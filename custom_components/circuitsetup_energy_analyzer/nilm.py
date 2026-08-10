@@ -7,7 +7,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 from hashlib import sha256
 from itertools import combinations
-from math import isclose, isfinite
+from math import isclose, isfinite, log
 from statistics import median
 from typing import Any
 from urllib.parse import urlencode
@@ -29,6 +29,9 @@ _MAX_POSITIVE_EVIDENCE = 96
 _MAX_EVIDENCE_PER_DAY = 4
 _MAX_EVIDENCE_PER_SOURCE = 64
 _LEGACY_STOP_WEIGHT = 0.35
+_ESTIMATED_ENERGY_WEIGHT = 0.5
+_EDGE_DERIVED_PLATEAU_WEIGHT = 0.35
+_TRANSITION_ONLY_CONFIDENCE_CAP = 0.65
 _SOURCE_TRUST = {"session": 1.0, "interval": 0.85, "legacy_interval": 0.45}
 _CONFIDENCE_CAP = 0.95
 _POWER_ENERGY_DISAGREEMENT_RATIO = 0.35
@@ -46,8 +49,10 @@ class _NormalizedAssignmentEvidence:
     on_delta_w: float | None
     off_delta_w: float | None
     plateau_w: float | None
+    plateau_source: str | None
     duration_s: float | None
     energy_kwh: float | None
+    energy_source: str | None
     quality: float
     inferred_stop: bool = False
     issues: tuple[str, ...] = ()
@@ -86,30 +91,26 @@ def build_nilm_assignment_model(
         )
         is not None
     )
-    if any(
+    observed_modern_on = any(
         record.positive
         and record.source_type != "legacy_interval"
-        and (record.on_delta_w is not None or record.off_delta_w is not None)
+        and record.on_delta_w is not None
         for record in records
-    ):
+    )
+    observed_modern_off = any(
+        record.positive
+        and record.source_type != "legacy_interval"
+        and record.off_delta_w is not None
+        for record in records
+    )
+    if observed_modern_on or observed_modern_off:
         records = [
             replace(
                 record,
-                on_delta_w=None
-                if any(
-                    other.source_type != "legacy_interval"
-                    and other.on_delta_w is not None
-                    for other in records
-                )
-                else record.on_delta_w,
-                off_delta_w=None,
+                on_delta_w=None if observed_modern_on else record.on_delta_w,
+                off_delta_w=None if observed_modern_off else record.off_delta_w,
             )
             if record.source_type == "legacy_interval"
-            and any(
-                other.source_type != "legacy_interval"
-                and (other.on_delta_w is not None or other.off_delta_w is not None)
-                for other in records
-            )
             else record
             for record in records
         ]
@@ -120,15 +121,28 @@ def build_nilm_assignment_model(
     normalized = normalize_nilm_assignment_model(assignment)
     model = _empty_assignment_model(normalized)
     if not positives:
-        return model
+        model["evidence_summary"]["negative_count"] = len(negatives)
+        if not negatives and not any(
+            key in assignment
+            for key in (
+                "confirmed_session_ids",
+                "rejected_session_ids",
+                "label_interval_ids",
+            )
+        ):
+            return model
+        return _finalize_assignment_model(model, normalized)
     on = [record for record in positives if record.on_delta_w is not None]
     off = [record for record in positives if record.off_delta_w is not None]
     plateau = [record for record in positives if record.plateau_w is not None]
+    weighted_plateau = _weighted_plateau_records(plateau)
     power_source = "plateau"
     if plateau:
         active_power = _weighted_median(
-            [record.plateau_w for record in plateau], plateau
+            [record.plateau_w for record in weighted_plateau], weighted_plateau
         )
+        if not any(record.plateau_source == "trace" for record in plateau):
+            power_source = "edge_derived_plateau"
     else:
         energy_power = [
             record
@@ -165,7 +179,11 @@ def build_nilm_assignment_model(
             "kind": "running",
             "power_w": active_power,
             "spread_w": round(
-                _weighted_mad([record.plateau_w for record in plateau], plateau), 3
+                _weighted_mad(
+                    [record.plateau_w for record in weighted_plateau],
+                    weighted_plateau,
+                ),
+                3,
             )
             if plateau
             else 0.0,
@@ -184,22 +202,25 @@ def build_nilm_assignment_model(
         record for record in positives if record.duration_s and record.duration_s > 0
     ]
     model["run_profile"] = {
-        "plateau_w": _profile([record.plateau_w for record in plateau], plateau),
-        "duration_s": _profile(
-            [record.duration_s for record in profile_records], profile_records
+        "plateau_w": _profile(
+            [record.plateau_w for record in weighted_plateau], weighted_plateau
         ),
-        "energy_kwh": _profile(
-            [
-                record.energy_kwh
-                for record in profile_records
-                if record.energy_kwh is not None
-            ],
-            [record for record in profile_records if record.energy_kwh is not None],
-        ),
+        "duration_s": _duration_profile(profile_records),
+        "energy_kwh": {},
     }
+    energy_records = [
+        record for record in profile_records if record.energy_kwh is not None
+    ]
+    model["run_profile"]["energy_kwh"] = _energy_profile(energy_records)
+    model["run_profile"]["plateau_w"]["source_counts"] = _count_values(
+        record.plateau_source for record in plateau
+    )
     conflicts = _close_rejected_conflicts(negatives, on, off)
     issues = sorted({issue for record in positives for issue in record.issues})
-    confidence = _evidence_confidence(positives, on, off, conflicts)
+    state_support = min(_weighted_support(weighted_plateau) / 3, 1.0)
+    confidence = _evidence_confidence(
+        positives, on, off, conflicts, state_support=state_support
+    )
     model["evidence_confidence"] = confidence
     model["model_confidence"] = confidence
     model["evidence_summary"] = {
@@ -207,9 +228,21 @@ def build_nilm_assignment_model(
         "negative_count": len(negatives),
         "positive_distinct_days": _distinct_days(positives),
         "effective_support": round(_effective_support(positives), 3),
+        "state_support": round(state_support, 3),
+        "source_counts": _count_values(record.source_type for record in positives),
+        "inferred_stop_count": sum(
+            record.inferred_stop and record.off_delta_w is not None
+            for record in positives
+        ),
         "close_rejected_conflicts": conflicts,
         "quality_issues": issues,
     }
+    return _finalize_assignment_model(model, normalized)
+
+
+def _finalize_assignment_model(
+    model: dict[str, Any], normalized: Mapping[str, Any]
+) -> dict[str, Any]:
     model["model_fingerprint"] = _model_fingerprint(model)
     previous = {
         key: normalized.get(key)
@@ -254,7 +287,18 @@ def _normalize_session_evidence(
     off = off if off is not None and off < 0 else None
     plateau = _positive_number(session.get("median_power_w"))
     duration = _duration_seconds(session)
-    energy = _positive_number(session.get("measured_energy_kwh"))
+    measured_energy = _positive_number(session.get("measured_energy_kwh"))
+    estimated_energy = (
+        _positive_number(session.get("estimated_energy_kwh"))
+        if measured_energy is None and on is not None and off is not None and duration
+        else None
+    )
+    energy = measured_energy or estimated_energy
+    energy_source = (
+        "measured" if measured_energy is not None else "estimated"
+        if estimated_energy is not None
+        else None
+    )
     if not any((on, off, plateau, energy)):
         return None
     record = _evidence_record(
@@ -265,8 +309,10 @@ def _normalize_session_evidence(
         on,
         off,
         plateau,
+        "edge_derived" if plateau is not None else None,
         duration,
         energy,
+        energy_source,
         _quality(session),
         False,
     )
@@ -296,6 +342,7 @@ def _normalize_interval_evidence(
         edge = _positive_number(interval.get("observed_transition_w"))
         if edge is None:
             return None
+        energy = _positive_number(interval.get("measured_energy_kwh"))
         return _evidence_record(
             evidence_id,
             "legacy_interval",
@@ -304,8 +351,10 @@ def _normalize_interval_evidence(
             edge,
             -edge,
             None,
+            None,
             _duration_seconds(interval),
-            _positive_number(interval.get("measured_energy_kwh")),
+            energy,
+            "measured" if energy is not None else None,
             min(_quality(interval), _LEGACY_INTERVAL_CONFIDENCE_CAP),
             True,
         )
@@ -342,8 +391,10 @@ def _normalize_interval_evidence(
         on,
         off,
         plateau,
+        "trace" if plateau is not None else None,
         duration,
         energy,
+        "measured" if energy is not None else None,
         quality,
         False,
         tuple(issues),
@@ -358,8 +409,10 @@ def _evidence_record(
     on: float | None,
     off: float | None,
     plateau: float | None,
+    plateau_source: str | None,
     duration: float | None,
     energy: float | None,
+    energy_source: str | None,
     quality: float,
     inferred_stop: bool,
     issues: tuple[str, ...] = (),
@@ -376,8 +429,10 @@ def _evidence_record(
         on,
         off,
         plateau,
+        plateau_source,
         duration,
         energy,
+        energy_source,
         quality,
         inferred_stop,
         issues,
@@ -468,7 +523,10 @@ def _weighted_mad(
 
 
 def _profile(
-    values: list[float | None], records: list[_NormalizedAssignmentEvidence]
+    values: list[float | None],
+    records: list[_NormalizedAssignmentEvidence],
+    *,
+    precision: int = 3,
 ) -> dict[str, Any]:
     usable = [
         (float(value), record)
@@ -481,18 +539,116 @@ def _profile(
             "mad": None,
             "p10": None,
             "p90": None,
+            "sample_count": 0,
             "effective_support": 0.0,
             "distinct_days": 0,
         }
     vals, recs = zip(*usable, strict=False)
     return {
-        "median": round(_weighted_median(list(vals), list(recs)), 3),
-        "mad": round(_weighted_mad(list(vals), list(recs)), 3),
-        "p10": round(_percentile(list(vals), 0.1), 3),
-        "p90": round(_percentile(list(vals), 0.9), 3),
+        "median": round(_weighted_median(list(vals), list(recs)), precision),
+        "mad": round(_weighted_mad(list(vals), list(recs)), precision),
+        "p10": round(
+            _weighted_percentile(list(vals), list(recs), 0.1), precision
+        ),
+        "p90": round(
+            _weighted_percentile(list(vals), list(recs), 0.9), precision
+        ),
+        "sample_count": len(recs),
         "effective_support": round(_effective_support(list(recs)), 3),
         "distinct_days": _distinct_days(recs),
     }
+
+
+def _duration_profile(
+    records: list[_NormalizedAssignmentEvidence],
+) -> dict[str, Any]:
+    profile = _profile([record.duration_s for record in records], records)
+    log_values = [log(float(record.duration_s)) for record in records]
+    profile.update(
+        median_seconds=profile["median"],
+        mad_seconds=profile["mad"],
+        p10_seconds=profile["p10"],
+        p90_seconds=profile["p90"],
+        median_log_seconds=(
+            round(_weighted_median(log_values, records), 3) if records else None
+        ),
+        mad_log_seconds=(
+            round(_weighted_mad(log_values, records), 3) if records else None
+        ),
+    )
+    return profile
+
+
+def _energy_profile(
+    records: list[_NormalizedAssignmentEvidence],
+) -> dict[str, Any]:
+    weighted_records = [
+        replace(
+            record,
+            quality=record.quality
+            * (
+                _ESTIMATED_ENERGY_WEIGHT
+                if record.energy_source == "estimated"
+                else 1.0
+            ),
+        )
+        for record in records
+    ]
+    profile = _profile(
+        [record.energy_kwh for record in weighted_records],
+        weighted_records,
+        precision=6,
+    )
+    measured_count = sum(record.energy_source == "measured" for record in records)
+    estimated_count = sum(record.energy_source == "estimated" for record in records)
+    profile.update(
+        sample_count=len(records),
+        measured_count=measured_count,
+        estimated_count=estimated_count,
+        source=(
+            "mixed"
+            if measured_count and estimated_count
+            else "measured"
+            if measured_count
+            else "estimated"
+            if estimated_count
+            else "unknown"
+        ),
+        weighted_median_kwh=profile["median"],
+        weighted_mad_kwh=profile["mad"],
+        weighted_p10_kwh=profile["p10"],
+        weighted_p90_kwh=profile["p90"],
+        median_kwh=profile["median"],
+        mad_kwh=profile["mad"],
+        p10_kwh=profile["p10"],
+        p90_kwh=profile["p90"],
+    )
+    return profile
+
+
+def _weighted_plateau_records(
+    records: list[_NormalizedAssignmentEvidence],
+) -> list[_NormalizedAssignmentEvidence]:
+    return [
+        replace(
+            record,
+            quality=record.quality
+            * (
+                _EDGE_DERIVED_PLATEAU_WEIGHT
+                if record.plateau_source == "edge_derived"
+                else 1.0
+            ),
+        )
+        for record in records
+    ]
+
+
+def _count_values(values: Iterable[str | None]) -> dict[str, int]:
+    counts: defaultdict[str, int] = defaultdict(int)
+    for value in values:
+        if value:
+            counts[value] += 1
+    return dict(sorted(counts.items()))
 
 
 def _percentile(values: list[float], fraction: float) -> float:
@@ -503,6 +659,24 @@ def _percentile(values: list[float], fraction: float) -> float:
     low = int(position)
     high = min(low + 1, len(ordered) - 1)
     return ordered[low] + (ordered[high] - ordered[low]) * (position - low)
+
+
+def _weighted_percentile(
+    values: list[float],
+    records: list[_NormalizedAssignmentEvidence],
+    fraction: float,
+) -> float:
+    pairs = sorted(
+        (float(value), _evidence_weight(record))
+        for value, record in zip(values, records, strict=False)
+    )
+    target = sum(weight for _, weight in pairs) * fraction
+    cumulative = 0.0
+    for value, weight in pairs:
+        cumulative += weight
+        if cumulative >= target:
+            return value
+    return pairs[-1][0]
 
 
 def _rich_transition_prototype(
@@ -601,6 +775,8 @@ def _evidence_confidence(
     on: list[_NormalizedAssignmentEvidence],
     off: list[_NormalizedAssignmentEvidence],
     conflicts: int,
+    *,
+    state_support: float,
 ) -> float:
     support = min(_effective_support(records) / 8, 1.0)
     days = min(_distinct_days(records) / 6, 1.0)
@@ -642,12 +818,25 @@ def _evidence_confidence(
     inferred_only = bool(records) and all(record.inferred_stop for record in records)
     quality = sum(record.quality for record in records) / len(records)
     score = (
-        (0.15 + 0.45 * support + 0.2 * days + 0.2 * directional)
+        (
+            0.1
+            + 0.35 * support
+            + 0.15 * days
+            + 0.2 * directional
+            + 0.2 * state_support
+        )
         * quality
         * (1 - 0.5 * dispersion)
         * (1 - min(conflicts * 0.1, 0.4))
     )
-    return round(min(score, 0.25 if inferred_only else _CONFIDENCE_CAP), 3)
+    confidence_cap = (
+        0.25
+        if inferred_only
+        else _CONFIDENCE_CAP
+        if state_support > 0
+        else _TRANSITION_ONLY_CONFIDENCE_CAP
+    )
+    return round(min(score, confidence_cap), 3)
 
 
 def _empty_assignment_model(normalized: Mapping[str, Any]) -> dict[str, Any]:
@@ -664,6 +853,9 @@ def _empty_assignment_model(normalized: Mapping[str, Any]) -> dict[str, Any]:
             "negative_count": 0,
             "positive_distinct_days": 0,
             "effective_support": 0.0,
+            "state_support": 0.0,
+            "source_counts": {},
+            "inferred_stop_count": 0,
             "close_rejected_conflicts": 0,
             "quality_issues": [],
         },
@@ -692,6 +884,7 @@ def _model_fingerprint(model: Mapping[str, Any]) -> str:
                 for item in model.get("transition_prototypes", [])
             ),
             model.get("run_profile"),
+            model.get("evidence_summary"),
             model.get("model_confidence"),
             model.get("evidence_confidence"),
         )
@@ -842,14 +1035,17 @@ def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, 
                 continue
             if (power := _model_number(item.get("power_w"))) is None:
                 continue
-            rich_states.append(
-                {
-                    "id": item["id"],
-                    "kind": "off" if item["id"] == "off" else "running",
-                    "power_w": power,
-                    "spread_w": max(_model_number(item.get("spread_w")) or 0.0, 0.0),
-                }
-            )
+            state = {
+                "id": item["id"],
+                "kind": "off" if item["id"] == "off" else "running",
+                "power_w": power,
+                "spread_w": max(_model_number(item.get("spread_w")) or 0.0, 0.0),
+            }
+            if item["id"] == "running" and isinstance(
+                item.get("power_source"), str
+            ):
+                state["power_source"] = item["power_source"]
+            rich_states.append(state)
         if {item["id"] for item in rich_states} == {"off", "running"}:
             states = sorted(rich_states, key=lambda item: item["id"] != "off")
             if not state_values:
@@ -879,27 +1075,59 @@ def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, 
     }
     if isinstance(assignment.get("run_profile"), Mapping):
         normalized["run_profile"] = {
-            name: {
-                field: number
-                for field, raw in profile.items()
-                if (number := _model_number(raw)) is not None
-            }
+            name: _normalize_assignment_profile(profile)
             for name, profile in assignment["run_profile"].items()
             if isinstance(name, str) and isinstance(profile, Mapping)
         }
     if isinstance(assignment.get("evidence_summary"), Mapping):
+        summary = assignment["evidence_summary"]
         normalized["evidence_summary"] = {
             "positive_count": _model_nonnegative_int(
-                assignment["evidence_summary"].get("positive_count")
+                summary.get("positive_count")
             ),
+            **{
+                key: number
+                for key in (
+                    "negative_count",
+                    "positive_distinct_days",
+                    "effective_support",
+                    "state_support",
+                    "close_rejected_conflicts",
+                    "inferred_stop_count",
+                )
+                if (number := _model_number(summary.get(key))) is not None
+            },
             "quality_issues": [
                 item
-                for item in assignment["evidence_summary"].get("quality_issues", ())
+                for item in summary.get("quality_issues", ())
                 if isinstance(item, str)
             ],
         }
+        if isinstance(summary.get("source_counts"), Mapping):
+            normalized["evidence_summary"]["source_counts"] = {
+                str(key): _model_nonnegative_int(value)
+                for key, value in summary["source_counts"].items()
+                if isinstance(key, str)
+            }
     if not normalized["model_fingerprint"] and state_values:
         normalized["model_fingerprint"] = _model_fingerprint(normalized)
+    return normalized
+
+
+def _normalize_assignment_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = {
+        field: number
+        for field, raw in profile.items()
+        if (number := _model_number(raw)) is not None
+    }
+    if profile.get("source") in {"measured", "estimated", "mixed", "unknown"}:
+        normalized["source"] = profile["source"]
+    if isinstance(profile.get("source_counts"), Mapping):
+        normalized["source_counts"] = {
+            str(key): _model_nonnegative_int(value)
+            for key, value in profile["source_counts"].items()
+            if isinstance(key, str)
+        }
     return normalized
 
 
@@ -917,7 +1145,19 @@ def nilm_assignment_model_is_compound_eligible(
         and _model_nonnegative_int(item.get("sample_count")) >= 3
     }
     confidence = _model_number(assignment.get("model_confidence"))
-    return learned == {"on", "off"} and confidence is not None and confidence >= 0.70
+    summary = assignment.get("evidence_summary")
+    state_support = (
+        _model_number(summary.get("state_support"))
+        if isinstance(summary, Mapping)
+        else None
+    )
+    return (
+        learned == {"on", "off"}
+        and confidence is not None
+        and confidence >= 0.70
+        and state_support is not None
+        and state_support > 0
+    )
 
 
 def _transition_prototype(

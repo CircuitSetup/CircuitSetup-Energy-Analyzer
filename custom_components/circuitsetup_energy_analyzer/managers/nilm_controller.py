@@ -437,17 +437,17 @@ class NilmController:
             )
             for assignment in assignments:
                 normalized = normalize_nilm_assignment_model(assignment)
-                model = (
-                    build_nilm_assignment_model(
+                model = normalized
+                if self._has_retained_assignment_evidence(
+                    assignment, history, label_intervals
+                ):
+                    rebuilt_model = build_nilm_assignment_model(
                         assignment,
                         history,
                         label_intervals=label_intervals,
                     )
-                    if self._has_retained_assignment_evidence(
-                        assignment, history, label_intervals
-                    )
-                    else normalized
-                )
+                    if self._model_has_usable_evidence(rebuilt_model):
+                        model = rebuilt_model
                 if self._assignment_model_changed(assignment, normalized, model):
                     assignment.update(model)
                     rebuilt = True
@@ -497,6 +497,17 @@ class NilmController:
         """Compare canonical runtime model content without order-only churn."""
         return any(key not in assignment for key in model) or normalized != (
             normalize_nilm_assignment_model(model)
+        )
+
+    @staticmethod
+    def _model_has_usable_evidence(model: Mapping[str, Any]) -> bool:
+        """Return whether building retained normalized positive or negative data."""
+        summary = model.get("evidence_summary")
+        if not isinstance(summary, Mapping):
+            return False
+        return any(
+            isinstance(summary.get(key), int) and summary[key] > 0
+            for key in ("positive_count", "negative_count")
         )
 
     def _normalize_legacy_expected_records(self) -> bool:
@@ -1138,6 +1149,9 @@ class NilmController:
             ),
             None,
         )
+        previous_assignment_id = str(
+            (existing or {}).get("assignment_id") or ""
+        ).strip()
         assignment_id_text = str(
             assignment_id or (existing or {}).get("assignment_id") or ""
         ).strip()
@@ -1232,12 +1246,6 @@ class NilmController:
         else:
             existing.clear()
             existing.update(payload)
-        if linked_assignment is not None:
-            self._append_unique(
-                linked_assignment.setdefault("label_interval_ids", []),
-                interval_id_text,
-            )
-            linked_assignment["updated_at"] = now
         assignment = linked_assignment
         profile_text = str(appliance_profile or "").strip()
         if profile_text:
@@ -1254,13 +1262,67 @@ class NilmController:
             payload["assignment_id"] = assignment["assignment_id"]
             if existing is not None:
                 existing["assignment_id"] = assignment["assignment_id"]
-        if assignment is not None and self._auto_link_configured_primary_signature(
-            circuit_id,
-            assignment,
-            (payload,),
-        ):
-            self._rebuild_assignment_model(circuit_id, assignment)
-        del intervals[: -self._label_interval_max_items]
+        affected_assignment_ids = {
+            value
+            for value in (
+                previous_assignment_id,
+                str((assignment or {}).get("assignment_id") or "").strip(),
+            )
+            if value
+        }
+        assignments = (
+            coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
+                circuit_id, ()
+            )
+        )
+        for candidate in assignments:
+            candidate_id = str(candidate.get("assignment_id") or "").strip()
+            interval_ids = self._clean_string_list(
+                candidate.get("label_interval_ids")
+            )
+            if candidate is assignment:
+                self._append_unique(interval_ids, interval_id_text)
+            elif interval_id_text in interval_ids:
+                interval_ids = [
+                    value for value in interval_ids if value != interval_id_text
+                ]
+                affected_assignment_ids.add(candidate_id)
+            candidate["label_interval_ids"] = interval_ids
+            if candidate_id in affected_assignment_ids:
+                candidate["updated_at"] = now
+        if assignment is not None:
+            self._auto_link_configured_primary_signature(
+                circuit_id,
+                assignment,
+                (payload,),
+            )
+        overflow = max(len(intervals) - self._label_interval_max_items, 0)
+        pruned_interval_ids = {
+            str(interval.get("interval_id") or "").strip()
+            for interval in intervals[:overflow]
+        }
+        if overflow:
+            del intervals[:overflow]
+            for candidate in assignments:
+                interval_ids = self._clean_string_list(
+                    candidate.get("label_interval_ids")
+                )
+                retained_ids = [
+                    value
+                    for value in interval_ids
+                    if value not in pruned_interval_ids
+                ]
+                if retained_ids == interval_ids:
+                    continue
+                candidate["label_interval_ids"] = retained_ids
+                candidate_id = str(candidate.get("assignment_id") or "").strip()
+                affected_assignment_ids.add(candidate_id)
+                candidate["updated_at"] = now
+        for candidate in assignments:
+            if str(candidate.get("assignment_id") or "").strip() in (
+                affected_assignment_ids
+            ):
+                self._rebuild_assignment_model(circuit_id, candidate)
 
         coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
@@ -1305,6 +1367,7 @@ class NilmController:
                     value for value in interval_ids if value != interval_id_text
                 ]
                 assignment["updated_at"] = now
+                self._rebuild_assignment_model(circuit_id, assignment)
         coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now_dt)

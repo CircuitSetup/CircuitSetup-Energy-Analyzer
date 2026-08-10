@@ -89,6 +89,46 @@ def test_assignment_model_builds_energy_profile_without_using_energy_as_edge() -
     assert model["transition_prototypes"][0]["delta_w"] == 80.0
 
 
+def test_assignment_model_profiles_measured_and_estimated_session_energy() -> None:
+    """Estimated complete-run energy is retained but measured energy is favored."""
+    model = build_nilm_assignment_model(
+        {
+            "assignment_id": "pump",
+            "confirmed_session_ids": ["estimated", "measured"],
+        },
+        [
+            {
+                "session_id": "estimated",
+                "assignment_id": "pump",
+                "start": "2026-06-01T10:00:00+00:00",
+                "end": "2026-06-01T10:10:00+00:00",
+                "on_delta_w": 80.0,
+                "off_delta_w": -80.0,
+                "estimated_energy_kwh": 0.8,
+                "confidence": 1.0,
+            },
+            {
+                "session_id": "measured",
+                "assignment_id": "pump",
+                "start": "2026-06-02T10:00:00+00:00",
+                "end": "2026-06-02T10:10:00+00:00",
+                "on_delta_w": 80.0,
+                "off_delta_w": -80.0,
+                "measured_energy_kwh": 0.2,
+                "estimated_energy_kwh": 9.0,
+                "confidence": 0.6,
+            },
+        ],
+    )
+
+    energy = model["run_profile"]["energy_kwh"]
+    assert energy["sample_count"] == 2
+    assert energy["measured_count"] == 1
+    assert energy["estimated_count"] == 1
+    assert energy["source"] == "mixed"
+    assert energy["median"] == 0.2
+
+
 def test_assignment_model_flags_power_energy_disagreement_without_broadening_state(  # noqa: E501
 ) -> None:
     model = build_nilm_assignment_model(
@@ -253,6 +293,39 @@ def test_assignment_model_rejected_evidence_does_not_shift_positive_or_adds_conf
     assert model["evidence_summary"]["close_rejected_conflicts"] == 1
 
 
+def test_assignment_model_rejecting_final_positive_updates_empty_model() -> None:
+    """Removing the last positive still canonicalizes negative-only model content."""
+    sessions = [
+        {
+            "session_id": "only",
+            "assignment_id": "pump",
+            "end": "2026-06-01T10:00:00+00:00",
+            "on_delta_w": 80.0,
+            "off_delta_w": -80.0,
+            "confidence": 1.0,
+        }
+    ]
+    first = build_nilm_assignment_model(
+        {"assignment_id": "pump", "confirmed_session_ids": ["only"]}, sessions
+    )
+    second = build_nilm_assignment_model(
+        {
+            "assignment_id": "pump",
+            "confirmed_session_ids": [],
+            "rejected_session_ids": ["only"],
+            **first,
+        },
+        sessions,
+    )
+
+    assert second["power_states_w"] == []
+    assert second["evidence_summary"]["negative_count"] == 1
+    assert second["evidence_summary"]["close_rejected_conflicts"] == 0
+    assert second["model_fingerprint"]
+    assert second["model_fingerprint"] != first["model_fingerprint"]
+    assert second["model_revision"] == first["model_revision"] + 1
+
+
 def test_assignment_model_uses_transition_fallback_without_steady_state() -> None:
     model = build_nilm_assignment_model(
         {"assignment_id": "pump", "confirmed_session_ids": ["one"]},
@@ -269,6 +342,50 @@ def test_assignment_model_uses_transition_fallback_without_steady_state() -> Non
     )
     assert model["states"][1]["power_source"] == "transition_fallback"
     assert model["states"][1]["power_w"] == 80.0
+
+
+def test_assignment_model_transition_only_evidence_is_not_compound_eligible() -> None:
+    session_ids = [str(index) for index in range(8)]
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "confirmed_session_ids": session_ids},
+        [
+            {
+                "session_id": session_id,
+                "assignment_id": "pump",
+                "end": f"2026-06-{index + 1:02d}T10:00:00+00:00",
+                "on_delta_w": 80.0,
+                "off_delta_w": -80.0,
+                "confidence": 1.0,
+            }
+            for index, session_id in enumerate(session_ids)
+        ],
+    )
+
+    assert model["evidence_summary"]["state_support"] == 0.0
+    assert model["model_confidence"] < 0.7
+    assert nilm_assignment_model_is_compound_eligible(model) is False
+
+
+def test_assignment_model_marks_session_power_as_edge_derived_plateau() -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "confirmed_session_ids": ["one"]},
+        [
+            {
+                "session_id": "one",
+                "assignment_id": "pump",
+                "end": "2026-06-01T10:00:00+00:00",
+                "on_delta_w": 80.0,
+                "off_delta_w": -80.0,
+                "median_power_w": 80.0,
+                "confidence": 1.0,
+            }
+        ],
+    )
+
+    assert model["states"][1]["power_source"] == "edge_derived_plateau"
+    assert model["run_profile"]["plateau_w"]["source_counts"] == {
+        "edge_derived": 1
+    }
 
 
 def test_assignment_model_invalid_optional_values_do_not_consume_selection_capacity(  # noqa: E501
@@ -373,6 +490,43 @@ def test_assignment_model_keeps_legacy_on_when_modern_stop_exists() -> None:
     )
     assert [item["delta_w"] for item in model["transition_prototypes"]] == [80.0, -70.0]
     assert model["transition_prototypes"][1]["evidence_kind"] == "observed"
+    assert model["evidence_summary"]["inferred_stop_count"] == 0
+
+
+def test_assignment_model_keeps_inferred_legacy_stop_without_observed_stop() -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "label_interval_ids": ["legacy", "modern"]},
+        [],
+        label_intervals=[
+            {
+                "interval_id": "legacy",
+                "assignment_id": "pump",
+                "observed_transition_w": 80.0,
+                "confidence": 1.0,
+            },
+            {
+                "interval_id": "modern",
+                "assignment_id": "pump",
+                "evidence_schema_version": 2,
+                "start_transition_eligible": True,
+                "start_transition_w": 90.0,
+                "power_coverage": 1.0,
+                "evidence_confidence": 1.0,
+            },
+        ],
+    )
+
+    assert [item["direction"] for item in model["transition_prototypes"]] == [
+        "on",
+        "off",
+    ]
+    assert model["transition_prototypes"][0]["delta_w"] == 90.0
+    assert model["transition_prototypes"][1]["delta_w"] == -80.0
+    assert (
+        model["transition_prototypes"][1]["evidence_kind"]
+        == "inferred_legacy_stop"
+    )
+    assert model["evidence_summary"]["inferred_stop_count"] == 1
 
 
 def test_assignment_model_profiles_duration_and_energy_without_state_evidence() -> None:
@@ -394,6 +548,87 @@ def test_assignment_model_profiles_duration_and_energy_without_state_evidence() 
     assert model["power_states_w"] != [0.0, 0.0]
     assert model["run_profile"]["duration_s"]["median"] == 600.0
     assert model["run_profile"]["energy_kwh"]["median"] == 0.15
+
+
+def test_assignment_model_emits_complete_weighted_profile_contract() -> None:
+    intervals = [
+        {
+            "interval_id": "high-a",
+            "assignment_id": "pump",
+            "start": "2026-06-01T10:00:00+00:00",
+            "duration_s": 100.0,
+            "evidence_schema_version": 2,
+            "start_transition_eligible": True,
+            "start_transition_w": 100.0,
+            "stop_transition_eligible": True,
+            "stop_transition_w": -100.0,
+            "plateau_eligible": True,
+            "median_power_w": 100.0,
+            "measured_energy_kwh": 0.0028,
+            "power_coverage": 1.0,
+            "evidence_confidence": 1.0,
+        },
+        {
+            "interval_id": "high-b",
+            "assignment_id": "pump",
+            "start": "2026-06-02T10:00:00+00:00",
+            "duration_s": 110.0,
+            "evidence_schema_version": 2,
+            "start_transition_eligible": True,
+            "start_transition_w": 110.0,
+            "stop_transition_eligible": True,
+            "stop_transition_w": -110.0,
+            "plateau_eligible": True,
+            "median_power_w": 110.0,
+            "measured_energy_kwh": 0.0034,
+            "power_coverage": 1.0,
+            "evidence_confidence": 1.0,
+        },
+        {
+            "interval_id": "legacy-low-weight",
+            "assignment_id": "pump",
+            "start": "2026-06-03T10:00:00+00:00",
+            "duration_s": 10_000.0,
+            "observed_transition_w": 500.0,
+            "measured_energy_kwh": 9.0,
+            "confidence": 1.0,
+        },
+    ]
+    model = build_nilm_assignment_model(
+        {
+            "assignment_id": "pump",
+            "label_interval_ids": [item["interval_id"] for item in intervals],
+        },
+        [],
+        label_intervals=intervals,
+    )
+
+    duration = model["run_profile"]["duration_s"]
+    assert duration["sample_count"] == 3
+    assert duration["distinct_days"] == 3
+    assert duration["median_seconds"] == 110.0
+    assert duration["p10_seconds"] == 100.0
+    assert duration["p90_seconds"] == 110.0
+    assert duration["median_log_seconds"] == pytest.approx(4.7, abs=0.001)
+    assert duration["mad_log_seconds"] == pytest.approx(0.095, abs=0.001)
+    assert duration["median"] == duration["median_seconds"]
+    assert duration["p90"] == duration["p90_seconds"]
+
+    energy = model["run_profile"]["energy_kwh"]
+    assert energy["sample_count"] == 3
+    assert energy["distinct_days"] == 3
+    assert energy["weighted_median_kwh"] == 0.0034
+    assert energy["weighted_mad_kwh"] == 0.0006
+    assert energy["weighted_p10_kwh"] == 0.0028
+    assert energy["weighted_p90_kwh"] == 0.0034
+    assert energy["measured_count"] == 3
+    assert energy["estimated_count"] == 0
+
+    assert model["evidence_summary"]["source_counts"] == {
+        "interval": 2,
+        "legacy_interval": 1,
+    }
+    assert model["evidence_summary"]["inferred_stop_count"] == 0
 
 
 def test_assignment_model_off_dispersion_reduces_confidence() -> None:
@@ -563,7 +798,7 @@ def test_assignment_model_uses_recent_confirmed_complete_sessions() -> None:
     assert model["transition_prototypes"][0]["sample_count"] == 35
     assert model["transition_prototypes"][0]["spread_w"] == 1.0
     assert 0.0 < model["model_confidence"] < 1.0
-    assert nilm_assignment_model_is_compound_eligible(model) is True
+    assert nilm_assignment_model_is_compound_eligible(model) is False
 
 
 def test_assignment_model_falls_back_to_one_legacy_manual_label_interval() -> None:
@@ -765,7 +1000,9 @@ def test_assignment_model_schema_2_low_coverage_plateau_is_not_active_evidence()
     assert model["transition_prototypes"] == []
 
 
-def test_assignment_model_schema_2_transitions_outrank_legacy_manual_fallback() -> None:
+def test_assignment_model_schema_2_transitions_outrank_matching_legacy_direction() -> (
+    None
+):
     model = build_nilm_assignment_model(
         {"assignment_id": "pump", "label_interval_ids": ["legacy", "schema-2"]},
         [],
@@ -790,7 +1027,13 @@ def test_assignment_model_schema_2_transitions_outrank_legacy_manual_fallback() 
         ],
     )
 
-    assert [item["delta_w"] for item in model["transition_prototypes"]] == [120.0]
+    assert [item["delta_w"] for item in model["transition_prototypes"]] == [
+        120.0,
+        -75.0,
+    ]
+    assert model["transition_prototypes"][1]["evidence_kind"] == (
+        "inferred_legacy_stop"
+    )
     assert model["power_states_w"] == [0.0, 120.0]
 
 
