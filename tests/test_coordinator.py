@@ -13019,7 +13019,7 @@ async def test_runtime_records_known_load_split_phase_topology_evidence() -> Non
         "time_score": 1.0,
         "topology_score": 1.0,
         "selection_method": "global_assignment",
-        "known_power_source": "startup_power_w",
+        "known_power_source": "transition_delta_w",
         "match_confidence": 1.0,
     }
 

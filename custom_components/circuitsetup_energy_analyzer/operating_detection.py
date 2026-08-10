@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
+from statistics import median
 from typing import Any
 
 from .baseline import build_baseline
@@ -39,6 +40,8 @@ OPERATING_DETECTION_OVERRIDE_FIELDS = (
 )
 _OPERATING_LEARNING_SAMPLE_LIMIT = 512
 _OPERATING_LEARNING_MIN_SAMPLES = 3
+_TRANSITION_CONTEXT_SAMPLE_LIMIT = 12
+_TRANSITION_CONTEXT_MAX_AGE_SECONDS = 60.0
 
 _GENERIC_PROFILE = {
     "on_threshold_w": 80.0,
@@ -314,6 +317,60 @@ class OperatingDetectionResult:
     events: tuple[CircuitEvent, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class _TransitionSample:
+    timestamp: datetime
+    power_w: float
+
+
+def _transition_features(
+    pre_samples: tuple[_TransitionSample, ...],
+    post_samples: tuple[_TransitionSample, ...],
+    *,
+    transition_timestamp: datetime | None,
+) -> dict[str, Any]:
+    pre = tuple(sample for sample in pre_samples if math.isfinite(sample.power_w))
+    post = tuple(sample for sample in post_samples if math.isfinite(sample.power_w))
+    features: dict[str, Any] = {
+        "pre_sample_count": len(pre),
+        "post_sample_count": len(post),
+        "transition_evidence_version": 1,
+    }
+    if transition_timestamp is not None:
+        features["transition_timestamp"] = transition_timestamp.isoformat()
+    if pre:
+        pre_values = [sample.power_w for sample in pre]
+        pre_median = float(median(pre_values))
+        features["pre_power_median_w"] = pre_median
+        features["pre_power_spread_w"] = float(
+            median([abs(value - pre_median) for value in pre_values])
+        )
+        features["transition_window_start"] = pre[0].timestamp.isoformat()
+    if post:
+        post_values = [sample.power_w for sample in post]
+        post_median = float(median(post_values))
+        features["post_power_median_w"] = post_median
+        features["post_plateau_power_w"] = post_median
+        features["post_power_spread_w"] = float(
+            median([abs(value - post_median) for value in post_values])
+        )
+        features["transition_window_end"] = post[-1].timestamp.isoformat()
+    if pre and post:
+        features["transition_delta_w"] = post_median - pre_median
+        features["transition_spread_w"] = (
+            features["pre_power_spread_w"] + features["post_power_spread_w"]
+        )
+        features["transition_timing_uncertainty_s"] = (
+            post[-1].timestamp - pre[0].timestamp
+        ).total_seconds()
+        features["transition_quality"] = "measured"
+    elif post:
+        features["transition_quality"] = "partial"
+    else:
+        features["transition_quality"] = "legacy_fallback"
+    return features
+
+
 def resolve_operating_detection(
     config: CircuitConfig,
     overrides: dict[str, Any] | None = None,
@@ -464,6 +521,15 @@ class OperatingStateMachine:
         self._stable_running_power_w: deque[float] = deque(
             maxlen=_OPERATING_LEARNING_SAMPLE_LIMIT
         )
+        self._off_transition_context: deque[_TransitionSample] = deque(
+            maxlen=_TRANSITION_CONTEXT_SAMPLE_LIMIT
+        )
+        self._running_transition_context: deque[_TransitionSample] = deque(
+            maxlen=_TRANSITION_CONTEXT_SAMPLE_LIMIT
+        )
+        self._pending_transition_kind: str | None = None
+        self._pending_transition_pre: tuple[_TransitionSample, ...] = ()
+        self._pending_transition_post: list[_TransitionSample] = []
         self._run_idle_upper_w: float | None = None
         self._run_idle_sample_count = 0
         self._nominal_voltage: float | None = None
@@ -483,6 +549,7 @@ class OperatingStateMachine:
             > self._profile.max_sample_gap_seconds
         ):
             self._clear_learning_state()
+            self._clear_transition_context()
             self._reset_pending_state(sample.timestamp)
 
         self._last_sample_at = sample.timestamp
@@ -493,7 +560,7 @@ class OperatingStateMachine:
             return self._handle_invalid_or_missing_power(sample)
 
         self._last_valid_power_at = sample.timestamp
-        self._record_stable_learning_sample(watts)
+        self._record_stable_learning_sample(sample, watts)
 
         if self._state is OperatingState.UNKNOWN:
             return self._initialize_from_first_valid_sample(sample, watts)
@@ -545,6 +612,9 @@ class OperatingStateMachine:
         self._state_since = sample.timestamp
         self._candidate_since = None
         self._transition_reason = "initial_below_on_threshold"
+        self._append_transition_context(
+            self._off_transition_context, sample.timestamp, watts
+        )
         if sample.voltage is not None:
             self._nominal_voltage = sample.voltage
         return self._result(self._transition_reason)
@@ -558,12 +628,18 @@ class OperatingStateMachine:
             if self._state is not OperatingState.PENDING_ON:
                 self._state = OperatingState.PENDING_ON
                 self._candidate_since = sample.timestamp
+                self._begin_pending_transition(
+                    "start", sample.timestamp, watts, self._off_transition_context
+                )
                 self._transition_reason = "pending_on"
                 return self._result(self._transition_reason)
+            self._append_pending_transition_sample(sample.timestamp, watts)
             if self._candidate_since is not None and (
                 sample.timestamp - self._candidate_since
             ).total_seconds() >= self._profile.on_dwell_seconds:
                 event_timestamp = self._candidate_since
+                features = _power_features(sample, "startup_power_w", watts)
+                features.update(self._pending_transition_features(event_timestamp))
                 self._set_running(
                     sample.timestamp,
                     emit_event=True,
@@ -576,7 +652,7 @@ class OperatingStateMachine:
                             timestamp=event_timestamp,
                             circuit_id=sample.circuit_id,
                             event_type=EventType.START,
-                            features=_power_features(sample, "startup_power_w", watts),
+                            features=features,
                         ),
                     ),
                 )
@@ -600,8 +676,12 @@ class OperatingStateMachine:
             if self._state is not OperatingState.PENDING_OFF:
                 self._state = OperatingState.PENDING_OFF
                 self._candidate_since = sample.timestamp
+                self._begin_pending_transition(
+                    "stop", sample.timestamp, watts, self._running_transition_context
+                )
                 self._transition_reason = "pending_off"
                 return self._result(self._transition_reason)
+            self._append_pending_transition_sample(sample.timestamp, watts)
             if self._candidate_since is not None and (
                 sample.timestamp - self._candidate_since
             ).total_seconds() >= self._profile.off_dwell_seconds:
@@ -612,6 +692,7 @@ class OperatingStateMachine:
                     "stop_power_w",
                     self._last_on_power_w or watts,
                 )
+                features.update(self._pending_transition_features(event_timestamp))
                 if run_started_at is not None and event_timestamp is not None:
                     features["run_duration_s"] = (
                         event_timestamp - run_started_at
@@ -653,6 +734,7 @@ class OperatingStateMachine:
         self._state = OperatingState.RUNNING
         self._stable_state = OperatingState.RUNNING
         self._candidate_since = None
+        self._clear_pending_transition()
         self._transition_reason = (
             "pending_off_cancelled"
             if watts < self._profile.on_threshold_w
@@ -714,6 +796,7 @@ class OperatingStateMachine:
         self._stable_off_power_w.clear()
         self._stable_running_power_w.clear()
         self._sag_emitted_for_run = False
+        self._clear_transition_context()
 
     def _set_off(self, timestamp: datetime) -> None:
         self._state = OperatingState.OFF
@@ -726,6 +809,7 @@ class OperatingStateMachine:
         self._run_idle_sample_count = 0
         self._last_on_power_w = None
         self._sag_emitted_for_run = False
+        self._clear_transition_context()
 
     def _set_unavailable(self, timestamp: datetime, *, reason: str) -> None:
         self._state = OperatingState.UNAVAILABLE
@@ -735,6 +819,7 @@ class OperatingStateMachine:
         self._transition_reason = reason
         self._run_started_at = None
         self._clear_learning_state()
+        self._clear_transition_context()
         self._last_on_power_w = None
         self._sag_emitted_for_run = False
 
@@ -752,20 +837,86 @@ class OperatingStateMachine:
             self._stable_state = OperatingState.RUNNING
             self._candidate_since = None
             self._transition_reason = "pending_off_reset_after_gap"
+        self._clear_pending_transition()
 
-    def _record_stable_learning_sample(self, watts: float) -> None:
+    def _record_stable_learning_sample(
+        self,
+        sample: NormalizedCircuitSample,
+        watts: float,
+    ) -> None:
         if (
             self._state is OperatingState.OFF
             and self._stable_state is OperatingState.OFF
             and watts < self._profile.on_threshold_w
         ):
             self._stable_off_power_w.append(watts)
+            self._append_transition_context(
+                self._off_transition_context, sample.timestamp, watts
+            )
         elif (
             self._state is OperatingState.RUNNING
             and self._stable_state is OperatingState.RUNNING
             and watts > self._profile.off_threshold_w
         ):
             self._stable_running_power_w.append(watts)
+            self._append_transition_context(
+                self._running_transition_context, sample.timestamp, watts
+            )
+
+    def _append_transition_context(
+        self,
+        context: deque[_TransitionSample],
+        timestamp: datetime,
+        watts: float,
+    ) -> None:
+        while context and (
+            timestamp - context[0].timestamp
+        ).total_seconds() > _TRANSITION_CONTEXT_MAX_AGE_SECONDS:
+            context.popleft()
+        context.append(_TransitionSample(timestamp=timestamp, power_w=watts))
+
+    def _begin_pending_transition(
+        self,
+        kind: str,
+        timestamp: datetime,
+        watts: float,
+        context: deque[_TransitionSample],
+    ) -> None:
+        self._pending_transition_kind = kind
+        self._pending_transition_pre = tuple(context)
+        self._pending_transition_post = [
+            _TransitionSample(timestamp=timestamp, power_w=watts)
+        ]
+
+    def _append_pending_transition_sample(
+        self,
+        timestamp: datetime,
+        watts: float,
+    ) -> None:
+        if self._pending_transition_kind is not None:
+            self._pending_transition_post.append(
+                _TransitionSample(timestamp=timestamp, power_w=watts)
+            )
+
+    def _pending_transition_features(
+        self,
+        transition_timestamp: datetime | None,
+    ) -> dict[str, Any]:
+        return _transition_features(
+            self._pending_transition_pre,
+            tuple(self._pending_transition_post),
+            transition_timestamp=transition_timestamp,
+        )
+
+    def _clear_pending_transition(self) -> None:
+        self._pending_transition_kind = None
+        self._pending_transition_pre = ()
+        self._pending_transition_post = []
+
+    def _clear_transition_context(self) -> None:
+        self._off_transition_context.clear()
+        self._running_transition_context.clear()
+        self._clear_pending_transition()
 
     def _clear_learning_state(self) -> None:
         self._stable_off_power_w.clear()
@@ -793,6 +944,7 @@ class OperatingStateMachine:
                 )
             return self._result("source_data_unavailable")
 
+        self._clear_transition_context()
         if self._state in {OperatingState.PENDING_ON, OperatingState.PENDING_OFF}:
             self._reset_pending_state(sample.timestamp)
 
@@ -817,6 +969,7 @@ class OperatingStateMachine:
         if previous_stable_state is not OperatingState.OFF or self._state_since is None:
             self._state_since = sample.timestamp
         self._candidate_since = None
+        self._clear_pending_transition()
         self._transition_reason = reason
         if sample.voltage is not None:
             self._nominal_voltage = sample.voltage
@@ -847,6 +1000,7 @@ class OperatingStateMachine:
             "run_duration_s": (stop_timestamp - self._run_started_at).total_seconds(),
             "transition_reason": "source_data_unavailable",
         }
+        features.update(self._pending_transition_features(self._candidate_since))
         return CircuitEvent(
             timestamp=stop_timestamp,
             circuit_id=sample.circuit_id,
