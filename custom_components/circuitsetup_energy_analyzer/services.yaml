@@ -1087,6 +1087,7 @@ set_nilm_reference_link:
           mode: box
     reference_on_dwell_seconds:
       name: Reference ON Dwell Seconds
+      description: Optional time the numeric reference must remain above its ON threshold before becoming active.
       required: false
       selector:
         number:
@@ -1095,6 +1096,7 @@ set_nilm_reference_link:
           mode: box
     reference_off_dwell_seconds:
       name: Reference OFF Dwell Seconds
+      description: Optional time the numeric reference must remain below its OFF threshold before becoming inactive.
       required: false
       selector:
         number:
@@ -1103,6 +1105,7 @@ set_nilm_reference_link:
           mode: box
     reference_minimum_interval_seconds:
       name: Reference Minimum Interval Seconds
+      description: Optional minimum duration retained for an active reference interval.
       required: false
       selector:
         number:
@@ -1111,6 +1114,7 @@ set_nilm_reference_link:
           mode: box
     reference_merge_gap_seconds:
       name: Reference Merge Gap Seconds
+      description: Optional inactive gap duration that can join adjacent active reference intervals.
       required: false
       selector:
         number:
@@ -1119,6 +1123,7 @@ set_nilm_reference_link:
           mode: box
     reference_maximum_unknown_gap_seconds:
       name: Reference Maximum Unknown Gap Seconds
+      description: Optional maximum unavailable-state gap before reference evidence becomes uncertain.
       required: false
       selector:
         number:
