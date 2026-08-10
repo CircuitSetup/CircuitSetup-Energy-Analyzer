@@ -5471,6 +5471,37 @@ def test_session_pairing_memoizes_and_bounds_trace_evidence(
     assert len(set(trace_pairs)) == len(trace_pairs)
 
 
+def test_session_pairing_reuses_scores_for_identical_profiles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pair_score_calls = 0
+    original_pair_score = nilm_domain._nilm_session_pair_score
+
+    def pair_score(*args: object, **kwargs: object) -> float | None:
+        nonlocal pair_score_calls
+        pair_score_calls += 1
+        if pair_score_calls > 4_500:
+            pytest.fail("session pairing recomputed identical profile scores")
+        return original_pair_score(*args, **kwargs)
+
+    monkeypatch.setattr(nilm_domain, "_nilm_session_pair_score", pair_score)
+
+    sessions = pair_nilm_sessions_for_signatures(
+        [
+            *(edge(index, 100.0) for index in range(64)),
+            *(edge(600 + index, -100.0) for index in range(64)),
+        ],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {"signature_fingerprint": f"load-{index}", "typical_watts": 100.0}
+            for index in range(51)
+        ],
+    )
+
+    assert len(sessions) == 64
+    assert pair_score_calls <= 4_500
+
+
 def test_session_pair_budget_does_not_turn_observed_off_edges_into_opens() -> None:
     sessions = pair_nilm_sessions_for_signatures(
         [

@@ -6020,50 +6020,103 @@ def pair_nilm_sessions_for_signatures(
     off_edges = [
         edge for edge in ordered_edges if edge.direction == "off"
     ][-NILM_SESSION_CANDIDATE_EDGE_MAX_ITEMS:]
-    preliminary_candidates: list[
-        tuple[int, int, NilmEdge, NilmEdge, Mapping[str, Any], float, float]
+    pairing_profiles: list[
+        tuple[
+            timedelta,
+            timedelta,
+            Mapping[str, Any],
+            Mapping[str, Any],
+            list[int],
+        ]
     ] = []
+    for spec_index, spec in enumerate(specs):
+        min_duration_for_spec = _nilm_session_spec_duration(
+            spec,
+            "min_duration_seconds",
+            min_duration,
+        )
+        max_duration_for_spec = _nilm_session_spec_duration(
+            spec,
+            "max_duration_seconds",
+            max_duration,
+        )
+        duration_profile = _nilm_session_spec_duration_profile(spec)
+        energy_profile = _nilm_session_spec_energy_profile(spec)
+        existing_profile = next(
+            (
+                profile
+                for profile in pairing_profiles
+                if profile[:4]
+                == (
+                    min_duration_for_spec,
+                    max_duration_for_spec,
+                    duration_profile,
+                    energy_profile,
+                )
+            ),
+            None,
+        )
+        if existing_profile is None:
+            pairing_profiles.append(
+                (
+                    min_duration_for_spec,
+                    max_duration_for_spec,
+                    duration_profile,
+                    energy_profile,
+                    [spec_index],
+                )
+            )
+        else:
+            existing_profile[4].append(spec_index)
+
+    on_signature_scores = [
+        [_nilm_signature_edge_score(edge, spec) for spec in specs]
+        for edge in on_edges
+    ]
+    off_signature_scores = [
+        [_nilm_signature_edge_score(edge, spec) for spec in specs]
+        for edge in off_edges
+    ]
     best_pair_scores: dict[tuple[int, int], float] = {}
+    preliminary_profile_scores: dict[tuple[int, int], list[float | None]] = {}
     preliminary_off_indices_by_on: dict[int, set[int]] = defaultdict(set)
     for on_index, on_edge in enumerate(on_edges):
         for off_index, off_edge in enumerate(off_edges):
-            for spec in specs:
-                spec_min_duration = _nilm_session_spec_duration(
-                    spec,
-                    "min_duration_seconds",
-                    min_duration,
-                )
-                spec_max_duration = _nilm_session_spec_duration(
-                    spec,
-                    "max_duration_seconds",
-                    max_duration,
-                )
+            profile_scores: list[float | None] = []
+            pair_has_candidate = False
+            for (
+                spec_min_duration,
+                spec_max_duration,
+                duration_profile,
+                energy_profile,
+                spec_indices,
+            ) in pairing_profiles:
                 pair_score = _nilm_session_pair_score(
                     on_edge,
                     off_edge,
                     min_duration=spec_min_duration,
                     max_duration=spec_max_duration,
-                    duration_profile=_nilm_session_spec_duration_profile(spec),
-                    energy_profile=_nilm_session_spec_energy_profile(spec),
+                    duration_profile=duration_profile,
+                    energy_profile=energy_profile,
                 )
-                signature_score = _nilm_signature_pair_score(on_edge, off_edge, spec)
-                if pair_score is None or signature_score is None:
+                profile_scores.append(pair_score)
+                if pair_score is None:
                     continue
-                score = _clamp((pair_score + (2.0 * signature_score)) / 3.0)
-                preliminary_candidates.append(
-                    (
-                        on_index,
-                        off_index,
-                        on_edge,
-                        off_edge,
-                        spec,
-                        pair_score,
-                        signature_score,
+                for spec_index in spec_indices:
+                    on_signature_score = on_signature_scores[on_index][spec_index]
+                    off_signature_score = off_signature_scores[off_index][spec_index]
+                    if on_signature_score is None or off_signature_score is None:
+                        continue
+                    signature_score = (on_signature_score + off_signature_score) / 2.0
+                    score = _clamp((pair_score + (2.0 * signature_score)) / 3.0)
+                    pair_has_candidate = True
+                    pair = (on_index, off_index)
+                    best_pair_scores[pair] = max(
+                        best_pair_scores.get(pair, 0.0), score
                     )
-                )
+            if pair_has_candidate:
                 preliminary_off_indices_by_on[on_index].add(off_index)
-                pair = (on_index, off_index)
-                best_pair_scores[pair] = max(best_pair_scores.get(pair, 0.0), score)
+                preliminary_profile_scores[(on_index, off_index)] = profile_scores
 
     candidate_pairs = tuple(
         pair
@@ -6091,56 +6144,54 @@ def pair_nilm_sessions_for_signatures(
         for pair in trace_pairs
     }
     candidates: list[_NilmSessionCandidate] = []
-    candidate_pair_set = set(candidate_pairs)
-    for (
-        on_index,
-        off_index,
-        on_edge,
-        off_edge,
-        spec,
-        base_pair_score,
-        signature_score,
-    ) in preliminary_candidates:
+    for on_index, off_index in candidate_pairs:
         pair = (on_index, off_index)
-        if pair not in candidate_pair_set:
-            continue
+        on_edge = on_edges[on_index]
+        off_edge = off_edges[off_index]
         trace_evidence = trace_evidence_by_pair.get(pair)
-        pair_score = base_pair_score
-        if pair in trace_pairs:
-            pair_score = _nilm_session_pair_score(
-                on_edge,
-                off_edge,
-                min_duration=_nilm_session_spec_duration(
-                    spec,
-                    "min_duration_seconds",
-                    min_duration,
-                ),
-                max_duration=_nilm_session_spec_duration(
-                    spec,
-                    "max_duration_seconds",
-                    max_duration,
-                ),
-                duration_profile=_nilm_session_spec_duration_profile(spec),
-                trace_evidence=trace_evidence,
-                energy_profile=_nilm_session_spec_energy_profile(spec),
-            )
-        if pair_score is None:
-            continue
-        score = _clamp((pair_score + (2.0 * signature_score)) / 3.0)
-        if score <= min_confidence:
-            continue
-        candidates.append(
-            _NilmSessionCandidate(
-                on_index=on_index,
-                off_index=off_index,
-                on_edge=on_edge,
-                off_edge=off_edge,
-                signature_fingerprint=_nilm_session_spec_fingerprint(spec),
-                assignment_id=_nilm_session_spec_assignment_id(spec),
-                score=score,
-                trace_evidence=trace_evidence,
-            )
-        )
+        base_profile_scores = preliminary_profile_scores[pair]
+        for profile_index, (
+            spec_min_duration,
+            spec_max_duration,
+            duration_profile,
+            energy_profile,
+            spec_indices,
+        ) in enumerate(pairing_profiles):
+            pair_score = base_profile_scores[profile_index]
+            if pair in trace_pairs:
+                pair_score = _nilm_session_pair_score(
+                    on_edge,
+                    off_edge,
+                    min_duration=spec_min_duration,
+                    max_duration=spec_max_duration,
+                    duration_profile=duration_profile,
+                    trace_evidence=trace_evidence,
+                    energy_profile=energy_profile,
+                )
+            if pair_score is None:
+                continue
+            for spec_index in spec_indices:
+                on_signature_score = on_signature_scores[on_index][spec_index]
+                off_signature_score = off_signature_scores[off_index][spec_index]
+                if on_signature_score is None or off_signature_score is None:
+                    continue
+                signature_score = (on_signature_score + off_signature_score) / 2.0
+                score = _clamp((pair_score + (2.0 * signature_score)) / 3.0)
+                if score <= min_confidence:
+                    continue
+                spec = specs[spec_index]
+                candidates.append(
+                    _NilmSessionCandidate(
+                        on_index=on_index,
+                        off_index=off_index,
+                        on_edge=on_edge,
+                        off_edge=off_edge,
+                        signature_fingerprint=_nilm_session_spec_fingerprint(spec),
+                        assignment_id=_nilm_session_spec_assignment_id(spec),
+                        score=score,
+                        trace_evidence=trace_evidence,
+                    )
+                )
 
     ambiguous_pairs: set[tuple[int, int]] = set()
     preferred_candidates: dict[tuple[int, int], _NilmSessionCandidate] = {}
