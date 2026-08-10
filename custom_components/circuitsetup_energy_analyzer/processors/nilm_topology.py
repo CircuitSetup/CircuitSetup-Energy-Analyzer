@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from math import isfinite
 from typing import Any
 
 from ..alerting import Observation
@@ -70,7 +71,10 @@ class NilmTopologyProcessor:
         match_confidence = float(match.confidence)
         if (
             match.selection_method != "topology_rejected"
-            and match_confidence < MIN_NILM_TOPOLOGY_MATCH_CONFIDENCE
+            and (
+                not isfinite(match_confidence)
+                or match_confidence < MIN_NILM_TOPOLOGY_MATCH_CONFIDENCE
+            )
         ):
             evidence["status"] = "low_confidence_match"
             evidence["minimum_match_confidence"] = (
@@ -87,7 +91,10 @@ class NilmTopologyProcessor:
         ]
         if status not in {"topology_mismatch", "leg_mismatch"}:
             return FeatureResult(state_updates=state_updates)
-        if match_confidence < MIN_NILM_TOPOLOGY_MATCH_CONFIDENCE:
+        if (
+            not isfinite(match_confidence)
+            or match_confidence < MIN_NILM_TOPOLOGY_MATCH_CONFIDENCE
+        ):
             return FeatureResult(state_updates=state_updates)
 
         policy = self._alert_policy_for_circuit(circuit_id)

@@ -8120,7 +8120,13 @@ def test_nilm_topology_processor_updates_state_and_returns_alert() -> None:
 
 @pytest.mark.parametrize(
     ("confidence", "expects_alert"),
-    [(0.49, False), (0.4999, False), (0.5, True)],
+    [
+        (0.49, False),
+        (0.4999, False),
+        (0.5, True),
+        (float("nan"), False),
+        (float("inf"), False),
+    ],
 )
 def test_nilm_topology_rejection_requires_minimum_confidence_for_alerts(
     confidence: float,
