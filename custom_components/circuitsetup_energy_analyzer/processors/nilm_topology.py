@@ -68,7 +68,10 @@ class NilmTopologyProcessor:
             )
 
         match_confidence = float(evidence["match_confidence"])
-        if match_confidence < MIN_NILM_TOPOLOGY_MATCH_CONFIDENCE:
+        if (
+            match.selection_method != "topology_rejected"
+            and match_confidence < MIN_NILM_TOPOLOGY_MATCH_CONFIDENCE
+        ):
             evidence["status"] = "low_confidence_match"
             evidence["minimum_match_confidence"] = (
                 MIN_NILM_TOPOLOGY_MATCH_CONFIDENCE

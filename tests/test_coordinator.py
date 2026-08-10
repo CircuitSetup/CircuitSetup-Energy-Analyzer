@@ -13495,8 +13495,11 @@ async def test_runtime_ignores_low_confidence_known_load_topology_mismatch(
         await coordinator.async_process_update()
 
     assert coordinator.state.nilm_topology_status_by_circuit["fridge"] == (
-        "low_confidence_match"
+        "topology_mismatch"
     )
+    assert coordinator.state.nilm_topology_evidence_by_circuit["fridge"][
+        "attribution_rejected"
+    ] is True
     topology_alerts = [
         alert for alert in notifications if alert.feature == "nilm_topology_mismatch"
     ]

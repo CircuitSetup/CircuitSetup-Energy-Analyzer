@@ -8117,6 +8117,70 @@ def test_nilm_topology_processor_updates_state_and_returns_alert() -> None:
     assert "balanced_240v" in result.alerts[0].message
 
 
+def test_nilm_topology_rejection_is_not_downgraded_for_low_confidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        KnownLoadMatch,
+        NilmEdge,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    fridge = CircuitConfig(
+        circuit_id="fridge",
+        name="Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    match = KnownLoadMatch(
+        edge=NilmEdge(
+            timestamp=now,
+            delta_w=300.0,
+            direction="on",
+            split_phase_type="balanced_240v",
+            dominant_leg="balanced",
+        ),
+        known_circuit_id="fridge",
+        confidence=0.49,
+        selection_method="topology_rejected",
+        topology_status="topology_mismatch",
+    )
+
+    processor = processors.NilmTopologyProcessor(
+        known_config_for_circuit=lambda _id: fridge,
+        alert_policy_for_circuit=lambda _id: _CaptureAlertPolicy(),
+    )
+    result = processor.process(mains, match, context)
+    evidence = {update.path: update.value for update in result.state_updates}[
+        ("nilm_topology_evidence_by_circuit", "fridge")
+    ]
+
+    assert evidence["status"] == "topology_mismatch"
+    assert evidence["attribution_rejected"] is True
+    assert "low_confidence_match" not in str(evidence)
+
+
 def test_nilm_edge_storage_round_trips_residual_provenance_and_legacy_defaults(
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
@@ -10945,8 +11009,20 @@ def test_nilm_sample_processor_matches_confirmed_edge_to_known_event(
     )
 
 
+@pytest.mark.parametrize(
+    ("observed_power_w", "known_power_w", "min_delta_w", "expected_residual_w"),
+    [
+        (600.0, 400.0, 100.0, 100.0),
+        (575.0, 400.0, 50.0, 75.0),
+        (850.0, 600.0, 250.0, None),
+    ],
+)
 def test_nilm_sample_processor_reconciles_only_known_load_residual(
     monkeypatch: pytest.MonkeyPatch,
+    observed_power_w: float,
+    known_power_w: float,
+    min_delta_w: float,
+    expected_residual_w: float | None,
 ) -> None:
     from collections import defaultdict
 
@@ -10993,14 +11069,15 @@ def test_nilm_sample_processor_reconciles_only_known_load_residual(
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
         seed_demo_nilm_state=lambda _config, _now: None,
-        min_delta_w_for_circuit=lambda _circuit_id: 100.0,
+        min_delta_w_for_circuit=lambda _circuit_id: min_delta_w,
         detectors={},
         total_events_by_circuit=defaultdict(int),
         unmatched_edges_by_circuit=defaultdict(list),
         ignored_signatures=set(),
         known_load_events=lambda _circuit_id, events: events,
-        observe_topology=lambda _config, match, _context: observed_matches.append(match)
-        or [],
+        observe_topology=lambda _config, match, _context: (
+            observed_matches.append(match) or []
+        ),
     )
 
     def sample(seconds: int, watts: float) -> NormalizedCircuitSample:
@@ -11021,18 +11098,121 @@ def test_nilm_sample_processor_reconciles_only_known_load_residual(
         timestamp=now + timedelta(seconds=5),
         circuit_id="fridge",
         event_type=EventType.START,
-        features={"startup_power_w": 400.0},
+        features={"startup_power_w": known_power_w},
     )
     processor.process(sample(0, 100.0), config, context, events=())
-    processor.process(sample(5, 600.0), config, context, events=(known_event,))
-    processor.process(sample(10, 600.0), config, context, events=())
+    processor.process(
+        sample(5, observed_power_w), config, context, events=(known_event,)
+    )
+    processor.process(sample(10, observed_power_w), config, context, events=())
 
     assert len(observed_matches) == 1
-    assert observed_matches[0].edge.delta_w == 500.0
-    assert observed_matches[0].residual_edge is not None
-    assert observed_matches[0].residual_edge.delta_w == 100.0
-    assert reconciled_edges == [observed_matches[0].residual_edge]
+    assert observed_matches[0].edge.delta_w == observed_power_w - 100.0
+    if expected_residual_w is None:
+        assert observed_matches[0].residual_edge is None
+        assert reconciled_edges == []
+    else:
+        assert observed_matches[0].residual_edge is not None
+        assert observed_matches[0].residual_edge.delta_w == expected_residual_w
+        assert reconciled_edges == [observed_matches[0].residual_edge]
     assert processor.unmatched_edges_by_circuit["mains"] == []
+
+
+def test_nilm_sample_processor_keeps_equal_fresh_edge_when_persisted_edge_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        KnownLoadMatch,
+        NilmEdge,
+        NilmMaskResult,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        nilm_sample,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    persisted = NilmEdge(timestamp=now, delta_w=400.0, direction="on")
+    fresh = NilmEdge(timestamp=now, delta_w=400.0, direction="on")
+
+    class Detector:
+        min_delta_w = 100.0
+        noise_spread_w = 0.0
+        has_pending_transition = False
+
+        def process(self, _sample: object) -> list[NilmEdge]:
+            return [fresh]
+
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset({"fridge"}),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    unmatched = defaultdict(list, {"mains": [persisted]})
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda *_args: None,
+        min_delta_w_for_circuit=lambda _id: 100.0,
+        detectors={"mains": Detector()},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=unmatched,
+        ignored_signatures=set(),
+        known_load_events=lambda _id, events: events,
+        observe_topology=lambda *_args: [],
+    )
+    candidate_counts = []
+
+    def attribute(candidates, *_args, **_kwargs):
+        candidate_counts.append(len(candidates))
+        return NilmMaskResult(
+            (KnownLoadMatch(persisted, "fridge", 1.0),),
+            (fresh,),
+        )
+
+    monkeypatch.setattr(nilm_sample, "attribute_known_loads", attribute)
+    sample = NormalizedCircuitSample(
+        timestamp=now,
+        circuit_id="mains",
+        real_power=500.0,
+        current=None,
+        voltage=None,
+        reactive_power=None,
+        apparent_power=None,
+        power_factor=None,
+        frequency=60.0,
+        energy=None,
+    )
+    event = CircuitEvent(
+        timestamp=now,
+        circuit_id="fridge",
+        event_type=EventType.START,
+        features={"startup_power_w": 400.0},
+    )
+
+    processor.process(sample, config, context, events=(event,))
+
+    assert candidate_counts == [2]
+    assert len(processor.unmatched_edges_by_circuit["mains"]) == 1
+    assert processor.unmatched_edges_by_circuit["mains"][0] is fresh
 
 
 def test_nilm_sample_processor_keeps_mixed_known_load_edges_unmatched() -> None:
