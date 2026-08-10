@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from .alerting import Observation
-from .models import AlertEvidence, CircuitEvent
+from .models import AlertEvidence, CircuitEvent, EventType
 from .ux import friendly_feature_name
 
 DEFAULT_TIMELINE_WINDOW_HOURS = 24
@@ -46,7 +46,11 @@ def build_recent_activity_timeline(
     event_items = [
         _event_item(event)
         for event in events
-        if event.circuit_id == circuit_id and event.timestamp >= cutoff
+        if (
+            event.circuit_id == circuit_id
+            and event.event_type in {EventType.START, EventType.STOP}
+            and event.timestamp >= cutoff
+        )
     ]
     alert_items = [
         _alert_item(alert)

@@ -463,6 +463,62 @@ def test_running_power_step_cooldown_prevents_duplicate_plateau_events() -> None
     assert [event.event_type for event in events].count(EventType.POWER_TRANSITION) == 1
 
 
+def test_running_power_step_rejects_continuous_gradual_ramp() -> None:
+    machine = _machine()
+    events = []
+    samples = [(0, 5.0), (5, 500.0), (15, 500.0), (20, 500.0), (25, 500.0)]
+    samples.extend(
+        (seconds, 500.0 + (seconds - 25) * 4.0)
+        for seconds in range(30, 190, 5)
+    )
+    for seconds, watts in samples:
+        events.extend(
+            machine.process(_sample(seconds, watts, circuit_id="fridge")).events
+        )
+
+    assert EventType.POWER_TRANSITION not in [event.event_type for event in events]
+
+
+def test_rejected_running_step_does_not_reuse_stale_pre_plateau() -> None:
+    machine = _machine()
+    events = []
+    for seconds, watts in (
+        (0, 5.0), (5, 500.0), (15, 500.0), (20, 500.0), (25, 500.0),
+        (30, 900.0), (35, 1200.0), (40, 900.0), (45, 900.0), (50, 900.0),
+        (55, 900.0), (60, 1300.0), (65, 1300.0), (70, 1300.0),
+    ):
+        events.extend(
+            machine.process(_sample(seconds, watts, circuit_id="fridge")).events
+        )
+
+    transitions = [
+        event for event in events if event.event_type is EventType.POWER_TRANSITION
+    ]
+    assert len(transitions) == 1
+    assert transitions[0].features["pre_power_median_w"] == 900.0
+    assert transitions[0].features["post_power_median_w"] == 1300.0
+
+
+def test_pending_off_cancellation_clears_running_step_candidate() -> None:
+    machine = _machine()
+    events = []
+    for seconds, watts in (
+        (0, 5.0), (5, 500.0), (15, 500.0), (20, 500.0), (25, 500.0),
+        (30, 900.0), (35, 5.0), (40, 700.0), (45, 700.0), (50, 700.0),
+        (55, 1100.0), (60, 1100.0), (65, 1100.0),
+    ):
+        events.extend(
+            machine.process(_sample(seconds, watts, circuit_id="fridge")).events
+        )
+
+    transitions = [
+        event for event in events if event.event_type is EventType.POWER_TRANSITION
+    ]
+    assert len(transitions) == 1
+    assert transitions[0].features["pre_power_median_w"] == 700.0
+    assert transitions[0].features["post_power_median_w"] == 1100.0
+
+
 def test_operating_state_machine_confirms_stop_after_off_dwell() -> None:
     from custom_components.circuitsetup_energy_analyzer.operating_detection import (
         OperatingDetectionProfile,

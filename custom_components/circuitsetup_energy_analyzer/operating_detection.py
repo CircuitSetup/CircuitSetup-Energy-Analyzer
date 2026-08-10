@@ -698,6 +698,7 @@ class OperatingStateMachine:
     ) -> OperatingDetectionResult:
         if watts <= self._profile.off_threshold_w:
             if self._state is not OperatingState.PENDING_OFF:
+                self._clear_pending_running_step()
                 self._state = OperatingState.PENDING_OFF
                 self._candidate_since = sample.timestamp
                 self._begin_pending_transition(
@@ -755,10 +756,14 @@ class OperatingStateMachine:
                 )
             return self._result("pending_off")
 
+        pending_off_cancelled = self._state is OperatingState.PENDING_OFF
         self._state = OperatingState.RUNNING
         self._stable_state = OperatingState.RUNNING
         self._candidate_since = None
         self._clear_pending_transition()
+        if pending_off_cancelled:
+            self._clear_pending_running_step()
+            self._running_transition_context.clear()
         self._transition_reason = (
             "pending_off_cancelled"
             if watts < self._profile.on_threshold_w
@@ -970,11 +975,16 @@ class OperatingStateMachine:
             )
             spread = float(features.get("post_power_spread_w", math.inf))
             delta = _finite_or_none(features.get("transition_delta_w"))
+            post_range = max(item.power_w for item in post) - min(
+                item.power_w for item in post
+            )
             if (
                 delta is None
                 or abs(delta) < _RUNNING_STEP_MATERIAL_FLOOR_W
                 or spread > _RUNNING_STEP_MAX_POST_SPREAD_W
+                or post_range > _RUNNING_STEP_MAX_POST_SPREAD_W
             ):
+                self._clear_pending_running_step()
                 return None
             event_timestamp = post[0].timestamp
             self._last_running_step_at = event_timestamp

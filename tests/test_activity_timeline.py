@@ -120,6 +120,36 @@ def test_recent_activity_timeline_limits_items_and_reports_quiet() -> None:
     assert quiet.items == []
 
 
+def test_recent_activity_timeline_uses_only_lifecycle_events() -> None:
+    now = datetime(2026, 6, 3, 18, 0, tzinfo=UTC)
+    start = CircuitEvent(
+        timestamp=now - timedelta(minutes=10),
+        circuit_id="pump",
+        event_type=EventType.START,
+    )
+    transition = CircuitEvent(
+        timestamp=now - timedelta(minutes=5),
+        circuit_id="pump",
+        event_type=EventType.POWER_TRANSITION,
+    )
+    stop = CircuitEvent(
+        timestamp=now - timedelta(minutes=1),
+        circuit_id="pump",
+        event_type=EventType.STOP,
+    )
+
+    summary = build_recent_activity_timeline(
+        circuit_id="pump",
+        events=[start, transition, stop],
+        alerts=[],
+        now=now,
+    )
+
+    assert summary.event_count == 2
+    assert summary.total_count == 2
+    assert [item["event_type"] for item in summary.items] == ["stop", "start"]
+
+
 def test_recent_activity_timeline_deduplicates_identical_items() -> None:
     now = datetime(2026, 6, 3, 18, 0, tzinfo=UTC)
     event = CircuitEvent(
