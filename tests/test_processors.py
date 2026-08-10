@@ -10030,6 +10030,115 @@ def test_nilm_runtime_duration_breaks_equal_stop_tie_from_session_age() -> None:
     assert reconciliation["ambiguous_event_count"] == 0
     assert reconciliation["duration_channel_available_count"] == 1
     assert reconciliation["duration_rank_impact_count"] == 1
+    assert completed[0]["accepted_predictions"][-1].get(
+        "duration_changed_winner"
+    ) is True
+    assert completed[0]["accepted_predictions"][-1].get(
+        "duration_counterfactual_prototype_ids"
+    ) == []
+    assert reconciliation["score_decisions"] == [{
+        "sequence": 1,
+        "timestamp": observed_at.isoformat(),
+        "accepted_prototype_ids": ["on-time:stop:running->off"],
+        "duration_counterfactual_prototype_ids": [],
+    }]
+
+
+def test_nilm_runtime_records_duration_counterfactual_after_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A channel-caused rejection remains available to replay scoring."""
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        NilmEdge,
+        NilmReconciliationResult,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        nilm_sample,
+    )
+
+    started_at = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    observed_at = started_at + timedelta(seconds=100)
+    assignment = {
+        **_reconciliation_assignment("on-time", 100.0),
+        "run_profile": {"duration_s": {
+            "effective_support": 5.0,
+            "distinct_days": 3,
+            "median_seconds": 100.0,
+            "p10_seconds": 90.0,
+            "p90_seconds": 110.0,
+        }},
+        "transition_prototypes": [{
+            "id": "on-time-stop",
+            "kind": "stop",
+            "direction": "off",
+            "from_state_id": "running",
+            "to_state_id": "off",
+            "from_state_w": 100.0,
+            "to_state_w": 0.0,
+            "delta_w": -100.0,
+            "spread_w": 2.0,
+            "sample_count": 3,
+        }],
+    }
+
+    def reconcile_with_duration_rejection(
+        edge: NilmEdge,
+        _models: object,
+        _current: object,
+        _helper_scores: object,
+        duration_scores: object,
+        _validation_scores: object,
+        **_kwargs: object,
+    ) -> NilmReconciliationResult:
+        accepted = not bool(duration_scores)
+        return NilmReconciliationResult(
+            accepted=accepted,
+            transitions=(),
+            residual_w=0.0,
+            tolerance_w=25.0,
+            compound=False,
+            consistent=True,
+            energy_allocation_allowed=accepted,
+            reason="accepted" if accepted else "low_confidence",
+            accepted_prototype_ids=("on-time-stop",) if accepted else (),
+        )
+
+    monkeypatch.setattr(
+        nilm_sample,
+        "reconcile_nilm_edge",
+        reconcile_with_duration_rejection,
+    )
+    runtime, reconciliation, completed, accepted = (
+        nilm_sample.reconcile_component_runtime(
+            source_power_w=100.0,
+            timestamp=observed_at,
+            assignments=(assignment,),
+            runtime={
+                "on-time": {
+                    "status": "on",
+                    "state_power_w": 100.0,
+                    "estimated_power_w": 100.0,
+                    "session_id": "on-time-session",
+                    "session_start": started_at.isoformat(),
+                    "consistent": True,
+                    "energy_kwh": 0.0,
+                }
+            },
+            edges=(NilmEdge(observed_at, -100.0, 0.0, -100.0, 0.0, "off"),),
+            standby_w=0.0,
+            noise_spread_w=0.0,
+        )
+    )
+
+    assert accepted == []
+    assert completed == []
+    assert runtime["on-time"]["status"] == "on"
+    assert reconciliation["score_decisions"] == [{
+        "sequence": 1,
+        "timestamp": observed_at.isoformat(),
+        "accepted_prototype_ids": [],
+        "duration_counterfactual_prototype_ids": ["on-time-stop"],
+    }]
 
 
 def test_nilm_runtime_duration_keeps_assignment_local_prototype_scores() -> None:
@@ -10159,6 +10268,12 @@ def test_nilm_runtime_validation_breaks_equal_tie_for_current_revision() -> None
     assert reconciliation["ambiguous_event_count"] == 0
     assert reconciliation["validation_channel_available_count"] == 1
     assert reconciliation["validation_rank_impact_count"] == 1
+    assert runtime["reliable"]["accepted_predictions"][-1].get(
+        "validation_changed_winner"
+    ) is True
+    assert runtime["reliable"]["accepted_predictions"][-1].get(
+        "validation_counterfactual_prototype_ids"
+    ) == []
 
 
 def test_nilm_runtime_uses_revision_matched_explicit_feedback_scores() -> None:

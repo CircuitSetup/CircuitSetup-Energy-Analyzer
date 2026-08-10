@@ -1,0 +1,147 @@
+schema_version: 1
+id: nilm_replay_gate
+description: Chronological NILM replay gate for discrete states and calibrated scoring
+scenario_type: normal
+source_kind: pure_mixed
+start_time: 2026-08-10T00:00:00Z
+min_delta_w: 100
+circuits:
+  - circuit_id: multistate
+    name: Multi-state load
+    appliance_profile: mixed
+    circuit_mode: mixed
+    sources: {power: sensor.multistate}
+  - circuit_id: variable
+    name: Variable envelope load
+    appliance_profile: mixed
+    circuit_mode: mixed
+    sources: {power: sensor.variable}
+  - circuit_id: duration
+    name: Duration rank tie
+    appliance_profile: mixed
+    circuit_mode: mixed
+    sources: {power: sensor.duration}
+assignments:
+  multistate:
+    - assignment_id: multistate
+      lifecycle_state: validated
+      model_confidence: 0.9
+      model_kind: multi_state
+      power_states_w: [0, 100, 200, 300]
+      states:
+        - {id: "off", kind: "off", power_w: 0, spread_w: 0}
+        - {id: active_1, kind: active, power_w: 100, spread_w: 2}
+        - {id: active_2, kind: active, power_w: 200, spread_w: 2}
+        - {id: active_3, kind: active, power_w: 300, spread_w: 2}
+      transition_prototypes:
+        - {id: multistate:start, kind: start, direction: "on", from_state_id: "off", to_state_id: active_1, from_state_w: 0, to_state_w: 100, delta_w: 100, spread_w: 2, sample_count: 4}
+        - {id: multistate:up-1, kind: state_up, direction: "on", from_state_id: active_1, to_state_id: active_2, from_state_w: 100, to_state_w: 200, delta_w: 100, spread_w: 2, sample_count: 4}
+        - {id: multistate:up-2, kind: state_up, direction: "on", from_state_id: active_2, to_state_id: active_3, from_state_w: 200, to_state_w: 300, delta_w: 100, spread_w: 2, sample_count: 4}
+        - {id: multistate:down-2, kind: state_down, direction: "off", from_state_id: active_3, to_state_id: active_2, from_state_w: 300, to_state_w: 200, delta_w: -100, spread_w: 2, sample_count: 4}
+        - {id: multistate:down-1, kind: state_down, direction: "off", from_state_id: active_2, to_state_id: active_1, from_state_w: 200, to_state_w: 100, delta_w: -100, spread_w: 2, sample_count: 4}
+        - {id: multistate:stop, kind: stop, direction: "off", from_state_id: active_1, to_state_id: "off", from_state_w: 100, to_state_w: 0, delta_w: -100, spread_w: 2, sample_count: 4}
+  variable:
+    - assignment_id: variable_envelope
+      lifecycle_state: validated
+      model_confidence: 0.9
+      model_kind: variable_envelope
+      power_states_w: [0, 110]
+      states:
+        - {id: "off", kind: "off", power_w: 0, spread_w: 0}
+        - {id: running, kind: active, power_w: 110, spread_w: 60}
+      transition_prototypes:
+        - {id: variable:start, kind: start, direction: "on", from_state_id: "off", to_state_id: running, from_state_w: 0, to_state_w: 110, delta_w: 110, spread_w: 60, sample_count: 4}
+        - {id: variable:stop, kind: stop, direction: "off", from_state_id: running, to_state_id: "off", from_state_w: 110, to_state_w: 0, delta_w: -110, spread_w: 60, sample_count: 4}
+  duration:
+    - &on_time
+      assignment_id: on_time
+      lifecycle_state: validated
+      model_confidence: 0.9
+      power_states_w: [0, 100]
+      run_profile:
+        duration_s: {effective_support: 5, distinct_days: 3, median_seconds: 200, p10_seconds: 190, p90_seconds: 210}
+      transition_prototypes:
+        - {id: on_time:stop, kind: stop, direction: "off", from_state_id: running, to_state_id: "off", from_state_w: 100, to_state_w: 0, delta_w: -100, spread_w: 2, sample_count: 3}
+    - &too_long
+      assignment_id: too_long
+      lifecycle_state: validated
+      model_confidence: 0.9
+      power_states_w: [0, 100]
+      run_profile:
+        duration_s: {effective_support: 5, distinct_days: 3, median_seconds: 15, p10_seconds: 10, p90_seconds: 20}
+      transition_prototypes:
+        - {id: too_long:stop, kind: stop, direction: "off", from_state_id: running, to_state_id: "off", from_state_w: 100, to_state_w: 0, delta_w: -100, spread_w: 2, sample_count: 3}
+initial_nilm_runtime_by_circuit:
+  duration:
+    on_time:
+      status: "on"
+      state_power_w: 100
+      current_state_id: running
+      current_state_power_w: 100
+      state_since: "2026-08-10T00:16:40Z"
+      estimated_power_w: 100
+      session_id: on_time|2026-08-10T00:16:40Z
+      session_start: "2026-08-10T00:16:40Z"
+      energy_kwh: 0
+      consistent: true
+    too_long:
+      status: "on"
+      state_power_w: 100
+      current_state_id: running
+      current_state_power_w: 100
+      state_since: "2026-08-10T00:16:40Z"
+      estimated_power_w: 100
+      session_id: too_long|2026-08-10T00:16:40Z
+      session_start: "2026-08-10T00:16:40Z"
+      energy_kwh: 0
+      consistent: true
+samples:
+  - {t: 1000, states: {sensor.multistate: 0, sensor.variable: 0, sensor.duration: 200}}
+  - {t: 1010, states: {sensor.multistate: 0, sensor.variable: 0, sensor.duration: 200}}
+  - {t: 1020, states: {sensor.multistate: 0, sensor.variable: 0, sensor.duration: 200}}
+  - {t: 1030, states: {sensor.multistate: 100, sensor.variable: 110, sensor.duration: 200}}
+  - {t: 1040, states: {sensor.multistate: 100, sensor.variable: 110, sensor.duration: 200}}
+  - {t: 1050, states: {sensor.multistate: 100, sensor.variable: 110, sensor.duration: 200}}
+  - {t: 1060, states: {sensor.multistate: 200, sensor.variable: 150, sensor.duration: 200}}
+  - {t: 1070, states: {sensor.multistate: 200, sensor.variable: 150, sensor.duration: 200}}
+  - {t: 1080, states: {sensor.multistate: 200, sensor.variable: 150, sensor.duration: 200}}
+  - {t: 1090, states: {sensor.multistate: 300, sensor.variable: 120, sensor.duration: 200}}
+  - {t: 1100, states: {sensor.multistate: 300, sensor.variable: 120, sensor.duration: 200}}
+  - {t: 1110, states: {sensor.multistate: 300, sensor.variable: 120, sensor.duration: 200}}
+  - {t: 1120, states: {sensor.multistate: 200, sensor.variable: 150, sensor.duration: 200}}
+  - {t: 1130, states: {sensor.multistate: 200, sensor.variable: 150, sensor.duration: 200}}
+  - {t: 1140, states: {sensor.multistate: 200, sensor.variable: 150, sensor.duration: 200}}
+  - {t: 1150, states: {sensor.multistate: 100, sensor.variable: 0, sensor.duration: 200}}
+  - {t: 1160, states: {sensor.multistate: 100, sensor.variable: 0, sensor.duration: 200}}
+  - {t: 1170, states: {sensor.multistate: 100, sensor.variable: 0, sensor.duration: 200}}
+  - {t: 1180, states: {sensor.multistate: 0, sensor.variable: 0, sensor.duration: 200}}
+  - {t: 1190, states: {sensor.multistate: 0, sensor.variable: 0, sensor.duration: 200}}
+  - {t: 1200, states: {sensor.multistate: 0, sensor.variable: 0, sensor.duration: 100}}
+  - {t: 1210, states: {sensor.multistate: 0, sensor.variable: 0, sensor.duration: 100}}
+  - {t: 1220, states: {sensor.multistate: 0, sensor.variable: 0, sensor.duration: 100}}
+  - {t: 1230, states: {sensor.multistate: 0, sensor.variable: 0, sensor.duration: 0}}
+  - {t: 1240, states: {sensor.multistate: 0, sensor.variable: 0, sensor.duration: 0}}
+  - {t: 1250, states: {sensor.multistate: 0, sensor.variable: 0, sensor.duration: 0}}
+labels:
+  replay_split: {training_end_t: 999, evaluation_start_t: 1000}
+  component_truth:
+    multistate:
+      edges: [{event_type: start, around_t: 1030}, {event_type: stop, around_t: 1180}]
+      sessions: [{start_t: 1030, end_t: 1180}]
+      state_segments:
+        - {start_t: 1030, end_t: 1060, state_id: active_1}
+        - {start_t: 1060, end_t: 1090, state_id: active_2}
+        - {start_t: 1090, end_t: 1120, state_id: active_3}
+        - {start_t: 1120, end_t: 1150, state_id: active_2}
+        - {start_t: 1150, end_t: 1180, state_id: active_1}
+    variable_envelope:
+      edges: [{event_type: start, around_t: 1030}, {event_type: stop, around_t: 1150}]
+      sessions: [{start_t: 1030, end_t: 1150}]
+      state_segments: [{start_t: 1030, end_t: 1150, state_id: running}]
+    on_time:
+      edges: [{event_type: start, around_t: 1000}, {event_type: stop, around_t: 1200}]
+      sessions: [{start_t: 1000, end_t: 1200}]
+    too_long:
+      edges: [{event_type: start, around_t: 1000}, {event_type: stop, around_t: 1230}]
+      sessions: [{start_t: 1000, end_t: 1230}]
+calibration_expectations: {}

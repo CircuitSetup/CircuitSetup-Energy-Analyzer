@@ -78,6 +78,7 @@ class _RuntimeAssignmentModel(NilmAssignmentModel):
 
 _NILM_RUNTIME_STATE_PATH_LIMIT = 12
 _NILM_RUNTIME_PREDICTION_LIMIT = 12
+_NILM_SCORE_DECISION_LIMIT = 48
 
 
 class NilmSampleProcessor:
@@ -961,8 +962,13 @@ def reconcile_component_runtime(
     ] = []
     conflict: str | None = None
     ambiguous_event_increment = 0
-    evidence_diagnostics: defaultdict[str, int] = defaultdict(int)
+    evidence_diagnostics: dict[str, Any] = defaultdict(int)
     unavailable_reasons: defaultdict[str, int] = defaultdict(int)
+    score_decisions: list[dict[str, Any]] = []
+    score_decision_sequence = max(
+        _nonnegative_int((previous_reconciliation or {}).get("score_decision_count")),
+        len(_list_items((previous_reconciliation or {}).get("score_decisions"))),
+    )
 
     if source_power_w is None or not isfinite(source_power_w):
         _suspend_runtime(next_runtime)
@@ -1067,6 +1073,58 @@ def reconcile_component_runtime(
             current_state_ids=current_state_ids,
             helper_conflict=helper_conflict,
         )
+        duration_changed_winner = False
+        duration_counterfactual_prototype_ids: tuple[str, ...] = ()
+        if duration_available:
+            without_duration = reconcile_nilm_edge(
+                edge, models, current, helper_scores, {}, validation_scores,
+                current_state_ids=current_state_ids,
+                helper_conflict=helper_conflict,
+            )
+            duration_counterfactual_prototype_ids = (
+                without_duration.accepted_prototype_ids
+            )
+            duration_changed_winner = (
+                duration_counterfactual_prototype_ids
+                != result.accepted_prototype_ids
+            )
+            evidence_diagnostics["duration_rank_impact_count"] += int(
+                duration_changed_winner
+            )
+        validation_changed_winner = False
+        validation_counterfactual_prototype_ids: tuple[str, ...] = ()
+        if validation_available:
+            without_validation = reconcile_nilm_edge(
+                edge, models, current, helper_scores, duration_scores, {},
+                current_state_ids=current_state_ids,
+                helper_conflict=helper_conflict,
+            )
+            validation_counterfactual_prototype_ids = (
+                without_validation.accepted_prototype_ids
+            )
+            validation_changed_winner = (
+                validation_counterfactual_prototype_ids
+                != result.accepted_prototype_ids
+            )
+            evidence_diagnostics["validation_rank_impact_count"] += int(
+                validation_changed_winner
+            )
+        if duration_changed_winner or validation_changed_winner:
+            score_decision_sequence += 1
+            decision = {
+                "sequence": score_decision_sequence,
+                "timestamp": edge.timestamp.isoformat(),
+                "accepted_prototype_ids": list(result.accepted_prototype_ids),
+            }
+            if duration_changed_winner:
+                decision["duration_counterfactual_prototype_ids"] = list(
+                    duration_counterfactual_prototype_ids
+                )
+            if validation_changed_winner:
+                decision["validation_counterfactual_prototype_ids"] = list(
+                    validation_counterfactual_prototype_ids
+                )
+            score_decisions.append(decision)
         if not result.accepted:
             if _bootstrap_observed_active_state_transition(
                 models,
@@ -1087,26 +1145,6 @@ def reconcile_component_runtime(
             if result.reason == "helper_conflict":
                 conflict = result.reason
             continue
-        if duration_available:
-            without_duration = reconcile_nilm_edge(
-                edge, models, current, helper_scores, {}, validation_scores,
-                current_state_ids=current_state_ids,
-                helper_conflict=helper_conflict,
-            )
-            evidence_diagnostics["duration_rank_impact_count"] += int(
-                without_duration.accepted_prototype_ids
-                != result.accepted_prototype_ids
-            )
-        if validation_available:
-            without_validation = reconcile_nilm_edge(
-                edge, models, current, helper_scores, duration_scores, {},
-                current_state_ids=current_state_ids,
-                helper_conflict=helper_conflict,
-            )
-            evidence_diagnostics["validation_rank_impact_count"] += int(
-                without_validation.accepted_prototype_ids
-                != result.accepted_prototype_ids
-            )
         pending_sessions: list[tuple[str, NilmTransitionPrototype, NilmEdge]] = []
         pending_predictions: list[
             tuple[str, dict[str, Any], bool, bool]
@@ -1184,7 +1222,20 @@ def reconcile_component_runtime(
                 })
             pending_predictions.append((
                 transition.assignment_id,
-                _runtime_prediction_summary(result, transition, models, edge),
+                _runtime_prediction_summary(
+                    result,
+                    transition,
+                    models,
+                    edge,
+                    duration_changed_winner=duration_changed_winner,
+                    duration_counterfactual_prototype_ids=(
+                        duration_counterfactual_prototype_ids
+                    ),
+                    validation_changed_winner=validation_changed_winner,
+                    validation_counterfactual_prototype_ids=(
+                        validation_counterfactual_prototype_ids
+                    ),
+                ),
                 is_start,
                 is_stop,
             ))
@@ -1329,6 +1380,7 @@ def reconcile_component_runtime(
         {
             **evidence_diagnostics,
             "evidence_unavailable_reason_counts": dict(unavailable_reasons),
+            "score_decisions": score_decisions,
         },
     ), completed, accepted
 
@@ -1462,6 +1514,11 @@ def _runtime_prediction_summary(
     transition: NilmTransitionPrototype,
     models: Iterable[NilmAssignmentModel],
     edge: NilmEdge,
+    *,
+    duration_changed_winner: bool = False,
+    duration_counterfactual_prototype_ids: Iterable[str] = (),
+    validation_changed_winner: bool = False,
+    validation_counterfactual_prototype_ids: Iterable[str] = (),
 ) -> dict[str, Any]:
     model = next(
         item for item in models if item.assignment_id == transition.assignment_id
@@ -1476,7 +1533,7 @@ def _runtime_prediction_summary(
         )
         if value is None
     ]
-    return {
+    summary = {
         "prediction_timestamp": edge.timestamp.isoformat(),
         "model_schema_version": getattr(model, "model_schema_version", 0),
         "model_revision": getattr(model, "model_revision", 0),
@@ -1495,6 +1552,17 @@ def _runtime_prediction_summary(
         "state_id": _runtime_transition_state_id(transition),
         "state_power_w": transition.to_state_w,
     }
+    if duration_changed_winner:
+        summary["duration_changed_winner"] = True
+        summary["duration_counterfactual_prototype_ids"] = list(
+            duration_counterfactual_prototype_ids
+        )
+    if validation_changed_winner:
+        summary["validation_changed_winner"] = True
+        summary["validation_counterfactual_prototype_ids"] = list(
+            validation_counterfactual_prototype_ids
+        )
+    return summary
 
 
 def _runtime_prediction_breakdown(
@@ -2833,6 +2901,23 @@ def _runtime_reconciliation(
         + _nonnegative_int(current_reasons.get(name))
         for name in reason_names
     }
+    previous_score_decisions = [
+        dict(item)
+        for item in _list_items((previous or {}).get("score_decisions"))
+        if isinstance(item, Mapping)
+    ]
+    current_score_decisions = [
+        dict(item)
+        for item in _list_items(diagnostics.get("score_decisions"))
+        if isinstance(item, Mapping)
+    ]
+    payload["score_decisions"] = (
+        previous_score_decisions + current_score_decisions
+    )[-_NILM_SCORE_DECISION_LIMIT:]
+    payload["score_decision_count"] = max(
+        _nonnegative_int((previous or {}).get("score_decision_count")),
+        len(previous_score_decisions),
+    ) + len(current_score_decisions)
     if conflict:
         payload["review_item"] = {
             "type": "model_conflict",

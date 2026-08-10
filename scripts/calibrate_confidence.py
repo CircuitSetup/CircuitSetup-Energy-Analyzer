@@ -119,12 +119,66 @@ def build_markdown_report(
                 "## Component replay metrics",
                 "",
                 "| Fixture | Source kind | Component | Edge P/R | Session P/R/F1 | "
-                "Start/stop error s | Energy abs/% error | Residual kWh | "
+                "Start/stop/duration error s | Interval IoU | State accuracy/count | "
+                "Energy abs/% error | Residual kWh | Assignment FP rate | "
                 "Helper FP rate | Ambiguous rate | Conservation violations |",
-                "|---|---|---|---|---|---|---|---:|---:|---:|---:|",
+                "|---|---|---|---|---|---|---|---|---|---:|---:|---:|---:|",
             ]
         )
         lines.extend(_component_row(*item) for item in component_metrics)
+
+    decision_metrics = [
+        (metrics.fixture_id, "duration", metrics.decision_impacts.duration)
+        for metrics in metrics_list
+    ] + [
+        (metrics.fixture_id, "validation", metrics.decision_impacts.validation)
+        for metrics in metrics_list
+    ]
+    if decision_metrics:
+        lines.extend(
+            [
+                "",
+                "## NILM score decision impact",
+                "",
+                "| Fixture | Channel | Changed/correct | "
+                "Incorrect | Neutral | Unscored |",
+                "|---|---|---:|---:|---:|---:|",
+                *(
+                    "| "
+                    f"{fixture_id} | {channel} | "
+                    f"{impact.changed_count}/{impact.changed_correct_count} | "
+                    f"{impact.changed_incorrect_count} | "
+                    f"{impact.changed_neutral_count} | "
+                    f"{impact.changed_unscored_count} |"
+                    for fixture_id, channel, impact in decision_metrics
+                ),
+            ]
+        )
+
+    nilm_confidence_rows = [
+        (metrics.fixture_id, label, values)
+        for metrics in metrics_list
+        for label, values in metrics.nilm_confidence_bins.items()
+        if values.get("prediction_count", 0.0)
+    ]
+    if nilm_confidence_rows:
+        lines.extend(
+            [
+                "",
+                "## NILM prediction confidence calibration",
+                "",
+                "| Fixture | Score band | Predictions | Accuracy | Average score |",
+                "|---|---|---:|---:|---:|",
+                *(
+                    "| "
+                    f"{fixture_id} | {label} | "
+                    f"{values['prediction_count']:g} | "
+                    f"{values['observed_accuracy']:g} | "
+                    f"{values['average_score']:g} |"
+                    for fixture_id, label, values in nilm_confidence_rows
+                ),
+            ]
+        )
 
     failures = [metrics for metrics in metrics_list if metrics.expectation_failures]
     if failures:
@@ -204,9 +258,19 @@ def _component_row(
         component_id,
         f"{_format_metric(component.edge_precision)}/{_format_metric(component.edge_recall)}",
         f"{_format_metric(component.session_precision)}/{_format_metric(component.session_recall)}/{_format_metric(component.session_f1)}",
-        f"{_format_metric(component.median_start_error_seconds)}/{_format_metric(component.median_stop_error_seconds)}",
+        "/".join(
+            _format_metric(value)
+            for value in (
+                component.median_start_error_seconds,
+                component.median_stop_error_seconds,
+                component.median_duration_error_seconds,
+            )
+        ),
+        _format_metric(component.interval_iou),
+        f"{_format_metric(component.state_accuracy)}/{component.observed_active_state_count}",
         f"{_format_metric(component.energy_absolute_error_kwh)}/{_format_metric(component.energy_percentage_error)}",
         f"{metrics.residual_energy_kwh:g}",
+        _format_metric(metrics.false_assignment_rate),
         _format_metric(metrics.false_helper_association_rate),
         f"{metrics.ambiguous_event_rate:g}",
         str(metrics.conservation_violations),
