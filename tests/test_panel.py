@@ -2491,6 +2491,15 @@ def test_nilm_workspace_reference_options_are_bounded_and_metadata_safe() -> Non
                 "display_name": "Pump",
                 "lifecycle_state": "assigned",
                 "reference_state_entity_id": "switch.pump",
+                "reference_threshold_w": 100.0,
+                "reference_on_threshold": 84.0,
+                "reference_off_threshold": 42.0,
+                "reference_on_dwell_seconds": 3.0,
+                "reference_off_dwell_seconds": 4.0,
+                "reference_minimum_interval_seconds": 5.0,
+                "reference_merge_gap_seconds": 6.0,
+                "reference_maximum_unknown_gap_seconds": 7.0,
+                "reference_maximum_power_gap_seconds": 8.0,
             }
         ]
     }
@@ -2570,6 +2579,16 @@ def test_nilm_workspace_reference_options_are_bounded_and_metadata_safe() -> Non
     assert reference["power_options"][0]["role"] == "real_power"
     assert reference["suggested_power_entity_id"] == "sensor.pump_power"
     assert reference["actions"]["set"]["data"]["entry_id"] == "entry-1"
+    assert reference["threshold_w"] == 100.0
+    assert reference["on_threshold"] == 84.0
+    assert reference["off_threshold"] == 42.0
+    assert reference["on_dwell_seconds"] == 3.0
+    assert reference["off_dwell_seconds"] == 4.0
+    assert reference["minimum_interval_seconds"] == 5.0
+    assert reference["merge_gap_seconds"] == 6.0
+    assert reference["maximum_unknown_gap_seconds"] == 7.0
+    assert reference["maximum_power_gap_seconds"] == 8.0
+    assert "reference_on_threshold" in reference["actions"]["set"]["requires"]
 
 
 def test_nilm_workspace_placeholder_session_is_evidence_only() -> None:

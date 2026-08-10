@@ -589,6 +589,7 @@ def nilm_reference_runtime(
         "measured_power_w": None,
         "source_entity_id": None,
         "fallback_to_nilm": True,
+        "state_mode": "unavailable",
     }
     if str(assignment.get("lifecycle_state") or "").strip().lower() == "retired":
         return fallback
@@ -623,19 +624,27 @@ def nilm_reference_runtime(
                 "measured_power_w": measured_power_w,
                 "source_entity_id": state_entity_id,
                 "fallback_to_nilm": False,
+                "state_mode": "binary_state",
             }
         return {**fallback, "measured_power_w": measured_power_w}
     if measured_power_w is None:
         return fallback
     threshold_w = _optional_nonnegative_float(
-        assignment.get("reference_threshold_w")
+        assignment.get("reference_on_threshold")
     )
+    if threshold_w is None:
+        threshold_w = _optional_nonnegative_float(
+            assignment.get("reference_threshold_w")
+        )
     return {
         "available": True,
         "is_running": measured_power_w > (threshold_w or 0.0),
         "measured_power_w": measured_power_w,
         "source_entity_id": power_entity_id,
         "fallback_to_nilm": False,
+        # This is only a current-value display; historical interval extraction
+        # remains responsible for hysteresis and dwell handling.
+        "state_mode": "stateless_numeric",
     }
 
 

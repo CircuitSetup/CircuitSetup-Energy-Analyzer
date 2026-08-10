@@ -2361,17 +2361,30 @@ def test_nilm_reference_runtime_uses_state_then_power_only_fallback() -> None:
         "measured_power_w": 84.0,
         "source_entity_id": "switch.pump",
         "fallback_to_nilm": False,
+        "state_mode": "binary_state",
     }
 
     power_reference = nilm_reference_runtime(
         coordinator,
         {
             "reference_power_entity_id": "sensor.pump_power",
-            "reference_threshold_w": 25,
+            "reference_threshold_w": 100,
+            "reference_on_threshold": 25,
         },
     )
     assert power_reference["is_running"] is True
     assert power_reference["source_entity_id"] == "sensor.pump_power"
+    assert power_reference["state_mode"] == "stateless_numeric"
+
+    legacy_power_reference = nilm_reference_runtime(
+        coordinator,
+        {
+            "reference_power_entity_id": "sensor.pump_power",
+            "reference_threshold_w": 100,
+        },
+    )
+    assert legacy_power_reference["is_running"] is False
+    assert legacy_power_reference["state_mode"] == "stateless_numeric"
 
     assert nilm_reference_runtime(
         coordinator,
