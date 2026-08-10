@@ -2058,6 +2058,30 @@ def test_attribute_known_loads_retains_strongest_unsuppressed_rejection() -> Non
     assert result.topology_rejections[0].selection_status == "rejected_topology"
 
 
+def test_attribute_known_loads_prefers_closest_equal_power_rejection() -> None:
+    """Removing time ordering would retain the farther same-event rejection."""
+    farther = edge(4, 1000.0, split_phase_type="balanced_240v")
+    closer = edge(1, 1000.0, split_phase_type="balanced_240v")
+    event = CircuitEvent(
+        BASE_TIME,
+        "load",
+        EventType.START,
+        features={"startup_power_w": 1000.0},
+    )
+
+    result = attribute_known_loads(
+        [farther, closer],
+        [event],
+        topology_by_circuit={
+            "load": nilm_domain.KnownLoadTopology(("single_leg_a",))
+        },
+    )
+
+    assert result.topology_rejections == (result.rejected_topology_candidates[0],)
+    assert result.topology_rejections[0].edge is closer
+    assert result.topology_rejections[0].time_distance_seconds == 1.0
+
+
 def test_attribute_known_loads_suppresses_rejection_for_selected_edge() -> None:
     """A rejected candidate must not diagnose an edge matched to another load."""
     candidate = edge(0, 1000.0, split_phase_type="single_leg_a")
