@@ -13009,6 +13009,17 @@ async def test_runtime_records_known_load_split_phase_topology_evidence() -> Non
         "observed_leg_balance_ratio": 2.0,
         "matched_delta_w": 300.0,
         "known_event_power_w": 300.0,
+        "source_aggregate_delta_w": 300.0,
+        "explained_delta_w": 300.0,
+        "residual_delta_w": 0.0,
+        "residual_emitted": False,
+        "residual_edge_id": None,
+        "match_time_offset_seconds": 0.0,
+        "magnitude_score": 1.0,
+        "time_score": 1.0,
+        "topology_score": 0.5,
+        "selection_method": "global_assignment",
+        "known_power_source": "startup_power_w",
         "match_confidence": 1.0,
     }
 

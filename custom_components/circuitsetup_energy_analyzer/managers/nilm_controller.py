@@ -20,8 +20,10 @@ from ..models import (
     SensorRole,
 )
 from ..nilm import (
+    KnownLoadTopology,
     NilmEdge,
     build_nilm_assignment_model,
+    known_load_topology_for_config,
     nilm_signature_is_assignable,
     normalize_nilm_assignment_model,
 )
@@ -209,6 +211,14 @@ class NilmController:
             ):
                 continue
             yield event
+
+    def known_load_topology(self, circuit_id: str) -> KnownLoadTopology | None:
+        """Return configured topology expectations for one known-load circuit."""
+        registry = self._coordinator.circuit_registry
+        if circuit_id not in registry.known_load_circuit_ids:
+            return None
+        config = registry.config_for_circuit(circuit_id)
+        return known_load_topology_for_config(config) if config is not None else None
 
     def observe_known_load_topology(
         self,

@@ -140,6 +140,21 @@ def nilm_topology_evidence_payload(
         ),
         "matched_delta_w": _round_number(match.edge.delta_w),
         "known_event_power_w": _round_number(match.known_power_w),
+        "source_aggregate_delta_w": _round_number(match.edge.delta_w),
+        "explained_delta_w": _round_number(match.explained_delta_w),
+        "residual_delta_w": _round_number(match.residual_delta_w),
+        "residual_emitted": match.residual_edge is not None,
+        "residual_edge_id": (
+            match.residual_edge.parent_edge_id if match.residual_edge else None
+        ),
+        "match_time_offset_seconds": _round_optional_number(
+            match.time_offset_seconds
+        ),
+        "magnitude_score": _round_optional_number(match.magnitude_score),
+        "time_score": _round_optional_number(match.time_score),
+        "topology_score": _round_optional_number(match.topology_score),
+        "selection_method": match.selection_method,
+        "known_power_source": match.power_source,
         "match_confidence": _round_number(
             match.magnitude_score
             if match.magnitude_score is not None

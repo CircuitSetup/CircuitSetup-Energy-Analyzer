@@ -11,6 +11,7 @@ from typing import Any
 
 from ..models import AlertEvidence, CircuitConfig, CircuitEvent
 from ..nilm import (
+    KnownLoadTopology,
     NilmAssignmentModel,
     NilmComponentStatus,
     NilmEdge,
@@ -18,11 +19,11 @@ from ..nilm import (
     NilmSignature,
     NilmTransitionPrototype,
     _nilm_signature_edge_score,
+    attribute_known_loads,
     classify_signature,
     cluster_recurring_signatures,
     conservation_tolerance_w,
     discover_nilm_helper_candidates,
-    mask_known_loads,
     nilm_helper_candidate_to_dict,
     nilm_session_to_dict,
     nilm_signature_fingerprint,
@@ -50,6 +51,7 @@ type KnownLoadEventsProvider = Callable[
     Iterable[CircuitEvent],
 ]
 type HelperCandidateEventsProvider = KnownLoadEventsProvider
+type KnownLoadTopologyProvider = Callable[[str], KnownLoadTopology | None]
 type TopologyObserver = Callable[
     [CircuitConfig, Any, ProcessingContext],
     list[AlertEvidence],
@@ -73,6 +75,7 @@ class NilmSampleProcessor:
         ignored_signatures: MutableSet[tuple[str, str]],
         known_load_events: KnownLoadEventsProvider,
         observe_topology: TopologyObserver,
+        known_load_topology: KnownLoadTopologyProvider | None = None,
         helper_candidate_events: HelperCandidateEventsProvider | None = None,
         unmatched_edges_max_items: int = 512,
         session_history_max_items: int = 2000,
@@ -85,6 +88,7 @@ class NilmSampleProcessor:
         self.unmatched_edges_by_circuit = unmatched_edges_by_circuit
         self.ignored_signatures = ignored_signatures
         self._known_load_events = known_load_events
+        self._known_load_topology = known_load_topology or (lambda _circuit_id: None)
         self._pending_known_load_events: dict[str, tuple[CircuitEvent, ...]] = {}
         self._helper_candidate_events = helper_candidate_events or (
             lambda _id, _events: ()
@@ -191,7 +195,16 @@ class NilmSampleProcessor:
         matched_edges = ()
         defer_known_events = detector.has_pending_transition and not edges
         if candidate_edges and known_events and not defer_known_events:
-            mask = mask_known_loads(candidate_edges, known_events)
+            topology_by_circuit = {
+                event.circuit_id: topology
+                for event in known_events
+                if (topology := self._known_load_topology(event.circuit_id)) is not None
+            }
+            mask = attribute_known_loads(
+                candidate_edges,
+                known_events,
+                topology_by_circuit=topology_by_circuit,
+            )
             matched_edges = mask.matched_edges
             next_unmatched = list(mask.unmatched_edges)
         else:
@@ -214,8 +227,17 @@ class NilmSampleProcessor:
                 sample.real_power, standby_w, detector.noise_spread_w,
                 assignments, runtime, sample.timestamp, signature_specs
             )
-            masked_ids = {id(match.edge) for match in matched_edges}
-            new_unmasked = [edge for edge in edges if id(edge) not in masked_ids]
+            matches_by_edge: dict[NilmEdge, list[Any]] = defaultdict(list)
+            for match in matched_edges:
+                matches_by_edge[match.edge].append(match)
+            new_unmasked: list[NilmEdge] = []
+            for edge in edges:
+                edge_matches = matches_by_edge.get(edge, [])
+                match = edge_matches.pop(0) if edge_matches else None
+                if match is None:
+                    new_unmasked.append(edge)
+                elif match.residual_edge is not None:
+                    new_unmasked.append(match.residual_edge)
             previous_reconciliation = (
                 context.state.nilm_reconciliation_by_circuit.get(circuit_id)
             )
@@ -294,10 +316,11 @@ class NilmSampleProcessor:
                     completed_sessions.extend(followup_completed)
             else:
                 accepted = ()
-            accepted_ids = {id(edge) for edge in accepted}
-            next_unmatched = [
-                edge for edge in next_unmatched if id(edge) not in accepted_ids
-            ]
+            for accepted_edge in accepted:
+                try:
+                    next_unmatched.remove(accepted_edge)
+                except ValueError:
+                    continue
             if completed_sessions:
                 history = (
                     context.store_data.nilm_session_history_by_circuit.setdefault(
@@ -1813,7 +1836,7 @@ def _nilm_edge_to_storage(edge: NilmEdge) -> dict[str, Any] | None:
     timestamp = edge.timestamp
     if timestamp.tzinfo is None:
         timestamp = timestamp.replace(tzinfo=UTC)
-    return {
+    payload = {
         "timestamp": timestamp.isoformat(),
         "delta_w": delta_w,
         "delta_var": _finite_float(edge.delta_var),
@@ -1826,6 +1849,13 @@ def _nilm_edge_to_storage(edge: NilmEdge) -> dict[str, Any] | None:
         "dominant_leg": str(edge.dominant_leg or "unknown"),
         "split_phase_type": str(edge.split_phase_type or "unknown"),
     }
+    if edge.origin != "aggregate":
+        payload["origin"] = edge.origin
+    if edge.parent_edge_id:
+        payload["parent_edge_id"] = edge.parent_edge_id
+    if edge.explained_known_circuit_ids:
+        payload["explained_known_circuit_ids"] = list(edge.explained_known_circuit_ids)
+    return payload
 
 
 def _nilm_edges_from_storage(
@@ -1861,6 +1891,17 @@ def _nilm_edges_from_storage(
                 leg_balance_ratio=_finite_float(value.get("leg_balance_ratio")),
                 dominant_leg=str(value.get("dominant_leg") or "unknown"),
                 split_phase_type=str(value.get("split_phase_type") or "unknown"),
+                origin=str(value.get("origin") or "aggregate"),
+                parent_edge_id=(
+                    str(value["parent_edge_id"])
+                    if value.get("parent_edge_id")
+                    else None
+                ),
+                explained_known_circuit_ids=tuple(
+                    str(circuit_id)
+                    for circuit_id in value.get("explained_known_circuit_ids", ())
+                    if str(circuit_id)
+                ),
             )
         )
     return _newest_nilm_edges(dict.fromkeys(edges), max_items)
