@@ -9081,11 +9081,15 @@ async def test_adjusted_nilm_label_interval_improves_history_matching() -> None:
         now_fn=lambda: now["value"],
     )
 
-    with pytest.raises(ValueError, match="No matching ground-truth NILM sessions"):
-        await coordinator.async_validate_nilm_assignment_history(
-            "mains",
-            "assignment-dishwasher",
-        )
+    unmatched = await coordinator.async_validate_nilm_assignment_history(
+        "mains",
+        "assignment-dishwasher",
+    )
+
+    assert unmatched["lifecycle_state"] == "needs_validation"
+    assert unmatched["validation_true_positive_count"] == 0
+    assert unmatched["validation_false_positive_count"] == 0
+    assert unmatched["validation_false_negative_count"] == 1
 
     now["value"] = datetime(2026, 6, 2, 15, 5, tzinfo=UTC)
     await coordinator.async_label_nilm_interval(
