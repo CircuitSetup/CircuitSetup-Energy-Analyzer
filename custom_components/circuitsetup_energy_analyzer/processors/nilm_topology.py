@@ -87,6 +87,8 @@ class NilmTopologyProcessor:
         ]
         if status not in {"topology_mismatch", "leg_mismatch"}:
             return FeatureResult(state_updates=state_updates)
+        if match_confidence < MIN_NILM_TOPOLOGY_MATCH_CONFIDENCE:
+            return FeatureResult(state_updates=state_updates)
 
         policy = self._alert_policy_for_circuit(circuit_id)
         alert = policy.observe(
@@ -137,7 +139,13 @@ def nilm_topology_evidence_payload(
     evidence = {
         "status": status,
         "matched_mains_circuit_id": mains_config.circuit_id,
-        "event_type": "start" if match.edge.direction == "on" else "stop",
+        "event_type": (
+            match.event_type.value
+            if match.event_type is not None
+            else "start"
+            if match.edge.direction == "on"
+            else "stop"
+        ),
         "configured_mode": known_config.mode.value,
         "configured_leg": configured_leg,
         "expected_split_phase_types": list(expected_types),

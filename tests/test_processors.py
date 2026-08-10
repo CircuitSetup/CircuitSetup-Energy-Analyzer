@@ -8118,7 +8118,15 @@ def test_nilm_topology_processor_updates_state_and_returns_alert() -> None:
     assert "balanced_240v" in result.alerts[0].message
 
 
-def test_nilm_topology_rejection_is_not_downgraded_for_low_confidence() -> None:
+@pytest.mark.parametrize(
+    ("confidence", "expects_alert"),
+    [(0.49, False), (0.5, True)],
+)
+def test_nilm_topology_rejection_requires_minimum_confidence_for_alerts(
+    confidence: float,
+    expects_alert: bool,
+) -> None:
+    """Bypassing the confidence gate would alert on weak rejections."""
     from custom_components.circuitsetup_energy_analyzer import processors
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         AnalyzerState,
@@ -8163,14 +8171,15 @@ def test_nilm_topology_rejection_is_not_downgraded_for_low_confidence() -> None:
             dominant_leg="balanced",
         ),
         known_circuit_id="fridge",
-        confidence=0.49,
+        confidence=confidence,
         selection_method="topology_rejected",
         topology_status="topology_mismatch",
     )
 
+    policy = _CaptureAlertPolicy()
     processor = processors.NilmTopologyProcessor(
         known_config_for_circuit=lambda _id: fridge,
-        alert_policy_for_circuit=lambda _id: _CaptureAlertPolicy(),
+        alert_policy_for_circuit=lambda _id: policy,
     )
     result = processor.process(mains, match, context)
     evidence = {update.path: update.value for update in result.state_updates}[
@@ -8180,6 +8189,9 @@ def test_nilm_topology_rejection_is_not_downgraded_for_low_confidence() -> None:
     assert evidence["status"] == "topology_mismatch"
     assert evidence["attribution_rejected"] is True
     assert "low_confidence_match" not in str(evidence)
+    assert len(policy.observations) == int(expects_alert)
+    assert len(result.alerts) == int(expects_alert)
+    assert result.notifications == result.alerts
 
 
 def test_nilm_topology_processor_uses_attached_status_and_provenance() -> None:
@@ -8230,6 +8242,7 @@ def test_nilm_topology_processor_uses_attached_status_and_provenance() -> None:
         edge=edge,
         known_circuit_id="load",
         confidence=0.8,
+        event_type=EventType.POWER_TRANSITION,
         known_power_w=500.0,
         selection_method="topology_rejected",
         selection_status="rejected_topology",
@@ -8252,6 +8265,7 @@ def test_nilm_topology_processor_uses_attached_status_and_provenance() -> None:
     ]
 
     assert evidence["status"] == "leg_mismatch"
+    assert evidence["event_type"] == "power_transition"
     assert evidence["selection_status"] == "rejected_topology"
     assert evidence["known_selected_power_source"] == "transition_delta_w"
     assert evidence["known_transition_delta_w"] == 500.0
