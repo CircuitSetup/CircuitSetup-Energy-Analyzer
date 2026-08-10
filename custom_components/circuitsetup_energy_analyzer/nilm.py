@@ -1228,6 +1228,18 @@ class KnownLoadCandidateScore:
 
 
 @dataclass(frozen=True, slots=True)
+class KnownEventPowerEstimate:
+    """Power estimate derived from a known circuit transition event."""
+
+    magnitude_w: float
+    signed_delta_w: float | None
+    source: str
+    transition_spread_w: float | None = None
+    transition_timestamp: datetime | None = None
+    transition_timing_uncertainty_s: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class KnownLoadMatch:
     """NILM edge attributed to an already-known circuit event."""
 
@@ -1250,6 +1262,12 @@ class KnownLoadMatch:
     magnitude_score: float | None = None
     time_score: float | None = None
     topology_status: str | None = None
+    known_power_source: str | None = None
+    known_transition_delta_w: float | None = None
+    known_transition_spread_w: float | None = None
+    transition_timing_uncertainty_s: float | None = None
+    power_match_confidence: float | None = None
+    selection_status: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2119,14 +2137,16 @@ def attribute_known_loads(
                 continue
             if event.event_type is EventType.STOP and edge.direction != "off":
                 continue
-            time_offset_seconds = (event.timestamp - edge.timestamp).total_seconds()
-            time_distance_seconds = abs(time_offset_seconds)
+            time_distance_seconds, time_offset_seconds = _known_event_time_distance(
+                event, edge.timestamp
+            )
             if time_distance_seconds > time_window_seconds:
                 continue
-            known_power = _event_power_w_with_source(event)
-            if known_power is None:
+            estimate = _event_power_estimate(event)
+            if estimate is None:
                 continue
-            known_watts, power_source = known_power
+            known_watts = estimate.magnitude_w
+            power_source = estimate.source
 
             ratio = abs(abs(edge.delta_w) - known_watts) / known_watts
             if ratio > magnitude_tolerance:
@@ -2164,7 +2184,11 @@ def attribute_known_loads(
                 topology_status=topology_status,
             )
             signed_known_watts = (
-                known_watts if event.event_type is EventType.START else -known_watts
+                estimate.signed_delta_w
+                if estimate.signed_delta_w is not None
+                else known_watts
+                if event.event_type is EventType.START
+                else -known_watts
             )
             residual_delta_w = edge.delta_w - signed_known_watts
             if not isclose(
@@ -2213,6 +2237,14 @@ def attribute_known_loads(
                 magnitude_score=score.magnitude,
                 time_score=score.time,
                 topology_status=score.topology_status,
+                known_power_source=estimate.source,
+                known_transition_delta_w=estimate.signed_delta_w,
+                known_transition_spread_w=estimate.transition_spread_w,
+                transition_timing_uncertainty_s=(
+                    estimate.transition_timing_uncertainty_s
+                ),
+                power_match_confidence=score.magnitude,
+                selection_status=("candidate" if eligible else "topology_rejected"),
             )
             if eligible:
                 candidates.append(
@@ -2233,7 +2265,10 @@ def attribute_known_loads(
     matched_edge_indices = {
         candidate.edge_index for candidate in selected_candidates
     }
-    matched_edges = tuple(candidate.match for candidate in selected_candidates)
+    matched_edges = tuple(
+        replace(candidate.match, selection_status="matched")
+        for candidate in selected_candidates
+    )
     accepted_unmatched_edges = tuple(
         edge for index, edge in enumerate(edges) if index not in matched_edge_indices
     )
@@ -2843,8 +2878,99 @@ def _round_optional(value: float | None) -> float | None:
 
 
 def _event_power_w(event: CircuitEvent) -> float | None:
-    known_power = _event_power_w_with_source(event)
-    return known_power[0] if known_power is not None else None
+    estimate = _event_power_estimate(event)
+    return estimate.magnitude_w if estimate is not None else None
+
+
+def _event_power_estimate(event: CircuitEvent) -> KnownEventPowerEstimate | None:
+    """Select the transition delta first, then retain legacy power precedence."""
+
+    signed_delta_w = _finite_event_feature_number(event, "transition_delta_w")
+    if (
+        signed_delta_w is not None
+        and (
+            event.event_type is EventType.START
+            and signed_delta_w > 0.0
+            or event.event_type is EventType.STOP
+            and signed_delta_w < 0.0
+        )
+    ):
+        source = "transition_delta_w"
+    else:
+        legacy_power = _event_power_w_with_source(event)
+        if legacy_power is None:
+            return None
+        magnitude_w, source = legacy_power
+        signed_delta_w = None
+        return KnownEventPowerEstimate(
+            magnitude_w,
+            signed_delta_w,
+            source,
+            _optional_nonnegative_event_feature_number(event, "transition_spread_w"),
+            _event_feature_datetime(event, "transition_timestamp"),
+            _optional_nonnegative_event_feature_number(
+                event, "transition_timing_uncertainty_s"
+            ),
+        )
+
+    return KnownEventPowerEstimate(
+        abs(signed_delta_w),
+        signed_delta_w,
+        source,
+        _optional_nonnegative_event_feature_number(event, "transition_spread_w"),
+        _event_feature_datetime(event, "transition_timestamp"),
+        _optional_nonnegative_event_feature_number(
+            event, "transition_timing_uncertainty_s"
+        ),
+    )
+
+
+def _finite_event_feature_number(event: CircuitEvent, key: str) -> float | None:
+    try:
+        value = float(event.features.get(key))
+    except (TypeError, ValueError):
+        return None
+    return value if isfinite(value) else None
+
+
+def _optional_nonnegative_event_feature_number(
+    event: CircuitEvent, key: str
+) -> float | None:
+    value = _finite_event_feature_number(event, key)
+    return value if value is not None and value >= 0.0 else None
+
+
+def _event_feature_datetime(event: CircuitEvent, key: str) -> datetime | None:
+    value = event.features.get(key)
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _known_event_time_distance(
+    event: CircuitEvent, edge_timestamp: datetime
+) -> tuple[float, float]:
+    """Return distance and signed offset using a valid transition interval."""
+
+    window_start = _event_feature_datetime(event, "transition_window_start")
+    window_end = _event_feature_datetime(event, "transition_window_end")
+    if window_start is not None and window_end is not None:
+        try:
+            if window_end >= window_start:
+                if window_start <= edge_timestamp <= window_end:
+                    return 0.0, 0.0
+                boundary = window_start if edge_timestamp < window_start else window_end
+                time_offset_seconds = (boundary - edge_timestamp).total_seconds()
+                return abs(time_offset_seconds), time_offset_seconds
+        except TypeError:
+            pass
+    time_offset_seconds = (event.timestamp - edge_timestamp).total_seconds()
+    return abs(time_offset_seconds), time_offset_seconds
 
 
 def _event_power_w_with_source(event: CircuitEvent) -> tuple[float, str] | None:

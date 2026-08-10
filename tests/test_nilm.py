@@ -1496,6 +1496,133 @@ def test_mask_known_loads_uses_event_timestamp_and_current_feature_names() -> No
     assert result.unmatched_edges == (edge(40, 325.0),)
 
 
+def test_attribute_known_loads_prefers_transition_delta_and_records_provenance(
+) -> None:
+    event = CircuitEvent(
+        timestamp=BASE_TIME + timedelta(seconds=10),
+        circuit_id="heater",
+        event_type=EventType.START,
+        features={
+            "startup_power_w": 120.0,
+            "transition_delta_w": 100.0,
+            "transition_spread_w": 4.0,
+        },
+    )
+
+    result = attribute_known_loads([edge(10, 120.0), edge(10, 100.0)], [event])
+
+    assert [match.edge.delta_w for match in result.matched_edges] == [100.0]
+    match = result.matched_edges[0]
+    assert match.known_power_w == 100.0
+    assert match.known_power_source == "transition_delta_w"
+    assert match.known_transition_delta_w == 100.0
+    assert match.known_transition_spread_w == 4.0
+    assert match.power_match_confidence == 1.0
+    assert match.selection_status == "matched"
+
+
+def test_attribute_known_loads_uses_signed_transition_delta_for_stop() -> None:
+    event = CircuitEvent(
+        timestamp=BASE_TIME + timedelta(seconds=10),
+        circuit_id="heater",
+        event_type=EventType.STOP,
+        features={"stop_power_w": 120.0, "transition_delta_w": -100.0},
+    )
+
+    result = attribute_known_loads([edge(10, -120.0), edge(10, -100.0)], [event])
+
+    match = result.matched_edges[0]
+    assert match.edge.delta_w == -100.0
+    assert match.known_power_source == "transition_delta_w"
+    assert match.known_transition_delta_w == -100.0
+    assert match.explained_delta_w == -100.0
+
+
+@pytest.mark.parametrize(
+    "transition_delta_w",
+    [-100.0, 0.0, None, float("inf"), float("nan")],
+)
+def test_attribute_known_loads_falls_back_when_transition_delta_is_invalid(
+    transition_delta_w: float | None,
+) -> None:
+    features: dict[str, float | None] = {
+        "startup_power_w": 120.0,
+        "transition_delta_w": transition_delta_w,
+    }
+    event = CircuitEvent(
+        timestamp=BASE_TIME + timedelta(seconds=10),
+        circuit_id="heater",
+        event_type=EventType.START,
+        features=features,
+    )
+
+    result = attribute_known_loads([edge(10, 120.0), edge(10, 100.0)], [event])
+
+    match = result.matched_edges[0]
+    assert match.edge.delta_w == 120.0
+    assert match.known_power_source == "startup_power_w"
+    assert match.known_transition_delta_w is None
+
+
+def test_attribute_known_loads_scores_edges_inside_transition_window_at_zero_distance(
+) -> None:
+    interval_event = CircuitEvent(
+        timestamp=BASE_TIME + timedelta(seconds=40),
+        circuit_id="heater",
+        event_type=EventType.START,
+        features={
+            "startup_power_w": 100.0,
+            "transition_window_start": "2026-06-02T12:00:10+00:00",
+            "transition_window_end": "2026-06-02T12:00:20+00:00",
+            "transition_timestamp": "2026-06-02T12:00:15+00:00",
+            "transition_timing_uncertainty_s": 2.5,
+        },
+    )
+    legacy_event = CircuitEvent(
+        timestamp=BASE_TIME + timedelta(seconds=11),
+        circuit_id="legacy",
+        event_type=EventType.START,
+        features={"startup_power_w": 100.0},
+    )
+
+    interval_result = attribute_known_loads(
+        [edge(15, 100.0)], [interval_event], time_window=timedelta(seconds=15)
+    )
+    legacy_result = attribute_known_loads(
+        [edge(10, 100.0)], [legacy_event], time_window=timedelta(seconds=15)
+    )
+
+    interval_match = interval_result.matched_edges[0]
+    legacy_match = legacy_result.matched_edges[0]
+    assert interval_match.time_distance_seconds == 0.0
+    assert interval_match.time_offset_seconds == 0.0
+    assert interval_match.transition_timing_uncertainty_s == 2.5
+    assert legacy_match.time_distance_seconds == 1.0
+    assert legacy_match.time_offset_seconds == 1.0
+
+
+def test_attribute_known_loads_transition_delta_conserves_residual() -> None:
+    features = {"startup_power_w": 120.0, "transition_delta_w": 100.0}
+    event = CircuitEvent(
+        timestamp=BASE_TIME + timedelta(seconds=10),
+        circuit_id="heater",
+        event_type=EventType.START,
+        features=features,
+    )
+    original = edge(10, 120.0)
+
+    result = attribute_known_loads(
+        [original], [event], residual_min_delta_w=10.0
+    )
+
+    match = result.matched_edges[0]
+    assert match.explained_delta_w == 100.0
+    assert match.residual_delta_w == 20.0
+    assert original.delta_w == match.explained_delta_w + match.residual_delta_w
+    assert result.residual_edges[0].delta_w == 20.0
+    assert dict(event.features) == features
+
+
 @pytest.mark.parametrize(
     (
         "aggregate_delta_w",
