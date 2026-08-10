@@ -7,7 +7,14 @@ from typing import Any
 
 from ..alerting import Observation
 from ..models import CircuitConfig, CircuitMode
-from ..nilm import KnownLoadMatch
+from ..nilm import (
+    KnownLoadMatch,
+    _nilm_edge_id,
+    evaluate_known_load_topology,
+    expected_known_load_dominant_legs,
+    known_load_topology_for_config,
+    observed_known_load_leg,
+)
 from .base import AlertPolicy, FeatureResult, ProcessingContext, StateUpdate
 
 MIN_NILM_TOPOLOGY_MATCH_CONFIDENCE = 0.5
@@ -51,7 +58,20 @@ class NilmTopologyProcessor:
         if not evidence:
             return FeatureResult()
 
-        if match.confidence < MIN_NILM_TOPOLOGY_MATCH_CONFIDENCE:
+        if match.selection_method == "topology_rejected":
+            evidence.update(
+                {
+                    "attribution_rejected": True,
+                    "aggregate_edge_retained": True,
+                    "rejection_reason": match.topology_status,
+                }
+            )
+
+        match_confidence = float(evidence["match_confidence"])
+        if (
+            match.selection_method != "topology_rejected"
+            and match_confidence < MIN_NILM_TOPOLOGY_MATCH_CONFIDENCE
+        ):
             evidence["status"] = "low_confidence_match"
             evidence["minimum_match_confidence"] = (
                 MIN_NILM_TOPOLOGY_MATCH_CONFIDENCE
@@ -104,28 +124,15 @@ def nilm_topology_evidence_payload(
     match: KnownLoadMatch,
 ) -> dict[str, Any]:
     """Build state evidence for a known-load NILM topology match."""
-    expected_types = _expected_nilm_split_phase_types(known_config)
+    topology = known_load_topology_for_config(known_config)
+    expected_types = topology.expected_split_phase_types
     observed_type = str(match.edge.split_phase_type or "unknown")
-    configured_leg = _configured_single_phase_leg(known_config)
-    observed_leg = _observed_single_phase_leg(observed_type, match.edge.dominant_leg)
+    configured_leg = topology.configured_leg
+    observed_leg = observed_known_load_leg(match.edge)
     suggested_leg = (
         observed_leg if known_config.mode is CircuitMode.SINGLE_PHASE else None
     )
-    if not expected_types:
-        status = "not_evaluated"
-    elif observed_type in {"unknown", "missing_leg_data"}:
-        status = "unknown_topology"
-    elif observed_type in expected_types:
-        status = "consistent"
-    else:
-        status = "topology_mismatch"
-    if (
-        status == "consistent"
-        and configured_leg is not None
-        and observed_leg is not None
-        and configured_leg != observed_leg
-    ):
-        status = "leg_mismatch"
+    status = evaluate_known_load_topology(match.edge, topology)
 
     return {
         "status": status,
@@ -134,9 +141,7 @@ def nilm_topology_evidence_payload(
         "configured_mode": known_config.mode.value,
         "configured_leg": configured_leg,
         "expected_split_phase_types": list(expected_types),
-        "expected_dominant_legs": list(
-            _expected_nilm_dominant_legs(known_config, configured_leg)
-        ),
+        "expected_dominant_legs": list(expected_known_load_dominant_legs(topology)),
         "observed_split_phase_type": observed_type,
         "observed_dominant_leg": match.edge.dominant_leg,
         "observed_leg": observed_leg,
@@ -148,6 +153,21 @@ def nilm_topology_evidence_payload(
         ),
         "matched_delta_w": _round_number(match.edge.delta_w),
         "known_event_power_w": _round_number(match.known_power_w),
+        "source_aggregate_delta_w": _round_number(match.edge.delta_w),
+        "explained_delta_w": _round_number(match.explained_delta_w),
+        "residual_delta_w": _round_number(match.residual_delta_w),
+        "residual_emitted": match.residual_edge is not None,
+        "residual_edge_id": (
+            _nilm_edge_id(match.residual_edge) if match.residual_edge else None
+        ),
+        "match_time_offset_seconds": _round_optional_number(
+            match.time_offset_seconds
+        ),
+        "magnitude_score": _round_optional_number(match.magnitude_score),
+        "time_score": _round_optional_number(match.time_score),
+        "topology_score": _round_optional_number(match.topology_score),
+        "selection_method": match.selection_method,
+        "known_power_source": match.power_source,
         "match_confidence": _round_number(match.confidence),
     }
 
@@ -164,12 +184,19 @@ def nilm_topology_mismatch_message(
     evidence: dict[str, Any],
 ) -> str:
     """Build the user-facing NILM topology mismatch message."""
+    rejected = bool(evidence.get("attribution_rejected"))
     if evidence.get("status") == "leg_mismatch":
         configured_leg = evidence.get("configured_leg", "unknown")
         observed_leg = evidence.get("observed_leg", "unknown")
+        observation = (
+            "rejected a known-load attribution because it was observed"
+            if rejected
+            else "repeatedly matched it"
+        )
         return (
             f"Possible issue: {config.name} is configured on leg "
-            f"{configured_leg}, but mains NILM repeatedly matched it on leg "
+            f"{configured_leg}, but mains NILM "
+            f"{observation} on leg "
             f"{observed_leg}. Verify circuit mapping, CT orientation, and "
             "whether another appliance changed at the same time before "
             "treating this as an appliance problem."
@@ -177,75 +204,24 @@ def nilm_topology_mismatch_message(
 
     observed_type = evidence.get("observed_split_phase_type", "unknown")
     expected = ", ".join(evidence.get("expected_split_phase_types") or [])
+    observation = (
+        "rejected a known-load attribution because it was observed"
+        if rejected
+        else "repeatedly matched it"
+    )
     return (
         f"Possible issue: {config.name} is configured as "
-        f"{_circuit_mode_phrase(config.mode)}, but mains NILM repeatedly matched "
-        f"it as {observed_type}. Expected {expected or 'no topology check'} from "
+        f"{_circuit_mode_phrase(config.mode)}, but mains NILM "
+        f"{observation} as "
+        f"{observed_type}. Expected {expected or 'no topology check'} from "
         "the configured circuit mode. Verify circuit mapping, CT orientation, "
         "and whether another appliance changed at the same time before treating "
         "this as an appliance problem."
     )
 
 
-def _expected_nilm_split_phase_types(config: CircuitConfig) -> tuple[str, ...]:
-    if config.mode is CircuitMode.SINGLE_PHASE:
-        return ("single_leg_a", "single_leg_b")
-    if config.mode is CircuitMode.DUAL_PHASE:
-        return ("balanced_240v",)
-    return ()
-
-
-def _expected_nilm_dominant_legs(
-    config: CircuitConfig,
-    configured_leg: str | None,
-) -> tuple[str, ...]:
-    if config.mode is CircuitMode.SINGLE_PHASE:
-        if configured_leg is not None:
-            return (configured_leg,)
-        return ("a", "b")
-    if config.mode is CircuitMode.DUAL_PHASE:
-        return ("balanced",)
-    return ()
-
-
-def _configured_single_phase_leg(config: CircuitConfig) -> str | None:
-    if config.mode is not CircuitMode.SINGLE_PHASE:
-        return None
-    legs = {
-        normalized
-        for sensor in config.sensors
-        if (normalized := _normalized_leg(sensor.leg)) is not None
-    }
-    if len(legs) == 1:
-        return next(iter(legs))
-    return None
-
-
-def _observed_single_phase_leg(
-    observed_type: str,
-    dominant_leg: str,
-) -> str | None:
-    del dominant_leg
-    if observed_type == "single_leg_a":
-        return "a"
-    if observed_type == "single_leg_b":
-        return "b"
-    return None
-
-
 def _circuit_mode_phrase(mode: CircuitMode) -> str:
     return str(mode.value).replace("_", " ")
-
-
-def _normalized_leg(leg: str | None) -> str | None:
-    if leg is None:
-        return None
-    value = leg.strip().lower()
-    if value in {"a", "left", "l1", "line1", "1"}:
-        return "a"
-    if value in {"b", "right", "l2", "line2", "2"}:
-        return "b"
-    return None
 
 
 def _float_or_none(value: Any) -> float | None:

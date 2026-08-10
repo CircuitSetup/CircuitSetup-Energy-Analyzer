@@ -1,19 +1,26 @@
 from __future__ import annotations
 
-from collections import deque
+from collections import defaultdict, deque
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, time, timedelta
 from enum import StrEnum
 from itertools import combinations
-from math import isfinite
+from math import isclose, isfinite
 from statistics import median, multimode
 from typing import Any
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .metric_consistency import evaluate_metric_consistency
-from .models import CircuitEvent, CircuitSample, EventType, SensorRole
+from .models import (
+    CircuitConfig,
+    CircuitEvent,
+    CircuitMode,
+    CircuitSample,
+    EventType,
+    SensorRole,
+)
 
 
 def build_nilm_assignment_model(
@@ -610,6 +617,9 @@ class NilmEdge:
     leg_balance_ratio: float | None = None
     dominant_leg: str = "unknown"
     split_phase_type: str = "unknown"
+    origin: str = "aggregate"
+    parent_edge_id: str | None = None
+    explained_known_circuit_ids: tuple[str, ...] = ()
 
 
 class NilmComponentStatus(StrEnum):
@@ -1183,6 +1193,41 @@ def _lag_mad(values: Iterable[float], center: float | None) -> float | None:
 
 
 @dataclass(frozen=True, slots=True)
+class KnownLoadTopology:
+    """Configured topology expected for one known-load circuit."""
+
+    expected_split_phase_types: tuple[str, ...] = ()
+    configured_leg: str | None = None
+
+
+KNOWN_LOAD_MAGNITUDE_WEIGHT = 0.65
+KNOWN_LOAD_TIME_WEIGHT = 0.20
+KNOWN_LOAD_TOPOLOGY_WEIGHT = 0.15
+KNOWN_LOAD_ASSIGNMENT_AMBIGUITY_MARGIN = 0.05
+KNOWN_LOAD_EXACT_ASSIGNMENT_MAX_BITMASK_NODES = 12
+
+if not isclose(
+    KNOWN_LOAD_MAGNITUDE_WEIGHT
+    + KNOWN_LOAD_TIME_WEIGHT
+    + KNOWN_LOAD_TOPOLOGY_WEIGHT,
+    1.0,
+):
+    raise RuntimeError("Known-load candidate weights must sum to 1.0.")
+
+
+@dataclass(frozen=True, slots=True)
+class KnownLoadCandidateScore:
+    """Weighted evidence for one aggregate-edge/known-event candidate."""
+
+    total: float
+    magnitude: float
+    time: float
+    topology: float
+    time_offset_seconds: float
+    topology_status: str
+
+
+@dataclass(frozen=True, slots=True)
 class KnownLoadMatch:
     """NILM edge attributed to an already-known circuit event."""
 
@@ -1190,6 +1235,21 @@ class KnownLoadMatch:
     known_circuit_id: str
     confidence: float
     known_power_w: float = 0.0
+    event_type: EventType | None = None
+    event_timestamp: datetime | None = None
+    power_source: str | None = None
+    time_distance_seconds: float | None = None
+    magnitude_ratio: float | None = None
+    topology_compatible: bool | None = None
+    topology_score: float | None = None
+    explained_delta_w: float = 0.0
+    residual_delta_w: float = 0.0
+    residual_edge: NilmEdge | None = None
+    selection_method: str = "greedy"
+    time_offset_seconds: float | None = None
+    magnitude_score: float | None = None
+    time_score: float | None = None
+    topology_status: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1198,6 +1258,83 @@ class NilmMaskResult:
 
     matched_edges: tuple[KnownLoadMatch, ...]
     unmatched_edges: tuple[NilmEdge, ...]
+    residual_edges: tuple[NilmEdge, ...] = ()
+    ambiguous_edge_count: int = 0
+    rejected_topology_candidates: tuple[KnownLoadMatch, ...] = ()
+
+
+def known_load_topology_for_config(config: CircuitConfig) -> KnownLoadTopology:
+    """Return NILM topology expectations derived from circuit configuration."""
+    if config.mode is CircuitMode.SINGLE_PHASE:
+        expected_types = ("single_leg_a", "single_leg_b")
+    elif config.mode is CircuitMode.DUAL_PHASE:
+        expected_types = ("balanced_240v",)
+    else:
+        expected_types = ()
+    configured_legs = {
+        normalized
+        for sensor in config.sensors
+        if (normalized := _normalize_known_load_leg(sensor.leg)) is not None
+    }
+    configured_leg = (
+        next(iter(configured_legs))
+        if config.mode is CircuitMode.SINGLE_PHASE and len(configured_legs) == 1
+        else None
+    )
+    return KnownLoadTopology(expected_types, configured_leg)
+
+
+def evaluate_known_load_topology(
+    edge: NilmEdge,
+    topology: KnownLoadTopology,
+) -> str:
+    """Evaluate one observed NILM edge against a known-load topology."""
+    if not topology.expected_split_phase_types:
+        return "not_evaluated"
+    observed_type = str(edge.split_phase_type or "unknown")
+    if observed_type in {"unknown", "missing_leg_data"}:
+        return "unknown_topology"
+    if observed_type not in topology.expected_split_phase_types:
+        return "topology_mismatch"
+    observed_leg = observed_known_load_leg(edge)
+    if (
+        topology.configured_leg is not None
+        and observed_leg is not None
+        and topology.configured_leg != observed_leg
+    ):
+        return "leg_mismatch"
+    return "consistent"
+
+
+def observed_known_load_leg(edge: NilmEdge) -> str | None:
+    """Return the single-phase leg encoded by an observed NILM edge."""
+    if edge.split_phase_type == "single_leg_a":
+        return "a"
+    if edge.split_phase_type == "single_leg_b":
+        return "b"
+    return None
+
+
+def expected_known_load_dominant_legs(
+    topology: KnownLoadTopology,
+) -> tuple[str, ...]:
+    """Return dominant-leg evidence expected by one topology."""
+    if topology.expected_split_phase_types == ("balanced_240v",):
+        return ("balanced",)
+    if set(topology.expected_split_phase_types) == {"single_leg_a", "single_leg_b"}:
+        return (topology.configured_leg,) if topology.configured_leg else ("a", "b")
+    return ()
+
+
+def _normalize_known_load_leg(leg: str | None) -> str | None:
+    if leg is None:
+        return None
+    value = leg.strip().lower()
+    if value in {"a", "left", "l1", "line1", "1"}:
+        return "a"
+    if value in {"b", "right", "l2", "line2", "2"}:
+        return "b"
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1667,19 +1804,314 @@ def _aligned_optional_delta(
     return float(current) - float(previous)
 
 
-def mask_known_loads(
+@dataclass(frozen=True, slots=True)
+class _KnownLoadCandidate:
+    edge_index: int
+    event_index: int
+    match: KnownLoadMatch
+    score: KnownLoadCandidateScore
+
+
+@dataclass(frozen=True, slots=True)
+class _KnownLoadAssignment:
+    candidate_indices: tuple[int, ...] = ()
+    total_score: float = 0.0
+    total_offset_seconds: float = 0.0
+
+
+def _known_load_topology_score(status: str) -> float:
+    if status == "consistent":
+        return 1.0
+    if status in {"unknown_topology", "not_evaluated"}:
+        return 0.5
+    return 0.0
+
+
+def _select_known_load_candidates(
+    candidates: list[_KnownLoadCandidate],
+) -> tuple[set[int], set[int]]:
+    selected: set[int] = set()
+    ambiguous_edges: set[int] = set()
+    for component in _known_load_candidate_components(candidates):
+        edge_nodes = {candidates[index].edge_index for index in component}
+        event_nodes = {candidates[index].event_index for index in component}
+        if min(len(edge_nodes), len(event_nodes)) > (
+            KNOWN_LOAD_EXACT_ASSIGNMENT_MAX_BITMASK_NODES
+        ):
+            component_selected, component_ambiguous = (
+                _greedy_known_load_component(candidates, component)
+            )
+            selected.update(component_selected)
+            ambiguous_edges.update(component_ambiguous)
+            continue
+
+        assignments = _exact_known_load_component(candidates, component)
+        if not assignments:
+            continue
+        best = assignments[0]
+        second = assignments[1] if len(assignments) > 1 else None
+        best_indices = set(best.candidate_indices)
+        if (
+            second is not None
+            and best.candidate_indices != second.candidate_indices
+            and best.total_score - second.total_score
+            <= KNOWN_LOAD_ASSIGNMENT_AMBIGUITY_MARGIN
+        ):
+            second_indices = set(second.candidate_indices)
+            selected.update(best_indices & second_indices)
+            ambiguous_edges.update(
+                candidates[index].edge_index
+                for index in best_indices ^ second_indices
+            )
+        else:
+            selected.update(best_indices)
+    return selected, ambiguous_edges
+
+
+def _known_load_candidate_components(
+    candidates: list[_KnownLoadCandidate],
+) -> tuple[tuple[int, ...], ...]:
+    by_edge: dict[int, list[int]] = defaultdict(list)
+    by_event: dict[int, list[int]] = defaultdict(list)
+    for index, candidate in enumerate(candidates):
+        by_edge[candidate.edge_index].append(index)
+        by_event[candidate.event_index].append(index)
+
+    components: list[tuple[int, ...]] = []
+    remaining = set(range(len(candidates)))
+    while remaining:
+        start = min(
+            remaining,
+            key=lambda index: _candidate_stable_key(candidates[index]),
+        )
+        pending = [start]
+        component: set[int] = set()
+        while pending:
+            index = pending.pop()
+            if index in component:
+                continue
+            component.add(index)
+            candidate = candidates[index]
+            pending.extend(by_edge[candidate.edge_index])
+            pending.extend(by_event[candidate.event_index])
+        remaining.difference_update(component)
+        components.append(
+            tuple(
+                sorted(
+                    component,
+                    key=lambda index: _candidate_stable_key(candidates[index]),
+                )
+            )
+        )
+    return tuple(components)
+
+
+def _exact_known_load_component(
+    candidates: list[_KnownLoadCandidate],
+    component: tuple[int, ...],
+) -> tuple[_KnownLoadAssignment, ...]:
+    edge_nodes = sorted({candidates[index].edge_index for index in component})
+    event_nodes = sorted({candidates[index].event_index for index in component})
+    bitmask_is_edge = len(edge_nodes) <= len(event_nodes)
+    bit_nodes = edge_nodes if bitmask_is_edge else event_nodes
+    other_nodes = event_nodes if bitmask_is_edge else edge_nodes
+    bit_position = {node: position for position, node in enumerate(bit_nodes)}
+    candidates_by_other: dict[int, list[int]] = defaultdict(list)
+    for index in component:
+        candidate = candidates[index]
+        other_node = (
+            candidate.event_index if bitmask_is_edge else candidate.edge_index
+        )
+        candidates_by_other[other_node].append(index)
+    for values in candidates_by_other.values():
+        values.sort(key=lambda index: _candidate_selection_key(candidates[index]))
+
+    states: dict[int, tuple[_KnownLoadAssignment, ...]] = {
+        0: (_KnownLoadAssignment(),)
+    }
+    for other_node in other_nodes:
+        next_states: dict[int, list[_KnownLoadAssignment]] = defaultdict(list)
+        for mask, assignments in states.items():
+            for assignment in assignments:
+                next_states[mask].append(assignment)
+                for candidate_index in candidates_by_other.get(other_node, ()):
+                    candidate = candidates[candidate_index]
+                    bit_node = (
+                        candidate.edge_index
+                        if bitmask_is_edge
+                        else candidate.event_index
+                    )
+                    bit = 1 << bit_position[bit_node]
+                    if mask & bit:
+                        continue
+                    next_states[mask | bit].append(
+                        _extend_known_load_assignment(
+                            assignment,
+                            candidate_index,
+                            candidates,
+                        )
+                    )
+        states = {
+            mask: _best_known_load_assignments(values, candidates)
+            for mask, values in next_states.items()
+        }
+    return _best_known_load_assignments(
+        [assignment for values in states.values() for assignment in values],
+        candidates,
+    )
+
+
+def _extend_known_load_assignment(
+    assignment: _KnownLoadAssignment,
+    candidate_index: int,
+    candidates: list[_KnownLoadCandidate],
+) -> _KnownLoadAssignment:
+    indices = tuple(
+        sorted(
+            (*assignment.candidate_indices, candidate_index),
+            key=lambda index: _candidate_stable_key(candidates[index]),
+        )
+    )
+    candidate = candidates[candidate_index]
+    return _KnownLoadAssignment(
+        indices,
+        assignment.total_score + candidate.score.total,
+        assignment.total_offset_seconds
+        + abs(candidate.score.time_offset_seconds),
+    )
+
+
+def _best_known_load_assignments(
+    assignments: Iterable[_KnownLoadAssignment],
+    candidates: list[_KnownLoadCandidate],
+) -> tuple[_KnownLoadAssignment, ...]:
+    unique = {assignment.candidate_indices: assignment for assignment in assignments}
+    return tuple(
+        sorted(
+            unique.values(),
+            key=lambda assignment: _known_load_assignment_sort_key(
+                assignment, candidates
+            ),
+        )[:2]
+    )
+
+
+def _known_load_assignment_sort_key(
+    assignment: _KnownLoadAssignment,
+    candidates: list[_KnownLoadCandidate],
+) -> tuple[float, int, float, tuple[tuple[int, int], ...]]:
+    stable_pairs = tuple(
+        _candidate_stable_key(candidates[index])
+        for index in assignment.candidate_indices
+    )
+    return (
+        -assignment.total_score,
+        -len(assignment.candidate_indices),
+        assignment.total_offset_seconds,
+        stable_pairs,
+    )
+
+
+def _greedy_known_load_component(
+    candidates: list[_KnownLoadCandidate],
+    component: tuple[int, ...],
+) -> tuple[set[int], set[int]]:
+    by_edge: dict[int, list[int]] = defaultdict(list)
+    by_event: dict[int, list[int]] = defaultdict(list)
+    for index in component:
+        by_edge[candidates[index].edge_index].append(index)
+        by_event[candidates[index].event_index].append(index)
+
+    ambiguous_edges: set[int] = set()
+    ambiguous_events: set[int] = set()
+    for values in by_edge.values():
+        ranked = sorted(
+            values,
+            key=lambda index: _candidate_selection_key(candidates[index]),
+        )
+        if len(ranked) > 1 and (
+            candidates[ranked[0]].score.total - candidates[ranked[1]].score.total
+            <= KNOWN_LOAD_ASSIGNMENT_AMBIGUITY_MARGIN
+        ):
+            ambiguous_edges.add(candidates[ranked[0]].edge_index)
+            ambiguous_events.update(
+                candidates[index].event_index for index in ranked[:2]
+            )
+    for values in by_event.values():
+        ranked = sorted(
+            values,
+            key=lambda index: _candidate_selection_key(candidates[index]),
+        )
+        if len(ranked) > 1 and (
+            candidates[ranked[0]].score.total - candidates[ranked[1]].score.total
+            <= KNOWN_LOAD_ASSIGNMENT_AMBIGUITY_MARGIN
+        ):
+            ambiguous_events.add(candidates[ranked[0]].event_index)
+            ambiguous_edges.update(candidates[index].edge_index for index in ranked[:2])
+
+    selected: set[int] = set()
+    used_edges: set[int] = set()
+    used_events: set[int] = set()
+    for index in sorted(
+        component,
+        key=lambda candidate_index: _candidate_selection_key(
+            candidates[candidate_index]
+        ),
+    ):
+        candidate = candidates[index]
+        if (
+            candidate.edge_index in ambiguous_edges
+            or candidate.event_index in ambiguous_events
+            or candidate.edge_index in used_edges
+            or candidate.event_index in used_events
+        ):
+            continue
+        selected.add(index)
+        used_edges.add(candidate.edge_index)
+        used_events.add(candidate.event_index)
+        candidates[index] = replace(
+            candidate,
+            match=replace(candidate.match, selection_method="greedy_fallback"),
+        )
+    return selected, ambiguous_edges
+
+
+def _candidate_selection_key(
+    candidate: _KnownLoadCandidate,
+) -> tuple[float, float, int, int]:
+    return (
+        -candidate.score.total,
+        abs(candidate.score.time_offset_seconds),
+        candidate.edge_index,
+        candidate.event_index,
+    )
+
+
+def _candidate_stable_key(candidate: _KnownLoadCandidate) -> tuple[int, int]:
+    return candidate.edge_index, candidate.event_index
+
+
+def attribute_known_loads(
     aggregate_edges: Iterable[NilmEdge],
     known_events: Iterable[CircuitEvent],
     time_window: timedelta = timedelta(seconds=15),
     watt_tolerance_ratio: float = 0.25,
+    residual_min_delta_w: float = 100.0,
+    topology_by_circuit: Mapping[str, KnownLoadTopology] | None = None,
 ) -> NilmMaskResult:
-    """Mask aggregate edges explained by known circuit start/stop events."""
+    """Attribute aggregate edges to known circuit events and retain residuals."""
 
     edges = list(aggregate_edges)
     events = list(known_events)
-    candidates: list[tuple[int, int, KnownLoadMatch, float]] = []
+    candidates: list[_KnownLoadCandidate] = []
+    rejected_topology_candidates: list[tuple[int, int, KnownLoadMatch]] = []
+    time_window_seconds = max(time_window.total_seconds(), 0.0)
+    magnitude_tolerance = max(float(watt_tolerance_ratio), 0.0)
+    topology_by_circuit = topology_by_circuit or {}
 
     for edge_index, edge in enumerate(edges):
+        if edge.origin != "aggregate":
+            continue
         for event_index, event in enumerate(events):
             if event.event_type not in {EventType.START, EventType.STOP}:
                 continue
@@ -1687,52 +2119,185 @@ def mask_known_loads(
                 continue
             if event.event_type is EventType.STOP and edge.direction != "off":
                 continue
-            time_distance = abs(edge.timestamp - event.timestamp)
-            if time_distance > time_window:
+            time_offset_seconds = (event.timestamp - edge.timestamp).total_seconds()
+            time_distance_seconds = abs(time_offset_seconds)
+            if time_distance_seconds > time_window_seconds:
                 continue
-            known_watts = _event_power_w(event)
-            if known_watts is None or known_watts <= 0:
+            known_power = _event_power_w_with_source(event)
+            if known_power is None:
                 continue
+            known_watts, power_source = known_power
 
             ratio = abs(abs(edge.delta_w) - known_watts) / known_watts
-            if ratio > watt_tolerance_ratio:
+            if ratio > magnitude_tolerance:
                 continue
 
-            confidence = max(0.0, 1.0 - (ratio / watt_tolerance_ratio))
-            candidates.append(
-                (
-                    edge_index,
-                    event_index,
-                    KnownLoadMatch(edge, event.circuit_id, confidence, known_watts),
-                    time_distance.total_seconds(),
-                )
+            magnitude_score = (
+                1.0
+                if magnitude_tolerance == 0.0 and ratio == 0.0
+                else max(0.0, 1.0 - (ratio / magnitude_tolerance))
+                if magnitude_tolerance > 0.0
+                else 0.0
             )
+            time_score = (
+                1.0
+                if time_window_seconds == 0.0 and time_distance_seconds == 0.0
+                else max(0.0, 1.0 - (time_distance_seconds / time_window_seconds))
+                if time_window_seconds > 0.0
+                else 0.0
+            )
+            topology_status = evaluate_known_load_topology(
+                edge,
+                topology_by_circuit.get(event.circuit_id, KnownLoadTopology()),
+            )
+            topology_score = _known_load_topology_score(topology_status)
+            score = KnownLoadCandidateScore(
+                total=(
+                    KNOWN_LOAD_MAGNITUDE_WEIGHT * magnitude_score
+                    + KNOWN_LOAD_TIME_WEIGHT * time_score
+                    + KNOWN_LOAD_TOPOLOGY_WEIGHT * topology_score
+                ),
+                magnitude=magnitude_score,
+                time=time_score,
+                topology=topology_score,
+                time_offset_seconds=time_offset_seconds,
+                topology_status=topology_status,
+            )
+            signed_known_watts = (
+                known_watts if event.event_type is EventType.START else -known_watts
+            )
+            residual_delta_w = edge.delta_w - signed_known_watts
+            if not isclose(
+                edge.delta_w,
+                signed_known_watts + residual_delta_w,
+                rel_tol=0.0,
+                abs_tol=1e-6,
+            ):
+                raise ValueError("Known-load attribution must conserve real power.")
+            eligible = topology_status not in {"topology_mismatch", "leg_mismatch"}
+            residual_edge = (
+                _known_load_residual_edge(
+                    edge,
+                    residual_delta_w,
+                    event.circuit_id,
+                    residual_min_delta_w=residual_min_delta_w,
+                )
+                if eligible
+                else None
+            )
+            match = KnownLoadMatch(
+                edge=edge,
+                known_circuit_id=event.circuit_id,
+                confidence=score.total,
+                known_power_w=known_watts,
+                event_type=event.event_type,
+                event_timestamp=event.timestamp,
+                power_source=power_source,
+                time_distance_seconds=time_distance_seconds,
+                magnitude_ratio=ratio,
+                topology_compatible=(
+                    True
+                    if topology_status == "consistent"
+                    else False
+                    if not eligible
+                    else None
+                ),
+                topology_score=score.topology,
+                explained_delta_w=signed_known_watts,
+                residual_delta_w=residual_delta_w,
+                residual_edge=residual_edge,
+                selection_method=(
+                    "global_assignment" if eligible else "topology_rejected"
+                ),
+                time_offset_seconds=score.time_offset_seconds,
+                magnitude_score=score.magnitude,
+                time_score=score.time,
+                topology_status=score.topology_status,
+            )
+            if eligible:
+                candidates.append(
+                    _KnownLoadCandidate(edge_index, event_index, match, score)
+                )
+            else:
+                rejected_topology_candidates.append(
+                    (edge_index, event_index, match)
+                )
 
-    matched_edge_indices: set[int] = set()
-    matched_event_indices: set[int] = set()
-    selected: list[tuple[int, KnownLoadMatch]] = []
-
-    for edge_index, event_index, match, _time_distance in sorted(
-        candidates,
-        key=lambda candidate: (
-            -candidate[2].confidence,
-            candidate[3],
-            candidate[0],
-            candidate[1],
-        ),
-    ):
-        if edge_index in matched_edge_indices or event_index in matched_event_indices:
-            continue
-        matched_edge_indices.add(edge_index)
-        matched_event_indices.add(event_index)
-        selected.append((edge_index, match))
-
-    matched_edges = tuple(match for _index, match in sorted(selected))
-    unmatched_edges = tuple(
+    selected_candidate_indices, ambiguous_edge_indices = (
+        _select_known_load_candidates(candidates)
+    )
+    selected_candidates = sorted(
+        (candidates[index] for index in selected_candidate_indices),
+        key=lambda candidate: (candidate.edge_index, candidate.event_index),
+    )
+    matched_edge_indices = {
+        candidate.edge_index for candidate in selected_candidates
+    }
+    matched_edges = tuple(candidate.match for candidate in selected_candidates)
+    accepted_unmatched_edges = tuple(
         edge for index, edge in enumerate(edges) if index not in matched_edge_indices
     )
+    residual_edges = tuple(
+        candidate.match.residual_edge
+        for candidate in selected_candidates
+        if candidate.match.residual_edge is not None
+    )
 
-    return NilmMaskResult(matched_edges, unmatched_edges)
+    return NilmMaskResult(
+        matched_edges,
+        accepted_unmatched_edges + residual_edges,
+        residual_edges,
+        len(ambiguous_edge_indices),
+        tuple(
+            match
+            for _edge_index, _event_index, match in sorted(
+                rejected_topology_candidates,
+                key=lambda item: (item[0], item[1]),
+            )
+        ),
+    )
+
+
+def mask_known_loads(
+    aggregate_edges: Iterable[NilmEdge],
+    known_events: Iterable[CircuitEvent],
+    time_window: timedelta = timedelta(seconds=15),
+    watt_tolerance_ratio: float = 0.25,
+) -> NilmMaskResult:
+    """Compatibility wrapper for direct known-load attribution."""
+
+    return attribute_known_loads(
+        aggregate_edges,
+        known_events,
+        time_window=time_window,
+        watt_tolerance_ratio=watt_tolerance_ratio,
+    )
+
+
+def _known_load_residual_edge(
+    edge: NilmEdge,
+    residual_delta_w: float,
+    known_circuit_id: str,
+    *,
+    residual_min_delta_w: float,
+) -> NilmEdge | None:
+    """Create a provenance-linked residual when it clears the configured floor."""
+
+    threshold = (
+        max(float(residual_min_delta_w), 0.0)
+        if isfinite(float(residual_min_delta_w))
+        else 100.0
+    )
+    if abs(residual_delta_w) < threshold:
+        return None
+    return NilmEdge(
+        timestamp=edge.timestamp,
+        delta_w=residual_delta_w,
+        direction="on" if residual_delta_w > 0 else "off",
+        origin="known_load_residual",
+        parent_edge_id=_nilm_edge_id(edge),
+        explained_known_circuit_ids=(known_circuit_id,),
+    )
 
 
 def cluster_recurring_signatures(edges: Iterable[NilmEdge]) -> list[NilmSignature]:
@@ -2278,6 +2843,11 @@ def _round_optional(value: float | None) -> float | None:
 
 
 def _event_power_w(event: CircuitEvent) -> float | None:
+    known_power = _event_power_w_with_source(event)
+    return known_power[0] if known_power is not None else None
+
+
+def _event_power_w_with_source(event: CircuitEvent) -> tuple[float, str] | None:
     preferred_keys = (
         "startup_power_w",
         "real_power_w",
@@ -2293,7 +2863,12 @@ def _event_power_w(event: CircuitEvent) -> float | None:
     for key in preferred_keys:
         value = event.features.get(key)
         if value is not None:
-            return abs(float(value))
+            try:
+                watts = abs(float(value))
+            except (TypeError, ValueError):
+                continue
+            if isfinite(watts) and watts > 0:
+                return watts, key
     return None
 
 
@@ -2718,16 +3293,21 @@ def _nilm_known_load_confidence(
 
 
 def _nilm_edge_id(edge: NilmEdge) -> str:
-    return "|".join(
-        (
-            edge.direction,
-            edge.timestamp.isoformat(),
-            f"w={edge.delta_w:.3f}",
-            f"var={_optional_number_text(edge.delta_var)}",
-            edge.split_phase_type,
-            edge.dominant_leg,
-        )
+    fields = (
+        edge.direction,
+        edge.timestamp.isoformat(),
+        f"w={edge.delta_w:.3f}",
+        f"var={_optional_number_text(edge.delta_var)}",
+        edge.split_phase_type,
+        edge.dominant_leg,
     )
+    if edge.origin != "aggregate":
+        fields += (
+            f"origin={edge.origin}",
+            f"parent={edge.parent_edge_id or 'none'}",
+            "explained=" + ",".join(edge.explained_known_circuit_ids),
+        )
+    return "|".join(fields)
 
 
 def _optional_number_text(value: float | None) -> str:

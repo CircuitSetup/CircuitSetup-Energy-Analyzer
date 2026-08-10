@@ -18,6 +18,7 @@ from custom_components.circuitsetup_energy_analyzer.nilm import (
     NilmEdgeDetector,
     NilmHelperCandidate,
     NilmSignature,
+    attribute_known_loads,
     build_nilm_assignment_model,
     classify_signature,
     cluster_recurring_signatures,
@@ -1490,8 +1491,172 @@ def test_mask_known_loads_uses_event_timestamp_and_current_feature_names() -> No
     assert len(result.matched_edges) == 1
     assert result.matched_edges[0].edge == edge(10, 200.0)
     assert result.matched_edges[0].known_circuit_id == "fridge"
-    assert result.matched_edges[0].confidence > 0.9
+    assert result.matched_edges[0].magnitude_score > 0.9
+    assert result.matched_edges[0].confidence == pytest.approx(0.8482520325)
     assert result.unmatched_edges == (edge(40, 325.0),)
+
+
+@pytest.mark.parametrize(
+    (
+        "aggregate_delta_w",
+        "event_type",
+        "feature",
+        "expected_explained",
+        "expected_residual",
+    ),
+    [
+        (1200.0, EventType.START, {"startup_power_w": 1000.0}, 1000.0, 200.0),
+        (-1200.0, EventType.STOP, {"stop_power_w": 1000.0}, -1000.0, -200.0),
+    ],
+)
+def test_attribute_known_loads_consumes_aggregate_and_emits_conserving_residual(
+    aggregate_delta_w: float,
+    event_type: EventType,
+    feature: dict[str, float],
+    expected_explained: float,
+    expected_residual: float,
+) -> None:
+    original = edge(10, aggregate_delta_w, delta_var=250.0, delta_va=1250.0)
+    event = CircuitEvent(
+        timestamp=BASE_TIME + timedelta(seconds=11),
+        circuit_id="water_heater",
+        event_type=event_type,
+        features=feature,
+    )
+
+    result = attribute_known_loads(
+        [original], [event], residual_min_delta_w=100.0
+    )
+
+    assert result.unmatched_edges == (result.residual_edges[0],)
+    assert result.matched_edges[0].edge == original
+    assert result.matched_edges[0].explained_delta_w == expected_explained
+    assert result.matched_edges[0].residual_delta_w == expected_residual
+    assert original.delta_w == (
+        result.matched_edges[0].explained_delta_w
+        + result.matched_edges[0].residual_delta_w
+    )
+    residual = result.residual_edges[0]
+    assert residual.delta_w == expected_residual
+    assert residual.direction == ("on" if expected_residual > 0 else "off")
+    assert residual.origin == "known_load_residual"
+    assert residual.parent_edge_id == nilm_domain._nilm_edge_id(original)
+    assert residual.explained_known_circuit_ids == ("water_heater",)
+    assert residual.timestamp == original.timestamp
+    assert (residual.delta_var, residual.delta_va, residual.delta_pf) == (
+        None,
+        None,
+        None,
+    )
+    assert (residual.leg_a_delta_w, residual.leg_b_delta_w) == (None, None)
+
+
+def test_nilm_edge_id_distinguishes_known_load_residual_provenance() -> None:
+    aggregate = edge(10, 200.0)
+    residual = NilmEdge(
+        timestamp=aggregate.timestamp,
+        delta_w=aggregate.delta_w,
+        delta_var=aggregate.delta_var,
+        delta_va=aggregate.delta_va,
+        delta_pf=aggregate.delta_pf,
+        direction=aggregate.direction,
+        origin="known_load_residual",
+        parent_edge_id="aggregate-edge",
+        explained_known_circuit_ids=("fridge",),
+    )
+
+    assert nilm_domain._nilm_edge_id(aggregate) != nilm_domain._nilm_edge_id(residual)
+
+
+@pytest.mark.parametrize("aggregate_delta_w", [1005.0, -1005.0])
+def test_attribute_known_loads_skips_residual_below_threshold(
+    aggregate_delta_w: float,
+) -> None:
+    event_type = EventType.START if aggregate_delta_w > 0 else EventType.STOP
+    feature = "startup_power_w" if aggregate_delta_w > 0 else "stop_power_w"
+
+    result = attribute_known_loads(
+        [edge(10, aggregate_delta_w)],
+        [
+            CircuitEvent(
+                BASE_TIME + timedelta(seconds=10),
+                "dryer",
+                event_type,
+                features={feature: 1000.0},
+            )
+        ],
+        residual_min_delta_w=100.0,
+    )
+
+    assert result.matched_edges[0].residual_delta_w == (
+        aggregate_delta_w - (1000.0 if aggregate_delta_w > 0 else -1000.0)
+    )
+    assert result.residual_edges == ()
+    assert result.unmatched_edges == ()
+
+
+def test_attribute_known_loads_derives_residual_direction_from_its_sign() -> None:
+    result = attribute_known_loads(
+        [edge(10, 800.0)],
+        [
+            CircuitEvent(
+                BASE_TIME + timedelta(seconds=10),
+                "heater",
+                EventType.START,
+                features={"startup_power_w": 1000.0},
+            )
+        ],
+        residual_min_delta_w=100.0,
+    )
+
+    assert result.residual_edges[0].delta_w == -200.0
+    assert result.residual_edges[0].direction == "off"
+
+
+@pytest.mark.parametrize("known_power_w", [0.0, float("inf"), float("nan")])
+def test_attribute_known_loads_rejects_nonpositive_or_nonfinite_known_power(
+    known_power_w: float,
+) -> None:
+    original = edge(10, 1000.0)
+
+    result = attribute_known_loads(
+        [original],
+        [
+            CircuitEvent(
+                BASE_TIME + timedelta(seconds=10),
+                "heater",
+                EventType.START,
+                features={"startup_power_w": known_power_w},
+            )
+        ],
+    )
+
+    assert result.matched_edges == ()
+    assert result.unmatched_edges == (original,)
+
+
+def test_attribute_known_loads_only_consumes_aggregate_edges() -> None:
+    residual = NilmEdge(
+        timestamp=BASE_TIME + timedelta(seconds=10),
+        delta_w=1000.0,
+        direction="on",
+        origin="known_load_residual",
+    )
+
+    result = attribute_known_loads(
+        [residual],
+        [
+            CircuitEvent(
+                BASE_TIME + timedelta(seconds=10),
+                "heater",
+                EventType.START,
+                features={"startup_power_w": 1000.0},
+            )
+        ],
+    )
+
+    assert result.matched_edges == ()
+    assert result.unmatched_edges == (residual,)
 
 
 def test_mask_known_loads_supports_stop_power_features() -> None:
@@ -1524,6 +1689,370 @@ def test_mask_known_loads_uses_each_known_event_once_with_closest_tie_break() ->
 
     assert tuple(match.edge for match in result.matched_edges) == (edge(29, 200.0),)
     assert result.unmatched_edges == (edge(20, 200.0),)
+
+
+@pytest.mark.parametrize(
+    ("topology", "candidate", "expected"),
+    [
+        (
+            {"expected_split_phase_types": ("single_leg_a", "single_leg_b")},
+            {"split_phase_type": "single_leg_a"},
+            "consistent",
+        ),
+        (
+            {"expected_split_phase_types": ("single_leg_a", "single_leg_b")},
+            {"split_phase_type": "unknown"},
+            "unknown_topology",
+        ),
+        ({}, {"split_phase_type": "balanced_240v"}, "not_evaluated"),
+        (
+            {"expected_split_phase_types": ("balanced_240v",)},
+            {"split_phase_type": "single_leg_a"},
+            "topology_mismatch",
+        ),
+        (
+            {
+                "expected_split_phase_types": ("single_leg_a", "single_leg_b"),
+                "configured_leg": "a",
+            },
+            {"split_phase_type": "single_leg_b"},
+            "leg_mismatch",
+        ),
+    ],
+)
+def test_known_load_topology_evaluator_returns_shared_statuses(
+    topology: dict[str, object],
+    candidate: dict[str, object],
+    expected: str,
+) -> None:
+    expectation = nilm_domain.KnownLoadTopology(**topology)
+    candidate_edge = edge(0, 1000.0, **candidate)
+
+    assert (
+        nilm_domain.evaluate_known_load_topology(candidate_edge, expectation)
+        == expected
+    )
+
+
+def test_attribute_known_loads_prefers_closer_time_for_equal_magnitude() -> None:
+    aggregate = edge(30, 1000.0)
+    farther = CircuitEvent(
+        BASE_TIME + timedelta(seconds=16),
+        "farther",
+        EventType.START,
+        features={"startup_power_w": 1000.0},
+    )
+    closer = CircuitEvent(
+        BASE_TIME + timedelta(seconds=29),
+        "closer",
+        EventType.START,
+        features={"startup_power_w": 1000.0},
+    )
+
+    result = attribute_known_loads([aggregate], [farther, closer])
+
+    assert [match.known_circuit_id for match in result.matched_edges] == ["closer"]
+    match = result.matched_edges[0]
+    assert match.time_offset_seconds == -1.0
+    assert match.time_score == pytest.approx(14 / 15)
+    assert match.magnitude_score == 1.0
+    assert match.power_source == "startup_power_w"
+    assert match.topology_status == "not_evaluated"
+    assert match.selection_method == "global_assignment"
+
+
+def test_attribute_known_loads_scores_exact_time_above_fourteen_seconds() -> None:
+    expectation = {
+        "load": nilm_domain.KnownLoadTopology(("single_leg_a",), None)
+    }
+    aggregate = edge(30, 1000.0, split_phase_type="single_leg_a")
+    exact = CircuitEvent(
+        aggregate.timestamp,
+        "load",
+        EventType.START,
+        features={"startup_power_w": 1000.0},
+    )
+    fourteen_seconds = CircuitEvent(
+        aggregate.timestamp - timedelta(seconds=14),
+        "load",
+        EventType.START,
+        features={"startup_power_w": 1000.0},
+    )
+
+    exact_result = attribute_known_loads(
+        [aggregate], [exact], topology_by_circuit=expectation
+    )
+    delayed_result = attribute_known_loads(
+        [aggregate], [fourteen_seconds], topology_by_circuit=expectation
+    )
+
+    assert exact_result.matched_edges[0].confidence == 1.0
+    assert delayed_result.matched_edges[0].time_score == pytest.approx(1 / 15)
+    assert delayed_result.matched_edges[0].confidence == pytest.approx(
+        0.65 + (0.20 / 15) + 0.15
+    )
+    assert exact_result.matched_edges[0].confidence > (
+        delayed_result.matched_edges[0].confidence
+    )
+    assert (
+        nilm_domain.KNOWN_LOAD_MAGNITUDE_WEIGHT
+        + nilm_domain.KNOWN_LOAD_TIME_WEIGHT
+        + nilm_domain.KNOWN_LOAD_TOPOLOGY_WEIGHT
+        == pytest.approx(1.0)
+    )
+
+
+def test_attribute_known_loads_enforces_time_and_magnitude_cutoffs() -> None:
+    aggregate = edge(30, 1000.0)
+    too_late = CircuitEvent(
+        aggregate.timestamp + timedelta(seconds=15, microseconds=1),
+        "late",
+        EventType.START,
+        features={"startup_power_w": 1000.0},
+    )
+    too_different = CircuitEvent(
+        aggregate.timestamp,
+        "different",
+        EventType.START,
+        features={"startup_power_w": 799.9},
+    )
+
+    assert attribute_known_loads([aggregate], [too_late]).matched_edges == ()
+    assert attribute_known_loads([aggregate], [too_different]).matched_edges == ()
+
+    boundary = attribute_known_loads(
+        [aggregate],
+        [
+            CircuitEvent(
+                aggregate.timestamp + timedelta(seconds=15),
+                "boundary",
+                EventType.START,
+                features={"startup_power_w": 800.0},
+            )
+        ],
+    )
+    assert len(boundary.matched_edges) == 1
+    assert boundary.matched_edges[0].time_score == 0.0
+    assert boundary.matched_edges[0].magnitude_score == 0.0
+
+
+@pytest.mark.parametrize(
+    ("candidate_edge", "topology_values", "expected_status"),
+    [
+        (
+            edge(0, 1000.0, split_phase_type="balanced_240v"),
+            (("single_leg_a", "single_leg_b"), None),
+            "topology_mismatch",
+        ),
+        (
+            edge(0, 1000.0, split_phase_type="single_leg_b"),
+            (("single_leg_a", "single_leg_b"), "a"),
+            "leg_mismatch",
+        ),
+    ],
+)
+def test_attribute_known_loads_retains_rejected_topology_evidence(
+    candidate_edge: NilmEdge,
+    topology_values: tuple[tuple[str, ...], str | None],
+    expected_status: str,
+) -> None:
+    event = CircuitEvent(
+        candidate_edge.timestamp,
+        "load",
+        EventType.START,
+        features={"startup_power_w": 1000.0},
+    )
+    topology = nilm_domain.KnownLoadTopology(*topology_values)
+
+    result = attribute_known_loads(
+        [candidate_edge], [event], topology_by_circuit={"load": topology}
+    )
+
+    assert result.matched_edges == ()
+    assert result.unmatched_edges == (candidate_edge,)
+    assert result.residual_edges == ()
+    assert len(result.rejected_topology_candidates) == 1
+    rejection = result.rejected_topology_candidates[0]
+    assert rejection.edge == candidate_edge
+    assert rejection.topology_status == expected_status
+    assert rejection.topology_score == 0.0
+    assert rejection.magnitude_score == 1.0
+    assert rejection.time_score == 1.0
+    assert rejection.confidence == pytest.approx(0.85)
+
+
+def test_attribute_known_loads_global_assignment_beats_greedy() -> None:
+    topology = nilm_domain.KnownLoadTopology(("single_leg_a",))
+    edge_one = edge(0, 961.5384615, split_phase_type="single_leg_a")
+    edge_two = edge(0, 1057.6923077, split_phase_type="single_leg_a")
+    event_a = CircuitEvent(
+        BASE_TIME,
+        "a",
+        EventType.START,
+        features={"startup_power_w": 1000.0},
+    )
+    event_b = CircuitEvent(
+        BASE_TIME,
+        "b",
+        EventType.START,
+        features={"startup_power_w": 892.8571429},
+    )
+
+    result = attribute_known_loads(
+        [edge_one, edge_two],
+        [event_a, event_b],
+        topology_by_circuit={"a": topology, "b": topology},
+    )
+
+    assert [
+        (match.edge, match.known_circuit_id) for match in result.matched_edges
+    ] == [(edge_one, "b"), (edge_two, "a")]
+    assert [match.confidence for match in result.matched_edges] == pytest.approx(
+        [0.80, 0.85]
+    )
+
+
+def test_attribute_known_loads_never_reuses_an_edge_or_event() -> None:
+    topology = nilm_domain.KnownLoadTopology(("single_leg_a",))
+    edges = [
+        edge(0, 961.5384615, split_phase_type="single_leg_a"),
+        edge(0, 1057.6923077, split_phase_type="single_leg_a"),
+    ]
+    events = [
+        CircuitEvent(
+            BASE_TIME,
+            "a",
+            EventType.START,
+            features={"startup_power_w": 1000.0},
+        ),
+        CircuitEvent(
+            BASE_TIME,
+            "b",
+            EventType.START,
+            features={"startup_power_w": 892.8571429},
+        ),
+    ]
+
+    matches = attribute_known_loads(
+        edges,
+        events,
+        topology_by_circuit={"a": topology, "b": topology},
+    ).matched_edges
+
+    assert len({match.edge for match in matches}) == len(matches)
+    assert len({match.known_circuit_id for match in matches}) == len(matches)
+
+
+def test_attribute_known_loads_ambiguity_retains_only_common_pairs() -> None:
+    stable = edge(0, 1000.0)
+    ambiguous = edge(14, 1000.0)
+    events = [
+        CircuitEvent(
+            BASE_TIME,
+            "stable",
+            EventType.START,
+            features={"startup_power_w": 1000.0},
+        ),
+        CircuitEvent(
+            BASE_TIME + timedelta(seconds=14),
+            "choice-a",
+            EventType.START,
+            features={"startup_power_w": 1000.0},
+        ),
+        CircuitEvent(
+            BASE_TIME + timedelta(seconds=15),
+            "choice-b",
+            EventType.START,
+            features={"startup_power_w": 1000.0},
+        ),
+    ]
+
+    result = attribute_known_loads([stable, ambiguous], events)
+
+    assert [match.known_circuit_id for match in result.matched_edges] == ["stable"]
+    assert result.unmatched_edges == (ambiguous,)
+    assert result.ambiguous_edge_count == 1
+
+
+def test_attribute_known_loads_preserves_stable_edge_order() -> None:
+    later = edge(100, 2000.0)
+    earlier = edge(0, 1000.0)
+    events = [
+        CircuitEvent(
+            BASE_TIME,
+            "earlier",
+            EventType.START,
+            features={"startup_power_w": 1000.0},
+        ),
+        CircuitEvent(
+            BASE_TIME + timedelta(seconds=100),
+            "later",
+            EventType.START,
+            features={"startup_power_w": 2000.0},
+        ),
+    ]
+
+    result = attribute_known_loads([later, earlier], events)
+
+    assert [match.edge for match in result.matched_edges] == [later, earlier]
+    assert [match.known_circuit_id for match in result.matched_edges] == [
+        "later",
+        "earlier",
+    ]
+    assert {match.selection_method for match in result.matched_edges} == {
+        "global_assignment"
+    }
+
+
+def test_attribute_known_loads_marks_large_component_greedy_fallback() -> None:
+    edges = [edge(index * 15, 1000.0) for index in range(13)]
+    events = [
+        CircuitEvent(
+            BASE_TIME + timedelta(seconds=index * 15),
+            f"load-{index}",
+            EventType.START,
+            features={"startup_power_w": 1000.0},
+        )
+        for index in range(13)
+    ]
+
+    result = attribute_known_loads(edges, events)
+
+    assert len(result.matched_edges) == 13
+    assert {match.selection_method for match in result.matched_edges} == {
+        "greedy_fallback"
+    }
+    assert result.ambiguous_edge_count == 0
+
+
+def test_attribute_known_loads_fallback_rejects_local_candidate_ambiguity() -> None:
+    edges = [edge(index * 15, 1000.0) for index in range(13)]
+    events = [
+        CircuitEvent(
+            BASE_TIME + timedelta(seconds=index * 15),
+            f"load-{index}",
+            EventType.START,
+            features={"startup_power_w": 1000.0},
+        )
+        for index in range(13)
+    ]
+    events.append(
+        CircuitEvent(
+            BASE_TIME + timedelta(seconds=1),
+            "load-ambiguous",
+            EventType.START,
+            features={"startup_power_w": 1000.0},
+        )
+    )
+
+    result = attribute_known_loads(edges, events)
+
+    assert result.unmatched_edges == (edges[0],)
+    assert result.ambiguous_edge_count == 1
+    assert len(result.matched_edges) == 12
+    assert {match.selection_method for match in result.matched_edges} == {
+        "greedy_fallback"
+    }
 
 
 def test_cluster_recurring_signatures_groups_similar_edges_conservatively() -> None:
