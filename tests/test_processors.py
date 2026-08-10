@@ -8097,6 +8097,7 @@ def test_nilm_topology_processor_updates_state_and_returns_alert() -> None:
             "|origin=known_load_residual|parent=mains:edge|explained=fridge"
         ),
         "match_time_offset_seconds": 2.5,
+        "synchronized_time_offset_seconds": 2.5,
         "magnitude_score": 0.92,
         "time_score": 0.83,
         "topology_score": 0.4,
@@ -8117,7 +8118,21 @@ def test_nilm_topology_processor_updates_state_and_returns_alert() -> None:
     assert "balanced_240v" in result.alerts[0].message
 
 
-def test_nilm_topology_rejection_is_not_downgraded_for_low_confidence() -> None:
+@pytest.mark.parametrize(
+    ("confidence", "expects_alert"),
+    [
+        (0.49, False),
+        (0.4999, False),
+        (0.5, True),
+        (float("nan"), False),
+        (float("inf"), False),
+    ],
+)
+def test_nilm_topology_rejection_requires_minimum_confidence_for_alerts(
+    confidence: float,
+    expects_alert: bool,
+) -> None:
+    """Bypassing the confidence gate would alert on weak rejections."""
     from custom_components.circuitsetup_energy_analyzer import processors
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         AnalyzerState,
@@ -8162,14 +8177,15 @@ def test_nilm_topology_rejection_is_not_downgraded_for_low_confidence() -> None:
             dominant_leg="balanced",
         ),
         known_circuit_id="fridge",
-        confidence=0.49,
+        confidence=confidence,
         selection_method="topology_rejected",
         topology_status="topology_mismatch",
     )
 
+    policy = _CaptureAlertPolicy()
     processor = processors.NilmTopologyProcessor(
         known_config_for_circuit=lambda _id: fridge,
-        alert_policy_for_circuit=lambda _id: _CaptureAlertPolicy(),
+        alert_policy_for_circuit=lambda _id: policy,
     )
     result = processor.process(mains, match, context)
     evidence = {update.path: update.value for update in result.state_updates}[
@@ -8179,6 +8195,95 @@ def test_nilm_topology_rejection_is_not_downgraded_for_low_confidence() -> None:
     assert evidence["status"] == "topology_mismatch"
     assert evidence["attribution_rejected"] is True
     assert "low_confidence_match" not in str(evidence)
+    if confidence == 0.4999:
+        assert evidence["match_confidence"] == 0.5
+    assert len(policy.observations) == int(expects_alert)
+    assert len(result.alerts) == int(expects_alert)
+    assert result.notifications == result.alerts
+
+
+def test_nilm_topology_processor_uses_attached_status_and_provenance() -> None:
+    """Re-evaluating a supplied status would diverge diagnostics from matching."""
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        KnownLoadMatch,
+        NilmEdge,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, tzinfo=UTC)
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    known = CircuitConfig(
+        circuit_id="load",
+        name="Load",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.DUAL_PHASE,
+    )
+    edge = NilmEdge(
+        timestamp=now,
+        delta_w=500.0,
+        direction="on",
+        split_phase_type="single_leg_a",
+        dominant_leg="a",
+    )
+    match = KnownLoadMatch(
+        edge=edge,
+        known_circuit_id="load",
+        confidence=0.8,
+        event_type=EventType.POWER_TRANSITION,
+        known_power_w=500.0,
+        selection_method="topology_rejected",
+        selection_status="rejected_topology",
+        topology_status="leg_mismatch",
+        known_power_source="transition_delta_w",
+        known_transition_delta_w=500.0,
+        known_transition_spread_w=11.0,
+        power_match_confidence=0.9,
+        time_distance_seconds=1.5,
+        time_offset_seconds=-1.5,
+        transition_timing_uncertainty_s=0.25,
+    )
+
+    result = processors.NilmTopologyProcessor(
+        known_config_for_circuit=lambda _id: known,
+        alert_policy_for_circuit=lambda _id: _CaptureAlertPolicy(),
+    ).process(mains, match, context)
+    evidence = {update.path: update.value for update in result.state_updates}[
+        ("nilm_topology_evidence_by_circuit", "load")
+    ]
+
+    assert evidence["status"] == "leg_mismatch"
+    assert evidence["event_type"] == "power_transition"
+    assert evidence["selection_status"] == "rejected_topology"
+    assert evidence["known_selected_power_source"] == "transition_delta_w"
+    assert evidence["known_transition_delta_w"] == 500.0
+    assert evidence["known_transition_spread_w"] == 11.0
+    assert evidence["pre_topology_power_match_confidence"] == 0.9
+    assert evidence["synchronized_time_distance_seconds"] == 1.5
+    assert evidence["synchronized_time_offset_seconds"] == -1.5
+    assert evidence["transition_timing_uncertainty_s"] == 0.25
+    assert match.edge == edge
+    assert match.selection_status == "rejected_topology"
 
 
 def test_nilm_edge_storage_round_trips_residual_provenance_and_legacy_defaults(

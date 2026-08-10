@@ -36,6 +36,8 @@ def _sample(
 
 def _machine(
     *,
+    on_threshold_w: float = 25.0,
+    off_threshold_w: float = 10.0,
     on_dwell_seconds: float = 10.0,
     off_dwell_seconds: float = 20.0,
     max_sample_gap_seconds: float = 600.0,
@@ -52,8 +54,8 @@ def _machine(
     return OperatingStateMachine(
         ResolvedOperatingDetection(
             profile=OperatingDetectionProfile(
-                on_threshold_w=25.0,
-                off_threshold_w=10.0,
+                on_threshold_w=on_threshold_w,
+                off_threshold_w=off_threshold_w,
                 on_dwell_seconds=on_dwell_seconds,
                 off_dwell_seconds=off_dwell_seconds,
                 merge_gap_seconds=60.0,
@@ -330,6 +332,233 @@ def test_operating_state_machine_ignores_short_below_threshold_dip() -> None:
     assert recovered.snapshot.stable_state is OperatingState.RUNNING
     assert stopped.events[0].features[OPERATING_IDLE_SAMPLE_COUNT] == 3
     assert stopped.events[0].features[OPERATING_RUNNING_SAMPLE_COUNT] == 6
+
+
+@pytest.mark.parametrize(
+    ("before_w", "after_w", "expected_delta_w"),
+    ((500.0, 900.0, 400.0), (900.0, 500.0, -400.0)),
+)
+def test_running_power_step_emits_confirmed_transition_evidence(
+    before_w: float,
+    after_w: float,
+    expected_delta_w: float,
+) -> None:
+    machine = _machine()
+    events = []
+    for seconds, watts in (
+        (0, 5.0),
+        (5, before_w),
+        (15, before_w),
+        (20, before_w),
+        (25, before_w),
+        (30, after_w),
+        (35, after_w),
+        (40, after_w),
+    ):
+        events.extend(
+            machine.process(_sample(seconds, watts, circuit_id="fridge")).events
+        )
+
+    transitions = [
+        event for event in events if event.event_type is EventType.POWER_TRANSITION
+    ]
+    assert len(transitions) == 1
+    transition = transitions[0]
+    assert transition.timestamp == _sample(30, after_w, circuit_id="fridge").timestamp
+    assert transition.features["transition_delta_w"] == expected_delta_w
+    assert transition.features["pre_power_median_w"] == before_w
+    assert transition.features["post_power_median_w"] == after_w
+    assert transition.features["pre_power_spread_w"] == 0.0
+    assert transition.features["post_power_spread_w"] == 0.0
+    assert transition.features["transition_kind"] == "step"
+    assert transition.features["lifecycle_state_before"] == "running"
+    assert transition.features["lifecycle_state_after"] == "running"
+    assert transition.features["transition_evidence_version"] == 1
+    assert transition.features["transition_quality"] == "measured"
+
+
+def test_running_power_steps_do_not_duplicate_lifecycle_events_or_cycles() -> None:
+    from custom_components.circuitsetup_energy_analyzer.cycles import (
+        summarize_circuit_cycles,
+    )
+
+    machine = _machine()
+    events = []
+    for seconds, watts in (
+        (0, 5.0),
+        (5, 500.0),
+        (15, 500.0),
+        (20, 500.0),
+        (25, 500.0),
+        (30, 900.0),
+        (35, 900.0),
+        (40, 900.0),
+        (50, 5.0),
+        (70, 5.0),
+    ):
+        events.extend(
+            machine.process(_sample(seconds, watts, circuit_id="fridge")).events
+        )
+
+    assert [event.event_type for event in events] == [
+        EventType.START,
+        EventType.POWER_TRANSITION,
+        EventType.STOP,
+    ]
+    summary = summarize_circuit_cycles(
+        events,
+        circuit_id="fridge",
+        now=_sample(70, 5.0, circuit_id="fridge").timestamp,
+        merge_gap_seconds=60.0,
+    )
+    assert summary.completed_cycle_count == 1
+
+
+def test_running_power_step_ignores_short_spikes_and_unsettled_ramps() -> None:
+    machine = _machine()
+    events = []
+    for seconds, watts in (
+        (0, 5.0),
+        (5, 500.0),
+        (15, 500.0),
+        (20, 500.0),
+        (25, 500.0),
+        (30, 900.0),
+        (35, 500.0),
+        (40, 550.0),
+        (45, 600.0),
+        (50, 650.0),
+        (55, 700.0),
+        (60, 750.0),
+        (65, 800.0),
+    ):
+        events.extend(
+            machine.process(_sample(seconds, watts, circuit_id="fridge")).events
+        )
+
+    assert EventType.POWER_TRANSITION not in [event.event_type for event in events]
+
+
+def test_running_power_step_cooldown_prevents_duplicate_plateau_events() -> None:
+    machine = _machine()
+    events = []
+    for seconds, watts in (
+        (0, 5.0),
+        (5, 500.0),
+        (15, 500.0),
+        (20, 500.0),
+        (25, 500.0),
+        (30, 900.0),
+        (35, 900.0),
+        (40, 900.0),
+        (45, 900.0),
+        (50, 900.0),
+        (55, 900.0),
+        (60, 900.0),
+    ):
+        events.extend(
+            machine.process(_sample(seconds, watts, circuit_id="fridge")).events
+        )
+
+    assert [event.event_type for event in events].count(EventType.POWER_TRANSITION) == 1
+
+
+def test_running_power_step_rejects_continuous_gradual_ramp() -> None:
+    machine = _machine()
+    events = []
+    samples = [(0, 5.0), (5, 500.0), (15, 500.0), (20, 500.0), (25, 500.0)]
+    samples.extend(
+        (seconds, 500.0 + (seconds - 25) * 4.0)
+        for seconds in range(30, 190, 5)
+    )
+    samples.extend(((190, 1140.0), (195, 1140.0), (200, 1140.0)))
+    for seconds, watts in samples:
+        events.extend(
+            machine.process(_sample(seconds, watts, circuit_id="fridge")).events
+        )
+
+    assert EventType.POWER_TRANSITION not in [event.event_type for event in events]
+
+
+def test_running_power_step_rejects_early_spike_without_stable_pre_plateau() -> None:
+    machine = _machine()
+    events = []
+    for seconds, watts in (
+        (0, 5.0),
+        (5, 500.0),
+        (15, 500.0),
+        (20, 900.0),
+        (25, 500.0),
+        (30, 500.0),
+        (35, 500.0),
+    ):
+        events.extend(
+            machine.process(_sample(seconds, watts, circuit_id="fridge")).events
+        )
+
+    assert EventType.POWER_TRANSITION not in [event.event_type for event in events]
+
+
+def test_rejected_running_step_does_not_reuse_stale_pre_plateau() -> None:
+    machine = _machine()
+    events = []
+    for seconds, watts in (
+        (0, 5.0), (5, 500.0), (15, 500.0), (20, 500.0), (25, 500.0),
+        (30, 900.0), (35, 1200.0), (40, 900.0), (45, 900.0), (50, 900.0),
+        (55, 900.0), (90, 900.0), (95, 900.0), (100, 1300.0),
+        (105, 1300.0), (110, 1300.0),
+    ):
+        events.extend(
+            machine.process(_sample(seconds, watts, circuit_id="fridge")).events
+        )
+
+    transitions = [
+        event for event in events if event.event_type is EventType.POWER_TRANSITION
+    ]
+    assert len(transitions) == 1
+    assert transitions[0].features["pre_power_median_w"] == 900.0
+    assert transitions[0].features["post_power_median_w"] == 1300.0
+
+
+def test_pending_off_cancellation_clears_running_step_candidate() -> None:
+    machine = _machine()
+    events = []
+    for seconds, watts in (
+        (0, 5.0), (5, 500.0), (15, 500.0), (20, 500.0), (25, 500.0),
+        (30, 900.0), (35, 5.0), (40, 700.0), (45, 700.0), (50, 700.0),
+        (55, 1100.0), (60, 1100.0), (65, 1100.0),
+    ):
+        events.extend(
+            machine.process(_sample(seconds, watts, circuit_id="fridge")).events
+        )
+
+    transitions = [
+        event for event in events if event.event_type is EventType.POWER_TRANSITION
+    ]
+    assert len(transitions) == 1
+    assert transitions[0].features["pre_power_median_w"] == 700.0
+    assert transitions[0].features["post_power_median_w"] == 1100.0
+
+
+def test_expired_running_step_candidate_cannot_reuse_frozen_pre_plateau() -> None:
+    machine = _machine()
+    events = []
+    for seconds, watts in (
+        (0, 5.0), (5, 500.0), (15, 500.0), (20, 500.0), (25, 500.0),
+        (30, 900.0), (70, 920.0), (110, 910.0), (150, 905.0),
+        (160, 900.0), (165, 900.0), (170, 900.0), (175, 1300.0),
+        (180, 1300.0), (185, 1300.0),
+    ):
+        events.extend(
+            machine.process(_sample(seconds, watts, circuit_id="fridge")).events
+        )
+
+    transitions = [
+        event for event in events if event.event_type is EventType.POWER_TRANSITION
+    ]
+    assert len(transitions) == 1
+    assert transitions[0].features["pre_power_median_w"] == 900.0
+    assert transitions[0].features["post_power_median_w"] == 1300.0
 
 
 def test_operating_state_machine_confirms_stop_after_off_dwell() -> None:
@@ -844,6 +1073,205 @@ def test_operating_state_machine_closes_running_cycle_when_gap_turns_unavailable
     assert summary.completed_cycle_count == 1
     assert summary.runtime_seconds == 41.0
     assert summary.active_cycle_seconds == 0.0
+
+
+def test_confirmed_start_includes_synchronized_transition_evidence() -> None:
+    import json
+
+    machine = _machine()
+    machine.process(_sample(0, 20.0, circuit_id="fridge"))
+    machine.process(_sample(5, 120.0, circuit_id="fridge"))
+    start = machine.process(_sample(15, 120.0, circuit_id="fridge")).events[0]
+
+    assert start.timestamp == _sample(5, 120.0, circuit_id="fridge").timestamp
+    assert start.features["startup_power_w"] == 120.0
+    assert start.features["pre_power_median_w"] == 20.0
+    assert start.features["post_power_median_w"] == 120.0
+    assert start.features["transition_delta_w"] == 100.0
+    assert start.features["pre_power_spread_w"] == 0.0
+    assert start.features["post_power_spread_w"] == 0.0
+    assert start.features["transition_spread_w"] == 0.0
+    assert start.features["pre_sample_count"] == 1
+    assert start.features["post_sample_count"] == 2
+    assert start.features["transition_evidence_version"] == 1
+    assert start.features["transition_quality"] == "measured"
+    assert start.features["transition_timestamp"] == "2026-06-18T12:00:05+00:00"
+    assert start.features["transition_window_start"] == "2026-06-18T12:00:00+00:00"
+    assert start.features["transition_window_end"] == "2026-06-18T12:00:05+00:00"
+    assert start.features["transition_timing_uncertainty_s"] == 5.0
+    json.dumps(dict(start.features), allow_nan=False)
+
+
+def test_confirmed_start_uses_post_plateau_median_not_confirmation_power() -> None:
+    machine = _machine()
+    machine.process(_sample(0, 20.0, circuit_id="fridge"))
+    machine.process(_sample(5, 145.0, circuit_id="fridge"))
+    machine.process(_sample(10, 122.0, circuit_id="fridge"))
+    start = machine.process(_sample(15, 118.0, circuit_id="fridge")).events[0]
+
+    assert start.features["startup_power_w"] == 118.0
+    assert start.features["post_plateau_power_w"] == 122.0
+    assert start.features["post_power_median_w"] == 122.0
+    assert start.features["transition_delta_w"] == 102.0
+
+
+def test_transition_features_use_plateau_medians_and_adjacent_boundaries() -> None:
+    machine = _machine()
+    machine.process(_sample(0, 20.0, circuit_id="fridge"))
+    machine.process(_sample(5, 22.0, circuit_id="fridge"))
+    machine.process(_sample(10, 18.0, circuit_id="fridge"))
+    machine.process(_sample(15, 145.0, circuit_id="fridge"))
+    machine.process(_sample(20, 118.0, circuit_id="fridge"))
+    start = machine.process(_sample(25, 122.0, circuit_id="fridge")).events[0]
+
+    assert start.features["pre_power_median_w"] == 20.0
+    assert start.features["post_power_median_w"] == 122.0
+    assert start.features["transition_delta_w"] == 102.0
+    assert start.features["transition_window_start"] == "2026-06-18T12:00:10+00:00"
+    assert start.features["transition_window_end"] == "2026-06-18T12:00:15+00:00"
+    assert start.features["transition_timing_uncertainty_s"] == 5.0
+    assert start.features["pre_sample_count"] == 3
+    assert start.features["post_sample_count"] == 3
+    assert start.features["transition_pre_sample_count"] == 3
+    assert start.features["transition_post_sample_count"] == 3
+
+
+def test_confirmed_stop_includes_signed_transition_evidence() -> None:
+    machine = _machine(on_threshold_w=30.0, off_threshold_w=25.0)
+    machine.process(_sample(0, 20.0, circuit_id="fridge"))
+    machine.process(_sample(5, 120.0, circuit_id="fridge"))
+    machine.process(_sample(15, 120.0, circuit_id="fridge"))
+    machine.process(_sample(16, 120.0, circuit_id="fridge"))
+    machine.process(_sample(20, 20.0, circuit_id="fridge"))
+    machine.process(_sample(30, 15.0, circuit_id="fridge"))
+    stop = machine.process(_sample(40, 25.0, circuit_id="fridge")).events[0]
+
+    assert stop.timestamp == _sample(20, 20.0, circuit_id="fridge").timestamp
+    assert stop.features["stop_power_w"] == 120.0
+    assert stop.features["pre_power_median_w"] == 120.0
+    assert stop.features["post_power_median_w"] == 20.0
+    assert stop.features["post_plateau_power_w"] == 20.0
+    assert stop.features["transition_delta_w"] == -100.0
+    assert stop.features["transition_quality"] == "measured"
+
+
+def test_cancelled_pending_transitions_do_not_leak_transition_evidence() -> None:
+    machine = _machine()
+    machine.process(_sample(0, 20.0, circuit_id="fridge"))
+    machine.process(_sample(5, 120.0, circuit_id="fridge"))
+    machine.process(_sample(8, 20.0, circuit_id="fridge"))
+    machine.process(_sample(20, 130.0, circuit_id="fridge"))
+    start = machine.process(_sample(30, 130.0, circuit_id="fridge")).events[0]
+
+    assert start.features["post_power_median_w"] == 130.0
+    assert start.features["post_sample_count"] == 2
+
+    machine.process(_sample(31, 125.0, circuit_id="fridge"))
+    machine.process(_sample(35, 10.0, circuit_id="fridge"))
+    machine.process(_sample(40, 125.0, circuit_id="fridge"))
+    machine.process(_sample(45, 125.0, circuit_id="fridge"))
+    machine.process(_sample(50, 10.0, circuit_id="fridge"))
+    stop = machine.process(
+        _sample(70, 10.0, circuit_id="fridge")
+    ).events[0]
+
+    assert stop.features["pre_power_median_w"] == 125.0
+    assert stop.features["post_power_median_w"] == 10.0
+    assert stop.features["post_sample_count"] == 2
+
+
+def test_invalid_gap_and_timestamp_samples_cannot_contaminate_transition_evidence(
+) -> None:
+    machine = _machine(max_sample_gap_seconds=30.0)
+    machine.process(_sample(0, 20.0, circuit_id="fridge"))
+    machine.process(_sample(5, 120.0, circuit_id="fridge"))
+    machine.process(_sample(5, 999.0, circuit_id="fridge"))
+    machine.process(_sample(4, 999.0, circuit_id="fridge"))
+    machine.process(_sample(15, None, circuit_id="fridge"))
+    machine.process(_sample(50, 20.0, circuit_id="fridge"))
+    machine.process(_sample(60, 130.0, circuit_id="fridge"))
+    start = machine.process(_sample(70, 130.0, circuit_id="fridge")).events[0]
+
+    assert start.features["pre_power_median_w"] == 20.0
+    assert start.features["post_power_median_w"] == 130.0
+    assert start.features["transition_delta_w"] == 110.0
+
+
+def test_unavailable_stop_is_legacy_fallback_without_fabricated_delta() -> None:
+    machine = _machine(max_sample_gap_seconds=30.0)
+    machine.process(_sample(0, 20.0, circuit_id="fridge"))
+    machine.process(_sample(5, 120.0, circuit_id="fridge"))
+    machine.process(_sample(15, 120.0, circuit_id="fridge"))
+    machine.process(_sample(20, None, circuit_id="fridge"))
+    stop = machine.process(_sample(50, None, circuit_id="fridge")).events[0]
+
+    assert stop.features["stop_power_w"] == 120.0
+    assert stop.features["transition_quality"] == "legacy_fallback"
+    assert "transition_delta_w" not in stop.features
+    assert "post_plateau_power_w" not in stop.features
+
+
+def test_unavailable_stop_after_pending_off_drops_measured_transition_evidence(
+) -> None:
+    machine = _machine(
+        on_threshold_w=30.0,
+        off_threshold_w=25.0,
+        max_sample_gap_seconds=30.0,
+    )
+    machine.process(_sample(0, 20.0, circuit_id="fridge"))
+    machine.process(_sample(5, 120.0, circuit_id="fridge"))
+    machine.process(_sample(15, 120.0, circuit_id="fridge"))
+    machine.process(_sample(16, 120.0, circuit_id="fridge"))
+    machine.process(_sample(20, 20.0, circuit_id="fridge"))
+    stop = machine.process(_sample(51, None, circuit_id="fridge")).events[0]
+
+    assert stop.features["stop_power_w"] == 120.0
+    assert stop.features["transition_quality"] == "legacy_fallback"
+    assert "transition_delta_w" not in stop.features
+    assert "post_plateau_power_w" not in stop.features
+
+
+def test_transition_crossing_prunes_pre_context_older_than_sixty_seconds() -> None:
+    machine = _machine(max_sample_gap_seconds=600.0)
+    machine.process(_sample(0, 20.0, circuit_id="fridge"))
+    machine.process(_sample(61, 120.0, circuit_id="fridge"))
+    start = machine.process(_sample(71, 120.0, circuit_id="fridge")).events[0]
+
+    assert start.features["pre_sample_count"] == 0
+    assert start.features["post_sample_count"] == 2
+    assert start.features["transition_quality"] == "partial"
+    assert "transition_delta_w" not in start.features
+
+
+def test_pending_transition_post_samples_remain_bounded_and_age_pruned() -> None:
+    machine = _machine(on_dwell_seconds=100.0)
+    machine.process(_sample(0, 20.0, circuit_id="fridge"))
+    for seconds in range(1, 100, 5):
+        machine.process(_sample(seconds, 120.0, circuit_id="fridge"))
+    start = machine.process(_sample(101, 120.0, circuit_id="fridge")).events[0]
+
+    assert start.features["post_sample_count"] == 12
+    assert start.features["post_power_median_w"] == 120.0
+    assert start.features["transition_window_end"] == "2026-06-18T12:00:01+00:00"
+    assert start.features["transition_timing_uncertainty_s"] == 1.0
+
+
+def test_pending_transition_post_window_excludes_samples_older_than_sixty_seconds(
+) -> None:
+    machine = _machine(on_dwell_seconds=100.0)
+    machine.process(_sample(0, 20.0, circuit_id="fridge"))
+    for seconds, watts in (
+        (1, 100.0),
+        (21, 110.0),
+        (41, 120.0),
+        (61, 130.0),
+        (81, 140.0),
+    ):
+        machine.process(_sample(seconds, watts, circuit_id="fridge"))
+    start = machine.process(_sample(101, 150.0, circuit_id="fridge")).events[0]
+
+    assert start.features["post_sample_count"] == 4
+    assert start.features["post_power_median_w"] == 135.0
 
 
 def test_operating_state_machine_recovers_from_unavailable_without_false_start(

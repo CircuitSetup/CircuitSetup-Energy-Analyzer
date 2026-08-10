@@ -16,6 +16,7 @@ from ..models import (
     AlertEvidence,
     ApplianceProfile,
     CircuitMode,
+    EventType,
     NilmSourceKind,
     SensorRole,
 )
@@ -205,6 +206,12 @@ class NilmController:
         for event in events:
             if event.circuit_id == nilm_circuit_id:
                 continue
+            if getattr(event, "event_type", None) not in {
+                EventType.START,
+                EventType.STOP,
+                EventType.POWER_TRANSITION,
+            }:
+                continue
             if (
                 known_load_circuit_ids
                 and event.circuit_id not in known_load_circuit_ids
@@ -244,6 +251,8 @@ class NilmController:
         registry = self._coordinator.circuit_registry
         for event in events:
             if event.circuit_id == nilm_circuit_id:
+                continue
+            if getattr(event, "event_type", None) is EventType.POWER_TRANSITION:
                 continue
             config = registry.config_for_circuit(event.circuit_id)
             if config is not None and supports_direct_appliance_analysis(config):
