@@ -4,7 +4,7 @@ import hashlib
 import inspect
 import math
 from collections.abc import Callable, Iterable, Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from statistics import median
 from typing import Any
@@ -13,6 +13,12 @@ from . import notifications
 from .const import DOMAIN, NILM_INTERVAL_CHANGES_MAX_ITEMS
 from .discovery import sensor_metadata_role_conflict, sensor_role_from_metadata
 from .models import SensorRole
+from .nilm_interval_evidence import (
+    DEFAULT_THRESHOLDS,
+    NilmPowerSample,
+    derive_manual_interval_evidence,
+    normalize_power_samples,
+)
 from .ux import SENSITIVITY_VALUES
 
 try:
@@ -924,6 +930,12 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
         for coordinator in _target_nilm_coordinators(
             hass, circuit_id, data.get(ATTR_ENTRY_ID)
         ):
+            evidence = await _async_manual_interval_evidence(
+                hass,
+                coordinator,
+                circuit_id,
+                [{ATTR_START: data.get(ATTR_START), ATTR_END: data.get(ATTR_END)}],
+            )
             await _call_if_present(
                 coordinator,
                 "async_label_nilm_interval",
@@ -937,9 +949,8 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 mains_entity_id=data.get(ATTR_MAINS_ENTITY_ID),
                 ground_truth_entity_id=data.get(ATTR_GROUND_TRUTH_ENTITY_ID),
                 interval_id=data.get(ATTR_INTERVAL_ID),
-                source=data.get(ATTR_SOURCE, "manual"),
-                confidence=data.get(ATTR_CONFIDENCE, 1.0),
-                observed_transition_w=data.get(ATTR_OBSERVED_TRANSITION_W),
+                source="manual",
+                evidence=evidence[0],
             )
         return
 
@@ -961,12 +972,20 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
         for coordinator in _target_nilm_coordinators(
             hass, circuit_id, data.get(ATTR_ENTRY_ID)
         ):
+            drafts = data.get(ATTR_INTERVALS, [])
+            evidence = await _async_manual_interval_evidence(
+                hass, coordinator, circuit_id, drafts
+            )
+            enriched_intervals = [
+                _manual_interval_draft(draft, item)
+                for draft, item in zip(drafts, evidence, strict=True)
+            ]
             await _call_if_present(
                 coordinator,
                 "async_save_nilm_interval_changes",
                 circuit_id,
                 label=data.get(ATTR_LABEL),
-                intervals=data.get(ATTR_INTERVALS, []),
+                intervals=enriched_intervals,
                 removed_interval_ids=data.get(ATTR_REMOVED_INTERVAL_IDS, []),
                 assignment_id=data.get(ATTR_ASSIGNMENT_ID),
                 appliance_id=data.get(ATTR_APPLIANCE_ID),
@@ -2507,6 +2526,186 @@ def _nilm_reference_power_unit(hass: Any, entity_id: str) -> str:
         is SensorRole.REAL_POWER
         else ""
     )
+
+
+def _configured_manual_power_sources(
+    hass: Any, coordinator: Any, circuit_id: str
+) -> tuple[tuple[str, float], ...]:
+    """Return only configured real-power legs with a supported power unit."""
+    config = next(
+        (
+            item
+            for item in getattr(coordinator, "circuit_configs", ())
+            if getattr(item, "circuit_id", None) == circuit_id
+        ),
+        None,
+    )
+    sources: list[tuple[str, float]] = []
+    for sensor in getattr(config, "sensors", ()):
+        if getattr(sensor, "role", None) != SensorRole.REAL_POWER:
+            continue
+        entity_id = str(getattr(sensor, "entity_id", "") or "").strip()
+        unit = str(getattr(sensor, "unit", "") or "").strip()
+        if not unit:
+            unit = _nilm_reference_power_unit(hass, entity_id)
+        factor = {"W": 1.0, "kW": 1000.0, "mW": 0.001, "MW": 1_000_000.0}.get(unit)
+        if entity_id and factor is not None:
+            sources.append((entity_id, factor))
+    return tuple(sources)
+
+
+def _manual_interval_draft(
+    draft: Mapping[str, Any], evidence: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Keep manual identity metadata while dropping browser electrical claims."""
+    allowed = (
+        ATTR_INTERVAL_ID,
+        ATTR_START,
+        ATTR_END,
+        ATTR_LABEL,
+        ATTR_MAINS_ENTITY_ID,
+        ATTR_GROUND_TRUTH_ENTITY_ID,
+        "validation_start",
+        "validation_end",
+    )
+    return {key: draft[key] for key in allowed if key in draft} | {"evidence": evidence}
+
+
+async def _async_manual_interval_evidence(
+    hass: Any,
+    coordinator: Any,
+    circuit_id: str,
+    drafts: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Fetch one bounded union window and derive trusted evidence for each draft."""
+    parsed = [
+        (
+            _service_datetime(draft.get(ATTR_START), ATTR_START),
+            _service_datetime(draft.get(ATTR_END), ATTR_END),
+        )
+        for draft in drafts
+    ]
+    if any(end <= start for start, end in parsed):
+        raise HomeAssistantError("NILM label interval end must be after start")
+    sources = _configured_manual_power_sources(hass, coordinator, circuit_id)
+    if not parsed:
+        return []
+    context = timedelta(seconds=DEFAULT_THRESHOLDS.maximum_context_seconds)
+    union_start = min(start for start, _ in parsed) - context
+    union_end = max(end for _, end in parsed) + context
+    samples: list[NilmPowerSample] = []
+    source_history_available: dict[str, bool] = {}
+    quality_flags: set[str] = set()
+    for entity_id, factor in sources:
+        rows = await _async_nilm_sensor_history_rows(
+            hass, entity_id, union_start, union_end
+        )
+        states = tuple(_iter_history_states(rows))
+        source_history_available[entity_id] = False
+        for state in states:
+            reported_entity_id = str(_state_value(state, "entity_id") or entity_id)
+            if reported_entity_id != entity_id:
+                continue
+            timestamp = _state_timestamp(state)
+            if timestamp is None:
+                quality_flags.add("invalid_timestamp")
+                continue
+            source_history_available[entity_id] = True
+            raw = _state_value(state, "state")
+            state_text = str(raw or "").strip().lower()
+            if state_text in {"unknown", "unavailable"}:
+                samples.append(NilmPowerSample(timestamp, None, entity_id, state_text))
+                quality_flags.add(state_text)
+                continue
+            value = _float_or_none(raw)
+            if value is None:
+                samples.append(NilmPowerSample(timestamp, None, entity_id, "invalid"))
+                quality_flags.add("invalid")
+            else:
+                samples.append(NilmPowerSample(timestamp, value * factor, entity_id))
+    normalized = normalize_power_samples(samples)
+    source_ids = tuple(entity_id for entity_id, _ in sources)
+    unavailable = not sources or not all(source_history_available.values())
+    return [
+        _manual_evidence_mapping(
+            normalized,
+            start=start,
+            end=end,
+            source_entity_ids=source_ids,
+            extra_flags=quality_flags
+            | ({"no_configured_real_power_sources"} if not sources else set())
+            | ({"history_unavailable"} if unavailable else set()),
+        )
+        for start, end in parsed
+    ]
+
+
+def _manual_evidence_mapping(
+    samples: Iterable[NilmPowerSample],
+    *,
+    start: datetime,
+    end: datetime,
+    source_entity_ids: tuple[str, ...],
+    extra_flags: set[str],
+) -> dict[str, Any]:
+    """Translate pure evidence into the controller's complete schema-2 mapping."""
+    if not source_entity_ids or "history_unavailable" in extra_flags:
+        result: dict[str, Any] = {
+            "start_transition_w": None,
+            "stop_transition_w": None,
+            "median_power_w": None,
+            "average_power_w": None,
+            "measured_energy_kwh": None,
+            "partial_energy_kwh": None,
+            "source_coverage": 0.0,
+            "power_coverage": 0.0,
+            "maximum_source_skew_seconds": None,
+            "longest_power_gap_seconds": (end - start).total_seconds(),
+            "start_boundary_uncertainty_seconds": None,
+            "end_boundary_uncertainty_seconds": None,
+            "start_transition_eligible": False,
+            "stop_transition_eligible": False,
+            "plateau_eligible": False,
+            "energy_complete": False,
+            "evidence_confidence": 0.0,
+            "power_confidence": 0.0,
+        }
+    else:
+        derived = derive_manual_interval_evidence(
+            samples, start=start, end=end, source_entity_ids=source_entity_ids
+        )
+        result = {
+            "start_transition_w": derived.start_transition_w,
+            "stop_transition_w": derived.stop_transition_w,
+            "median_power_w": derived.net_plateau_power_w,
+            "average_power_w": derived.average_power_w,
+            "measured_energy_kwh": derived.measured_energy_kwh,
+            "partial_energy_kwh": derived.partial_energy_kwh,
+            "source_coverage": derived.source_coverage,
+            "power_coverage": derived.power_coverage,
+            "maximum_source_skew_seconds": derived.maximum_source_skew_seconds,
+            "longest_power_gap_seconds": derived.longest_power_gap_seconds,
+            "start_boundary_uncertainty_seconds": (
+                derived.start_boundary_uncertainty_seconds
+            ),
+            "end_boundary_uncertainty_seconds": (
+                derived.end_boundary_uncertainty_seconds
+            ),
+            "start_transition_eligible": derived.start_transition_eligible,
+            "stop_transition_eligible": derived.stop_transition_eligible,
+            "plateau_eligible": derived.plateau_eligible,
+            "energy_complete": derived.energy_complete,
+            "evidence_confidence": derived.evidence_confidence,
+            "power_confidence": derived.power_confidence,
+        }
+        extra_flags |= set(derived.quality_flags)
+    return {
+        "evidence_schema_version": 2,
+        "evidence_source": "manual_backend",
+        "evidence_generated_at": datetime.now(UTC).isoformat(),
+        **result,
+        "quality_flags": sorted(extra_flags),
+    }
 
 
 async def _async_nilm_sensor_history_rows(
