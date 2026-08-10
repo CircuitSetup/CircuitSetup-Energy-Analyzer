@@ -32,6 +32,9 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     SensorRole,
     Severity,
 )
+from custom_components.circuitsetup_energy_analyzer.nilm import (
+    normalize_nilm_assignment_model,
+)
 from custom_components.circuitsetup_energy_analyzer.normalize import (
     SourceState,
     build_circuit_sample,
@@ -126,12 +129,26 @@ class ExpectedNoAlert:
 
 
 @dataclass(frozen=True, slots=True)
+class ReplaySplit:
+    training_end_t: int
+    evaluation_start_t: int
+
+
+@dataclass(frozen=True, slots=True)
+class ExpectedStateSegment:
+    start_t: int
+    end_t: int
+    state_id: str
+
+
+@dataclass(frozen=True, slots=True)
 class CalibrationLabels:
     expected_events: tuple[ExpectedEvent, ...] = ()
     expected_alerts: tuple[ExpectedAlert, ...] = ()
     expected_no_alerts: tuple[ExpectedNoAlert, ...] = ()
     abnormal_condition_start_t: int | None = None
     component_truth: dict[str, ComponentTruth] = field(default_factory=dict)
+    replay_split: ReplaySplit | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +162,7 @@ class ExpectedComponentSession:
 class ComponentTruth:
     edges: tuple[ExpectedEvent, ...] = ()
     sessions: tuple[ExpectedComponentSession, ...] = ()
+    state_segments: tuple[ExpectedStateSegment, ...] = ()
     energy_kwh: float | None = None
     corroborating_helper_circuit_ids: frozenset[str] = frozenset()
 
@@ -173,6 +191,9 @@ class CalibrationFixture:
     path: Path
     source_kind: str | None = None
     assignments_by_circuit: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict
+    )
+    initial_runtime_by_circuit: dict[str, dict[str, dict[str, Any]]] = field(
         default_factory=dict
     )
     entry_id: str | None = None
@@ -214,6 +235,12 @@ class CalibrationMetrics:
     false_helper_association_rate: float | None = None
     ambiguous_event_rate: float = 0.0
     conservation_violations: int = 0
+    false_assignment_rate: float | None = None
+    nilm_confidence_bins: dict[str, dict[str, float]] = field(default_factory=dict)
+    decision_impacts: ReplayDecisionImpacts = field(
+        default_factory=lambda: ReplayDecisionImpacts()
+    )
+    replay_split: ReplaySplit | None = None
     expectation_failures: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -226,8 +253,33 @@ class ComponentReplayMetrics:
     session_f1: float | None
     median_start_error_seconds: float | None
     median_stop_error_seconds: float | None
+    median_duration_error_seconds: float | None
+    interval_iou: float | None
+    state_accuracy: float | None
+    observed_active_state_count: int
     energy_absolute_error_kwh: float | None
     energy_percentage_error: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayDecisionImpact:
+    changed_count: int = 0
+    changed_correct_count: int = 0
+    changed_incorrect_count: int = 0
+    changed_neutral_count: int = 0
+    changed_unscored_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayDecisionImpacts:
+    duration: ReplayDecisionImpact = field(default_factory=ReplayDecisionImpact)
+    validation: ReplayDecisionImpact = field(default_factory=ReplayDecisionImpact)
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayGateResult:
+    passed: bool
+    violations: tuple[str, ...]
 
 
 def load_calibration_fixture(path: Path) -> CalibrationFixture:
@@ -302,6 +354,14 @@ def _parse_fixture(raw: Mapping[str, Any], path: Path) -> CalibrationFixture:
         source_kind = production_kinds.pop()
 
     labels = _parse_labels(_required_mapping(raw, "labels"))
+    if labels.replay_split and any(
+        sample.t < labels.replay_split.evaluation_start_t for sample in samples
+    ):
+        msg = (
+            f"{path}: evaluation samples must begin at or after "
+            "replay_split.evaluation_start_t"
+        )
+        raise CalibrationFixtureError(msg)
     expectations = _parse_expectations(
         _required_mapping(raw, "calibration_expectations")
     )
@@ -325,6 +385,7 @@ def _parse_fixture(raw: Mapping[str, Any], path: Path) -> CalibrationFixture:
         if isinstance(entry, Mapping)
     )
     assignments = _optional_mapping(raw, "assignments")
+    initial_runtime = _optional_mapping(raw, "initial_nilm_runtime_by_circuit")
     return CalibrationFixture(
         schema_version=schema_version,
         id=fixture_id,
@@ -344,6 +405,15 @@ def _parse_fixture(raw: Mapping[str, Any], path: Path) -> CalibrationFixture:
             for circuit_id, values in assignments.items()
             if isinstance(values, list)
         },
+        initial_runtime_by_circuit={
+            str(circuit_id): {
+                str(assignment_id): dict(runtime)
+                for assignment_id, runtime in runtimes.items()
+                if isinstance(runtime, Mapping)
+            }
+            for circuit_id, runtimes in initial_runtime.items()
+            if isinstance(runtimes, Mapping)
+        },
         entry_id=(str(raw["entry_id"]) if raw.get("entry_id") else None),
         entries=entries,
         min_delta_w=float(raw.get("min_delta_w", 100.0)),
@@ -352,12 +422,19 @@ def _parse_fixture(raw: Mapping[str, Any], path: Path) -> CalibrationFixture:
 
 def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
     state = AnalyzerState()
+    state.nilm_component_runtime_by_circuit = {
+        circuit_id: {
+            assignment_id: dict(runtime) for assignment_id, runtime in runtimes.items()
+        }
+        for circuit_id, runtimes in fixture.initial_runtime_by_circuit.items()
+    }
     store_data = FeatureStoreData(
         nilm_appliance_assignments_by_circuit={
             circuit_id: [dict(item) for item in assignments]
             for circuit_id, assignments in fixture.assignments_by_circuit.items()
         }
     )
+
     def build_processors() -> tuple[
         CircuitEventProcessor,
         NilmSampleProcessor,
@@ -608,6 +685,7 @@ def evaluate_replay_result(
         matched_alert_indexes,
     )
     reconciliation = _combined_reconciliation(result)
+    component_metrics = _component_metrics(fixture, result)
     return CalibrationMetrics(
         fixture_id=fixture.id,
         true_positive_alerts=true_positive_alerts,
@@ -624,17 +702,19 @@ def evaluate_replay_result(
         brier_score=brier,
         expected_calibration_error=ece,
         source_kind=fixture.source_kind,
-        component_metrics=_component_metrics(fixture, result),
+        component_metrics=component_metrics,
         residual_energy_kwh=float(reconciliation.get("residual_energy_kwh", 0.0)),
-        false_helper_association_rate=_false_helper_association_rate(
-            fixture, result
-        ),
+        false_helper_association_rate=_false_helper_association_rate(fixture, result),
         ambiguous_event_rate=_ratio_or_none(
             int(reconciliation.get("ambiguous_event_count", 0)),
             int(reconciliation.get("total_event_count", 0)),
         )
         or 0.0,
         conservation_violations=int(reconciliation.get("conservation_violations", 0)),
+        false_assignment_rate=_false_assignment_rate(fixture, result),
+        nilm_confidence_bins=_nilm_confidence_calibration(fixture, result),
+        decision_impacts=_decision_impacts(fixture, result),
+        replay_split=fixture.labels.replay_split,
     )
 
 
@@ -873,6 +953,19 @@ def _mark_prior_energy_days_complete(
 
 
 def _parse_labels(raw: Mapping[str, Any]) -> CalibrationLabels:
+    replay_split_raw = raw.get("replay_split")
+    replay_split = None
+    if replay_split_raw is not None:
+        if not isinstance(replay_split_raw, Mapping):
+            msg = "replay_split must be a mapping"
+            raise CalibrationFixtureError(msg)
+        replay_split = ReplaySplit(
+            training_end_t=int(replay_split_raw["training_end_t"]),
+            evaluation_start_t=int(replay_split_raw["evaluation_start_t"]),
+        )
+        if replay_split.training_end_t >= replay_split.evaluation_start_t:
+            msg = "replay_split.training_end_t must precede evaluation_start_t"
+            raise CalibrationFixtureError(msg)
     return CalibrationLabels(
         expected_events=tuple(
             ExpectedEvent(
@@ -912,35 +1005,56 @@ def _parse_labels(raw: Mapping[str, Any]) -> CalibrationLabels:
             else None
         ),
         component_truth={
-            str(component_id): ComponentTruth(
-                edges=tuple(
-                    ExpectedEvent(
-                        circuit_id=str(component_id),
-                        event_type=EventType(str(item["event_type"])),
-                        around_t=int(item["around_t"]),
-                        tolerance_seconds=int(item.get("tolerance_seconds", 0)),
-                    )
-                    for item in _optional_list(value, "edges")
-                ),
-                sessions=tuple(
-                    ExpectedComponentSession(
-                        start_t=int(item["start_t"]),
-                        end_t=int(item["end_t"]),
-                        tolerance_seconds=int(item.get("tolerance_seconds", 0)),
-                    )
-                    for item in _optional_list(value, "sessions")
-                ),
-                energy_kwh=_optional_float(value.get("energy_kwh")),
-                corroborating_helper_circuit_ids=frozenset(
-                    str(item)
-                    for item in _optional_list(
-                        value, "corroborating_helper_circuit_ids"
-                    )
-                ),
-            )
+            str(component_id): _parse_component_truth(str(component_id), value)
             for component_id, value in _optional_mapping(raw, "component_truth").items()
             if isinstance(value, Mapping)
         },
+        replay_split=replay_split,
+    )
+
+
+def _parse_component_truth(component_id: str, raw: Mapping[str, Any]) -> ComponentTruth:
+    state_segments = tuple(
+        ExpectedStateSegment(
+            start_t=int(item["start_t"]),
+            end_t=int(item["end_t"]),
+            state_id=str(item["state_id"]),
+        )
+        for item in _optional_list(raw, "state_segments")
+    )
+    if any(segment.end_t <= segment.start_t for segment in state_segments):
+        msg = f"{component_id} state_segments must have positive durations"
+        raise CalibrationFixtureError(msg)
+    if any(
+        later.start_t < earlier.end_t
+        for earlier, later in zip(state_segments, state_segments[1:], strict=False)
+    ):
+        msg = f"{component_id} state_segments must not overlap"
+        raise CalibrationFixtureError(msg)
+    return ComponentTruth(
+        edges=tuple(
+            ExpectedEvent(
+                circuit_id=component_id,
+                event_type=EventType(str(item["event_type"])),
+                around_t=int(item["around_t"]),
+                tolerance_seconds=int(item.get("tolerance_seconds", 0)),
+            )
+            for item in _optional_list(raw, "edges")
+        ),
+        sessions=tuple(
+            ExpectedComponentSession(
+                start_t=int(item["start_t"]),
+                end_t=int(item["end_t"]),
+                tolerance_seconds=int(item.get("tolerance_seconds", 0)),
+            )
+            for item in _optional_list(raw, "sessions")
+        ),
+        state_segments=state_segments,
+        energy_kwh=_optional_float(raw.get("energy_kwh")),
+        corroborating_helper_circuit_ids=frozenset(
+            str(item)
+            for item in _optional_list(raw, "corroborating_helper_circuit_ids")
+        ),
     )
 
 
@@ -1112,28 +1226,22 @@ def _component_metrics(
             and item.get("start")
             and item.get("end")
         ]
-        matched: list[tuple[ExpectedComponentSession, Mapping[str, Any]]] = []
-        unused = list(predicted)
-        for expected in truth.sessions:
-            for actual in unused:
-                start_error = abs(
-                    (
-                        _parse_datetime(str(actual["start"])) - fixture.start_time
-                    ).total_seconds()
-                    - expected.start_t
-                )
-                stop_error = abs(
-                    (
-                        _parse_datetime(str(actual["end"])) - fixture.start_time
-                    ).total_seconds()
-                    - expected.end_t
-                )
-                if max(start_error, stop_error) <= expected.tolerance_seconds:
-                    matched.append((expected, actual))
-                    unused.remove(actual)
-                    break
+        matched = [
+            (expected, actual)
+            for expected, actual in _optimal_session_pairs(
+                truth.sessions,
+                predicted,
+                lambda expected, actual: float(
+                    _session_matches_truth(fixture, expected, actual)
+                ),
+            )
+            if expected is not None and actual is not None
+        ]
         session_precision = _ratio_or_none(len(matched), len(predicted))
         session_recall = _ratio_or_none(len(matched), len(truth.sessions))
+        evaluation_pairs = _session_evaluation_pairs(
+            fixture, truth.sessions, predicted
+        )
         start_errors = [
             abs(
                 (
@@ -1141,7 +1249,8 @@ def _component_metrics(
                 ).total_seconds()
                 - expected.start_t
             )
-            for expected, actual in matched
+            for expected, actual in evaluation_pairs
+            if expected is not None and actual is not None
         ]
         stop_errors = [
             abs(
@@ -1150,8 +1259,42 @@ def _component_metrics(
                 ).total_seconds()
                 - expected.end_t
             )
-            for expected, actual in matched
+            for expected, actual in evaluation_pairs
+            if expected is not None and actual is not None
         ]
+        duration_errors = [
+            abs(
+                (
+                    _parse_datetime(str(actual["end"]))
+                    - _parse_datetime(str(actual["start"]))
+                ).total_seconds()
+                - (expected.end_t - expected.start_t)
+            )
+            for expected, actual in evaluation_pairs
+            if expected is not None and actual is not None
+        ]
+        interval_ious = [
+            0.0
+            if expected is None or actual is None
+            else _session_interval_iou(fixture, expected, actual)
+            for expected, actual in evaluation_pairs
+        ]
+        predicted_state_segments = [
+            segment
+            for actual in predicted
+            for segment in _predicted_state_segments(fixture, actual)
+        ]
+        state_accuracy = _state_accuracy(
+            truth.state_segments,
+            predicted_state_segments,
+        )
+        observed_active_state_count = len(
+            {
+                state_id
+                for state_id, _start, _end in predicted_state_segments
+                if state_id != "off"
+            }
+        )
         predicted_starts = {
             _parse_datetime(str(actual["start"])) for actual in predicted
         }
@@ -1175,10 +1318,14 @@ def _component_metrics(
         matched_edges = 0
         for expected in truth.edges:
             for actual in unmatched_edges:
-                if actual[0] is expected.event_type and abs(
-                    (actual[1] - fixture.start_time).total_seconds()
-                    - expected.around_t
-                ) <= expected.tolerance_seconds:
+                if (
+                    actual[0] is expected.event_type
+                    and abs(
+                        (actual[1] - fixture.start_time).total_seconds()
+                        - expected.around_t
+                    )
+                    <= expected.tolerance_seconds
+                ):
                     matched_edges += 1
                     unmatched_edges.remove(actual)
                     break
@@ -1196,6 +1343,16 @@ def _component_metrics(
             session_f1=_f1(session_precision, session_recall),
             median_start_error_seconds=median(start_errors) if start_errors else None,
             median_stop_error_seconds=median(stop_errors) if stop_errors else None,
+            median_duration_error_seconds=(
+                median(duration_errors) if duration_errors else None
+            ),
+            interval_iou=(
+                round(sum(interval_ious) / len(interval_ious), 3)
+                if interval_ious
+                else None
+            ),
+            state_accuracy=state_accuracy,
+            observed_active_state_count=observed_active_state_count,
             energy_absolute_error_kwh=round(absolute_error, 6)
             if absolute_error is not None
             else None,
@@ -1204,6 +1361,625 @@ def _component_metrics(
             else None,
         )
     return metrics
+
+
+def evaluate_nilm_replay_gate(
+    baseline: CalibrationMetrics,
+    candidate: CalibrationMetrics,
+    *,
+    multistate_component_ids: tuple[str, ...] = (),
+    variable_envelope_component_ids: tuple[str, ...] = (),
+    required_score_channels: tuple[str, ...] = (),
+) -> ReplayGateResult:
+    """Apply the deterministic no-regression gate to chronological NILM replay."""
+    violations: list[str] = []
+    if candidate.expectation_failures:
+        violations.append("candidate has deterministic expectation failures")
+    if candidate.event_miss_count > baseline.event_miss_count:
+        violations.append("candidate missed more deterministic events")
+    if not _not_increased(
+        candidate.false_assignment_rate,
+        baseline.false_assignment_rate,
+    ):
+        violations.append("false assignment rate increased")
+    if candidate.conservation_violations > baseline.conservation_violations:
+        violations.append("conservation violations increased")
+    if not _not_increased(
+        candidate.residual_energy_kwh,
+        baseline.residual_energy_kwh,
+    ):
+        violations.append("residual energy increased")
+
+    for component_id, baseline_component in baseline.component_metrics.items():
+        candidate_component = candidate.component_metrics.get(component_id)
+        if candidate_component is None:
+            violations.append(f"missing component replay metric: {component_id}")
+            continue
+        for field_name in ("session_f1", "interval_iou"):
+            if not _not_worse(
+                getattr(candidate_component, field_name),
+                getattr(baseline_component, field_name),
+            ):
+                violations.append(f"{component_id} {field_name} regressed")
+        if not _not_increased(
+            candidate_component.energy_absolute_error_kwh,
+            baseline_component.energy_absolute_error_kwh,
+        ):
+            violations.append(f"{component_id} energy error increased")
+
+    for channel, impact in (
+        ("duration", candidate.decision_impacts.duration),
+        ("validation", candidate.decision_impacts.validation),
+    ):
+        if impact.changed_incorrect_count > impact.changed_correct_count:
+            violations.append(f"{channel} changed decisions have net harm")
+        if impact.changed_unscored_count:
+            violations.append(f"{channel} changed decisions were not truth-scored")
+        if channel in required_score_channels and (
+            not impact.changed_count
+            or impact.changed_correct_count <= impact.changed_incorrect_count
+        ):
+            violations.append(f"{channel} did not demonstrate net benefit")
+
+    for component_id in multistate_component_ids:
+        baseline_component = baseline.component_metrics.get(component_id)
+        candidate_component = candidate.component_metrics.get(component_id)
+        if candidate_component is None or candidate_component.state_accuracy is None:
+            violations.append(f"missing multistate accuracy: {component_id}")
+            continue
+        if baseline_component is None or not _improved(
+            candidate_component.state_accuracy,
+            baseline_component.state_accuracy,
+        ):
+            violations.append(f"{component_id} state accuracy did not improve")
+        if baseline_component is None or not _improved(
+            candidate_component.session_f1,
+            baseline_component.session_f1,
+        ):
+            violations.append(f"{component_id} session F1 did not improve")
+
+    for component_id in variable_envelope_component_ids:
+        component = candidate.component_metrics.get(component_id)
+        if component is None or component.observed_active_state_count != 1:
+            violations.append(f"{component_id} variable envelope was oversegmented")
+
+    if not _valid_replay_split(baseline.replay_split) or not _valid_replay_split(
+        candidate.replay_split
+    ):
+        violations.append("replay split provenance is required")
+    elif baseline.replay_split != candidate.replay_split:
+        violations.append("baseline and candidate replay splits differ")
+
+    return ReplayGateResult(passed=not violations, violations=tuple(violations))
+
+
+def _not_worse(candidate: float | None, baseline: float | None) -> bool:
+    if baseline is None:
+        return True
+    return candidate is not None and candidate >= baseline
+
+
+def _not_increased(candidate: float | None, baseline: float | None) -> bool:
+    if baseline is None:
+        return candidate is None
+    return candidate is not None and candidate <= baseline
+
+
+def _improved(candidate: float | None, baseline: float | None) -> bool:
+    return (
+        candidate is not None
+        and candidate > (baseline if baseline is not None else 0.0)
+    )
+
+
+def _valid_replay_split(split: ReplaySplit | None) -> bool:
+    return split is not None and split.training_end_t < split.evaluation_start_t
+
+
+def _interval_iou(
+    expected_start: float,
+    expected_end: float,
+    actual_start: float,
+    actual_end: float,
+) -> float:
+    overlap = max(
+        0.0, min(expected_end, actual_end) - max(expected_start, actual_start)
+    )
+    union = max(expected_end, actual_end) - min(expected_start, actual_start)
+    return overlap / union if union else 0.0
+
+
+def _session_interval_iou(
+    fixture: CalibrationFixture,
+    expected: ExpectedComponentSession,
+    actual: Mapping[str, Any],
+) -> float:
+    return _interval_iou(
+        expected.start_t,
+        expected.end_t,
+        (_parse_datetime(str(actual["start"])) - fixture.start_time).total_seconds(),
+        (_parse_datetime(str(actual["end"])) - fixture.start_time).total_seconds(),
+    )
+
+
+def _session_evaluation_pairs(
+    fixture: CalibrationFixture,
+    expected_sessions: tuple[ExpectedComponentSession, ...],
+    predicted_sessions: list[Mapping[str, Any]],
+) -> list[tuple[ExpectedComponentSession | None, Mapping[str, Any] | None]]:
+    return _optimal_session_pairs(
+        expected_sessions,
+        predicted_sessions,
+        lambda expected, actual: _session_interval_iou(fixture, expected, actual),
+    )
+
+
+def _optimal_session_pairs(
+    expected_sessions: tuple[ExpectedComponentSession, ...],
+    predicted_sessions: list[Mapping[str, Any]],
+    score: Any,
+) -> list[tuple[ExpectedComponentSession | None, Mapping[str, Any] | None]]:
+    """Return a deterministic maximum-total-score one-to-one session pairing."""
+    size = max(len(expected_sessions), len(predicted_sessions))
+    if not size:
+        return []
+    weights = [
+        [
+            (
+                float(score(expected, actual))
+                if expected_index < len(expected_sessions)
+                and actual_index < len(predicted_sessions)
+                else 0.0
+            )
+            for actual_index, actual in enumerate(
+                list(predicted_sessions) + [None] * (size - len(predicted_sessions))
+            )
+        ]
+        for expected_index, expected in enumerate(
+            list(expected_sessions) + [None] * (size - len(expected_sessions))
+        )
+    ]
+    selected = _maximum_weight_assignment(weights)
+    used_actual_indexes: set[int] = set()
+    pairs: list[tuple[ExpectedComponentSession | None, Mapping[str, Any] | None]] = []
+    for expected_index, expected in enumerate(expected_sessions):
+        actual_index = selected[expected_index]
+        actual = (
+            predicted_sessions[actual_index]
+            if actual_index < len(predicted_sessions)
+            and weights[expected_index][actual_index] > 0.0
+            else None
+        )
+        if actual is not None:
+            used_actual_indexes.add(actual_index)
+        pairs.append((expected, actual))
+    pairs.extend(
+        (None, actual)
+        for index, actual in enumerate(predicted_sessions)
+        if index not in used_actual_indexes
+    )
+    return pairs
+
+
+def _maximum_weight_assignment(weights: list[list[float]]) -> list[int]:
+    """Solve a square maximum-weight assignment with stable tie ordering."""
+    size = len(weights)
+    if not size:
+        return []
+    maximum = max(max(row) for row in weights)
+    costs = [[maximum - weight for weight in row] for row in weights]
+    u = [0.0] * (size + 1)
+    v = [0.0] * (size + 1)
+    p = [0] * (size + 1)
+    way = [0] * (size + 1)
+    for row in range(1, size + 1):
+        p[0] = row
+        column = 0
+        min_cost = [float("inf")] * (size + 1)
+        used = [False] * (size + 1)
+        while True:
+            used[column] = True
+            assigned_row = p[column]
+            delta = float("inf")
+            next_column = 0
+            for candidate_column in range(1, size + 1):
+                if used[candidate_column]:
+                    continue
+                reduced_cost = (
+                    costs[assigned_row - 1][candidate_column - 1]
+                    - u[assigned_row]
+                    - v[candidate_column]
+                )
+                if reduced_cost < min_cost[candidate_column]:
+                    min_cost[candidate_column] = reduced_cost
+                    way[candidate_column] = column
+                if min_cost[candidate_column] < delta:
+                    delta = min_cost[candidate_column]
+                    next_column = candidate_column
+            for candidate_column in range(size + 1):
+                if used[candidate_column]:
+                    u[p[candidate_column]] += delta
+                    v[candidate_column] -= delta
+                else:
+                    min_cost[candidate_column] -= delta
+            column = next_column
+            if p[column] == 0:
+                break
+        while True:
+            previous_column = way[column]
+            p[column] = p[previous_column]
+            column = previous_column
+            if column == 0:
+                break
+    assignment = [0] * size
+    for column in range(1, size + 1):
+        assignment[p[column] - 1] = column - 1
+    return assignment
+
+
+def _predicted_state_segments(
+    fixture: CalibrationFixture, session: Mapping[str, Any]
+) -> list[tuple[str, float, float]]:
+    path = sorted(
+        (
+            item
+            for item in _optional_list(session, "state_path")
+            if isinstance(item, Mapping)
+            and item.get("state_id")
+            and item.get("started_at")
+        ),
+        key=lambda item: str(item["started_at"]),
+    )
+    if not path or not session.get("start") or not session.get("end"):
+        return []
+    session_start = (
+        _parse_datetime(str(session["start"])) - fixture.start_time
+    ).total_seconds()
+    session_end = (
+        _parse_datetime(str(session["end"])) - fixture.start_time
+    ).total_seconds()
+    segments: list[tuple[str, float, float]] = []
+    for index, item in enumerate(path):
+        started_at = (
+            _parse_datetime(str(item["started_at"])) - fixture.start_time
+        ).total_seconds()
+        ended_at = (
+            (
+                _parse_datetime(str(path[index + 1]["started_at"])) - fixture.start_time
+            ).total_seconds()
+            if index + 1 < len(path)
+            else session_end
+        )
+        if ended_at > max(started_at, session_start):
+            segments.append(
+                (
+                    str(item["state_id"]),
+                    max(started_at, session_start),
+                    min(ended_at, session_end),
+                )
+            )
+    return segments
+
+
+def _state_accuracy(
+    expected: tuple[ExpectedStateSegment, ...],
+    predicted: list[tuple[str, float, float]],
+) -> float | None:
+    if not expected:
+        return None
+    expected_duration = sum(segment.end_t - segment.start_t for segment in expected)
+    if expected_duration <= 0:
+        return None
+    correct_duration = sum(
+        _merged_overlap_duration(
+            expected_segment.start_t,
+            expected_segment.end_t,
+            [
+                (predicted_start, predicted_end)
+                for state_id, predicted_start, predicted_end in predicted
+                if state_id == expected_segment.state_id
+            ],
+        )
+        for expected_segment in expected
+    )
+    return round(correct_duration / expected_duration, 3)
+
+
+def _merged_overlap_duration(
+    expected_start: float,
+    expected_end: float,
+    intervals: list[tuple[float, float]],
+) -> float:
+    overlapping = sorted(
+        (
+            (max(expected_start, start), min(expected_end, end))
+            for start, end in intervals
+            if end > expected_start and start < expected_end
+        ),
+    )
+    merged: list[tuple[float, float]] = []
+    for start, end in overlapping:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return sum(end - start for start, end in merged)
+
+
+def _completed_nilm_sessions(result: ReplayResult) -> list[Mapping[str, Any]]:
+    return [
+        session
+        for history in result.store_data.nilm_session_history_by_circuit.values()
+        for session in history
+        if isinstance(session, Mapping) and session.get("start") and session.get("end")
+    ]
+
+
+def _session_matches_truth(
+    fixture: CalibrationFixture,
+    expected: ExpectedComponentSession,
+    actual: Mapping[str, Any],
+) -> bool:
+    start_error = abs(
+        (_parse_datetime(str(actual["start"])) - fixture.start_time).total_seconds()
+        - expected.start_t
+    )
+    stop_error = abs(
+        (_parse_datetime(str(actual["end"])) - fixture.start_time).total_seconds()
+        - expected.end_t
+    )
+    return max(start_error, stop_error) <= expected.tolerance_seconds
+
+
+def _false_assignment_rate(
+    fixture: CalibrationFixture, result: ReplayResult
+) -> float | None:
+    records: list[bool] = []
+    unused_truth = {
+        component_id: list(truth.sessions)
+        for component_id, truth in fixture.labels.component_truth.items()
+    }
+    for session in _completed_nilm_sessions(result):
+        component_id = str(
+            session.get("assignment_id") or session.get("appliance_id") or ""
+        )
+        expected = next(
+            (
+                item
+                for item in unused_truth.get(component_id, ())
+                if _session_matches_truth(fixture, item, session)
+            ),
+            None,
+        )
+        records.append(expected is None)
+        if expected is not None:
+            unused_truth[component_id].remove(expected)
+    return _ratio_or_none(records.count(True), len(records))
+
+
+def _prediction_matches_truth(
+    fixture: CalibrationFixture,
+    component_id: str,
+    prediction: Mapping[str, Any],
+) -> bool | None:
+    truth = fixture.labels.component_truth.get(component_id)
+    timestamp = prediction.get("prediction_timestamp")
+    if truth is None or not timestamp:
+        return None
+    offset = (_parse_datetime(str(timestamp)) - fixture.start_time).total_seconds()
+    kind = str(prediction.get("transition_kind") or "").lower()
+    if kind in {"start", "on"}:
+        return any(
+            edge.event_type is EventType.START
+            and abs(offset - edge.around_t) <= edge.tolerance_seconds
+            for edge in truth.edges
+        )
+    if kind in {"stop", "off"}:
+        return any(
+            edge.event_type is EventType.STOP
+            and abs(offset - edge.around_t) <= edge.tolerance_seconds
+            for edge in truth.edges
+        )
+    state_id = str(prediction.get("state_id") or "")
+    return any(
+        segment.state_id == state_id and segment.start_t <= offset < segment.end_t
+        for segment in truth.state_segments
+    )
+
+
+def _nilm_confidence_calibration(
+    fixture: CalibrationFixture, result: ReplayResult
+) -> dict[str, dict[str, float]]:
+    bins = {
+        label: {
+            "prediction_count": 0.0,
+            "correct_count": 0.0,
+            "incorrect_count": 0.0,
+            "observed_accuracy": 0.0,
+            "average_score": 0.0,
+        }
+        for label in CALIBRATION_CONFIDENCE_BINS
+    }
+    for session in _completed_nilm_sessions(result):
+        component_id = str(
+            session.get("assignment_id") or session.get("appliance_id") or ""
+        )
+        for prediction in _optional_list(session, "accepted_predictions"):
+            if not isinstance(prediction, Mapping):
+                continue
+            outcome = _prediction_matches_truth(fixture, component_id, prediction)
+            score = _optional_float(prediction.get("candidate_score"))
+            if outcome is None or score is None:
+                continue
+            bucket = bins[_bin_label(max(0.0, min(score, 1.0)))]
+            bucket["prediction_count"] += 1.0
+            bucket["correct_count"] += float(outcome)
+            bucket["incorrect_count"] += float(not outcome)
+            bucket["average_score"] += score
+    for bucket in bins.values():
+        count = bucket["prediction_count"]
+        if count:
+            bucket["average_score"] = round(bucket["average_score"] / count, 3)
+            bucket["observed_accuracy"] = round(bucket["correct_count"] / count, 3)
+    return bins
+
+
+def _decision_impacts(
+    fixture: CalibrationFixture, result: ReplayResult
+) -> ReplayDecisionImpacts:
+    decisions_by_channel: dict[str, list[tuple[str, Mapping[str, Any]]]] = {
+        "duration": [],
+        "validation": [],
+    }
+    for circuit_id, decision in _replay_score_decisions(result):
+        for channel in decisions_by_channel:
+            if f"{channel}_counterfactual_prototype_ids" in decision:
+                decisions_by_channel[channel].append((circuit_id, decision))
+
+    def impact_for(channel: str) -> ReplayDecisionImpact:
+        correct = incorrect = neutral = unscored = 0
+        for circuit_id, decision in decisions_by_channel[channel]:
+            accepted_outcomes = _decision_outcomes(
+                fixture,
+                circuit_id,
+                tuple(
+                    str(prototype_id)
+                    for prototype_id in _optional_list(
+                        decision, "accepted_prototype_ids"
+                    )
+                ),
+                str(decision["timestamp"]),
+            )
+            counterfactual_outcomes = _decision_outcomes(
+                fixture,
+                circuit_id,
+                tuple(
+                    str(prototype_id)
+                    for prototype_id in _optional_list(
+                        decision, f"{channel}_counterfactual_prototype_ids"
+                    )
+                ),
+                str(decision["timestamp"]),
+            )
+            if (
+                accepted_outcomes is None
+                or counterfactual_outcomes is None
+                or any(
+                    outcome is None
+                    for outcome in (*accepted_outcomes, *counterfactual_outcomes)
+                )
+            ):
+                unscored += 1
+                continue
+            accepted_correct = _decision_is_correct(
+                accepted_outcomes, counterfactual_outcomes
+            )
+            counterfactual_correct = _decision_is_correct(
+                counterfactual_outcomes, accepted_outcomes
+            )
+            if accepted_correct and not counterfactual_correct:
+                correct += 1
+            elif not accepted_correct and counterfactual_correct:
+                incorrect += 1
+            else:
+                neutral += 1
+        return ReplayDecisionImpact(
+            changed_count=len(decisions_by_channel[channel]),
+            changed_correct_count=correct,
+            changed_incorrect_count=incorrect,
+            changed_neutral_count=neutral,
+            changed_unscored_count=unscored,
+        )
+
+    return ReplayDecisionImpacts(
+        duration=impact_for("duration"),
+        validation=impact_for("validation"),
+    )
+
+
+def _replay_score_decisions(
+    result: ReplayResult,
+) -> list[tuple[str, Mapping[str, Any]]]:
+    """Recover every bounded runtime decision from chronological snapshots."""
+    decisions: dict[tuple[str, str, int], tuple[str, Mapping[str, Any]]] = {}
+
+    def collect(
+        scope: str, reconciliations: Mapping[str, Any]
+    ) -> None:
+        for raw_circuit_id, reconciliation in reconciliations.items():
+            if not isinstance(reconciliation, Mapping):
+                continue
+            circuit_id = str(raw_circuit_id)
+            for decision in _optional_list(reconciliation, "score_decisions"):
+                if not isinstance(decision, Mapping) or not decision.get("timestamp"):
+                    continue
+                sequence = max(_optional_int(decision.get("sequence")) or 0, 0)
+                if sequence:
+                    decisions[(scope, circuit_id, sequence)] = (
+                        circuit_id,
+                        dict(decision),
+                    )
+
+    for snapshot in result.state_snapshots:
+        if not isinstance(snapshot, Mapping):
+            continue
+        reconciliations = snapshot.get("nilm_reconciliation_by_circuit")
+        if isinstance(reconciliations, Mapping):
+            collect(str(snapshot.get("state_id") or "snapshot"), reconciliations)
+    collect(
+        str(id(result.final_state)),
+        result.final_state.nilm_reconciliation_by_circuit,
+    )
+    return list(decisions.values())
+
+
+def _decision_outcomes(
+    fixture: CalibrationFixture,
+    circuit_id: str,
+    prototype_ids: tuple[str, ...],
+    timestamp: str,
+) -> list[bool | None] | None:
+    if not prototype_ids:
+        return []
+    prototypes = _fixture_prototypes_by_id(fixture, circuit_id)
+    outcomes: list[bool | None] = []
+    for prototype_id in prototype_ids:
+        candidate = prototypes.get(prototype_id)
+        if candidate is None:
+            return None
+        component_id, prototype = candidate
+        outcomes.append(
+            _prediction_matches_truth(
+                fixture,
+                component_id,
+                {
+                    "prediction_timestamp": timestamp,
+                    "transition_kind": prototype["kind"],
+                    "state_id": prototype["to_state_id"],
+                },
+            )
+        )
+    return outcomes
+
+
+def _decision_is_correct(
+    outcomes: list[bool | None], alternate_outcomes: list[bool | None]
+) -> bool:
+    """Treat rejection as correct only when the alternate outcome is false."""
+    return all(outcomes) if outcomes else not any(alternate_outcomes)
+
+
+def _fixture_prototypes_by_id(
+    fixture: CalibrationFixture, circuit_id: str
+) -> dict[str, tuple[str, Mapping[str, Any]]]:
+    prototypes: dict[str, tuple[str, Mapping[str, Any]]] = {}
+    for assignment in fixture.assignments_by_circuit.get(circuit_id, ()):
+        assignment_id = str(assignment.get("assignment_id") or "")
+        model = normalize_nilm_assignment_model(assignment)
+        for prototype in model.get("transition_prototypes", ()):
+            if isinstance(prototype, Mapping) and prototype.get("id"):
+                prototypes[str(prototype["id"])] = (assignment_id, prototype)
+    return prototypes
 
 
 def _combined_reconciliation(result: ReplayResult) -> dict[str, Any]:
@@ -1233,23 +2009,30 @@ def _false_helper_association_rate(
                 session.get("assignment_id") or session.get("appliance_id") or ""
             )
             truth = fixture.labels.component_truth.get(component_id)
-            matching_truth = next((
-                expected
-                for expected in unused_truth.get(component_id, ())
-                if max(
-                    abs(
-                        (_parse_datetime(str(session["start"])) - fixture.start_time)
-                        .total_seconds()
-                        - expected.start_t
-                    ),
-                    abs(
-                        (_parse_datetime(str(session["end"])) - fixture.start_time)
-                        .total_seconds()
-                        - expected.end_t
-                    ),
-                )
-                <= expected.tolerance_seconds
-            ), None)
+            matching_truth = next(
+                (
+                    expected
+                    for expected in unused_truth.get(component_id, ())
+                    if max(
+                        abs(
+                            (
+                                _parse_datetime(str(session["start"]))
+                                - fixture.start_time
+                            ).total_seconds()
+                            - expected.start_t
+                        ),
+                        abs(
+                            (
+                                _parse_datetime(str(session["end"]))
+                                - fixture.start_time
+                            ).total_seconds()
+                            - expected.end_t
+                        ),
+                    )
+                    <= expected.tolerance_seconds
+                ),
+                None,
+            )
             session_matches = matching_truth is not None
             if matching_truth is not None:
                 unused_truth[component_id].remove(matching_truth)
@@ -1483,9 +2266,7 @@ def _optional_mapping(raw: Mapping[str, Any], key: str) -> Mapping[str, Any]:
 
 def _validate_block_ids(items: list[Any], key: str, label: str) -> None:
     ids = [
-        str(item.get(key) or "").strip()
-        for item in items
-        if isinstance(item, Mapping)
+        str(item.get(key) or "").strip() for item in items if isinstance(item, Mapping)
     ]
     invalid = len(ids) != len(items) or any(not item for item in ids)
     if invalid or len(set(ids)) != len(ids):

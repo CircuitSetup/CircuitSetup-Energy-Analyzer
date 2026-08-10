@@ -14,7 +14,9 @@ from custom_components.circuitsetup_energy_analyzer.profiles import nilm_source_
 from tests.helpers.calibration import (
     CALIBRATION_CONFIDENCE_BINS,
     CalibrationFixtureError,
+    _maximum_weight_assignment,
     assert_fixture_expectations,
+    evaluate_nilm_replay_gate,
     evaluate_replay_result,
     load_calibration_fixture,
     load_calibration_scenarios,
@@ -668,6 +670,275 @@ def test_nilm_multi_state_fixture_attributes_two_appliances_across_three_states(
     assert {item["assignment_id"] for item in sessions} == {"blower", "pump"}
 
 
+def test_nilm_replay_gate_scores_chronological_multistate_evidence() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "nilm_replay_gate.yaml")
+    result = replay_fixture_processors(fixture)
+    metrics = assert_fixture_expectations(fixture, result)
+
+    assert fixture.labels.replay_split is not None
+    assert (
+        fixture.labels.replay_split.training_end_t
+        < fixture.labels.replay_split.evaluation_start_t
+    )
+    assert all(
+        sample.t >= fixture.labels.replay_split.evaluation_start_t
+        for sample in fixture.samples
+    )
+    assert metrics.component_metrics["multistate"].session_f1 == 1.0
+    assert metrics.component_metrics["multistate"].interval_iou == 1.0
+    assert metrics.component_metrics["multistate"].state_accuracy == 1.0
+    assert metrics.component_metrics["variable_envelope"].state_accuracy == 1.0
+    assert (
+        metrics.component_metrics["variable_envelope"].observed_active_state_count
+        == 1
+    )
+    assert metrics.decision_impacts.duration.changed_count == 1
+    assert metrics.decision_impacts.duration.changed_correct_count == 1
+    assert metrics.decision_impacts.validation.changed_count == 0
+    assert metrics.false_assignment_rate == 0.0
+    assert metrics.nilm_confidence_bins["0.8-1.0"]["prediction_count"] > 0
+    assert metrics.nilm_confidence_bins["0.8-1.0"]["observed_accuracy"] == 1.0
+
+    baseline_components = dict(metrics.component_metrics)
+    baseline_components["multistate"] = replace(
+        baseline_components["multistate"],
+        session_f1=0.5,
+        interval_iou=0.5,
+        state_accuracy=0.5,
+    )
+    baseline = replace(metrics, component_metrics=baseline_components)
+    gate = evaluate_nilm_replay_gate(
+        baseline,
+        metrics,
+        multistate_component_ids=("multistate",),
+        variable_envelope_component_ids=("variable_envelope",),
+        required_score_channels=("duration",),
+    )
+
+    assert gate.passed
+    assert gate.violations == ()
+
+
+def test_nilm_replay_split_rejects_training_overlap(tmp_path: Path) -> None:
+    fixture_path = tmp_path / "overlap.yaml"
+    fixture_path.write_text(
+        """schema_version: 1
+id: invalid_replay_split
+description: invalid split
+scenario_type: normal
+start_time: 2026-01-01T00:00:00Z
+circuits:
+  - circuit_id: mixed
+    name: Mixed
+    appliance_profile: mixed
+    circuit_mode: mixed
+    sources: {power: sensor.mixed}
+samples: [{t: 10, states: {sensor.mixed: 0}}]
+labels:
+  replay_split: {training_end_t: 10, evaluation_start_t: 10}
+calibration_expectations: {}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CalibrationFixtureError, match="training_end_t"):
+        load_calibration_fixture(fixture_path)
+
+
+def test_nilm_decision_impacts_do_not_merge_same_timestamp_across_circuits() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "nilm_replay_gate.yaml")
+    result = replay_fixture_processors(fixture)
+    fixture = replace(
+        fixture,
+        assignments_by_circuit={
+            **fixture.assignments_by_circuit,
+            "other_duration": fixture.assignments_by_circuit["duration"],
+        },
+    )
+    result.final_state.nilm_reconciliation_by_circuit["other_duration"] = dict(
+        result.final_state.nilm_reconciliation_by_circuit["duration"]
+    )
+
+    impacts = evaluate_replay_result(fixture, result).decision_impacts.duration
+
+    assert impacts.changed_count == 2
+    assert impacts.changed_correct_count == 2
+
+
+def test_nilm_decision_impacts_compare_counterfactual_winner_truth() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "nilm_replay_gate.yaml")
+    result = replay_fixture_processors(fixture)
+    result.final_state.nilm_reconciliation_by_circuit["duration"]["score_decisions"][0][
+        "duration_counterfactual_prototype_ids"
+    ] = ["on_time:stop:running->off"]
+
+    impact = evaluate_replay_result(fixture, result).decision_impacts.duration
+
+    assert impact.changed_count == 1
+    assert impact.changed_correct_count == 0
+    assert impact.changed_incorrect_count == 0
+    assert impact.changed_neutral_count == 1
+
+
+@pytest.mark.parametrize(
+    ("accepted_ids", "counterfactual_ids"),
+    [
+        ([], ["on_time:stop:running->off"]),
+        (["too_long:stop:running->off"], []),
+    ],
+)
+def test_nilm_decision_impacts_score_rejected_outcomes(
+    accepted_ids: list[str], counterfactual_ids: list[str]
+) -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "nilm_replay_gate.yaml")
+    result = replay_fixture_processors(fixture)
+    decision = result.final_state.nilm_reconciliation_by_circuit["duration"][
+        "score_decisions"
+    ][0]
+    decision["accepted_prototype_ids"] = accepted_ids
+    decision["duration_counterfactual_prototype_ids"] = counterfactual_ids
+
+    impact = evaluate_replay_result(fixture, result).decision_impacts.duration
+
+    assert impact.changed_count == 1
+    assert impact.changed_correct_count == 0
+    assert impact.changed_incorrect_count == 1
+    assert impact.changed_unscored_count == 0
+
+
+def test_nilm_decision_impacts_mark_unknown_truth_unscored() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "nilm_replay_gate.yaml")
+    result = replay_fixture_processors(fixture)
+    fixture = replace(
+        fixture,
+        labels=replace(
+            fixture.labels,
+            component_truth={
+                component_id: truth
+                for component_id, truth in fixture.labels.component_truth.items()
+                if component_id != "on_time"
+            },
+        ),
+    )
+    decision = result.final_state.nilm_reconciliation_by_circuit["duration"][
+        "score_decisions"
+    ][0]
+    decision["accepted_prototype_ids"] = []
+    decision["duration_counterfactual_prototype_ids"] = [
+        "on_time:stop:running->off"
+    ]
+
+    impact = evaluate_replay_result(fixture, result).decision_impacts.duration
+
+    assert impact.changed_count == 1
+    assert impact.changed_correct_count == 0
+    assert impact.changed_incorrect_count == 0
+    assert impact.changed_unscored_count == 1
+
+
+def test_nilm_decision_impacts_retain_scores_beyond_runtime_tail() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "nilm_replay_gate.yaml")
+    result = replay_fixture_processors(fixture)
+    first = dict(
+        result.final_state.nilm_reconciliation_by_circuit["duration"][
+            "score_decisions"
+        ][0]
+    )
+    first["sequence"] = 1
+    rolling_tail = [{**first, "sequence": sequence} for sequence in range(2, 50)]
+    state_id = id(result.final_state)
+    result.state_snapshots = [
+        {
+            "state_id": state_id,
+            "nilm_reconciliation_by_circuit": {
+                "duration": {"score_decisions": [first]}
+            },
+        },
+        {
+            "state_id": state_id,
+            "nilm_reconciliation_by_circuit": {
+                "duration": {"score_decisions": rolling_tail}
+            },
+        },
+    ]
+    result.final_state.nilm_reconciliation_by_circuit["duration"][
+        "score_decisions"
+    ] = rolling_tail
+
+    impact = evaluate_replay_result(fixture, result).decision_impacts.duration
+
+    assert impact.changed_count == 49
+    assert impact.changed_correct_count == 49
+
+
+def test_nilm_replay_gate_rejects_regressions_and_missing_provenance() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "nilm_replay_gate.yaml")
+    metrics = replay_fixture_processors(fixture).metrics
+    assert metrics is not None
+
+    false_attribution = replace(metrics, false_assignment_rate=1.0)
+    more_residual_energy = replace(
+        metrics, residual_energy_kwh=metrics.residual_energy_kwh + 0.01
+    )
+    no_provenance = replace(metrics, replay_split=None)
+    no_duration_benefit = replace(
+        metrics,
+        decision_impacts=replace(
+            metrics.decision_impacts,
+            duration=replace(metrics.decision_impacts.duration, changed_count=0),
+        ),
+    )
+
+    for candidate, expected_violation in (
+        (false_attribution, "false assignment rate increased"),
+        (more_residual_energy, "residual energy increased"),
+        (no_provenance, "replay split provenance is required"),
+        (no_duration_benefit, "duration did not demonstrate net benefit"),
+    ):
+        gate = evaluate_nilm_replay_gate(
+            metrics,
+            candidate,
+            multistate_component_ids=("multistate",),
+            variable_envelope_component_ids=("variable_envelope",),
+            required_score_channels=("duration",),
+        )
+        assert not gate.passed
+        assert expected_violation in gate.violations
+
+
+def test_nilm_session_matching_maximizes_total_one_to_one_score() -> None:
+    # A greedy first-row match would choose column zero and strand row one.
+    assert _maximum_weight_assignment([[1.0, 0.5], [1.0, 0.0]]) == [1, 0]
+
+
+def test_nilm_replay_interval_metrics_include_near_miss_sessions() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "nilm_replay_gate.yaml")
+    result = replay_fixture_processors(fixture)
+    session = result.store_data.nilm_session_history_by_circuit["multistate"][0]
+    session["start"] = (fixture.start_time + timedelta(seconds=1035)).isoformat()
+    session["end"] = (fixture.start_time + timedelta(seconds=1170)).isoformat()
+
+    metrics = evaluate_replay_result(fixture, result).component_metrics["multistate"]
+
+    assert metrics.session_f1 is None
+    assert metrics.median_start_error_seconds == 5.0
+    assert metrics.median_stop_error_seconds == 10.0
+    assert metrics.median_duration_error_seconds == 15.0
+    assert metrics.interval_iou == 0.9
+
+
+def test_nilm_replay_state_accuracy_does_not_double_count_overlaps() -> None:
+    fixture = load_calibration_fixture(FIXTURE_DIR / "nilm_replay_gate.yaml")
+    result = replay_fixture_processors(fixture)
+    result.store_data.nilm_session_history_by_circuit["multistate"].append(
+        dict(result.store_data.nilm_session_history_by_circuit["multistate"][0])
+    )
+
+    metrics = evaluate_replay_result(fixture, result).component_metrics["multistate"]
+
+    assert metrics.state_accuracy == 1.0
+
+
 @pytest.mark.parametrize(
     "fixture_name",
     [
@@ -1033,7 +1304,7 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     )
 
     assert "# Confidence Calibration Report" in report
-    assert "| Fixtures | 33 |" in report
+    assert f"| Fixtures | {len(metrics)} |" in report
     assert "normal_refrigerator_week" in report
     assert "refrigerator_cycle_signature_change" in report
     assert "refrigerator_energy_drift" in report
@@ -1053,6 +1324,9 @@ def test_calibration_report_markdown_lists_fixture_metrics() -> None:
     assert "nilm_mixed_compatibility.legacy_mixed_encoding" in report
     assert "nilm_mixed_helpers.ac2_distinct_lag_disambiguates" in report
     assert "Helper FP rate" in report
+    assert "State accuracy/count" in report
+    assert "Changed/correct" in report
+    assert "NILM prediction confidence calibration" in report
 
 
 def test_calibration_report_script_runs_directly() -> None:
