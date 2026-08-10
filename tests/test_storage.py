@@ -1244,6 +1244,56 @@ def test_feature_store_round_trips_nilm_appliance_assignments() -> None:
     }
 
 
+def test_feature_store_round_trips_multistate_nilm_assignment_and_session() -> None:
+    """Generic NILM persistence retains bounded multi-state model/session fields."""
+    assignment = {
+        "assignment_id": "assignment-dryer",
+        "model_schema_version": 2,
+        "model_kind": "multi_state",
+        "power_states_w": [0.0, 120.0, 820.0],
+        "states": [
+            {"id": "off", "kind": "off", "power_w": 0.0, "spread_w": 0.0},
+            {"id": "active_1", "kind": "active", "power_w": 120.0, "spread_w": 4.0},
+            {"id": "active_2", "kind": "active", "power_w": 820.0, "spread_w": 9.0},
+        ],
+        "transition_prototypes": [{
+            "id": "assignment-dryer:state_up:active_1->active_2",
+            "kind": "state_up",
+            "direction": "on",
+            "from_state_id": "active_1",
+            "to_state_id": "active_2",
+            "from_state_w": 120.0,
+            "to_state_w": 820.0,
+            "delta_w": 700.0,
+            "spread_w": 12.0,
+            "sample_count": 4,
+        }],
+        "state_dwell_profiles": {
+            "active_1": {"median_seconds": 120.0, "effective_support": 5.0},
+        },
+    }
+    session = {
+        "session_id": "dryer-session",
+        "assignment_id": "assignment-dryer",
+        "state_path": [{
+            "state_id": "active_1",
+            "started_at": "2026-06-02T12:00:00+00:00",
+            "power_w": 120.0,
+        }],
+        "state_dwell_seconds": {"active_1": 120.0},
+        "time_weighted_mean_power_w": 120.0,
+    }
+    data = FeatureStoreData(
+        nilm_appliance_assignments_by_circuit={"mains": [assignment]},
+        nilm_session_history_by_circuit={"mains": [session]},
+    )
+
+    restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
+
+    assert restored.nilm_appliance_assignments_by_circuit == {"mains": [assignment]}
+    assert restored.nilm_session_history_by_circuit == {"mains": [session]}
+
+
 def test_feature_store_persists_canonical_nilm_identity_with_session_history() -> None:
     assignment = {
         "assignment_id": "assignment-dishwasher",

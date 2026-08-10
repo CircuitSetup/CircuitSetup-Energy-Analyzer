@@ -41,6 +41,207 @@ BASE_TIME = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
 _DEFAULT_DELTA_VA = object()
 
 
+def _multistate_intervals(values: list[tuple[str, float]]) -> list[dict[str, object]]:
+    return [
+        {
+            "interval_id": f"state-{index}",
+            "assignment_id": "pump",
+            "start": f"2026-06-{day}T12:00:00+00:00",
+            "evidence_schema_version": 2,
+            "start_transition_eligible": True,
+            "start_transition_w": power,
+            "stop_transition_eligible": True,
+            "stop_transition_w": -power,
+            "plateau_eligible": True,
+            "median_power_w": power,
+            "power_coverage": 1.0,
+            "evidence_confidence": 1.0,
+        }
+        for index, (day, power) in enumerate(values)
+    ]
+
+
+def test_assignment_model_does_not_synthesize_active_transitions_from_plateaus(
+) -> None:
+    intervals = _multistate_intervals(
+        [
+            (f"{day:02}", power)
+            for day, power in enumerate((100, 105, 98, 102, 300, 305, 298, 302), 1)
+        ]
+    )
+    model = build_nilm_assignment_model(
+        {
+            "assignment_id": "pump",
+            "label_interval_ids": [item["interval_id"] for item in intervals],
+        },
+        [],
+        label_intervals=intervals,
+    )
+
+    assert model["model_kind"] == "multi_state"
+    assert [state["id"] for state in model["states"]] == ["off", "active_1", "active_2"]
+    assert [state["power_w"] for state in model["states"]] == [0.0, 101.0, 301.0]
+    assert {item["kind"] for item in model["transition_prototypes"]} == {
+        "start",
+        "stop",
+    }
+
+
+def test_assignment_model_requires_distinct_days_for_active_state_split() -> None:
+    intervals = _multistate_intervals(
+        [("01", power) for power in (100, 105, 98, 102, 300, 305, 298, 302)]
+    )
+    model = build_nilm_assignment_model(
+        {
+            "assignment_id": "pump",
+            "label_interval_ids": [item["interval_id"] for item in intervals],
+        },
+        [],
+        label_intervals=intervals,
+    )
+
+    assert model["model_kind"] == "binary"
+    assert [state["id"] for state in model["states"]] == ["off", "running"]
+
+
+def test_assignment_model_uses_configured_timezone_for_evidence_days() -> None:
+    intervals = _multistate_intervals([("02", 100.0), ("02", 105.0)])
+    intervals[0]["start"] = "2026-06-02T03:00:00+00:00"
+    intervals[1]["start"] = "2026-06-02T05:00:00+00:00"
+    assignment = {
+        "assignment_id": "pump",
+        "label_interval_ids": [item["interval_id"] for item in intervals],
+    }
+
+    utc_model = build_nilm_assignment_model(
+        assignment, [], label_intervals=intervals
+    )
+    local_model = build_nilm_assignment_model(
+        assignment,
+        [],
+        label_intervals=intervals,
+        time_zone="America/New_York",
+    )
+
+    assert utc_model["run_profile"]["plateau_w"]["distinct_days"] == 1
+    assert local_model["run_profile"]["plateau_w"]["distinct_days"] == 2
+
+
+def test_assignment_model_uses_variable_envelope_for_broad_unsplittable_plateaus() -> (
+    None
+):
+    intervals = _multistate_intervals(
+        [
+            (f"{day:02}", power)
+            for day, power in enumerate((100, 110, 120, 130, 140, 150, 160, 170), 1)
+        ]
+    )
+    model = build_nilm_assignment_model(
+        {
+            "assignment_id": "pump",
+            "label_interval_ids": [item["interval_id"] for item in intervals],
+        },
+        [],
+        label_intervals=intervals,
+    )
+
+    assert model["model_kind"] == "variable_envelope"
+    assert model["states"][1]["id"] == "running"
+    assert model["active_power_envelope_w"]["p10"] == 100.0
+    assert model["active_power_envelope_w"]["p90"] == 170.0
+
+
+def test_assignment_model_multistate_learning_is_order_independent_and_ids_stable() -> (
+    None
+):
+    values = [
+        (f"{day:02}", power)
+        for day, power in enumerate((100, 105, 98, 102, 300, 305, 298, 302), 1)
+    ]
+    first_intervals = _multistate_intervals(values)
+    second_intervals = _multistate_intervals(list(reversed(values)))
+    assignment = {
+        "assignment_id": "pump",
+        "label_interval_ids": [item["interval_id"] for item in first_intervals],
+    }
+
+    first = build_nilm_assignment_model(assignment, [], label_intervals=first_intervals)
+    second = build_nilm_assignment_model(
+        assignment, [], label_intervals=second_intervals
+    )
+
+    assert first["states"] == second["states"]
+    assert [item["id"] for item in first["transition_prototypes"]] == [
+        item["id"] for item in second["transition_prototypes"]
+    ]
+
+
+def test_normalize_assignment_model_preserves_multistate_ids_and_transition_kinds() -> (
+    None
+):
+    normalized = nilm_domain.normalize_nilm_assignment_model(
+        {
+            "assignment_id": "pump",
+            "model_kind": "multi_state",
+            "power_states_w": [0.0, 100.0, 300.0],
+            "states": [
+                {"id": "off", "power_w": 0.0},
+                {"id": "active_1", "power_w": 100.0},
+                {"id": "active_2", "power_w": 300.0},
+            ],
+            "transition_prototypes": [
+                {
+                    "id": "old-up",
+                    "direction": "on",
+                    "from_state_id": "active_1",
+                    "to_state_id": "active_2",
+                    "from_state_w": 100.0,
+                    "to_state_w": 300.0,
+                    "delta_w": 200.0,
+                    "spread_w": 2.0,
+                }
+            ],
+        }
+    )
+
+    assert [state["id"] for state in normalized["states"]] == [
+        "off",
+        "active_1",
+        "active_2",
+    ]
+    assert normalized["transition_prototypes"][0]["kind"] == "state_up"
+    assert normalized["transition_prototypes"][0]["id"] == (
+        "pump:state_up:active_1->active_2"
+    )
+
+
+def test_normalize_assignment_model_rejects_state_id_power_mismatch() -> None:
+    normalized = nilm_domain.normalize_nilm_assignment_model(
+        {
+            "assignment_id": "pump",
+            "power_states_w": [0.0, 100.0, 300.0],
+            "states": [
+                {"id": "off", "power_w": 0.0},
+                {"id": "active_1", "power_w": 100.0},
+                {"id": "active_2", "power_w": 300.0},
+            ],
+            "transition_prototypes": [
+                {
+                    "direction": "on",
+                    "from_state_id": "active_2",
+                    "to_state_id": "off",
+                    "from_state_w": 100.0,
+                    "to_state_w": 0.0,
+                    "delta_w": -100.0,
+                    "spread_w": 1.0,
+                }
+            ],
+        }
+    )
+
+    assert normalized["transition_prototypes"] == []
+
+
 def test_assignment_model_uses_interval_plateau_for_running_state() -> None:
     model = build_nilm_assignment_model(
         {"assignment_id": "pump", "label_interval_ids": ["one"]},
@@ -63,6 +264,157 @@ def test_assignment_model_uses_interval_plateau_for_running_state() -> None:
     )
     assert model["states"][1]["power_w"] == 100.0
     assert model["transition_prototypes"][0]["delta_w"] == 70.0
+
+
+def test_assignment_model_builds_supported_state_dwell_profiles_from_completed_paths(  # noqa: E501
+) -> None:
+    sessions = [
+        {
+            "session_id": f"session-{index}",
+            "assignment_id": "pump",
+            "start": f"2026-06-{day:02}T10:00:00+00:00",
+            "end": f"2026-06-{day:02}T10:20:00+00:00",
+            "on_delta_w": power,
+            "off_delta_w": -power,
+            "median_power_w": power,
+            "confidence": 1.0,
+            "state_path": [
+                {"state_id": "active_1", "power_w": 100.0},
+                {"state_id": "active_2", "power_w": 300.0},
+            ],
+            "state_dwell_seconds": {"active_1": 120.0, "active_2": 1080.0},
+        }
+        for index, (day, power) in enumerate(
+            (
+                (1, 100),
+                (2, 102),
+                (3, 98),
+                (4, 101),
+                (5, 300),
+                (6, 302),
+                (7, 298),
+                (8, 301),
+            ),
+            1,
+        )
+    ]
+    model = build_nilm_assignment_model(
+        {
+            "assignment_id": "pump",
+            "confirmed_session_ids": [item["session_id"] for item in sessions],
+        },
+        sessions,
+    )
+
+    dwell = model["state_dwell_profiles"]
+    assert dwell["active_2"]["median_seconds"] == 1080.0
+    assert dwell["active_2"]["effective_support"] == 8.0
+    assert dwell["active_2"]["distinct_days"] == 8
+    transitions = {item["kind"]: item for item in model["transition_prototypes"]}
+    assert transitions["state_up"]["from_state_id"] == "active_1"
+    assert transitions["state_up"]["to_state_id"] == "active_2"
+    assert transitions["state_up"]["effective_support"] == 8.0
+
+
+def test_assignment_model_omits_malformed_or_legacy_state_dwell_evidence() -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "confirmed_session_ids": ["bad"]},
+        [
+            {
+                "session_id": "bad",
+                "assignment_id": "pump",
+                "start": "2026-06-01T10:00:00+00:00",
+                "end": "2026-06-01T10:10:00+00:00",
+                "on_delta_w": 100.0,
+                "off_delta_w": -100.0,
+                "median_power_w": 100.0,
+                "confidence": 1.0,
+                "state_path": "legacy",
+                "state_dwell_seconds": {"active_1": "bad", "off": 100.0},
+            }
+        ],
+    )
+
+    assert "state_dwell_profiles" not in model
+
+
+def test_assignment_model_learns_states_from_qualified_energy_mean_evidence() -> None:
+    sessions = [
+        {
+            "session_id": f"energy-{index}",
+            "assignment_id": "pump",
+            "start": f"2026-06-{day:02}T10:00:00+00:00",
+            "end": f"2026-06-{day:02}T10:10:00+00:00",
+            "on_delta_w": power,
+            "off_delta_w": -power,
+            "measured_energy_kwh": power * 600 / 3_600_000,
+            "confidence": 1.0,
+        }
+        for index, (day, power) in enumerate(
+            (
+                (1, 100),
+                (2, 102),
+                (3, 98),
+                (4, 101),
+                (5, 300),
+                (6, 302),
+                (7, 298),
+                (8, 301),
+            ),
+            1,
+        )
+    ]
+    model = build_nilm_assignment_model(
+        {
+            "assignment_id": "pump",
+            "confirmed_session_ids": [item["session_id"] for item in sessions],
+        },
+        sessions,
+    )
+
+    assert model["model_kind"] == "multi_state"
+    assert [state["id"] for state in model["states"]] == ["off", "active_1", "active_2"]
+
+
+def test_assignment_model_rejects_low_coverage_energy_means_for_state_learning() -> (
+    None
+):
+    intervals = [
+        {
+            "interval_id": f"energy-{index}",
+            "assignment_id": "pump",
+            "start": f"2026-06-{day:02}T10:00:00+00:00",
+            "evidence_schema_version": 2,
+            "duration_s": 600,
+            "measured_energy_kwh": power * 600 / 3_600_000,
+            "power_coverage": 0.10,
+            "evidence_confidence": 1.0,
+        }
+        for index, (day, power) in enumerate(
+            (
+                (1, 100),
+                (2, 102),
+                (3, 98),
+                (4, 101),
+                (5, 300),
+                (6, 302),
+                (7, 298),
+                (8, 301),
+            ),
+            1,
+        )
+    ]
+    model = build_nilm_assignment_model(
+        {
+            "assignment_id": "pump",
+            "label_interval_ids": [item["interval_id"] for item in intervals],
+        },
+        [],
+        label_intervals=intervals,
+    )
+
+    assert model["model_kind"] == "binary"
+    assert [state["id"] for state in model["states"]] == ["off", "running"]
 
 
 def test_assignment_model_builds_energy_profile_without_using_energy_as_edge() -> None:
@@ -192,19 +544,20 @@ def test_assignment_prototypes_have_global_semantic_identity() -> None:
                 "assignment_id": assignment_id,
                 "confirmed_session_ids": [session_id],
             },
-            [{
-                "session_id": session_id,
-                "assignment_id": assignment_id,
-                "end": "2026-06-01T10:00:00+00:00",
-                "on_delta_w": 80.0,
-                "off_delta_w": -80.0,
-                "confidence": 1.0,
-            }],
+            [
+                {
+                    "session_id": session_id,
+                    "assignment_id": assignment_id,
+                    "end": "2026-06-01T10:00:00+00:00",
+                    "on_delta_w": 80.0,
+                    "off_delta_w": -80.0,
+                    "confidence": 1.0,
+                }
+            ],
         )
 
     assert [
-        (item["id"], item["kind"])
-        for item in models["pump"]["transition_prototypes"]
+        (item["id"], item["kind"]) for item in models["pump"]["transition_prototypes"]
     ] == [
         ("pump:start:off->running", "start"),
         ("pump:stop:running->off", "stop"),
@@ -221,20 +574,24 @@ def test_assignment_prototypes_have_global_semantic_identity() -> None:
     }
 
     normalized = [
-        nilm_domain.normalize_nilm_assignment_model({
-            "assignment_id": assignment_id,
-            "power_states_w": [0.0, 80.0],
-            "transition_prototypes": [{
-                "id": "shared-legacy-start",
-                "kind": "on",
-                "direction": "on",
-                "from_state_w": 0.0,
-                "to_state_w": 80.0,
-                "delta_w": 80.0,
-                "spread_w": 1.0,
-                "sample_count": 3,
-            }],
-        })
+        nilm_domain.normalize_nilm_assignment_model(
+            {
+                "assignment_id": assignment_id,
+                "power_states_w": [0.0, 80.0],
+                "transition_prototypes": [
+                    {
+                        "id": "shared-legacy-start",
+                        "kind": "on",
+                        "direction": "on",
+                        "from_state_w": 0.0,
+                        "to_state_w": 80.0,
+                        "delta_w": 80.0,
+                        "spread_w": 1.0,
+                        "sample_count": 3,
+                    }
+                ],
+            }
+        )
         for assignment_id in ("pump", "dryer")
     ]
     assert [
@@ -248,8 +605,7 @@ def test_assignment_prototypes_have_global_semantic_identity() -> None:
         ("dryer:start:off->running", "start"),
     ]
     assert [
-        model["transition_prototypes"][0]["legacy_ids"]
-        for model in normalized
+        model["transition_prototypes"][0]["legacy_ids"] for model in normalized
     ] == [["shared-legacy-start"], ["shared-legacy-start"]]
 
 
@@ -454,9 +810,7 @@ def test_assignment_model_marks_session_power_as_edge_derived_plateau() -> None:
     )
 
     assert model["states"][1]["power_source"] == "edge_derived_plateau"
-    assert model["run_profile"]["plateau_w"]["source_counts"] == {
-        "edge_derived": 1
-    }
+    assert model["run_profile"]["plateau_w"]["source_counts"] == {"edge_derived": 1}
 
 
 def test_assignment_model_invalid_optional_values_do_not_consume_selection_capacity(  # noqa: E501
@@ -593,10 +947,7 @@ def test_assignment_model_keeps_inferred_legacy_stop_without_observed_stop() -> 
     ]
     assert model["transition_prototypes"][0]["delta_w"] == 90.0
     assert model["transition_prototypes"][1]["delta_w"] == -80.0
-    assert (
-        model["transition_prototypes"][1]["evidence_kind"]
-        == "inferred_legacy_stop"
-    )
+    assert model["transition_prototypes"][1]["evidence_kind"] == "inferred_legacy_stop"
     assert model["evidence_summary"]["inferred_stop_count"] == 1
 
 
@@ -748,6 +1099,37 @@ def test_normalize_assignment_model_preserves_valid_v2_nested_fields() -> None:
     assert normalized["evidence_summary"]["quality_issues"] == ["x"]
 
 
+def test_normalize_assignment_model_preserves_state_dwell_profiles() -> None:
+    """Persisted active-state duration evidence survives model hydration."""
+    model = nilm_domain.normalize_nilm_assignment_model(
+        {
+            "assignment_id": "dryer",
+            "power_states_w": [0.0, 120.0, 820.0],
+            "states": [
+                {"id": "off", "power_w": 0.0, "spread_w": 0.0},
+                {"id": "active_1", "power_w": 120.0, "spread_w": 4.0},
+                {"id": "active_2", "power_w": 820.0, "spread_w": 9.0},
+            ],
+            "state_dwell_profiles": {
+                "active_1": {
+                    "median_seconds": 120.0,
+                    "effective_support": 5.0,
+                    "distinct_days": 3,
+                },
+                "unknown": {"median_seconds": 5.0},
+            },
+        }
+    )
+
+    assert model["state_dwell_profiles"] == {
+        "active_1": {
+            "median_seconds": 120.0,
+            "effective_support": 5.0,
+            "distinct_days": 3.0,
+        }
+    }
+
+
 def test_assignment_model_fingerprint_tracks_reactive_and_confidence_fields() -> None:
     base = {
         "power_states_w": [0, 80],
@@ -774,6 +1156,65 @@ def test_assignment_model_fingerprint_tracks_reactive_and_confidence_fields() ->
     assert (
         nilm_domain.normalize_nilm_assignment_model(base)["model_fingerprint"]
         != nilm_domain.normalize_nilm_assignment_model(changed)["model_fingerprint"]
+    )
+    dwell_changed = {
+        **base,
+        "state_dwell_profiles": {
+            "running": {
+                "effective_support": 5,
+                "distinct_days": 3,
+                "median_seconds": 120,
+                "p10_seconds": 90,
+                "p90_seconds": 150,
+            }
+        },
+    }
+    assert (
+        nilm_domain.normalize_nilm_assignment_model(base)["model_fingerprint"]
+        != nilm_domain.normalize_nilm_assignment_model(dwell_changed)[
+            "model_fingerprint"
+        ]
+    )
+    rich_base = {
+        "assignment_id": "pump",
+        "model_kind": "multi_state",
+        "power_states_w": [0, 100, 200, 300],
+        "states": [
+            {"id": "off", "power_w": 0},
+            {"id": "active_1", "power_w": 100},
+            {"id": "active_2", "power_w": 200},
+            {"id": "active_3", "power_w": 300},
+        ],
+        "transition_prototypes": [
+            {
+                "direction": "on",
+                "from_state_id": "active_1",
+                "to_state_id": "active_2",
+                "from_state_w": 100,
+                "to_state_w": 200,
+                "delta_w": 100,
+                "spread_w": 1,
+                "sample_count": 3,
+            }
+        ],
+    }
+    rich_changed = {
+        **rich_base,
+        "transition_prototypes": [
+            {
+                **rich_base["transition_prototypes"][0],
+                "from_state_id": "active_2",
+                "to_state_id": "active_3",
+                "from_state_w": 200,
+                "to_state_w": 300,
+            }
+        ],
+    }
+    assert (
+        nilm_domain.normalize_nilm_assignment_model(rich_base)["model_fingerprint"]
+        != nilm_domain.normalize_nilm_assignment_model(rich_changed)[
+            "model_fingerprint"
+        ]
     )
 
 
@@ -1494,6 +1935,7 @@ def reconcile(
     helpers: dict[str, float | None] | None = None,
     durations: dict[str, float | None] | None = None,
     validations: dict[str, float | None] | None = None,
+    state_ids: dict[str, str | None] | None = None,
     helper_conflict: bool = False,
 ) -> nilm_domain.NilmReconciliationResult:
     return nilm_domain.reconcile_nilm_edge(
@@ -1503,6 +1945,7 @@ def reconcile(
         helpers or {},
         durations or {},
         validations or {},
+        current_state_ids=state_ids,
         helper_conflict=helper_conflict,
     )
 
@@ -1574,9 +2017,7 @@ def test_nilm_score_breakdown_preserves_missing_channel_renormalization() -> Non
 
 
 def test_nilm_prototype_score_lookup_wins_over_assignment_fallback() -> None:
-    preferred = assignment_model(
-        "a", transition("a", 100, prototype_id="a-start")
-    )
+    preferred = assignment_model("a", transition("a", 100, prototype_id="a-start"))
     other = assignment_model("b", transition("b", 100, prototype_id="b-start"))
 
     result = reconcile(
@@ -1640,12 +2081,15 @@ def test_nilm_duration_score_uses_full_age_only_for_supported_stop_to_off() -> N
         }
     }
 
-    assert nilm_domain.duration_state_score_for_transition(
-        stop,
-        assignment,
-        {"session_started_at": (BASE_TIME - timedelta(seconds=100)).isoformat()},
-        BASE_TIME.replace(tzinfo=None),
-    ) == 1.0
+    assert (
+        nilm_domain.duration_state_score_for_transition(
+            stop,
+            assignment,
+            {"session_started_at": (BASE_TIME - timedelta(seconds=100)).isoformat()},
+            BASE_TIME.replace(tzinfo=None),
+        )
+        == 1.0
+    )
     tapered = nilm_domain.duration_state_score_for_transition(
         stop,
         assignment,
@@ -1668,18 +2112,27 @@ def test_nilm_duration_score_uses_full_age_only_for_supported_stop_to_off() -> N
         from_state_id="low",
         to_state_id="high",
     )
-    assert nilm_domain.duration_state_score_for_transition(
-        start, assignment, {}, BASE_TIME
-    ) is None
-    assert nilm_domain.duration_state_score_for_transition(
-        active, assignment, {}, BASE_TIME
-    ) is None
-    assert nilm_domain.duration_state_score_for_transition(
-        stop,
-        {"run_profile": {"duration_s": {"effective_support": "bad"}}},
-        {"session_started_at": "not-a-time"},
-        BASE_TIME,
-    ) is None
+    assert (
+        nilm_domain.duration_state_score_for_transition(
+            start, assignment, {}, BASE_TIME
+        )
+        is None
+    )
+    assert (
+        nilm_domain.duration_state_score_for_transition(
+            active, assignment, {}, BASE_TIME
+        )
+        is None
+    )
+    assert (
+        nilm_domain.duration_state_score_for_transition(
+            stop,
+            {"run_profile": {"duration_s": {"effective_support": "bad"}}},
+            {"session_started_at": "not-a-time"},
+            BASE_TIME,
+        )
+        is None
+    )
 
 
 def test_nilm_duration_score_legacy_fallback_requires_transition_to_zero() -> None:
@@ -1714,12 +2167,18 @@ def test_nilm_duration_score_legacy_fallback_requires_transition_to_zero() -> No
         sample_count=5,
     )
 
-    assert nilm_domain.duration_state_score_for_transition(
-        active_drop, assignment, runtime, BASE_TIME
-    ) is None
-    assert nilm_domain.duration_state_score_for_transition(
-        legacy_stop, assignment, runtime, BASE_TIME
-    ) == 1.0
+    assert (
+        nilm_domain.duration_state_score_for_transition(
+            active_drop, assignment, runtime, BASE_TIME
+        )
+        is None
+    )
+    assert (
+        nilm_domain.duration_state_score_for_transition(
+            legacy_stop, assignment, runtime, BASE_TIME
+        )
+        == 1.0
+    )
 
 
 def test_nilm_duration_score_uses_supported_active_state_dwell() -> None:
@@ -1749,12 +2208,15 @@ def test_nilm_duration_score_uses_supported_active_state_dwell() -> None:
         }
     }
 
-    assert nilm_domain.duration_state_score_for_transition(
-        transition,
-        assignment,
-        {"state_since": BASE_TIME - timedelta(seconds=100)},
-        BASE_TIME,
-    ) == 1.0
+    assert (
+        nilm_domain.duration_state_score_for_transition(
+            transition,
+            assignment,
+            {"state_since": BASE_TIME - timedelta(seconds=100)},
+            BASE_TIME,
+        )
+        == 1.0
+    )
 
 
 def test_nilm_duration_score_rejects_unsupported_active_state_dwell() -> None:
@@ -1782,12 +2244,15 @@ def test_nilm_duration_score_rejects_unsupported_active_state_dwell() -> None:
         }
     }
 
-    assert nilm_domain.duration_state_score_for_transition(
-        transition,
-        assignment,
-        {"state_since": BASE_TIME - timedelta(seconds=100)},
-        BASE_TIME,
-    ) is None
+    assert (
+        nilm_domain.duration_state_score_for_transition(
+            transition,
+            assignment,
+            {"state_since": BASE_TIME - timedelta(seconds=100)},
+            BASE_TIME,
+        )
+        is None
+    )
 
 
 def test_nilm_validation_feedback_is_smoothed_and_revision_gated() -> None:
@@ -1877,9 +2342,7 @@ def test_nilm_validation_accepts_only_trusted_ground_truth_and_held_out_data() -
                 "model_revision": 7,
                 "model_fingerprint": "current",
                 "test_window_id": "window-2026-06",
-                "test_window_start": (
-                    BASE_TIME - timedelta(days=1)
-                ).isoformat(),
+                "test_window_start": (BASE_TIME - timedelta(days=1)).isoformat(),
                 "test_window_end": (BASE_TIME + timedelta(days=4)).isoformat(),
             }
             for index in range(5)
@@ -1976,13 +2439,17 @@ def test_nilm_validation_requires_provenance_and_deduplicates_stable_ids() -> No
         }
         for index in range(5)
     ]
-    assert nilm_domain.build_nilm_validation_profile(
-        assignment, session_outcomes=unprovenanced
-    )["sample_count"] == 0
+    assert (
+        nilm_domain.build_nilm_validation_profile(
+            assignment, session_outcomes=unprovenanced
+        )["sample_count"]
+        == 0
+    )
 
 
-def test_nilm_compound_uses_each_component_prototype_evidence_deterministically(
-) -> None:
+def test_nilm_compound_uses_each_component_prototype_evidence_deterministically() -> (
+    None
+):
     a = assignment_model("a", transition("a", 60, prototype_id="a-start"))
     b = assignment_model("b", transition("b", 40, prototype_id="b-start"))
     states = {"a": 0.0, "b": 0.0}
@@ -2050,11 +2517,80 @@ def test_nilm_single_candidate_applies_threshold_and_lead_gates() -> None:
     assert not result.accepted and result.reason == "below_threshold"
 
 
+def test_reconciliation_requires_supplied_state_id_to_match_prototype_source() -> None:
+    prototype = nilm_domain.NilmTransitionPrototype(
+        assignment_id="pump",
+        direction="on",
+        from_state_w=100.0,
+        to_state_w=300.0,
+        delta_w=200.0,
+        spread_w=5.0,
+        sample_count=3,
+        prototype_id="pump:state_up:active_1->active_2",
+        transition_kind="state_up",
+        from_state_id="active_1",
+        to_state_id="active_2",
+    )
+    model = nilm_domain.NilmAssignmentModel(
+        assignment_id="pump",
+        power_states_w=(0.0, 100.0, 300.0),
+        transition_prototypes=(prototype,),
+        model_confidence=0.9,
+        lifecycle_state="validated",
+        last_observed=BASE_TIME,
+    )
+
+    accepted = reconcile(
+        edge(100, 200.0), [model], {"pump": 100.0}, state_ids={"pump": "active_1"}
+    )
+    rejected = reconcile(
+        edge(100, 200.0), [model], {"pump": 100.0}, state_ids={"pump": "active_2"}
+    )
+
+    assert accepted.accepted is True
+    assert rejected.accepted is False
+
+
+def test_reconciliation_rejects_state_id_with_mismatched_state_power() -> None:
+    """A named state cannot be paired with another state's wattage."""
+    prototype = nilm_domain.NilmTransitionPrototype(
+        assignment_id="pump",
+        direction="off",
+        from_state_w=100.0,
+        to_state_w=0.0,
+        delta_w=-100.0,
+        spread_w=5.0,
+        sample_count=3,
+        prototype_id="pump:stop:active_2->off",
+        transition_kind="stop",
+        from_state_id="active_2",
+        to_state_id="off",
+    )
+    model = nilm_domain.NilmAssignmentModel(
+        assignment_id="pump",
+        power_states_w=(0.0, 100.0, 300.0),
+        transition_prototypes=(prototype,),
+        model_confidence=0.9,
+        lifecycle_state="validated",
+        last_observed=BASE_TIME,
+        state_powers_by_id={"off": 0.0, "active_1": 100.0, "active_2": 300.0},
+    )
+
+    result = reconcile(
+        edge(100, -100.0),
+        [model],
+        {"pump": 100.0},
+        state_ids={"pump": "active_2"},
+    )
+
+    assert result.accepted is False
+
+
 def test_nilm_candidate_masks_lifecycle_and_illegal_state_but_allows_retired_stop() -> (
     None
 ):
     on = transition("a", 100)
-    off = transition("a", -100)
+    off = transition("a", -100, from_state_id="running", to_state_id="off")
     for lifecycle in ("hidden", "rejected", "ignored", "converted"):
         result = reconcile(
             edge(0, 100),
@@ -2173,7 +2709,9 @@ def test_nilm_reconciliation_requires_a_known_finite_current_state() -> None:
 
 def test_nilm_retired_stop_is_single_only_and_never_compound() -> None:
     retired = assignment_model(
-        "retired", transition("retired", -60), lifecycle_state="retired"
+        "retired",
+        transition("retired", -60, from_state_id="running", to_state_id="off"),
+        lifecycle_state="retired",
     )
     active = assignment_model("active", transition("active", 100))
     states = {"retired": 60.0, "active": 0.0}

@@ -3108,6 +3108,34 @@ def test_nilm_assignment_identity_and_history_survive_restart() -> None:
     ]
 
 
+def test_rebuild_assignment_model_uses_home_assistant_timezone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.managers import (
+        nilm_controller as controller_module,
+    )
+
+    captured_time_zones: list[str | None] = []
+
+    def build_model(*_args: object, **kwargs: object) -> dict[str, object]:
+        captured_time_zones.append(kwargs.get("time_zone"))
+        return {}
+
+    monkeypatch.setattr(controller_module, "build_nilm_assignment_model", build_model)
+    coordinator = SimpleNamespace(
+        context_builder=SimpleNamespace(time_zone=lambda: "America/New_York"),
+        store_data=SimpleNamespace(
+            nilm_session_history_by_circuit={"mains": []},
+            nilm_label_intervals_by_circuit={"mains": []},
+        ),
+    )
+    controller = _nilm_controller(coordinator)
+
+    controller._rebuild_assignment_model("mains", {"assignment_id": "pump"})
+
+    assert captured_time_zones == ["America/New_York"]
+
+
 def test_hydration_normalizes_optional_assignment_model_fields_once() -> None:
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     assignment = {
