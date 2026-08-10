@@ -2648,22 +2648,31 @@ def test_nilm_compound_requires_two_different_learned_assignments_and_improvemen
     assert not reconcile(edge(0, 100), [a, unlearned], {"a": 0.0, "b": 0.0}).accepted
 
 
-def test_nilm_compound_is_bounded_to_twenty_recent_models() -> None:
-    old = assignment_model("old", transition("old", 40), last_observed=BASE_TIME)
-    recent = [
-        assignment_model(
-            f"recent-{index}",
-            transition(f"recent-{index}", 5),
-            last_observed=BASE_TIME + timedelta(seconds=index + 1),
-        )
+def test_nilm_compound_search_is_bounded_to_ten_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    checked_candidate_counts: list[int] = []
+
+    def bounded_combinations(iterable, size):
+        candidates = tuple(iterable)
+        checked_candidate_counts.append(len(candidates))
+        if len(candidates) > 10:
+            raise AssertionError("compound search exceeded the ten-candidate bound")
+        return stdlib_combinations(candidates, size)
+
+    monkeypatch.setattr(nilm_domain, "combinations", bounded_combinations)
+    models = [
+        assignment_model(f"load-{index:02d}", transition(f"load-{index:02d}", 1))
         for index in range(20)
     ]
     result = reconcile(
         edge(0, 100),
-        [old, *recent],
-        {model.assignment_id: 0.0 for model in [old, *recent]},
+        models,
+        {model.assignment_id: 0.0 for model in models},
     )
-    assert not result.accepted
+    assert result.accepted is False
+    assert result.reason == "below_threshold"
+    assert max(checked_candidate_counts) == 10
 
 
 def test_nilm_three_transition_edge_reconciles_unique_components() -> None:

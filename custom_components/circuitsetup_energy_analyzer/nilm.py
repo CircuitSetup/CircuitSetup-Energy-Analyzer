@@ -37,6 +37,7 @@ _SOURCE_TRUST = {"session": 1.0, "interval": 0.85, "legacy_interval": 0.45}
 _CONFIDENCE_CAP = 0.95
 _POWER_ENERGY_DISAGREEMENT_RATIO = 0.35
 _NILM_MAX_SCORE_BREAKDOWNS = 5
+_NILM_COMPOUND_CANDIDATE_MAX_ITEMS = 10
 _NILM_MAX_ACTIVE_STATES = 3
 _NILM_STATE_SPLIT_MIN_EFFECTIVE_SUPPORT = 8.0
 _NILM_STATE_MIN_EFFECTIVE_SUPPORT = 3.0
@@ -2655,27 +2656,11 @@ def reconcile_nilm_edge(
     else:
         single_reason = "below_threshold"
 
-    recent_ids = {
-        model.assignment_id
-        for model in sorted(
-            (
-                model
-                for model in models
-                if model.lifecycle_state.strip().lower() != "retired"
-            ),
-            key=lambda item: (
-                -_nilm_aware(item.last_observed).timestamp()
-                if item.last_observed is not None
-                else float("inf"),
-                item.assignment_id,
-            ),
-        )[:20]
-    }
+    models_by_assignment_id = {model.assignment_id: model for model in models}
     per_assignment: dict[str, NilmTransitionPrototype] = {}
     for model, prototype in legal:
         if (
-            model.assignment_id in recent_ids
-            and model.lifecycle_state.strip().lower() != "retired"
+            model.lifecycle_state.strip().lower() != "retired"
             and prototype.sample_count >= 3
             and (
                 prototype.effective_support
@@ -2702,10 +2687,22 @@ def reconcile_nilm_edge(
         ]
     ] = []
     ordered_transitions = tuple(
-        per_assignment[assignment_id] for assignment_id in sorted(per_assignment)
+        prototype
+        for assignment_id, prototype in sorted(
+            per_assignment.items(),
+            key=lambda item: (
+                abs(edge.delta_w - item[1].delta_w),
+                -_nilm_aware(
+                    models_by_assignment_id[item[0]].last_observed
+                ).timestamp()
+                if models_by_assignment_id[item[0]].last_observed is not None
+                else float("inf"),
+                item[0],
+            ),
+        )[:_NILM_COMPOUND_CANDIDATE_MAX_ITEMS]
     )
-    # ponytail: four simultaneous transitions bound combinatorial work; already-active
-    # components remain unlimited. Raise only if labelled replay needs larger groups.
+    # ponytail: ten edge-relevant candidates and four simultaneous transitions
+    # bound combinatorial work; already-active components remain unlimited.
     for size in range(2, min(4, len(ordered_transitions)) + 1):
         sized_compounds: list[
             tuple[
