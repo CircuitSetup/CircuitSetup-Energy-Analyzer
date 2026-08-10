@@ -4336,6 +4336,57 @@ async def test_session_feedback_upserts_a_revision_matched_explicit_outcome() ->
 
 
 @pytest.mark.asyncio
+async def test_session_feedback_preserves_matching_schema_v2_ground_truth_outcome() -> (
+    None
+):
+    """Removing another validation source during feedback upsert must fail."""
+    now = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+    assignment = {
+        "assignment_id": "assignment-pump",
+        "model_revision": 7,
+        "model_fingerprint": "model-seven",
+        "validation_schema_version": 2,
+        "validation_method": "one_to_one_iou",
+        "validation_outcomes": [
+            {
+                "outcome_id": "session-1",
+                "session_id": "session-1",
+                "source": "ground_truth",
+                "outcome": "correct",
+                "timestamp": now.isoformat(),
+                "model_revision": 7,
+                "model_fingerprint": "model-seven",
+            }
+        ],
+    }
+    controller, assignment = _validation_feedback_controller(
+        [
+            {
+                "session_id": "session-1",
+                "assignment_id": "assignment-pump",
+                "start": now.isoformat(),
+                "end": (now + timedelta(minutes=10)).isoformat(),
+                "start_model_revision": 7,
+                "stop_model_revision": 7,
+                "start_model_fingerprint": "model-seven",
+                "stop_model_fingerprint": "model-seven",
+            }
+        ],
+        now_values=[now],
+        assignment=assignment,
+    )
+
+    await controller.async_record_nilm_session_validation(
+        "mixed", "session-1", assignment_id="assignment-pump", correct=True
+    )
+
+    assert {
+        (record["outcome_id"], record["source"])
+        for record in assignment["validation_outcomes"]
+    } == {("session-1", "ground_truth"), ("session-1", "explicit_feedback")}
+
+
+@pytest.mark.asyncio
 async def test_session_feedback_profiles_become_eligible_only_at_support_and_day_gates(
 ) -> None:
     """Dropping either Task-3 gate or smoothing must fail this test."""

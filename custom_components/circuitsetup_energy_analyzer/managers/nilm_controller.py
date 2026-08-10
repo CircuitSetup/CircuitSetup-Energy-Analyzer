@@ -2770,8 +2770,14 @@ class NilmController:
             dict(item)
             for item in assignment.get("validation_outcomes", ())
             if isinstance(item, Mapping)
-            and str(item.get("outcome_id") or item.get("session_id") or "").strip()
-            != session_id
+            and not (
+                str(item.get("source") or "").strip().lower()
+                == "explicit_feedback"
+                and str(
+                    item.get("outcome_id") or item.get("session_id") or ""
+                ).strip()
+                == session_id
+            )
         ]
         outcomes.append(outcome)
         assignment["validation_outcomes"] = outcomes[
