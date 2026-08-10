@@ -214,7 +214,7 @@ def test_binary_state_persists_between_rows_and_prestart_is_censored() -> None:
         settings=SETTINGS,
     )
     assert [(item.start, item.end) for item in persisted.intervals] == [
-        (BASE + timedelta(seconds=10), BASE + timedelta(seconds=40))
+        (BASE + timedelta(seconds=10), BASE + timedelta(seconds=50))
     ]
     assert prestart.intervals[0].left_censored is True
 
@@ -257,3 +257,34 @@ def test_request_end_confirms_persisted_binary_on_and_off_candidates() -> None:
     assert [
         (item.start, item.end, item.right_censored) for item in off_pending.intervals
     ] == [(BASE, BASE + timedelta(seconds=30), False)]
+
+
+def test_on_confirmation_hands_current_off_to_its_own_dwell() -> None:
+    short = extract_reference_intervals(
+        rows((10, "on"), (40, "off")),
+        start=BASE,
+        end=BASE + timedelta(seconds=50),
+        settings=SETTINGS,
+    )
+    held = extract_reference_intervals(
+        rows((10, "on"), (40, "off")),
+        start=BASE,
+        end=BASE + timedelta(seconds=60),
+        settings=SETTINGS,
+    )
+    assert short.intervals[0].right_censored is True
+    assert held.intervals[0].end == BASE + timedelta(seconds=40)
+    assert held.intervals[0].right_censored is False
+
+
+def test_resume_after_long_unknown_is_left_uncertain() -> None:
+    result = extract_reference_intervals(
+        rows((0, "on"), (20, "on"), (30, "unknown"), (60, "on"), (80, "on")),
+        start=BASE,
+        end=BASE + timedelta(seconds=100),
+        settings=SETTINGS,
+    )
+    resumed = result.intervals[-1]
+    assert resumed.left_censored is True
+    assert "left_uncertain_after_unknown_gap" in resumed.quality_flags
+    assert resumed.evidence_confidence < 0.85

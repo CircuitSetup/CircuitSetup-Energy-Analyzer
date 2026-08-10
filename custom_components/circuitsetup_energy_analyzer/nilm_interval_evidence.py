@@ -171,6 +171,8 @@ def extract_reference_intervals(
     unknown_at: datetime | None = None
     unknown_total = 0.0
     bridged = 0
+    resumed_after_unknown_gap = False
+    interval_flags: set[str] = set()
     raw: list[tuple[datetime, datetime, bool, bool, float, int, float, set[str]]] = []
     previous: NilmReferenceSample | None = None
     if before_start:
@@ -208,6 +210,7 @@ def extract_reference_intervals(
                     None,
                     None,
                 )
+                resumed_after_unknown_gap = True
             continue
         confirmed_this_row = False
         confirmed_state: ReferenceActivityState | None = None
@@ -222,6 +225,10 @@ def extract_reference_intervals(
                 confirmed_state, confirmed_at = candidate, candidate_at
                 if candidate is ReferenceActivityState.ACTIVE and not active:
                     active, interval_start, left_censored = True, candidate_at, False
+                    if resumed_after_unknown_gap:
+                        left_censored = True
+                        interval_flags = {"left_uncertain_after_unknown_gap"}
+                        resumed_after_unknown_gap = False
                 confirmed_this_row = True
                 candidate, candidate_at = None, None
         if unknown_at is not None:
@@ -248,8 +255,14 @@ def extract_reference_intervals(
                     None,
                     None,
                 )
+                resumed_after_unknown_gap = True
             unknown_at = None
-        if confirmed_this_row and active and state is ReferenceActivityState.INACTIVE:
+        if (
+            confirmed_this_row
+            and confirmed_state is ReferenceActivityState.INACTIVE
+            and active
+            and state is ReferenceActivityState.INACTIVE
+        ):
             raw.append(
                 (
                     interval_start or start,
@@ -263,7 +276,7 @@ def extract_reference_intervals(
                     unknown_total,
                     0,
                     0.0,
-                    set(),
+                    set(interval_flags),
                 )
             )
             active, interval_start, unknown_total = False, None, 0.0
@@ -291,6 +304,10 @@ def extract_reference_intervals(
             continue
         if state is ReferenceActivityState.ACTIVE:
             active, interval_start, left_censored = True, candidate_at, False
+            if resumed_after_unknown_gap:
+                left_censored = True
+                interval_flags = {"left_uncertain_after_unknown_gap"}
+                resumed_after_unknown_gap = False
         elif active:
             raw.append(
                 (
@@ -301,7 +318,7 @@ def extract_reference_intervals(
                     unknown_total,
                     0,
                     0.0,
-                    set(),
+                    set(interval_flags),
                 )
             )
             active, interval_start, unknown_total = False, None, 0.0
@@ -343,7 +360,7 @@ def extract_reference_intervals(
                 unknown_total,
                 0,
                 0.0,
-                {"right_censored"},
+                interval_flags | {"right_censored"},
             )
         )
     merged: list[
@@ -391,6 +408,8 @@ def extract_reference_intervals(
             continue
         coverage = max(0.0, min(1.0, 1 - (unknown + inactive_gap) / interval_duration))
         confidence = coverage * (0.85 if left or right else 1.0)
+        if "left_uncertain_after_unknown_gap" in flags:
+            confidence *= 0.8
         intervals.append(
             NilmReferenceInterval(
                 interval_start,
