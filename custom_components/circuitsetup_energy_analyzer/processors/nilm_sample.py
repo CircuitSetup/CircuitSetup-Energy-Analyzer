@@ -988,13 +988,25 @@ def reconcile_component_runtime(
             else None
             for key, value in next_runtime.items()
         }
+        current_state_ids = {}
+        for key, value in next_runtime.items():
+            status = value.get("status")
+            if status not in {NilmComponentStatus.ON, NilmComponentStatus.OFF}:
+                current_state_ids[key] = None
+                continue
+            current_state_ids[key] = (
+                str(value.get("current_state_id") or "").strip()
+                or ("off" if status == NilmComponentStatus.OFF else "running")
+            )
         helper_scores = _confirmed_helper_scores(
             assignments, helper_events, edge, available_helper_ids
         )
         duration_scores = _runtime_duration_state_scores(
-            assignments, models, next_runtime, edge, current
+            assignments, models, next_runtime, edge, current, current_state_ids
         )
-        candidates = _runtime_candidate_transitions(models, current, edge)
+        candidates = _runtime_candidate_transitions(
+            models, current, current_state_ids, edge
+        )
         candidate_assignment_ids = {
             prototype.assignment_id for prototype in candidates
         }
@@ -1005,6 +1017,7 @@ def reconcile_component_runtime(
             available_helper_ids,
             models,
             current,
+            current_state_ids,
         )
         duration_available = any(
             _runtime_transition_score(duration_scores, prototype) is not None
@@ -1051,6 +1064,7 @@ def reconcile_component_runtime(
             helper_scores,
             duration_scores,
             validation_scores,
+            current_state_ids=current_state_ids,
             helper_conflict=helper_conflict,
         )
         if not result.accepted:
@@ -1067,6 +1081,7 @@ def reconcile_component_runtime(
         if duration_available:
             without_duration = reconcile_nilm_edge(
                 edge, models, current, helper_scores, {}, validation_scores,
+                current_state_ids=current_state_ids,
                 helper_conflict=helper_conflict,
             )
             evidence_diagnostics["duration_rank_impact_count"] += int(
@@ -1076,6 +1091,7 @@ def reconcile_component_runtime(
         if validation_available:
             without_validation = reconcile_nilm_edge(
                 edge, models, current, helper_scores, duration_scores, {},
+                current_state_ids=current_state_ids,
                 helper_conflict=helper_conflict,
             )
             evidence_diagnostics["validation_rank_impact_count"] += int(
@@ -1938,12 +1954,15 @@ def _runtime_duration_state_scores(
     runtime: Mapping[str, Mapping[str, Any]],
     edge: NilmEdge,
     current_states_w: Mapping[str, float | None],
+    current_state_ids: Mapping[str, str | None] | None = None,
 ) -> dict[str, float | None]:
     """Build prototype-specific duration scores for one observed edge."""
     assignments_by_id = {
         str(item.get("assignment_id") or ""): item for item in assignments
     }
-    candidates = _runtime_legal_transitions(models, current_states_w)
+    candidates = _runtime_legal_transitions(
+        models, current_states_w, current_state_ids
+    )
     prototype_counts: defaultdict[str, int] = defaultdict(int)
     for prototype in candidates:
         prototype_counts[prototype.prototype_id] += 1
@@ -1974,11 +1993,14 @@ def _runtime_duration_state_scores(
 def _runtime_candidate_transitions(
     models: Iterable[NilmAssignmentModel],
     current_states_w: Mapping[str, float | None],
+    current_state_ids: Mapping[str, str | None] | None,
     edge: NilmEdge,
 ) -> tuple[NilmTransitionPrototype, ...]:
     return tuple(
         prototype
-        for prototype in _runtime_legal_transitions(models, current_states_w)
+        for prototype in _runtime_legal_transitions(
+            models, current_states_w, current_state_ids
+        )
         if abs(edge.delta_w - prototype.delta_w)
         <= nilm_transition_tolerance_w(prototype)
     )
@@ -1987,6 +2009,7 @@ def _runtime_candidate_transitions(
 def _runtime_legal_transitions(
     models: Iterable[NilmAssignmentModel],
     current_states_w: Mapping[str, float | None],
+    current_state_ids: Mapping[str, str | None] | None = None,
 ) -> tuple[NilmTransitionPrototype, ...]:
     return tuple(
         prototype
@@ -2003,6 +2026,9 @@ def _runtime_legal_transitions(
         )
         if (current := current_states_w.get(model.assignment_id)) is not None
         if isfinite(current)
+        if current_state_ids is None
+        or str(current_state_ids.get(model.assignment_id) or "").strip()
+        == prototype.from_state_id
         if prototype.direction == ("on" if prototype.delta_w > 0 else "off")
         if all(
             any(abs(state - expected) <= 1e-6 for state in model.power_states_w)
@@ -2214,6 +2240,7 @@ def _confirmed_helper_conflict(
     available_helper_ids: set[str] | frozenset[str],
     models: Iterable[NilmAssignmentModel],
     current_states_w: Mapping[str, float | None],
+    current_state_ids: Mapping[str, str | None] | None = None,
 ) -> bool:
     events = tuple(events)
     eligible = {
@@ -2226,6 +2253,7 @@ def _confirmed_helper_conflict(
             {model.assignment_id: 1.0},
             {},
             {},
+            current_state_ids=current_state_ids,
         ).accepted
     }
     helper_assignments: dict[str, set[str]] = {}

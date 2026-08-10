@@ -1396,6 +1396,19 @@ def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, 
             for name, profile in assignment["run_profile"].items()
             if isinstance(name, str) and isinstance(profile, Mapping)
         }
+    if isinstance(assignment.get("state_dwell_profiles"), Mapping):
+        active_state_ids = {
+            str(state.get("id") or "")
+            for state in states
+            if state.get("id") != "off"
+        }
+        profiles = {
+            str(state_id): _normalize_assignment_profile(profile)
+            for state_id, profile in assignment["state_dwell_profiles"].items()
+            if str(state_id) in active_state_ids and isinstance(profile, Mapping)
+        }
+        if profiles:
+            normalized["state_dwell_profiles"] = profiles
     if isinstance(assignment.get("evidence_summary"), Mapping):
         summary = assignment["evidence_summary"]
         normalized["evidence_summary"] = {

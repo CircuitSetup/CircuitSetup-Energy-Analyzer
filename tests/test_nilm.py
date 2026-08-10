@@ -965,6 +965,37 @@ def test_normalize_assignment_model_preserves_valid_v2_nested_fields() -> None:
     assert normalized["evidence_summary"]["quality_issues"] == ["x"]
 
 
+def test_normalize_assignment_model_preserves_state_dwell_profiles() -> None:
+    """Persisted active-state duration evidence survives model hydration."""
+    model = nilm_domain.normalize_nilm_assignment_model(
+        {
+            "assignment_id": "dryer",
+            "power_states_w": [0.0, 120.0, 820.0],
+            "states": [
+                {"id": "off", "power_w": 0.0, "spread_w": 0.0},
+                {"id": "active_1", "power_w": 120.0, "spread_w": 4.0},
+                {"id": "active_2", "power_w": 820.0, "spread_w": 9.0},
+            ],
+            "state_dwell_profiles": {
+                "active_1": {
+                    "median_seconds": 120.0,
+                    "effective_support": 5.0,
+                    "distinct_days": 3,
+                },
+                "unknown": {"median_seconds": 5.0},
+            },
+        }
+    )
+
+    assert model["state_dwell_profiles"] == {
+        "active_1": {
+            "median_seconds": 120.0,
+            "effective_support": 5.0,
+            "distinct_days": 3.0,
+        }
+    }
+
+
 def test_assignment_model_fingerprint_tracks_reactive_and_confidence_fields() -> None:
     base = {
         "power_states_w": [0, 80],

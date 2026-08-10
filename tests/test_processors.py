@@ -10681,6 +10681,52 @@ def test_nilm_runtime_keeps_one_session_through_active_state_changes() -> None:
     assert session["time_weighted_median_power_w"] == 100.0
 
 
+def test_nilm_runtime_rejects_transition_from_a_different_active_state_id() -> None:
+    """Equal state power alone cannot authorize an incompatible state transition."""
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    assignment = {
+        "assignment_id": "load",
+        "lifecycle_state": "validated",
+        "model_confidence": 0.9,
+        "power_states_w": [0.0, 100.0],
+        "states": [
+            {"id": "off", "kind": "off", "power_w": 0.0, "spread_w": 0.0},
+            {"id": "active_1", "kind": "active", "power_w": 100.0, "spread_w": 1.0},
+            {"id": "active_2", "kind": "active", "power_w": 100.0, "spread_w": 1.0},
+        ],
+        "transition_prototypes": [
+            {"id": "load-stop-active-2", "kind": "stop", "direction": "off",
+             "from_state_id": "active_2", "to_state_id": "off",
+             "from_state_w": 100.0, "to_state_w": 0.0,
+             "delta_w": -100.0, "spread_w": 2.0, "sample_count": 4},
+        ],
+    }
+    runtime, _, completed, accepted = reconcile_component_runtime(
+        source_power_w=0.0,
+        timestamp=now,
+        assignments=(assignment,),
+        runtime={
+            "load": {
+                "status": "on", "state_power_w": 100.0,
+                "current_state_id": "active_1", "estimated_power_w": 100.0,
+                "session_id": "load|open", "session_start": now.isoformat(),
+                "consistent": True,
+            }
+        },
+        edges=(NilmEdge(now, -100.0, 0.0, -100.0, 0.0, "off"),),
+        standby_w=0.0,
+        noise_spread_w=0.0,
+    )
+
+    assert accepted == []
+    assert completed == []
+
+
 def test_nilm_source_unavailable_preserves_metrics_and_counts_input_edge() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
