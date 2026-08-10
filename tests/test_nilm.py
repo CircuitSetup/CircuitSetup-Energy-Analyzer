@@ -215,6 +215,74 @@ def test_assignment_model_uses_interval_plateau_for_running_state() -> None:
     assert model["transition_prototypes"][0]["delta_w"] == 70.0
 
 
+def test_assignment_model_builds_supported_state_dwell_profiles_from_completed_paths(  # noqa: E501
+) -> None:
+    sessions = [
+        {
+            "session_id": f"session-{index}",
+            "assignment_id": "pump",
+            "start": f"2026-06-{day:02}T10:00:00+00:00",
+            "end": f"2026-06-{day:02}T10:20:00+00:00",
+            "on_delta_w": power,
+            "off_delta_w": -power,
+            "median_power_w": power,
+            "confidence": 1.0,
+            "state_path": [
+                {"state_id": "active_1", "power_w": 100.0},
+                {"state_id": "active_2", "power_w": 300.0},
+            ],
+            "state_dwell_seconds": {"active_1": 120.0, "active_2": 1080.0},
+        }
+        for index, (day, power) in enumerate(
+            (
+                (1, 100),
+                (2, 102),
+                (3, 98),
+                (4, 101),
+                (5, 300),
+                (6, 302),
+                (7, 298),
+                (8, 301),
+            ),
+            1,
+        )
+    ]
+    model = build_nilm_assignment_model(
+        {
+            "assignment_id": "pump",
+            "confirmed_session_ids": [item["session_id"] for item in sessions],
+        },
+        sessions,
+    )
+
+    dwell = model["state_dwell_profiles"]
+    assert dwell["active_2"]["median_seconds"] == 1080.0
+    assert dwell["active_2"]["effective_support"] == 8.0
+    assert dwell["active_2"]["distinct_days"] == 8
+
+
+def test_assignment_model_omits_malformed_or_legacy_state_dwell_evidence() -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "confirmed_session_ids": ["bad"]},
+        [
+            {
+                "session_id": "bad",
+                "assignment_id": "pump",
+                "start": "2026-06-01T10:00:00+00:00",
+                "end": "2026-06-01T10:10:00+00:00",
+                "on_delta_w": 100.0,
+                "off_delta_w": -100.0,
+                "median_power_w": 100.0,
+                "confidence": 1.0,
+                "state_path": "legacy",
+                "state_dwell_seconds": {"active_1": "bad", "off": 100.0},
+            }
+        ],
+    )
+
+    assert "state_dwell_profiles" not in model
+
+
 def test_assignment_model_builds_energy_profile_without_using_energy_as_edge() -> None:
     model = build_nilm_assignment_model(
         {"assignment_id": "pump", "label_interval_ids": ["one"]},
@@ -1643,6 +1711,7 @@ def reconcile(
     helpers: dict[str, float | None] | None = None,
     durations: dict[str, float | None] | None = None,
     validations: dict[str, float | None] | None = None,
+    state_ids: dict[str, str | None] | None = None,
     helper_conflict: bool = False,
 ) -> nilm_domain.NilmReconciliationResult:
     return nilm_domain.reconcile_nilm_edge(
@@ -1652,6 +1721,7 @@ def reconcile(
         helpers or {},
         durations or {},
         validations or {},
+        current_state_ids=state_ids,
         helper_conflict=helper_conflict,
     )
 
@@ -2221,6 +2291,40 @@ def test_nilm_single_candidate_applies_threshold_and_lead_gates() -> None:
     assert not result.accepted and result.reason == "ambiguous"
     result = reconcile(edge(0, 110), [strong], {"strong": 0.0})
     assert not result.accepted and result.reason == "below_threshold"
+
+
+def test_reconciliation_requires_supplied_state_id_to_match_prototype_source() -> None:
+    prototype = nilm_domain.NilmTransitionPrototype(
+        assignment_id="pump",
+        direction="on",
+        from_state_w=100.0,
+        to_state_w=300.0,
+        delta_w=200.0,
+        spread_w=5.0,
+        sample_count=3,
+        prototype_id="pump:state_up:active_1->active_2",
+        transition_kind="state_up",
+        from_state_id="active_1",
+        to_state_id="active_2",
+    )
+    model = nilm_domain.NilmAssignmentModel(
+        assignment_id="pump",
+        power_states_w=(0.0, 100.0, 300.0),
+        transition_prototypes=(prototype,),
+        model_confidence=0.9,
+        lifecycle_state="validated",
+        last_observed=BASE_TIME,
+    )
+
+    accepted = reconcile(
+        edge(100, 200.0), [model], {"pump": 100.0}, state_ids={"pump": "active_1"}
+    )
+    rejected = reconcile(
+        edge(100, 200.0), [model], {"pump": 100.0}, state_ids={"pump": "active_2"}
+    )
+
+    assert accepted.accepted is True
+    assert rejected.accepted is False
 
 
 def test_nilm_candidate_masks_lifecycle_and_illegal_state_but_allows_retired_stop() -> (

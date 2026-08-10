@@ -285,6 +285,14 @@ def build_nilm_assignment_model(
     model["run_profile"]["plateau_w"]["source_counts"] = _count_values(
         record.plateau_source for record in plateau
     )
+    state_dwell_profiles = _build_nilm_state_dwell_profiles(
+        sessions,
+        positives,
+        assignment_id,
+        {state["id"] for state in model["states"] if state["id"] != "off"},
+    )
+    if state_dwell_profiles:
+        model["state_dwell_profiles"] = state_dwell_profiles
     conflicts = _close_rejected_conflicts(negatives, on, off)
     issues = sorted({issue for record in positives for issue in record.issues})
     state_support = min(_weighted_support(weighted_plateau) / 3, 1.0)
@@ -308,6 +316,58 @@ def build_nilm_assignment_model(
         "quality_issues": issues,
     }
     return _finalize_assignment_model(model, normalized)
+
+
+def _build_nilm_state_dwell_profiles(
+    sessions: Iterable[Mapping[str, Any]],
+    records: list[_NormalizedAssignmentEvidence],
+    assignment_id: str,
+    active_state_ids: set[str],
+) -> dict[str, dict[str, Any]]:
+    """Build bounded state-dwell profiles from completed, normalized sessions."""
+    record_by_id = {
+        record.evidence_id: record
+        for record in records
+        if record.source_type == "session"
+    }
+    dwell_records: defaultdict[str, list[_NormalizedAssignmentEvidence]] = defaultdict(
+        list
+    )
+    for session in sessions:
+        session_id = str(session.get("session_id") or "").strip()
+        record = record_by_id.get(session_id)
+        if record is None or str(session.get("assignment_id") or "").strip() not in {
+            "",
+            assignment_id,
+        }:
+            continue
+        if _nilm_datetime(session.get("end")) is None:
+            continue
+        path = session.get("state_path")
+        dwell = session.get("state_dwell_seconds")
+        if not isinstance(path, list) or not isinstance(dwell, Mapping):
+            continue
+        path_ids = {
+            str(item.get("state_id") or "").strip()
+            for item in path
+            if isinstance(item, Mapping)
+        }
+        for raw_state_id, raw_seconds in dwell.items():
+            state_id = str(raw_state_id or "").strip()
+            seconds = _positive_number(raw_seconds)
+            if (
+                not state_id
+                or state_id not in active_state_ids
+                or state_id not in path_ids
+                or seconds is None
+            ):
+                continue
+            dwell_records[state_id].append(replace(record, duration_s=seconds))
+    return {
+        state_id: _duration_profile(state_records)
+        for state_id, state_records in sorted(dwell_records.items())
+        if state_records
+    }
 
 
 def _finalize_assignment_model(
@@ -1388,17 +1448,22 @@ def _normalize_assignment_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
 
 def nilm_assignment_model_is_compound_eligible(
     assignment: Mapping[str, Any],
+    prototype: Mapping[str, Any] | None = None,
 ) -> bool:
-    """Return whether both directions are learned and confidence is sufficient."""
+    """Return whether a candidate transition has sufficient compound evidence."""
     prototypes = assignment.get("transition_prototypes")
     if not isinstance(prototypes, list):
         return False
-    learned = {
-        str(item.get("direction") or "")
-        for item in prototypes
-        if isinstance(item, Mapping)
+    candidates = [prototype] if prototype is not None else prototypes
+    learned = any(
+        isinstance(item, Mapping)
         and _model_nonnegative_int(item.get("sample_count")) >= 3
-    }
+        and _model_number(item.get("effective_support", item.get("sample_count")))
+        is not None
+        and _model_number(item.get("effective_support", item.get("sample_count")))
+        >= 3.0
+        for item in candidates
+    )
     confidence = _model_number(assignment.get("model_confidence"))
     summary = assignment.get("evidence_summary")
     state_support = (
@@ -1407,7 +1472,7 @@ def nilm_assignment_model_is_compound_eligible(
         else None
     )
     return (
-        learned == {"on", "off"}
+        learned
         and confidence is not None
         and confidence >= 0.70
         and state_support is not None
@@ -2359,6 +2424,7 @@ def reconcile_nilm_edge(
     duration_state_scores: Mapping[str, float | None],
     validation_scores: Mapping[str, float | None],
     *,
+    current_state_ids: Mapping[str, str | None] | None = None,
     helper_conflict: bool = False,
 ) -> NilmReconciliationResult:
     """Match one edge to a bounded set of legal assignment transitions."""
@@ -2367,7 +2433,7 @@ def reconcile_nilm_edge(
         (model, prototype)
         for model in models
         for prototype in model.transition_prototypes
-        if _nilm_transition_legal(model, prototype, current_states_w)
+        if _nilm_transition_legal(model, prototype, current_states_w, current_state_ids)
     ]
     if helper_conflict:
         return _nilm_reconciliation(edge, (), reason="helper_conflict")
@@ -2537,6 +2603,7 @@ def _nilm_transition_legal(
     model: NilmAssignmentModel,
     prototype: NilmTransitionPrototype,
     current_states_w: Mapping[str, float | None],
+    current_state_ids: Mapping[str, str | None] | None = None,
 ) -> bool:
     lifecycle = model.lifecycle_state.strip().lower()
     if lifecycle in {"hidden", "ignored", "rejected", "converted"}:
@@ -2544,6 +2611,11 @@ def _nilm_transition_legal(
     current = current_states_w.get(model.assignment_id)
     if current is None or not isfinite(current):
         return False
+    if current_state_ids is not None:
+        expected_id = prototype.from_state_id
+        current_id = str(current_state_ids.get(model.assignment_id) or "").strip()
+        if not expected_id or current_id != expected_id:
+            return False
     if lifecycle == "retired" and not (prototype.direction == "off" and current):
         return False
     if prototype.direction != ("on" if prototype.delta_w > 0 else "off"):
