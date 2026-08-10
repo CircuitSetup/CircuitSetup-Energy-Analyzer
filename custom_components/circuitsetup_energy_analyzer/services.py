@@ -2508,6 +2508,20 @@ def _nilm_reference_power_metrics(
     }
 
 
+def _manual_power_unit(unit: Any) -> tuple[str, float] | None:
+    """Canonicalize compatible real-power units without conflating mW and MW."""
+    text = str(unit or "").strip()
+    if text.casefold() == "w":
+        return "W", 1.0
+    if text.casefold() == "kw":
+        return "kW", 1_000.0
+    if text == "MW" or (text.startswith("M") and text[1:].casefold() == "w"):
+        return "MW", 1_000_000.0
+    if text.casefold() == "mw":
+        return "mW", 0.001
+    return None
+
+
 def _nilm_reference_power_unit(hass: Any, entity_id: str) -> str:
     get_state = getattr(getattr(hass, "states", None), "get", None)
     state = get_state(entity_id) if callable(get_state) else None
@@ -2516,12 +2530,13 @@ def _nilm_reference_power_unit(hass: Any, entity_id: str) -> str:
         return ""
     unit = str(attributes.get("unit_of_measurement") or "").strip()
     device_class = str(attributes.get("device_class") or "").strip()
-    if unit not in {"W", "kW", "mW", "MW"}:
+    normalized_unit = _manual_power_unit(unit)
+    if normalized_unit is None:
         return ""
     if sensor_metadata_role_conflict(device_class=device_class, unit=unit):
         return ""
     return (
-        unit
+        normalized_unit[0]
         if sensor_role_from_metadata(device_class=device_class, unit=unit)
         is SensorRole.REAL_POWER
         else ""
@@ -2548,9 +2563,9 @@ def _configured_manual_power_sources(
         unit = str(getattr(sensor, "unit", "") or "").strip()
         if not unit:
             unit = _nilm_reference_power_unit(hass, entity_id)
-        factor = {"W": 1.0, "kW": 1000.0, "mW": 0.001, "MW": 1_000_000.0}.get(unit)
-        if entity_id and factor is not None:
-            sources.append((entity_id, factor))
+        normalized_unit = _manual_power_unit(unit)
+        if entity_id and normalized_unit is not None:
+            sources.append((entity_id, normalized_unit[1]))
     return tuple(sources)
 
 

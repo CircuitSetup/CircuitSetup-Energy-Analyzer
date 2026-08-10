@@ -1270,6 +1270,40 @@ def _manual_evidence_rows(entity_id: str) -> list[list[dict[str, str]]]:
     ]
 
 
+def test_manual_power_sources_normalize_case_varied_units() -> None:
+    """Catches valid real-power source units being dropped due to unit casing."""
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        _configured_manual_power_sources,
+    )
+
+    config = _manual_evidence_config(
+        SensorRef("sensor.configured_kw", SensorRole.REAL_POWER, unit="kw"),
+        SensorRef("sensor.configured_milli", SensorRole.REAL_POWER, unit="mW"),
+        SensorRef("sensor.configured_mega", SensorRole.REAL_POWER, unit="MW"),
+        SensorRef("sensor.metadata", SensorRole.REAL_POWER),
+    )
+    hass = SimpleNamespace(
+        states=SimpleNamespace(
+            get=lambda entity_id: SimpleNamespace(
+                attributes={
+                    "device_class": "power",
+                    "unit_of_measurement": (
+                        "KW" if entity_id == "sensor.metadata" else ""
+                    ),
+                }
+            )
+        )
+    )
+    coordinator = SimpleNamespace(circuit_configs=[config])
+
+    assert _configured_manual_power_sources(hass, coordinator, "mains") == (
+        ("sensor.configured_kw", 1_000.0),
+        ("sensor.configured_milli", 0.001),
+        ("sensor.configured_mega", 1_000_000.0),
+        ("sensor.metadata", 1_000.0),
+    )
+
+
 @pytest.mark.asyncio
 async def test_manual_label_uses_configured_power_evidence(
     monkeypatch: pytest.MonkeyPatch,
@@ -1366,6 +1400,14 @@ async def test_manual_batch_fetches_each_configured_source_once_for_union_contex
     assert {call.args[1] for call in history.await_args_list} == {
         "sensor.leg_a",
         "sensor.leg_b",
+    }
+    assert {
+        (call.args[2], call.args[3]) for call in history.await_args_list
+    } == {
+        (
+            datetime(2026, 7, 31, 23, 59, 20, tzinfo=UTC),
+            datetime(2026, 8, 1, 0, 5, 40, tzinfo=UTC),
+        )
     }
     saved = coordinator.async_save_nilm_interval_changes.await_args.kwargs["intervals"]
     assert all(
