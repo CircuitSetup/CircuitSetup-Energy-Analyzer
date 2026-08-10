@@ -132,9 +132,9 @@ def nilm_topology_evidence_payload(
     suggested_leg = (
         observed_leg if known_config.mode is CircuitMode.SINGLE_PHASE else None
     )
-    status = evaluate_known_load_topology(match.edge, topology)
+    status = match.topology_status or evaluate_known_load_topology(match.edge, topology)
 
-    return {
+    evidence = {
         "status": status,
         "matched_mains_circuit_id": mains_config.circuit_id,
         "event_type": "start" if match.edge.direction == "on" else "stop",
@@ -170,6 +170,35 @@ def nilm_topology_evidence_payload(
         "known_power_source": match.power_source,
         "match_confidence": _round_number(match.confidence),
     }
+    if match.selection_status is not None:
+        evidence["selection_status"] = match.selection_status
+    if match.known_power_source is not None:
+        evidence["known_selected_power_source"] = match.known_power_source
+    if match.known_transition_delta_w is not None:
+        evidence["known_transition_delta_w"] = _round_number(
+            match.known_transition_delta_w
+        )
+    if match.known_transition_spread_w is not None:
+        evidence["known_transition_spread_w"] = _round_number(
+            match.known_transition_spread_w
+        )
+    if match.power_match_confidence is not None:
+        evidence["pre_topology_power_match_confidence"] = _round_number(
+            match.power_match_confidence
+        )
+    if match.time_distance_seconds is not None:
+        evidence["synchronized_time_distance_seconds"] = _round_number(
+            match.time_distance_seconds
+        )
+    if match.time_offset_seconds is not None:
+        evidence["synchronized_time_offset_seconds"] = _round_number(
+            match.time_offset_seconds
+        )
+    if match.transition_timing_uncertainty_s is not None:
+        evidence["transition_timing_uncertainty_s"] = _round_number(
+            match.transition_timing_uncertainty_s
+        )
+    return evidence
 
 
 def nilm_topology_alert_feature(status: str) -> str:

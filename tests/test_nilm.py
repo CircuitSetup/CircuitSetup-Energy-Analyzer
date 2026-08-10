@@ -2008,6 +2008,86 @@ def test_attribute_known_loads_retains_rejected_topology_evidence(
     assert rejection.confidence == pytest.approx(0.85)
 
 
+def test_attribute_known_loads_bounds_topology_rejections_after_assignment() -> None:
+    """A wrong selection/suppression branch would retain noisy diagnostics."""
+    topology = {"load": nilm_domain.KnownLoadTopology(("single_leg_a",))}
+    rejected_exact = edge(0, 1000.0, split_phase_type="balanced_240v")
+    rejected_weaker = edge(1, 900.0, split_phase_type="balanced_240v")
+    selected = edge(2, 1000.0, split_phase_type="single_leg_a")
+    load_event = CircuitEvent(
+        BASE_TIME,
+        "load",
+        EventType.START,
+        features={"startup_power_w": 1000.0},
+    )
+    result = attribute_known_loads(
+        [rejected_exact, rejected_weaker, selected],
+        [load_event],
+        topology_by_circuit=topology,
+    )
+
+    assert [match.known_circuit_id for match in result.matched_edges] == ["load"]
+    assert result.unmatched_edges == (rejected_exact, rejected_weaker)
+    assert result.rejected_topology_candidates == ()
+    assert result.topology_rejections == result.rejected_topology_candidates
+
+
+def test_attribute_known_loads_retains_strongest_unsuppressed_rejection() -> None:
+    """Removing power/time/identity ordering would report a noisy mismatch."""
+    first = edge(0, 1000.0, split_phase_type="balanced_240v")
+    equal = edge(0, 1000.0, split_phase_type="balanced_240v")
+    weaker = edge(1, 900.0, split_phase_type="balanced_240v")
+    event = CircuitEvent(
+        BASE_TIME,
+        "load",
+        EventType.START,
+        features={"startup_power_w": 1000.0},
+    )
+
+    result = attribute_known_loads(
+        [first, equal, weaker],
+        [event],
+        topology_by_circuit={
+            "load": nilm_domain.KnownLoadTopology(("single_leg_a",))
+        },
+    )
+
+    assert result.unmatched_edges == (first, equal, weaker)
+    assert result.topology_rejections == (result.rejected_topology_candidates[0],)
+    assert result.topology_rejections[0].edge is first
+    assert result.topology_rejections[0].selection_status == "rejected_topology"
+
+
+def test_attribute_known_loads_suppresses_rejection_for_selected_edge() -> None:
+    """A rejected candidate must not diagnose an edge matched to another load."""
+    candidate = edge(0, 1000.0, split_phase_type="single_leg_a")
+    result = attribute_known_loads(
+        [candidate],
+        [
+            CircuitEvent(
+                BASE_TIME,
+                "dual",
+                EventType.START,
+                features={"startup_power_w": 1000.0},
+            ),
+            CircuitEvent(
+                BASE_TIME,
+                "single",
+                EventType.START,
+                features={"startup_power_w": 1000.0},
+            ),
+        ],
+        topology_by_circuit={
+            "dual": nilm_domain.KnownLoadTopology(("balanced_240v",)),
+            "single": nilm_domain.KnownLoadTopology(("single_leg_a",)),
+        },
+    )
+
+    assert [match.known_circuit_id for match in result.matched_edges] == ["single"]
+    assert result.unmatched_edges == ()
+    assert result.topology_rejections == ()
+
+
 def test_attribute_known_loads_global_assignment_beats_greedy() -> None:
     topology = nilm_domain.KnownLoadTopology(("single_leg_a",))
     edge_one = edge(0, 961.5384615, split_phase_type="single_leg_a")

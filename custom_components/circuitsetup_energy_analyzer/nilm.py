@@ -1280,6 +1280,11 @@ class NilmMaskResult:
     ambiguous_edge_count: int = 0
     rejected_topology_candidates: tuple[KnownLoadMatch, ...] = ()
 
+    @property
+    def topology_rejections(self) -> tuple[KnownLoadMatch, ...]:
+        """Compatibility alias for bounded topology-rejection diagnostics."""
+        return self.rejected_topology_candidates
+
 
 def known_load_topology_for_config(config: CircuitConfig) -> KnownLoadTopology:
     """Return NILM topology expectations derived from circuit configuration."""
@@ -2244,7 +2249,7 @@ def attribute_known_loads(
                     estimate.transition_timing_uncertainty_s
                 ),
                 power_match_confidence=score.magnitude,
-                selection_status=("candidate" if eligible else "topology_rejected"),
+                selection_status=("candidate" if eligible else "rejected_topology"),
             )
             if eligible:
                 candidates.append(
@@ -2277,6 +2282,31 @@ def attribute_known_loads(
         for candidate in selected_candidates
         if candidate.match.residual_edge is not None
     )
+    matched_event_indices = {
+        candidate.event_index for candidate in selected_candidates
+    }
+    strongest_rejections_by_event: dict[int, tuple[int, int, KnownLoadMatch]] = {}
+    for edge_index, event_index, match in rejected_topology_candidates:
+        if edge_index in matched_edge_indices or event_index in matched_event_indices:
+            continue
+        existing = strongest_rejections_by_event.get(event_index)
+        candidate_key = (
+            -float(match.power_match_confidence or 0.0),
+            float(match.time_distance_seconds or 0.0),
+            edge_index,
+            event_index,
+        )
+        if existing is None or candidate_key < (
+            -float(existing[2].power_match_confidence or 0.0),
+            float(existing[2].time_distance_seconds or 0.0),
+            existing[0],
+            existing[1],
+        ):
+            strongest_rejections_by_event[event_index] = (
+                edge_index,
+                event_index,
+                match,
+            )
 
     return NilmMaskResult(
         matched_edges,
@@ -2286,8 +2316,8 @@ def attribute_known_loads(
         tuple(
             match
             for _edge_index, _event_index, match in sorted(
-                rejected_topology_candidates,
-                key=lambda item: (item[0], item[1]),
+                strongest_rejections_by_event.values(),
+                key=lambda item: (item[1], item[0]),
             )
         ),
     )
