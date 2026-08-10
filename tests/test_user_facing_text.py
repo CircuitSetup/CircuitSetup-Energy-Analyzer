@@ -6678,6 +6678,7 @@ def test_nilm_interval_evidence_preview_is_backend_authoritative() -> None:
     assert "_requestNilmIntervalEvidence" in workspace_source
     assert "data-nilm-interval-evidence" in workspace_source
     assert "saved.observed_transition_w" not in workspace_source
+    assert "_nilmLabelIntervalPowerPreview" not in workspace_source
 
 
 def test_nilm_assigned_interval_is_visible_and_persistently_removable() -> None:
@@ -6745,34 +6746,45 @@ assert.equal(JSON.stringify(panel._nilmRemovedIntervalIds), '["saved-interval"]'
     )
 
 
-def test_nilm_interval_power_combines_only_mains_source_legs() -> None:
+def test_nilm_interval_evidence_preview_uses_explicit_target_and_ignores_stale_results() -> None:
     _run_panel_node_script(
         """
 const workspace = makeWorkspace({
-  history: { source_entities: ["sensor.mains_l1_watts", "sensor.mains_l2_watts"] },
+  circuit: { circuit_id: "mains" },
   label_intervals: [{
     start: "2026-08-04T08:00:00Z",
     end: "2026-08-04T08:10:00Z",
   }],
 });
-const panel = makePanel({ _nilmWorkspace: workspace, _nilmActiveIntervalIndex: 0 });
-panel._nilmWorkspaceHistorySeries = [
-  [
-    { entity_id: "sensor.mains_l1_watts", state: "100", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:00:00Z" },
-    { entity_id: "sensor.mains_l1_watts", state: "142", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:01:00Z" },
-    { entity_id: "sensor.mains_l1_watts", state: "100", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:10:00Z" },
-  ],
-  [
-    { entity_id: "sensor.mains_l2_watts", state: "80", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:00:00Z" },
-    { entity_id: "sensor.mains_l2_watts", state: "122", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:01:00Z" },
-    { entity_id: "sensor.mains_l2_watts", state: "80", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:10:00Z" },
-  ],
-  [
-    { entity_id: "sensor.helper_power", state: "0", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:00:00Z" },
-    { entity_id: "sensor.helper_power", state: "100", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:01:00Z" },
-  ],
-];
-assert.equal(panel._nilmLabelIntervalPowerPreview(workspace.label_intervals[0]), 84);
+(async () => {
+const panel = makePanel({
+  _nilmWorkspace: workspace,
+  _nilmActiveIntervalIndex: 0,
+  _nilmLabelIntervalDraft: { intervals: workspace.label_intervals },
+  _loadedRouteKey: "/panel?entry_id=entry-1&circuit_id=wrong-circuit",
+});
+const path = panel._nilmIntervalEvidenceRequest();
+assert.ok(path.includes("entry_id=entry-1"), path);
+assert.ok(path.includes("circuit_id=mains"), path);
+assert.equal(new URL(path, "http://example.local").searchParams.get("start"), "2026-08-04T08:00:00.000Z");
+let rendered = 0;
+panel._render = () => { rendered += 1; };
+panel._requestJson = async () => ({ interval_evidence: {
+  start_transition_w: 500, stop_transition_w: -490, average_power_w: 480,
+  median_power_w: 475, partial_energy_kwh: 0.12, source_coverage: 0.9,
+  power_coverage: 0.8, quality_flags: ["power_gap"],
+} });
+panel._nilmIntervalEvidenceToken = 2;
+await panel._requestNilmIntervalEvidence(path, 1);
+assert.equal(panel._nilmIntervalEvidence, undefined, "stale response must not update evidence");
+await panel._requestNilmIntervalEvidence(path, 2);
+assert.equal(panel._nilmIntervalEvidence.start_transition_w, 500);
+assert.equal(rendered, 1);
+const html = panel._renderNilmIntervalEvidence(panel._nilmIntervalEvidence);
+for (const text of ["Start: 500 W", "Stop: -490 W", "Average: 480 W", "Median: 475 W", "Partial energy: 0.12 kWh", "Source coverage: 0.9", "Power coverage: 0.8", "Quality: power_gap"]) {
+  assert.ok(html.includes(text), html);
+}
+})().catch((error) => { console.error(error); process.exit(1); });
 """
     )
 
