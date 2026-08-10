@@ -5119,6 +5119,8 @@ def test_nilm_workspace_payload_validates_sensor_labels_against_predictions() ->
     assert validation["metrics"] == {
         "ground_truth_interval_count": 3,
         "prediction_count": 1,
+        "evaluable_prediction_count": 1,
+        "unevaluated_prediction_count": 0,
         "matched_ground_truth_count": 1,
         "matched_prediction_count": 1,
         "missed_ground_truth_count": 2,
@@ -5215,6 +5217,8 @@ def test_nilm_validation_preview_rejects_one_second_overlap() -> None:
     assert payload["metrics"] == {
         "ground_truth_interval_count": 1,
         "prediction_count": 1,
+        "evaluable_prediction_count": 1,
+        "unevaluated_prediction_count": 0,
         "matched_ground_truth_count": 0,
         "matched_prediction_count": 0,
         "missed_ground_truth_count": 1,
@@ -5223,6 +5227,52 @@ def test_nilm_validation_preview_rejects_one_second_overlap() -> None:
     }
     assert payload["prediction_preview"][0]["prediction_status"] == "missed"
     assert payload["prediction_preview"][0]["matched_session_id"] is None
+
+
+def test_nilm_validation_preview_excludes_outside_coverage_from_precision() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_validation_payload,
+    )
+
+    payload = _nilm_validation_payload(
+        [
+            {
+                "interval_id": "label-dishwasher",
+                "assignment_id": "assignment-dishwasher",
+                "ground_truth_entity_id": "sensor.dishwasher_power",
+                "start": "2026-06-06T12:00:00+00:00",
+                "end": "2026-06-06T12:30:00+00:00",
+                "validation_start": "2026-06-06T12:00:00+00:00",
+                "validation_end": "2026-06-06T13:00:00+00:00",
+            }
+        ],
+        [
+            {
+                "session_id": "session-outside-coverage",
+                "assignment_id": "assignment-dishwasher",
+                "start": "2026-06-06T14:00:00+00:00",
+                "end": "2026-06-06T14:30:00+00:00",
+            }
+        ],
+        [
+            {
+                "assignment_id": "assignment-dishwasher",
+                "label_interval_ids": ["label-dishwasher"],
+            }
+        ],
+    )
+
+    assert payload["metrics"] == {
+        "ground_truth_interval_count": 1,
+        "prediction_count": 1,
+        "evaluable_prediction_count": 0,
+        "unevaluated_prediction_count": 1,
+        "matched_ground_truth_count": 0,
+        "matched_prediction_count": 0,
+        "missed_ground_truth_count": 1,
+        "precision": 0.0,
+        "recall": 0.0,
+    }
 
 
 def test_nilm_workspace_validation_uses_uncapped_data() -> None:

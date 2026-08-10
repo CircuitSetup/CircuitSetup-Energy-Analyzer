@@ -9011,9 +9011,8 @@ async def test_nilm_assignment_history_validation_rolls_back_on_save_failure() -
         now_fn=lambda: datetime(2026, 6, 2, 15, 30, tzinfo=UTC),
     )
     original = deepcopy(store_data.nilm_appliance_assignments_by_circuit)
-    coordinator.store_persistence.async_save_if_dirty = AsyncMock(
-        side_effect=RuntimeError("save failed")
-    )
+    save = AsyncMock(side_effect=[RuntimeError("save failed"), None])
+    coordinator.store_persistence.async_save_if_dirty = save
 
     with pytest.raises(RuntimeError, match="save failed"):
         await coordinator.async_validate_nilm_assignment_history(
@@ -9022,6 +9021,7 @@ async def test_nilm_assignment_history_validation_rolls_back_on_save_failure() -
         )
 
     assert coordinator.store_data.nilm_appliance_assignments_by_circuit == original
+    assert save.await_count == 2
 
 
 @pytest.mark.asyncio

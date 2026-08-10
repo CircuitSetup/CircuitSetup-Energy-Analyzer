@@ -2124,7 +2124,15 @@ class NilmController:
             except Exception:
                 for name, snapshot in snapshots.items():
                     setattr(store_data, name, snapshot)
+                now_dt = self._coordinator.current_time()
+                self._coordinator.store_persistence.mark_dirty()
                 self._coordinator.async_set_updated_data(self._coordinator.state)
+                try:
+                    await self._coordinator.store_persistence.async_save_if_dirty(
+                        now_dt
+                    )
+                except Exception:
+                    pass
                 raise
 
     async def _async_validate_nilm_assignment_history(

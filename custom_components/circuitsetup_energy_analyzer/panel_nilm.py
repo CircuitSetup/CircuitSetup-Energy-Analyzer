@@ -2243,6 +2243,8 @@ def _nilm_validation_payload(
         if str(assignment.get("assignment_id") or "").strip()
     }
     matched_prediction_ids: set[str] = set()
+    evaluable_prediction_ids: set[str] = set()
+    unevaluated_prediction_ids: set[str] = set()
     matched_sessions_by_interval_id: dict[str, dict[str, Any]] = {}
     matches_by_interval_id = {}
     for assignment_id, assignment in assignment_by_id.items():
@@ -2271,6 +2273,11 @@ def _nilm_validation_payload(
             assignment_intervals,
             circuit_id=circuit_id,
         )
+        evaluable_prediction_ids.update(
+            match.session_id for match in result.matches
+        )
+        evaluable_prediction_ids.update(result.false_positive_session_ids)
+        unevaluated_prediction_ids.update(result.unevaluated_session_ids)
         sessions_by_id = {
             str(session.get("session_id") or "").strip(): session
             for session in assignment_sessions
@@ -2347,6 +2354,8 @@ def _nilm_validation_payload(
         "metrics": {
             "ground_truth_interval_count": ground_truth_count,
             "prediction_count": prediction_count,
+            "evaluable_prediction_count": len(evaluable_prediction_ids),
+            "unevaluated_prediction_count": len(unevaluated_prediction_ids),
             "matched_ground_truth_count": matched_ground_truth_count,
             "matched_prediction_count": matched_prediction_count,
             "missed_ground_truth_count": (
@@ -2354,7 +2363,7 @@ def _nilm_validation_payload(
             ),
             "precision": _nilm_validation_ratio(
                 matched_prediction_count,
-                prediction_count,
+                len(evaluable_prediction_ids),
             ),
             "recall": _nilm_validation_ratio(
                 matched_ground_truth_count,
