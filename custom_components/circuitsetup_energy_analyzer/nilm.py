@@ -5,8 +5,9 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
+from hashlib import sha256
 from itertools import combinations
-from math import isclose, isfinite
+from math import isclose, isfinite, log
 from statistics import median
 from typing import Any
 from urllib.parse import urlencode
@@ -24,6 +25,39 @@ from .models import (
 from .nilm_interval_evidence import DEFAULT_THRESHOLDS
 
 _LEGACY_INTERVAL_CONFIDENCE_CAP = 0.25
+_MAX_POSITIVE_EVIDENCE = 96
+_MAX_EVIDENCE_PER_DAY = 4
+_MAX_EVIDENCE_PER_SOURCE = 64
+_LEGACY_STOP_WEIGHT = 0.35
+_ESTIMATED_ENERGY_WEIGHT = 0.5
+_EDGE_DERIVED_PLATEAU_WEIGHT = 0.35
+_TRANSITION_ONLY_CONFIDENCE_CAP = 0.65
+_SOURCE_TRUST = {"session": 1.0, "interval": 0.85, "legacy_interval": 0.45}
+_CONFIDENCE_CAP = 0.95
+_POWER_ENERGY_DISAGREEMENT_RATIO = 0.35
+
+
+@dataclass(frozen=True, slots=True)
+class _NormalizedAssignmentEvidence:
+    """One normalized, assignment-owned evidence record."""
+
+    evidence_id: str
+    source_type: str
+    timestamp: datetime | None
+    local_day: str
+    positive: bool
+    on_delta_w: float | None
+    off_delta_w: float | None
+    plateau_w: float | None
+    plateau_source: str | None
+    duration_s: float | None
+    energy_kwh: float | None
+    energy_source: str | None
+    quality: float
+    inferred_stop: bool = False
+    issues: tuple[str, ...] = ()
+    on_delta_var: float | None = None
+    off_delta_var: float | None = None
 
 
 def build_nilm_assignment_model(
@@ -32,200 +66,868 @@ def build_nilm_assignment_model(
     *,
     label_intervals: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
-    """Build one assignment's transition model from reviewed real-power evidence."""
+    """Build a deterministic schema-v2 binary model and legacy projection."""
     assignment_id = str(assignment.get("assignment_id") or "").strip()
-    confirmed = {
-        str(value or "").strip()
-        for value in assignment.get("confirmed_session_ids", ())
-        if str(value or "").strip()
-    }
-    rejected = {
-        str(value or "").strip()
-        for value in assignment.get("rejected_session_ids", ())
-        if str(value or "").strip()
-    }
-    evidence = []
-    for session in sessions:
-        session_id = str(session.get("session_id") or "").strip()
-        owner = str(session.get("assignment_id") or "").strip()
-        on_delta, off_delta = _session_transition_values(session)
+    confirmed = _assignment_ids(assignment, "confirmed_session_ids")
+    rejected = _assignment_ids(assignment, "rejected_session_ids")
+    records = [
+        record
+        for session in sessions
         if (
-            session_id in confirmed
-            and session_id not in rejected
-            and (not owner or owner == assignment_id)
-            and session.get("end") is not None
-            and on_delta is not None
-            and on_delta > 0
-            and off_delta is not None
-            and off_delta < 0
-        ):
-            evidence.append(
-                {
-                    "source": session,
-                    "on": on_delta,
-                    "off": off_delta,
-                    "on_var": _session_edge_metric(
-                        session,
-                        value_key="on_delta_var",
-                        edge_id_key="on_edge_id",
-                        metric="var",
-                    ),
-                    "off_var": _session_edge_metric(
-                        session,
-                        value_key="off_delta_var",
-                        edge_id_key="off_edge_id",
-                        metric="var",
-                    ),
-                    "confidence": (
-                        _model_number(session.get("confidence")) or 0.0
-                    ),
-                    "plateau": None,
-                }
+            record := _normalize_session_evidence(
+                session, assignment_id, confirmed, rejected
             )
-    assigned_interval_ids = {
-        str(value or "").strip()
-        for value in assignment.get("label_interval_ids", ())
-        if str(value or "").strip()
-    }
-    schema_evidence = []
-    legacy_intervals = []
-    for interval in label_intervals:
-        interval_id = str(interval.get("interval_id") or "").strip()
-        owner = str(interval.get("assignment_id") or "").strip()
-        if interval_id not in assigned_interval_ids or (
-            owner and owner != assignment_id
-        ):
-            continue
-        if _is_schema_2_interval(interval):
-            on_value = _model_number(interval.get("start_transition_w"))
-            off_value = _model_number(interval.get("stop_transition_w"))
-            on_value = (
-                on_value
-                if interval.get("start_transition_eligible") is True
-                and on_value is not None
-                and on_value > 0
-                else None
-            )
-            off_value = (
-                off_value
-                if interval.get("stop_transition_eligible") is True
-                and off_value is not None
-                and off_value < 0
-                else None
-            )
-            plateau = _schema_2_interval_plateau(interval)
-            if on_value is not None or off_value is not None or plateau is not None:
-                schema_evidence.append(
-                    {
-                        "source": interval,
-                        "on": on_value,
-                        "off": off_value,
-                        "on_var": None,
-                        "off_var": None,
-                        "confidence": _schema_2_interval_confidence(interval),
-                        "plateau": plateau,
-                    }
-                )
-        else:
-            observed_transition_w = _model_number(interval.get("observed_transition_w"))
-            if observed_transition_w is not None and observed_transition_w > 0:
-                legacy_intervals.append((interval, observed_transition_w))
-    evidence.extend(schema_evidence)
-    if not any(item["on"] is not None or item["off"] is not None for item in evidence):
-        evidence.extend(
-            {
-                "source": interval,
-                "on": observed_transition_w,
-                "off": -observed_transition_w,
-                "on_var": None,
-                "off_var": None,
-                "confidence": min(
-                    _model_number(interval.get("confidence")) or 0.0,
-                    _LEGACY_INTERVAL_CONFIDENCE_CAP,
-                ),
-                "plateau": None,
-            }
-            for interval, observed_transition_w in legacy_intervals
         )
-    evidence.sort(
-        key=lambda item: str(
-            item["source"].get("end") or item["source"].get("start") or ""
-        ),
-        reverse=True,
+        is not None
+    ]
+    interval_ids = _assignment_ids(assignment, "label_interval_ids")
+    records.extend(
+        record
+        for interval in label_intervals
+        if (
+            record := _normalize_interval_evidence(
+                interval, assignment_id, interval_ids
+            )
+        )
+        is not None
     )
-    evidence = evidence[:32]
-    on_values = [item["on"] for item in evidence if item["on"] is not None]
-    off_values = [item["off"] for item in evidence if item["off"] is not None]
-    plateau_values = [
-        item["plateau"] for item in evidence if item["plateau"] is not None
-    ]
-    on_var_values = [
-        item["on_var"] for item in evidence if item["on_var"] is not None
-    ]
-    off_var_values = [
-        item["off_var"] for item in evidence if item["off_var"] is not None
-    ]
-    confidences = [item["confidence"] for item in evidence]
+    observed_modern_on = any(
+        record.positive
+        and record.source_type != "legacy_interval"
+        and record.on_delta_w is not None
+        for record in records
+    )
+    observed_modern_off = any(
+        record.positive
+        and record.source_type != "legacy_interval"
+        and record.off_delta_w is not None
+        for record in records
+    )
+    if observed_modern_on or observed_modern_off:
+        records = [
+            replace(
+                record,
+                on_delta_w=None if observed_modern_on else record.on_delta_w,
+                off_delta_w=None if observed_modern_off else record.off_delta_w,
+            )
+            if record.source_type == "legacy_interval"
+            else record
+            for record in records
+        ]
+    positives = _select_positive_evidence(
+        record for record in records if record.positive
+    )
+    negatives = [record for record in records if not record.positive]
     normalized = normalize_nilm_assignment_model(assignment)
-    model: dict[str, Any] = {
-        "role": normalized["role"],
-        "power_states_w": [],
-        "transition_prototypes": [],
-        "model_confidence": 0.0,
-        "model_revision": normalized["model_revision"],
-    }
-    if not on_values and not off_values and not plateau_values:
-        return model
-    on_median = median(on_values) if on_values else None
-    off_median = median(off_values) if off_values else None
-    active_state = round(
-        median(plateau_values)
-        if plateau_values
-        else max(
-            value
-            for value in (
-                on_median,
-                abs(off_median) if off_median is not None else None,
+    model = _empty_assignment_model(normalized)
+    if not positives:
+        model["evidence_summary"]["negative_count"] = len(negatives)
+        if not negatives and not any(
+            key in assignment
+            for key in (
+                "confirmed_session_ids",
+                "rejected_session_ids",
+                "label_interval_ids",
             )
-            if value is not None
+        ):
+            return model
+        return _finalize_assignment_model(model, normalized)
+    on = [record for record in positives if record.on_delta_w is not None]
+    off = [record for record in positives if record.off_delta_w is not None]
+    plateau = [record for record in positives if record.plateau_w is not None]
+    weighted_plateau = _weighted_plateau_records(plateau)
+    power_source = "plateau"
+    if plateau:
+        active_power = _weighted_median(
+            [record.plateau_w for record in weighted_plateau], weighted_plateau
+        )
+        if not any(record.plateau_source == "trace" for record in plateau):
+            power_source = "edge_derived_plateau"
+    else:
+        energy_power = [
+            record
+            for record in positives
+            if record.energy_kwh is not None
+            and record.duration_s
+            and record.duration_s > 0
+        ]
+        if energy_power:
+            active_power = _weighted_median(
+                [
+                    record.energy_kwh * 3_600_000 / record.duration_s
+                    for record in energy_power
+                ],
+                energy_power,
+            )
+            power_source = "energy_mean"
+        else:
+            active_power = max(
+                _weighted_median([record.on_delta_w for record in on], on)
+                if on
+                else 0.0,
+                abs(_weighted_median([record.off_delta_w for record in off], off))
+                if off
+                else 0.0,
+            )
+            power_source = "transition_fallback"
+    active_power = round(active_power, 3)
+    model["power_states_w"] = [0.0, active_power]
+    model["states"] = [
+        {"id": "off", "kind": "off", "power_w": 0.0, "spread_w": 0.0},
+        {
+            "id": "running",
+            "kind": "running",
+            "power_w": active_power,
+            "spread_w": round(
+                _weighted_mad(
+                    [record.plateau_w for record in weighted_plateau],
+                    weighted_plateau,
+                ),
+                3,
+            )
+            if plateau
+            else 0.0,
+            "power_source": power_source,
+        },
+    ]
+    if on:
+        model["transition_prototypes"].append(
+            _rich_transition_prototype("on", 0.0, active_power, on)
+        )
+    if off:
+        model["transition_prototypes"].append(
+            _rich_transition_prototype("off", active_power, 0.0, off)
+        )
+    profile_records = [
+        record for record in positives if record.duration_s and record.duration_s > 0
+    ]
+    model["run_profile"] = {
+        "plateau_w": _profile(
+            [record.plateau_w for record in weighted_plateau], weighted_plateau
         ),
-        3,
+        "duration_s": _duration_profile(profile_records),
+        "energy_kwh": {},
+    }
+    energy_records = [
+        record for record in profile_records if record.energy_kwh is not None
+    ]
+    model["run_profile"]["energy_kwh"] = _energy_profile(energy_records)
+    model["run_profile"]["plateau_w"]["source_counts"] = _count_values(
+        record.plateau_source for record in plateau
     )
-    model["power_states_w"] = [0.0, active_state]
-    if on_median is not None:
-        model["transition_prototypes"].append(
-            _transition_prototype(
-                "on", 0.0, active_state, on_median, on_values, on_var_values
-            )
-        )
-    if off_median is not None:
-        model["transition_prototypes"].append(
-            _transition_prototype(
-                "off", active_state, 0.0, off_median, off_values, off_var_values
-            )
-        )
-    model["model_confidence"] = round(
-        min(max(median(confidences) if confidences else 0.0, 0.0), 1.0)
-        * min(len(evidence) / 3, 1),
-        3,
+    conflicts = _close_rejected_conflicts(negatives, on, off)
+    issues = sorted({issue for record in positives for issue in record.issues})
+    state_support = min(_weighted_support(weighted_plateau) / 3, 1.0)
+    confidence = _evidence_confidence(
+        positives, on, off, conflicts, state_support=state_support
     )
+    model["evidence_confidence"] = confidence
+    model["model_confidence"] = confidence
+    model["evidence_summary"] = {
+        "positive_count": len(positives),
+        "negative_count": len(negatives),
+        "positive_distinct_days": _distinct_days(positives),
+        "effective_support": round(_effective_support(positives), 3),
+        "state_support": round(state_support, 3),
+        "source_counts": _count_values(record.source_type for record in positives),
+        "inferred_stop_count": sum(
+            record.inferred_stop and record.off_delta_w is not None
+            for record in positives
+        ),
+        "close_rejected_conflicts": conflicts,
+        "quality_issues": issues,
+    }
+    return _finalize_assignment_model(model, normalized)
+
+
+def _finalize_assignment_model(
+    model: dict[str, Any], normalized: Mapping[str, Any]
+) -> dict[str, Any]:
+    model["model_fingerprint"] = _model_fingerprint(model)
     previous = {
-        "power_states_w": normalized["power_states_w"],
-        "transition_prototypes": normalized["transition_prototypes"],
+        key: normalized.get(key)
+        for key in ("power_states_w", "transition_prototypes", "model_fingerprint")
     }
-    current = {
-        "power_states_w": model["power_states_w"],
-        "transition_prototypes": model["transition_prototypes"],
-    }
+    current = {key: model.get(key) for key in previous}
+    previous["transition_prototypes"] = sorted(
+        previous["transition_prototypes"], key=lambda item: item["direction"]
+    )
+    current["transition_prototypes"] = sorted(
+        current["transition_prototypes"], key=lambda item: item["direction"]
+    )
     if current != previous:
         model["model_revision"] += 1
     return model
+
+
+def _assignment_ids(assignment: Mapping[str, Any], key: str) -> set[str]:
+    return {
+        str(value or "").strip()
+        for value in assignment.get(key, ())
+        if str(value or "").strip()
+    }
+
+
+def _normalize_session_evidence(
+    session: Mapping[str, Any],
+    assignment_id: str,
+    confirmed: set[str],
+    rejected: set[str],
+) -> _NormalizedAssignmentEvidence | None:
+    evidence_id = str(session.get("session_id") or "").strip()
+    owner = str(session.get("assignment_id") or "").strip()
+    if (
+        not evidence_id
+        or (owner and owner != assignment_id)
+        or evidence_id not in confirmed | rejected
+    ):
+        return None
+    on, off = _session_transition_values(session)
+    on = on if on is not None and on > 0 else None
+    off = off if off is not None and off < 0 else None
+    plateau = _positive_number(session.get("median_power_w"))
+    duration = _duration_seconds(session)
+    measured_energy = _positive_number(session.get("measured_energy_kwh"))
+    estimated_energy = (
+        _positive_number(session.get("estimated_energy_kwh"))
+        if measured_energy is None and on is not None and off is not None and duration
+        else None
+    )
+    energy = measured_energy or estimated_energy
+    energy_source = (
+        "measured" if measured_energy is not None else "estimated"
+        if estimated_energy is not None
+        else None
+    )
+    if not any((on, off, plateau, energy)):
+        return None
+    record = _evidence_record(
+        evidence_id,
+        "session",
+        session,
+        evidence_id in confirmed and evidence_id not in rejected,
+        on,
+        off,
+        plateau,
+        "edge_derived" if plateau is not None else None,
+        duration,
+        energy,
+        energy_source,
+        _quality(session),
+        False,
+    )
+    return replace(
+        record,
+        on_delta_var=_session_edge_metric(
+            session, value_key="on_delta_var", edge_id_key="on_edge_id", metric="var"
+        ),
+        off_delta_var=_session_edge_metric(
+            session, value_key="off_delta_var", edge_id_key="off_edge_id", metric="var"
+        ),
+    )
+
+
+def _normalize_interval_evidence(
+    interval: Mapping[str, Any], assignment_id: str, interval_ids: set[str]
+) -> _NormalizedAssignmentEvidence | None:
+    evidence_id = str(interval.get("interval_id") or "").strip()
+    owner = str(interval.get("assignment_id") or "").strip()
+    if (
+        not evidence_id
+        or evidence_id not in interval_ids
+        or (owner and owner != assignment_id)
+    ):
+        return None
+    if not _is_schema_2_interval(interval):
+        edge = _positive_number(interval.get("observed_transition_w"))
+        if edge is None:
+            return None
+        energy = _positive_number(interval.get("measured_energy_kwh"))
+        return _evidence_record(
+            evidence_id,
+            "legacy_interval",
+            interval,
+            True,
+            edge,
+            -edge,
+            None,
+            None,
+            _duration_seconds(interval),
+            energy,
+            "measured" if energy is not None else None,
+            min(_quality(interval), _LEGACY_INTERVAL_CONFIDENCE_CAP),
+            True,
+        )
+    on = (
+        _positive_number(interval.get("start_transition_w"))
+        if interval.get("start_transition_eligible") is True
+        else None
+    )
+    raw_off = (
+        _model_number(interval.get("stop_transition_w"))
+        if interval.get("stop_transition_eligible") is True
+        else None
+    )
+    off = raw_off if raw_off is not None and raw_off < 0 else None
+    plateau = _schema_2_interval_plateau(interval)
+    duration = _duration_seconds(interval)
+    energy = _positive_number(interval.get("measured_energy_kwh"))
+    if not any((on, off, plateau, energy)):
+        return None
+    issues: list[str] = []
+    if plateau and energy and duration:
+        mean_power = energy * 3_600_000 / duration
+        if (
+            abs(plateau - mean_power) / max(plateau, mean_power)
+            > _POWER_ENERGY_DISAGREEMENT_RATIO
+        ):
+            issues.append("power_energy_disagreement")
+    quality = _schema_2_interval_confidence(interval) * (0.5 if issues else 1.0)
+    return _evidence_record(
+        evidence_id,
+        "interval",
+        interval,
+        True,
+        on,
+        off,
+        plateau,
+        "trace" if plateau is not None else None,
+        duration,
+        energy,
+        "measured" if energy is not None else None,
+        quality,
+        False,
+        tuple(issues),
+    )
+
+
+def _evidence_record(
+    evidence_id: str,
+    source_type: str,
+    source: Mapping[str, Any],
+    positive: bool,
+    on: float | None,
+    off: float | None,
+    plateau: float | None,
+    plateau_source: str | None,
+    duration: float | None,
+    energy: float | None,
+    energy_source: str | None,
+    quality: float,
+    inferred_stop: bool,
+    issues: tuple[str, ...] = (),
+) -> _NormalizedAssignmentEvidence:
+    timestamp = _nilm_datetime(source.get("end") or source.get("start"))
+    return _NormalizedAssignmentEvidence(
+        evidence_id,
+        source_type,
+        timestamp,
+        timestamp.date().isoformat()
+        if timestamp
+        else str(source.get("end") or source.get("start") or evidence_id)[:10],
+        positive,
+        on,
+        off,
+        plateau,
+        plateau_source,
+        duration,
+        energy,
+        energy_source,
+        quality,
+        inferred_stop,
+        issues,
+    )
+
+
+def _select_positive_evidence(
+    records: Iterable[_NormalizedAssignmentEvidence],
+) -> list[_NormalizedAssignmentEvidence]:
+    ordered = sorted(records, key=_evidence_sort_key)
+    representatives: list[_NormalizedAssignmentEvidence] = []
+    seen_days: set[str] = set()
+    source_counts: defaultdict[str, int] = defaultdict(int)
+    for record in ordered:
+        if record.local_day not in seen_days:
+            if source_counts[record.source_type] >= _MAX_EVIDENCE_PER_SOURCE:
+                continue
+            representatives.append(record)
+            seen_days.add(record.local_day)
+            source_counts[record.source_type] += 1
+    selected = representatives[:_MAX_POSITIVE_EVIDENCE]
+    day_counts = defaultdict(int)
+    source_counts = defaultdict(int)
+    for record in selected:
+        day_counts[record.local_day] += 1
+        source_counts[record.source_type] += 1
+    for record in ordered:
+        if len(selected) >= _MAX_POSITIVE_EVIDENCE:
+            break
+        if (
+            record in selected
+            or day_counts[record.local_day] >= _MAX_EVIDENCE_PER_DAY
+            or source_counts[record.source_type] >= _MAX_EVIDENCE_PER_SOURCE
+        ):
+            continue
+        selected.append(record)
+        day_counts[record.local_day] += 1
+        source_counts[record.source_type] += 1
+    return selected
+
+
+def _evidence_sort_key(
+    record: _NormalizedAssignmentEvidence,
+) -> tuple[float, float, float, str]:
+    return (
+        -record.quality,
+        -_SOURCE_TRUST[record.source_type],
+        -(record.timestamp.timestamp() if record.timestamp else 0.0),
+        record.evidence_id,
+    )
+
+
+def _weighted_median(
+    values: list[float | None], records: list[_NormalizedAssignmentEvidence]
+) -> float:
+    pairs = sorted(
+        (float(value), _evidence_weight(record))
+        for value, record in zip(values, records, strict=False)
+        if value is not None
+    )
+    target = sum(weight for _, weight in pairs) / 2
+    total = 0.0
+    for index, (value, weight) in enumerate(pairs):
+        total += weight
+        if total == target and index + 1 < len(pairs):
+            return (value + pairs[index + 1][0]) / 2
+        if total >= target:
+            return value
+    return pairs[-1][0]
+
+
+def _weighted_mad(
+    values: list[float | None], records: list[_NormalizedAssignmentEvidence]
+) -> float:
+    usable = [
+        (float(value), record)
+        for value, record in zip(values, records, strict=False)
+        if value is not None
+    ]
+    if not usable:
+        return 0.0
+    center = _weighted_median(
+        [value for value, _ in usable], [record for _, record in usable]
+    )
+    return _weighted_median(
+        [abs(value - center) for value, _ in usable], [record for _, record in usable]
+    )
+
+
+def _profile(
+    values: list[float | None],
+    records: list[_NormalizedAssignmentEvidence],
+    *,
+    precision: int = 3,
+) -> dict[str, Any]:
+    usable = [
+        (float(value), record)
+        for value, record in zip(values, records, strict=False)
+        if value is not None
+    ]
+    if not usable:
+        return {
+            "median": None,
+            "mad": None,
+            "p10": None,
+            "p90": None,
+            "sample_count": 0,
+            "effective_support": 0.0,
+            "distinct_days": 0,
+        }
+    vals, recs = zip(*usable, strict=False)
+    return {
+        "median": round(_weighted_median(list(vals), list(recs)), precision),
+        "mad": round(_weighted_mad(list(vals), list(recs)), precision),
+        "p10": round(
+            _weighted_percentile(list(vals), list(recs), 0.1), precision
+        ),
+        "p90": round(
+            _weighted_percentile(list(vals), list(recs), 0.9), precision
+        ),
+        "sample_count": len(recs),
+        "effective_support": round(_effective_support(list(recs)), 3),
+        "distinct_days": _distinct_days(recs),
+    }
+
+
+def _duration_profile(
+    records: list[_NormalizedAssignmentEvidence],
+) -> dict[str, Any]:
+    profile = _profile([record.duration_s for record in records], records)
+    log_values = [log(float(record.duration_s)) for record in records]
+    profile.update(
+        median_seconds=profile["median"],
+        mad_seconds=profile["mad"],
+        p10_seconds=profile["p10"],
+        p90_seconds=profile["p90"],
+        median_log_seconds=(
+            round(_weighted_median(log_values, records), 3) if records else None
+        ),
+        mad_log_seconds=(
+            round(_weighted_mad(log_values, records), 3) if records else None
+        ),
+    )
+    return profile
+
+
+def _energy_profile(
+    records: list[_NormalizedAssignmentEvidence],
+) -> dict[str, Any]:
+    weighted_records = [
+        replace(
+            record,
+            quality=record.quality
+            * (
+                _ESTIMATED_ENERGY_WEIGHT
+                if record.energy_source == "estimated"
+                else 1.0
+            ),
+        )
+        for record in records
+    ]
+    profile = _profile(
+        [record.energy_kwh for record in weighted_records],
+        weighted_records,
+        precision=6,
+    )
+    measured_count = sum(record.energy_source == "measured" for record in records)
+    estimated_count = sum(record.energy_source == "estimated" for record in records)
+    profile.update(
+        sample_count=len(records),
+        measured_count=measured_count,
+        estimated_count=estimated_count,
+        source=(
+            "mixed"
+            if measured_count and estimated_count
+            else "measured"
+            if measured_count
+            else "estimated"
+            if estimated_count
+            else "unknown"
+        ),
+        weighted_median_kwh=profile["median"],
+        weighted_mad_kwh=profile["mad"],
+        weighted_p10_kwh=profile["p10"],
+        weighted_p90_kwh=profile["p90"],
+        median_kwh=profile["median"],
+        mad_kwh=profile["mad"],
+        p10_kwh=profile["p10"],
+        p90_kwh=profile["p90"],
+    )
+    return profile
+
+
+def _weighted_plateau_records(
+    records: list[_NormalizedAssignmentEvidence],
+) -> list[_NormalizedAssignmentEvidence]:
+    return [
+        replace(
+            record,
+            quality=record.quality
+            * (
+                _EDGE_DERIVED_PLATEAU_WEIGHT
+                if record.plateau_source == "edge_derived"
+                else 1.0
+            ),
+        )
+        for record in records
+    ]
+
+
+def _count_values(values: Iterable[str | None]) -> dict[str, int]:
+    counts: defaultdict[str, int] = defaultdict(int)
+    for value in values:
+        if value:
+            counts[value] += 1
+    return dict(sorted(counts.items()))
+
+
+def _percentile(values: list[float], fraction: float) -> float:
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    position = (len(ordered) - 1) * fraction
+    low = int(position)
+    high = min(low + 1, len(ordered) - 1)
+    return ordered[low] + (ordered[high] - ordered[low]) * (position - low)
+
+
+def _weighted_percentile(
+    values: list[float],
+    records: list[_NormalizedAssignmentEvidence],
+    fraction: float,
+) -> float:
+    pairs = sorted(
+        (float(value), _evidence_weight(record))
+        for value, record in zip(values, records, strict=False)
+    )
+    target = sum(weight for _, weight in pairs) * fraction
+    cumulative = 0.0
+    for value, weight in pairs:
+        cumulative += weight
+        if cumulative >= target:
+            return value
+    return pairs[-1][0]
+
+
+def _rich_transition_prototype(
+    direction: str,
+    start: float,
+    end: float,
+    records: list[_NormalizedAssignmentEvidence],
+) -> dict[str, Any]:
+    values = [
+        record.on_delta_w if direction == "on" else record.off_delta_w
+        for record in records
+    ]
+    center = _weighted_median(values, records)
+    inferred = direction == "off" and all(record.inferred_stop for record in records)
+    prototype = {
+        "id": f"{direction}:off-running",
+        "kind": direction,
+        "direction": direction,
+        "from_state_id": "off" if direction == "on" else "running",
+        "to_state_id": "running" if direction == "on" else "off",
+        "from_state_w": round(start, 3),
+        "to_state_w": round(end, 3),
+        "delta_w": round(center, 3),
+        "spread_w": round(_weighted_mad(values, records), 3),
+        "sample_count": len(records),
+        "effective_support": round(
+            _weighted_support(records) * (_LEGACY_STOP_WEIGHT if inferred else 1.0), 3
+        ),
+        "distinct_days": _distinct_days(records),
+        "evidence_kind": "inferred_legacy_stop" if inferred else "observed",
+    }
+    vars_ = [
+        record.on_delta_var if direction == "on" else record.off_delta_var
+        for record in records
+    ]
+    var_records = [
+        record
+        for value, record in zip(vars_, records, strict=False)
+        if value is not None
+    ]
+    if var_records:
+        var_values = [value for value in vars_ if value is not None]
+        var_center = _weighted_median(var_values, var_records)
+        prototype.update(
+            delta_var=round(var_center, 3),
+            spread_var=round(_weighted_mad(var_values, var_records), 3),
+        )
+    return prototype
+
+
+def _evidence_weight(record: _NormalizedAssignmentEvidence) -> float:
+    return max(record.quality, 0.05) * _SOURCE_TRUST[record.source_type]
+
+
+def _effective_support(
+    records: Iterable[_NormalizedAssignmentEvidence], multiplier: float = 1.0
+) -> float:
+    weights = [_evidence_weight(record) * multiplier for record in records]
+    return (
+        sum(weights) ** 2 / sum(weight * weight for weight in weights)
+        if weights
+        else 0.0
+    )
+
+
+def _weighted_support(records: Iterable[_NormalizedAssignmentEvidence]) -> float:
+    return sum(_evidence_weight(record) for record in records)
+
+
+def _distinct_days(records: Iterable[_NormalizedAssignmentEvidence]) -> int:
+    return len({record.local_day for record in records})
+
+
+def _close_rejected_conflicts(
+    negatives: list[_NormalizedAssignmentEvidence],
+    on: list[_NormalizedAssignmentEvidence],
+    off: list[_NormalizedAssignmentEvidence],
+) -> int:
+    centers = [record.on_delta_w for record in on] + [
+        abs(record.off_delta_w) for record in off
+    ]
+    return sum(
+        1
+        for record in negatives
+        if any(
+            value is not None and abs(abs(value) - center) <= max(10.0, center * 0.15)
+            for value in (record.on_delta_w, record.off_delta_w)
+            for center in centers
+            if center is not None
+        )
+    )
+
+
+def _evidence_confidence(
+    records: list[_NormalizedAssignmentEvidence],
+    on: list[_NormalizedAssignmentEvidence],
+    off: list[_NormalizedAssignmentEvidence],
+    conflicts: int,
+    *,
+    state_support: float,
+) -> float:
+    support = min(_effective_support(records) / 8, 1.0)
+    days = min(_distinct_days(records) / 6, 1.0)
+    directional = (bool(on) + bool(off)) / 2
+    spreads = [
+        _weighted_mad([record.on_delta_w for record in on], on)
+        / max(abs(_weighted_median([record.on_delta_w for record in on], on)), 1.0)
+        if on
+        else 0.0,
+        _weighted_mad([record.off_delta_w for record in off], off)
+        / max(abs(_weighted_median([record.off_delta_w for record in off], off)), 1.0)
+        if off
+        else 0.0,
+        _weighted_mad(
+            [record.plateau_w for record in records if record.plateau_w is not None],
+            [record for record in records if record.plateau_w is not None],
+        )
+        / max(
+            _weighted_median(
+                [
+                    record.plateau_w
+                    for record in records
+                    if record.plateau_w is not None
+                ],
+                [record for record in records if record.plateau_w is not None],
+            ),
+            1.0,
+        )
+        if any(record.plateau_w is not None for record in records)
+        else 0.0,
+    ]
+    if off:
+        off_values = [abs(record.off_delta_w) for record in off]
+        spreads.append(
+            (_percentile(off_values, 0.9) - _percentile(off_values, 0.1))
+            / max(_weighted_median(off_values, off), 1.0)
+        )
+    dispersion = min(max(spreads), 1.0)
+    inferred_only = bool(records) and all(record.inferred_stop for record in records)
+    quality = sum(record.quality for record in records) / len(records)
+    score = (
+        (
+            0.1
+            + 0.35 * support
+            + 0.15 * days
+            + 0.2 * directional
+            + 0.2 * state_support
+        )
+        * quality
+        * (1 - 0.5 * dispersion)
+        * (1 - min(conflicts * 0.1, 0.4))
+    )
+    confidence_cap = (
+        0.25
+        if inferred_only
+        else _CONFIDENCE_CAP
+        if state_support > 0
+        else _TRANSITION_ONLY_CONFIDENCE_CAP
+    )
+    return round(min(score, confidence_cap), 3)
+
+
+def _empty_assignment_model(normalized: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "model_schema_version": 2,
+        "model_kind": "binary",
+        "role": normalized["role"],
+        "power_states_w": [],
+        "states": [],
+        "transition_prototypes": [],
+        "run_profile": {},
+        "evidence_summary": {
+            "positive_count": 0,
+            "negative_count": 0,
+            "positive_distinct_days": 0,
+            "effective_support": 0.0,
+            "state_support": 0.0,
+            "source_counts": {},
+            "inferred_stop_count": 0,
+            "close_rejected_conflicts": 0,
+            "quality_issues": [],
+        },
+        "evidence_confidence": 0.0,
+        "model_confidence": 0.0,
+        "model_revision": normalized["model_revision"],
+        "model_fingerprint": "",
+    }
+
+
+def _model_fingerprint(model: Mapping[str, Any]) -> str:
+    parts = repr(
+        (
+            model.get("power_states_w"),
+            sorted(
+                (
+                    item.get("direction"),
+                    item.get("delta_w"),
+                    item.get("spread_w"),
+                    item.get("delta_var"),
+                    item.get("spread_var"),
+                    item.get("sample_count"),
+                    item.get("effective_support"),
+                    item.get("distinct_days"),
+                )
+                for item in model.get("transition_prototypes", [])
+            ),
+            model.get("run_profile"),
+            model.get("evidence_summary"),
+            model.get("model_confidence"),
+            model.get("evidence_confidence"),
+        )
+    )
+    return sha256(parts.encode()).hexdigest()[:16]
 
 
 def _is_schema_2_interval(interval: Mapping[str, Any]) -> bool:
     """Return whether an interval uses backend-derived directional evidence."""
     version = _model_number(interval.get("evidence_schema_version"))
     return version is not None and version >= 2
+
+
+def _positive_number(value: Any) -> float | None:
+    number = _model_number(value)
+    return number if number is not None and number > 0 else None
+
+
+def _duration_seconds(source: Mapping[str, Any]) -> float | None:
+    duration = _positive_number(source.get("duration_s"))
+    if duration is not None:
+        return duration
+    start = _nilm_datetime(source.get("start"))
+    end = _nilm_datetime(source.get("end"))
+    return (end - start).total_seconds() if start and end and end > start else None
+
+
+def _quality(source: Mapping[str, Any]) -> float:
+    value = next(
+        (
+            _model_number(source.get(key))
+            for key in ("evidence_confidence", "power_confidence", "confidence")
+            if _model_number(source.get(key)) is not None
+        ),
+        0.0,
+    )
+    coverage = _model_number(source.get("power_coverage"))
+    return min(
+        max(
+            value * (min(max(coverage, 0.0), 1.0) if coverage is not None else 1.0), 0.0
+        ),
+        1.0,
+    )
 
 
 def _schema_2_interval_confidence(interval: Mapping[str, Any]) -> float:
@@ -267,7 +969,7 @@ def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, 
     valid_states = (
         [_model_number(value) for value in states] if isinstance(states, list) else []
     )
-    prototypes = []
+    prototypes: list[dict[str, Any]] = []
     stored_prototypes = assignment.get("transition_prototypes")
     for item in stored_prototypes if isinstance(stored_prototypes, list) else ():
         if not isinstance(item, Mapping) or item.get("direction") not in {"on", "off"}:
@@ -279,28 +981,154 @@ def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, 
         if any(value is None for value in values):
             continue
         spread_var = _model_number(item.get("spread_var"))
-        prototype = {
+        prototype: dict[str, Any] = {
+            "id": str(item.get("id") or f"{item['direction']}:off-running"),
+            "kind": str(item.get("kind") or item["direction"]),
             "direction": item["direction"],
             "from_state_w": values[0],
             "to_state_w": values[1],
             "delta_w": values[2],
             "spread_w": max(values[3], 0.0),
             "sample_count": _model_nonnegative_int(item.get("sample_count")),
+            "effective_support": max(
+                _model_number(item.get("effective_support"))
+                or _model_nonnegative_int(item.get("sample_count")),
+                0.0,
+            ),
+            "distinct_days": _model_nonnegative_int(item.get("distinct_days")),
+            "evidence_kind": str(item.get("evidence_kind") or "observed"),
         }
+        if item.get("from_state_id") in {"off", "running"}:
+            prototype["from_state_id"] = item["from_state_id"]
+        if item.get("to_state_id") in {"off", "running"}:
+            prototype["to_state_id"] = item["to_state_id"]
         if (delta_var := _model_number(item.get("delta_var"))) is not None:
             prototype["delta_var"] = delta_var
         if spread_var is not None:
             prototype["spread_var"] = max(spread_var, 0.0)
         prototypes.append(prototype)
-    return {
+    state_values = (
+        valid_states if all(value is not None for value in valid_states) else []
+    )
+    active = state_values[1] if len(state_values) > 1 else None
+    states = (
+        [
+            {"id": "off", "kind": "off", "power_w": 0.0, "spread_w": 0.0},
+            {
+                "id": "running",
+                "kind": "running",
+                "power_w": active,
+                "spread_w": 0.0,
+                "power_source": "legacy",
+            },
+        ]
+        if active is not None
+        else []
+    )
+    if isinstance(assignment.get("states"), list):
+        rich_states = []
+        for item in assignment["states"]:
+            if not isinstance(item, Mapping) or item.get("id") not in {
+                "off",
+                "running",
+            }:
+                continue
+            if (power := _model_number(item.get("power_w"))) is None:
+                continue
+            state = {
+                "id": item["id"],
+                "kind": "off" if item["id"] == "off" else "running",
+                "power_w": power,
+                "spread_w": max(_model_number(item.get("spread_w")) or 0.0, 0.0),
+            }
+            if item["id"] == "running" and isinstance(
+                item.get("power_source"), str
+            ):
+                state["power_source"] = item["power_source"]
+            rich_states.append(state)
+        if {item["id"] for item in rich_states} == {"off", "running"}:
+            states = sorted(rich_states, key=lambda item: item["id"] != "off")
+            if not state_values:
+                state_values = [states[0]["power_w"], states[1]["power_w"]]
+    prototypes.sort(key=lambda item: (item["direction"], item["delta_w"], item["id"]))
+    normalized = {
+        "model_schema_version": 2,
+        "model_kind": str(assignment.get("model_kind") or "binary")
+        if str(assignment.get("model_kind") or "binary") == "binary"
+        else "binary",
         "role": role.strip() if isinstance(role, str) and role.strip() else "component",
-        "power_states_w": (
-            valid_states if all(value is not None for value in valid_states) else []
-        ),
+        "power_states_w": state_values,
+        "states": states,
         "transition_prototypes": prototypes,
         "model_confidence": min(max(confidence or 0.0, 0.0), 1.0),
+        "evidence_confidence": min(
+            max(
+                _model_number(assignment.get("evidence_confidence"))
+                or confidence
+                or 0.0,
+                0.0,
+            ),
+            1.0,
+        ),
         "model_revision": _model_nonnegative_int(assignment.get("model_revision")),
+        "model_fingerprint": str(assignment.get("model_fingerprint") or ""),
     }
+    if isinstance(assignment.get("run_profile"), Mapping):
+        normalized["run_profile"] = {
+            name: _normalize_assignment_profile(profile)
+            for name, profile in assignment["run_profile"].items()
+            if isinstance(name, str) and isinstance(profile, Mapping)
+        }
+    if isinstance(assignment.get("evidence_summary"), Mapping):
+        summary = assignment["evidence_summary"]
+        normalized["evidence_summary"] = {
+            "positive_count": _model_nonnegative_int(
+                summary.get("positive_count")
+            ),
+            **{
+                key: number
+                for key in (
+                    "negative_count",
+                    "positive_distinct_days",
+                    "effective_support",
+                    "state_support",
+                    "close_rejected_conflicts",
+                    "inferred_stop_count",
+                )
+                if (number := _model_number(summary.get(key))) is not None
+            },
+            "quality_issues": [
+                item
+                for item in summary.get("quality_issues", ())
+                if isinstance(item, str)
+            ],
+        }
+        if isinstance(summary.get("source_counts"), Mapping):
+            normalized["evidence_summary"]["source_counts"] = {
+                str(key): _model_nonnegative_int(value)
+                for key, value in summary["source_counts"].items()
+                if isinstance(key, str)
+            }
+    if not normalized["model_fingerprint"] and state_values:
+        normalized["model_fingerprint"] = _model_fingerprint(normalized)
+    return normalized
+
+
+def _normalize_assignment_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = {
+        field: number
+        for field, raw in profile.items()
+        if (number := _model_number(raw)) is not None
+    }
+    if profile.get("source") in {"measured", "estimated", "mixed", "unknown"}:
+        normalized["source"] = profile["source"]
+    if isinstance(profile.get("source_counts"), Mapping):
+        normalized["source_counts"] = {
+            str(key): _model_nonnegative_int(value)
+            for key, value in profile["source_counts"].items()
+            if isinstance(key, str)
+        }
+    return normalized
 
 
 def nilm_assignment_model_is_compound_eligible(
@@ -317,7 +1145,19 @@ def nilm_assignment_model_is_compound_eligible(
         and _model_nonnegative_int(item.get("sample_count")) >= 3
     }
     confidence = _model_number(assignment.get("model_confidence"))
-    return learned == {"on", "off"} and confidence is not None and confidence >= 0.70
+    summary = assignment.get("evidence_summary")
+    state_support = (
+        _model_number(summary.get("state_support"))
+        if isinstance(summary, Mapping)
+        else None
+    )
+    return (
+        learned == {"on", "off"}
+        and confidence is not None
+        and confidence >= 0.70
+        and state_support is not None
+        and state_support > 0
+    )
 
 
 def _transition_prototype(
@@ -1312,9 +2152,7 @@ KNOWN_LOAD_ASSIGNMENT_AMBIGUITY_MARGIN = 0.05
 KNOWN_LOAD_EXACT_ASSIGNMENT_MAX_BITMASK_NODES = 12
 
 if not isclose(
-    KNOWN_LOAD_MAGNITUDE_WEIGHT
-    + KNOWN_LOAD_TIME_WEIGHT
-    + KNOWN_LOAD_TOPOLOGY_WEIGHT,
+    KNOWN_LOAD_MAGNITUDE_WEIGHT + KNOWN_LOAD_TIME_WEIGHT + KNOWN_LOAD_TOPOLOGY_WEIGHT,
     1.0,
 ):
     raise RuntimeError("Known-load candidate weights must sum to 1.0.")
@@ -1770,9 +2608,7 @@ def _nilm_fingerprint_bucket_compatible(
         return False
     try:
         saved_start, saved_end = (float(value) for value in saved.split("-", 1))
-        current_start, current_end = (
-            float(value) for value in current.split("-", 1)
-        )
+        current_start, current_end = (float(value) for value in current.split("-", 1))
     except (TypeError, ValueError):
         return False
     return max(saved_start, current_start) < min(saved_end, current_end)
@@ -2115,8 +2951,8 @@ def _select_known_load_candidates(
         if min(len(edge_nodes), len(event_nodes)) > (
             KNOWN_LOAD_EXACT_ASSIGNMENT_MAX_BITMASK_NODES
         ):
-            component_selected, component_ambiguous = (
-                _greedy_known_load_component(candidates, component)
+            component_selected, component_ambiguous = _greedy_known_load_component(
+                candidates, component
             )
             selected.update(component_selected)
             ambiguous_edges.update(component_ambiguous)
@@ -2137,8 +2973,7 @@ def _select_known_load_candidates(
             second_indices = set(second.candidate_indices)
             selected.update(best_indices & second_indices)
             ambiguous_edges.update(
-                candidates[index].edge_index
-                for index in best_indices ^ second_indices
+                candidates[index].edge_index for index in best_indices ^ second_indices
             )
         else:
             selected.update(best_indices)
@@ -2196,16 +3031,12 @@ def _exact_known_load_component(
     candidates_by_other: dict[int, list[int]] = defaultdict(list)
     for index in component:
         candidate = candidates[index]
-        other_node = (
-            candidate.event_index if bitmask_is_edge else candidate.edge_index
-        )
+        other_node = candidate.event_index if bitmask_is_edge else candidate.edge_index
         candidates_by_other[other_node].append(index)
     for values in candidates_by_other.values():
         values.sort(key=lambda index: _candidate_selection_key(candidates[index]))
 
-    states: dict[int, tuple[_KnownLoadAssignment, ...]] = {
-        0: (_KnownLoadAssignment(),)
-    }
+    states: dict[int, tuple[_KnownLoadAssignment, ...]] = {0: (_KnownLoadAssignment(),)}
     for other_node in other_nodes:
         next_states: dict[int, list[_KnownLoadAssignment]] = defaultdict(list)
         for mask, assignments in states.items():
@@ -2253,8 +3084,7 @@ def _extend_known_load_assignment(
     return _KnownLoadAssignment(
         indices,
         assignment.total_score + candidate.score.total,
-        assignment.total_offset_seconds
-        + abs(candidate.score.time_offset_seconds),
+        assignment.total_offset_seconds + abs(candidate.score.time_offset_seconds),
     )
 
 
@@ -2402,7 +3232,8 @@ def attribute_known_loads(
             event_direction = (
                 "on"
                 if event.event_type is EventType.START
-                or estimate.signed_delta_w is not None and estimate.signed_delta_w > 0.0
+                or estimate.signed_delta_w is not None
+                and estimate.signed_delta_w > 0.0
                 else "off"
             )
             if edge.direction != event_direction:
@@ -2518,20 +3349,16 @@ def attribute_known_loads(
                     _KnownLoadCandidate(edge_index, event_index, match, score)
                 )
             else:
-                rejected_topology_candidates.append(
-                    (edge_index, event_index, match)
-                )
+                rejected_topology_candidates.append((edge_index, event_index, match))
 
-    selected_candidate_indices, ambiguous_edge_indices = (
-        _select_known_load_candidates(candidates)
+    selected_candidate_indices, ambiguous_edge_indices = _select_known_load_candidates(
+        candidates
     )
     selected_candidates = sorted(
         (candidates[index] for index in selected_candidate_indices),
         key=lambda candidate: (candidate.edge_index, candidate.event_index),
     )
-    matched_edge_indices = {
-        candidate.edge_index for candidate in selected_candidates
-    }
+    matched_edge_indices = {candidate.edge_index for candidate in selected_candidates}
     matched_edges = tuple(
         replace(candidate.match, selection_status="matched")
         for candidate in selected_candidates
@@ -2544,9 +3371,7 @@ def attribute_known_loads(
         for candidate in selected_candidates
         if candidate.match.residual_edge is not None
     )
-    matched_event_indices = {
-        candidate.event_index for candidate in selected_candidates
-    }
+    matched_event_indices = {candidate.event_index for candidate in selected_candidates}
     strongest_rejections_by_event: dict[int, tuple[int, int, KnownLoadMatch]] = {}
     for edge_index, event_index, match in rejected_topology_candidates:
         if edge_index in matched_edge_indices or event_index in matched_event_indices:
@@ -3099,8 +3924,7 @@ def _signature_from_cluster(
             floor=getattr(policy, floor_name),
         )
         for name, _attribute, ratio_name, floor_name in _CLUSTER_FEATURES
-        if (feature := stats[name]).minimum is not None
-        and feature.maximum is not None
+        if (feature := stats[name]).minimum is not None and feature.maximum is not None
     ]
     radius = max(radii, default=0.0)
     feature_coverage = (
@@ -3184,8 +4008,7 @@ def _cluster_topology_coverage(edges: Iterable[NilmEdge]) -> float:
     if not values:
         return 0.0
     return sum(
-        _nilm_cluster_split_phase_type(edge)
-        not in {"unknown", "missing_leg_data"}
+        _nilm_cluster_split_phase_type(edge) not in {"unknown", "missing_leg_data"}
         for edge in values
     ) / len(values)
 
@@ -3269,9 +4092,7 @@ def pair_nilm_sessions_for_signatures(
         for spec in signature_specs
         if _nilm_session_spec_fingerprint(spec)
         and not nilm_signature_is_off_direction(spec.get("direction"))
-        and not nilm_signature_is_off_direction(
-            _nilm_session_spec_fingerprint(spec)
-        )
+        and not nilm_signature_is_off_direction(_nilm_session_spec_fingerprint(spec))
         and (
             _nilm_number(spec.get("median_delta_w")) is None
             or float(spec["median_delta_w"]) >= 0
@@ -3697,14 +4518,11 @@ def _event_power_estimate(event: CircuitEvent) -> KnownEventPowerEstimate | None
                 event, "transition_timing_uncertainty_s"
             ),
         )
-    if (
-        signed_delta_w is not None
-        and (
-            event.event_type is EventType.START
-            and signed_delta_w > 0.0
-            or event.event_type is EventType.STOP
-            and signed_delta_w < 0.0
-        )
+    if signed_delta_w is not None and (
+        event.event_type is EventType.START
+        and signed_delta_w > 0.0
+        or event.event_type is EventType.STOP
+        and signed_delta_w < 0.0
     ):
         source = "transition_delta_w"
     else:

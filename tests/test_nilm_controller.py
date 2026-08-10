@@ -29,6 +29,9 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     NilmSourceKind,
     PowerFlowMode,
 )
+from custom_components.circuitsetup_energy_analyzer.nilm import (
+    build_nilm_assignment_model,
+)
 from custom_components.circuitsetup_energy_analyzer.profiles import nilm_source_kind
 from custom_components.circuitsetup_energy_analyzer.storage import (
     FeatureStoreData,
@@ -481,6 +484,111 @@ async def test_label_intervals_validate_and_retain_observed_transition_w() -> No
                 end="2026-06-02T11:05:00+00:00",
                 observed_transition_w=invalid,
             )
+
+
+@pytest.mark.asyncio
+async def test_direct_interval_create_move_and_delete_rebuilds_each_owner() -> None:
+    """Every direct interval mutation refreshes the assignments it affects."""
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    first = {"assignment_id": "first", "label_interval_ids": []}
+    second = {"assignment_id": "second", "label_interval_ids": []}
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mixed": [first, second]}
+        ),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=AsyncMock(),
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    controller = NilmController(
+        coordinator, label_interval_max_items=10, assignment_max_items=10
+    )
+
+    saved = await controller.async_label_nilm_interval(
+        "mixed",
+        label="Pump",
+        start="2026-06-02T10:00:00+00:00",
+        end="2026-06-02T10:05:00+00:00",
+        assignment_id="first",
+        observed_transition_w=80.0,
+    )
+    assert first["power_states_w"] == [0.0, 80.0]
+
+    await controller.async_label_nilm_interval(
+        "mixed",
+        label="Pump",
+        start="2026-06-02T10:00:00+00:00",
+        end="2026-06-02T10:05:00+00:00",
+        interval_id=saved["interval_id"],
+        assignment_id="second",
+        observed_transition_w=90.0,
+    )
+    assert first["label_interval_ids"] == []
+    assert first["power_states_w"] == []
+    assert second["power_states_w"] == [0.0, 90.0]
+
+    assert await controller.async_delete_nilm_label_interval(
+        "mixed", saved["interval_id"]
+    )
+    assert second["label_interval_ids"] == []
+    assert second["power_states_w"] == []
+
+
+@pytest.mark.asyncio
+async def test_direct_interval_create_rebuilds_owner_of_retention_eviction() -> None:
+    """Pruning an old interval detaches and refreshes its former owner."""
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    old_interval = {
+        "interval_id": "old",
+        "assignment_id": "first",
+        "label": "Old pump",
+        "start": "2026-06-01T10:00:00+00:00",
+        "end": "2026-06-01T10:05:00+00:00",
+        "observed_transition_w": 80.0,
+        "confidence": 1.0,
+    }
+    first = {"assignment_id": "first", "label_interval_ids": ["old"]}
+    first.update(
+        build_nilm_assignment_model(first, (), label_intervals=[old_interval])
+    )
+    second = {"assignment_id": "second", "label_interval_ids": []}
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mixed": [first, second]},
+            nilm_label_intervals_by_circuit={"mixed": [old_interval]},
+        ),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=AsyncMock(),
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    controller = NilmController(
+        coordinator, label_interval_max_items=1, assignment_max_items=10
+    )
+
+    saved = await controller.async_label_nilm_interval(
+        "mixed",
+        label="New pump",
+        start="2026-06-02T10:00:00+00:00",
+        end="2026-06-02T10:05:00+00:00",
+        assignment_id="second",
+        observed_transition_w=90.0,
+    )
+
+    assert [
+        interval["interval_id"]
+        for interval in coordinator.store_data.nilm_label_intervals_by_circuit["mixed"]
+    ] == [saved["interval_id"]]
+    assert first["label_interval_ids"] == []
+    assert first["power_states_w"] == []
+    assert second["power_states_w"] == [0.0, 90.0]
 
 
 @pytest.mark.asyncio
@@ -3005,9 +3113,24 @@ def test_hydration_normalizes_optional_assignment_model_fields_once() -> None:
         "assignment_id": "pump",
         "confirmed_session_ids": ["session-1"],
         "role": "component",
-        "power_states_w": [],
-        "transition_prototypes": [],
-        "model_confidence": 0.0,
+        "power_states_w": [0.0, 80.0],
+        "transition_prototypes": [
+            {
+                "direction": "on",
+                "from_state_w": 0.0,
+                "to_state_w": 80.0,
+                "delta_w": 80.0,
+                "spread_w": 0.0,
+            },
+            {
+                "direction": "off",
+                "from_state_w": 80.0,
+                "to_state_w": 0.0,
+                "delta_w": -80.0,
+                "spread_w": 0.0,
+            },
+        ],
+        "model_confidence": 0.5,
         "model_revision": 0,
     }
     store_data = FeatureStoreData(
@@ -3047,14 +3170,37 @@ def test_hydration_normalizes_optional_assignment_model_fields_once() -> None:
     controller = _nilm_controller(coordinator)
 
     controller.hydrate_state_from_store()
-    controller.hydrate_state_from_store()
 
+    assert assignment["model_schema_version"] == 2
+    assert assignment["model_kind"] == "binary"
     assert assignment["role"] == "component"
     assert assignment["power_states_w"] == [0.0, 83.0]
     assert assignment["transition_prototypes"][0]["delta_var"] == 27.0
     assert assignment["transition_prototypes"][1]["delta_var"] == -4.0
     assert assignment["model_revision"] == 1
     assert dirty == [True]
+
+    restarted_store = feature_store_data_from_dict(
+        feature_store_data_to_dict(store_data)
+    )
+    restart_dirty: list[bool] = []
+    restarted = _nilm_controller(
+        SimpleNamespace(
+            current_time=lambda: now,
+            store_data=restarted_store,
+            store_persistence=SimpleNamespace(
+                mark_dirty=lambda: restart_dirty.append(True)
+            ),
+        )
+    )
+    restarted.hydrate_state_from_store()
+
+    restarted_assignment = restarted_store.nilm_appliance_assignments_by_circuit[
+        "mixed"
+    ][0]
+    assert restarted_assignment["model_schema_version"] == 2
+    assert restarted_assignment["model_revision"] == 1
+    assert restart_dirty == []
 
     for prototype in assignment["transition_prototypes"]:
         prototype.pop("delta_var")
@@ -3066,6 +3212,152 @@ def test_hydration_normalizes_optional_assignment_model_fields_once() -> None:
     assert assignment["transition_prototypes"][1]["delta_var"] == -4.0
     assert assignment["model_revision"] == 2
     assert dirty == [True, True]
+
+
+def test_hydration_upgrades_v1_model_without_retained_evidence_once() -> None:
+    assignment = {
+        "assignment_id": "pump",
+        "role": "component",
+        "power_states_w": [0.0, 83.0],
+        "transition_prototypes": [
+            {
+                "direction": "on",
+                "from_state_w": 0.0,
+                "to_state_w": 83.0,
+                "delta_w": 83.0,
+                "spread_w": 1.0,
+            },
+            {
+                "direction": "off",
+                "from_state_w": 83.0,
+                "to_state_w": 0.0,
+                "delta_w": -83.0,
+                "spread_w": 1.0,
+            },
+        ],
+        "model_confidence": 0.8,
+        "model_revision": 4,
+    }
+    dirty: list[bool] = []
+    coordinator = SimpleNamespace(
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mixed": [assignment]}
+        ),
+        store_persistence=SimpleNamespace(mark_dirty=lambda: dirty.append(True)),
+    )
+
+    controller = _nilm_controller(coordinator)
+    controller.hydrate_state_from_store()
+    controller.hydrate_state_from_store()
+
+    assert assignment["model_schema_version"] == 2
+    assert assignment["power_states_w"] == [0.0, 83.0]
+    assert assignment["model_revision"] == 4
+    assert dirty == [True]
+
+
+def test_hydration_keeps_legacy_projection_when_matching_evidence_is_unusable() -> (
+    None
+):
+    assignment = {
+        "assignment_id": "pump",
+        "confirmed_session_ids": ["malformed"],
+        "role": "component",
+        "power_states_w": [0.0, 83.0],
+        "transition_prototypes": [
+            {
+                "direction": "on",
+                "from_state_w": 0.0,
+                "to_state_w": 83.0,
+                "delta_w": 83.0,
+                "spread_w": 1.0,
+                "sample_count": 3,
+            },
+            {
+                "direction": "off",
+                "from_state_w": 83.0,
+                "to_state_w": 0.0,
+                "delta_w": -83.0,
+                "spread_w": 1.0,
+                "sample_count": 3,
+            },
+        ],
+        "model_confidence": 0.8,
+        "model_revision": 4,
+    }
+    dirty: list[bool] = []
+    coordinator = SimpleNamespace(
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mixed": [assignment]},
+            nilm_session_history_by_circuit={
+                "mixed": [
+                    {
+                        "session_id": "malformed",
+                        "assignment_id": "pump",
+                        "on_delta_w": "unknown",
+                        "off_delta_w": None,
+                        "median_power_w": float("nan"),
+                        "measured_energy_kwh": -1,
+                    }
+                ]
+            },
+        ),
+        store_persistence=SimpleNamespace(mark_dirty=lambda: dirty.append(True)),
+    )
+
+    _nilm_controller(coordinator).hydrate_state_from_store()
+
+    assert assignment["model_schema_version"] == 2
+    assert assignment["power_states_w"] == [0.0, 83.0]
+    assert {
+        prototype["direction"] for prototype in assignment["transition_prototypes"]
+    } == {"on", "off"}
+    assert assignment["model_revision"] == 4
+    assert dirty == [True]
+
+
+def test_hydration_persists_changed_v2_profile_when_projection_is_unchanged() -> None:
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    label_intervals = [
+        {
+            "interval_id": "interval-1",
+            "assignment_id": "pump",
+            "start": "2026-06-01T10:00:00+00:00",
+            "end": "2026-06-01T10:05:00+00:00",
+            "median_power_w": 83.0,
+            "evidence_schema_version": 2,
+            "plateau_eligible": True,
+            "power_coverage": 1.0,
+            "confidence": 0.9,
+        }
+    ]
+    assignment = {
+        "assignment_id": "pump",
+        "label_interval_ids": ["interval-1"],
+    }
+    assignment.update(
+        build_nilm_assignment_model(assignment, (), label_intervals=label_intervals)
+    )
+    assignment["run_profile"]["duration_s"]["median"] = 999.0
+    assignment["model_fingerprint"] = "stale-fingerprint"
+    assignment["model_revision"] = 1
+    dirty: list[bool] = []
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mixed": [assignment]},
+            nilm_label_intervals_by_circuit={"mixed": label_intervals},
+        ),
+        store_persistence=SimpleNamespace(mark_dirty=lambda: dirty.append(True)),
+    )
+
+    _nilm_controller(coordinator).hydrate_state_from_store()
+
+    assert assignment["power_states_w"] == [0.0, 83.0]
+    assert assignment["run_profile"]["duration_s"]["median"] == 300.0
+    assert assignment["model_fingerprint"] != "stale-fingerprint"
+    assert assignment["model_revision"] == 2
+    assert dirty == [True]
 
 
 def test_hydration_reopens_legacy_expected_signature_once() -> None:
