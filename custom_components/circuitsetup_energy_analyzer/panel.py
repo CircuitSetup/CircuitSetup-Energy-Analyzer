@@ -2111,12 +2111,17 @@ async def nilm_interval_evidence_payload(
 ) -> dict[str, Any]:
     """Return bounded schema-2 evidence through the manual save extraction path."""
 
+    requested_entry_id = str(entry_id or "").strip()
+    requested_circuit_id = str(circuit_id or "").strip()
+    if not requested_entry_id or not requested_circuit_id:
+        return {"interval_evidence": None, "error": "not_found"}
+
     interval = _nilm_interval_evidence_window(start, end)
     if interval is None:
         return {"interval_evidence": None, "error": "invalid_interval"}
 
     coordinator_target = _nilm_workspace_target(
-        tuple(coordinators), circuit_id, entry_id=entry_id
+        tuple(coordinators), requested_circuit_id, entry_id=requested_entry_id
     )
     if coordinator_target is None:
         return {"interval_evidence": None, "error": "not_found"}

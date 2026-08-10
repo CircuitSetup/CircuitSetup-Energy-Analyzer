@@ -7400,6 +7400,48 @@ async def test_nilm_interval_evidence_rejects_invalid_selection_before_extractio
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("entry_id", "circuit_id"),
+    [
+        (None, "mains"),
+        ("   ", "mains"),
+        ("entry-1", None),
+        ("entry-1", "   "),
+    ],
+)
+async def test_nilm_interval_evidence_requires_explicit_entry_and_circuit(
+    monkeypatch: pytest.MonkeyPatch,
+    entry_id: str | None,
+    circuit_id: str | None,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1", name="Mains", entity_id="sensor.mains_power"
+    )
+    called = False
+
+    async def shared_path(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        return []
+
+    monkeypatch.setattr(panel, "_async_manual_interval_evidence", shared_path)
+
+    payload = await panel.nilm_interval_evidence_payload(
+        SimpleNamespace(),
+        [coordinator],
+        entry_id=entry_id,
+        circuit_id=circuit_id,
+        start="2026-08-10T12:00:00Z",
+        end="2026-08-10T12:15:00Z",
+    )
+
+    assert payload == {"interval_evidence": None, "error": "not_found"}
+    assert called is False
+
+
+@pytest.mark.asyncio
 async def test_nilm_interval_evidence_preview_returns_shared_manual_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
