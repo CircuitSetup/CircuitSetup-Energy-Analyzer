@@ -8502,7 +8502,6 @@ async def test_nilm_assignment_history_validation_confirms_matches() -> None:
                         "label_interval_ids": ["label-dishwasher"],
                         "confirmed_session_ids": [],
                         "rejected_session_ids": ["session-match"],
-                        "history_validation_session_ids": ["session-match"],
                         "last_validation": "history",
                         "lifecycle_state": "assigned",
                         "confidence": 0.8,
@@ -8706,7 +8705,7 @@ async def test_nilm_assignment_history_validation_rejects_direct_meter_conflicts
                         "label_interval_ids": ["label-dishwasher"],
                         "confirmed_session_ids": [],
                         "rejected_session_ids": [],
-                        "lifecycle_state": "validated",
+                        "lifecycle_state": "published",
                         "confidence": 0.8,
                         "created_device": True,
                         "publish_entities": True,
@@ -8728,7 +8727,9 @@ async def test_nilm_assignment_history_validation_rejects_direct_meter_conflicts
     assert validated["rejected_sessions"] == 1
     assert validated["adjusted_sessions"] == 0
     assert validated["confidence"] == pytest.approx(0.65)
-    assert validated["lifecycle_state"] == "conflict"
+    assert validated["lifecycle_state"] == "published"
+    assert validated["validation_status"] == "conflict"
+    assert validated["publication_review_required"] is True
     assert validated["last_validation"] == "direct_meter_conflict"
     assert validated["last_rejected_at"] == "2026-06-02T15:00:00+00:00"
     assert validated["ground_truth_interval_count"] == 1
@@ -8805,16 +8806,26 @@ async def test_nilm_assignment_history_validation_preserves_existing_conflicts()
         now_fn=lambda: now,
     )
 
-    validated = await coordinator.async_validate_nilm_assignment_history(
+    first = await coordinator.async_validate_nilm_assignment_history(
+        "mains",
+        "assignment-dishwasher",
+    )
+    second = await coordinator.async_validate_nilm_assignment_history(
         "mains",
         "assignment-dishwasher",
     )
 
-    assert validated["rejected_session_ids"] == ["session-false-positive"]
-    assert validated["confidence"] == pytest.approx(0.65)
-    assert validated["lifecycle_state"] == "conflict"
-    assert validated["last_validation"] == "direct_meter_conflict"
-    assert validated["last_rejected_at"] == "2026-06-02T15:05:00+00:00"
+    assert first["rejected_session_ids"] == ["session-false-positive"]
+    assert first["history_validation_session_ids"] == ["session-false-positive"]
+    assert first["history_validation_manual_session_ids"] == [
+        "session-false-positive"
+    ]
+    assert first["confidence"] == pytest.approx(0.65)
+    assert second["rejected_session_ids"] == ["session-false-positive"]
+    assert second["confidence"] == pytest.approx(0.65)
+    assert second["lifecycle_state"] == "conflict"
+    assert second["last_validation"] == "direct_meter_conflict"
+    assert second["last_rejected_at"] == "2026-06-02T15:05:00+00:00"
 
 
 @pytest.mark.asyncio
