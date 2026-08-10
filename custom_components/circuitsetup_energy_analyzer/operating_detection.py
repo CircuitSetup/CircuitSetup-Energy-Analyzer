@@ -964,44 +964,47 @@ class OperatingStateMachine:
         watts: float,
     ) -> CircuitEvent | None:
         if self._pending_running_step_pre:
-            self._append_running_step_post(sample.timestamp, watts)
-            post = tuple(self._pending_running_step_post)
-            if len(post) < _RUNNING_STEP_POST_SAMPLE_COUNT:
-                return None
-            features = _transition_features(
-                self._pending_running_step_pre,
-                post,
-                transition_timestamp=post[0].timestamp,
-            )
-            spread = float(features.get("post_power_spread_w", math.inf))
-            delta = _finite_or_none(features.get("transition_delta_w"))
-            post_range = max(item.power_w for item in post) - min(
-                item.power_w for item in post
-            )
-            if (
-                delta is None
-                or abs(delta) < _RUNNING_STEP_MATERIAL_FLOOR_W
-                or spread > _RUNNING_STEP_MAX_POST_SPREAD_W
-                or post_range > _RUNNING_STEP_MAX_POST_SPREAD_W
-            ):
+            if self._running_step_candidate_expired(sample.timestamp):
                 self._clear_pending_running_step()
-                return None
-            event_timestamp = post[0].timestamp
-            self._last_running_step_at = event_timestamp
-            self._clear_pending_running_step()
-            features.update(
-                {
-                    "transition_kind": "step",
-                    "lifecycle_state_before": OperatingState.RUNNING.value,
-                    "lifecycle_state_after": OperatingState.RUNNING.value,
-                }
-            )
-            return CircuitEvent(
-                timestamp=event_timestamp,
-                circuit_id=sample.circuit_id,
-                event_type=EventType.POWER_TRANSITION,
-                features=features,
-            )
+            else:
+                self._append_running_step_post(sample.timestamp, watts)
+                post = tuple(self._pending_running_step_post)
+                if len(post) < _RUNNING_STEP_POST_SAMPLE_COUNT:
+                    return None
+                features = _transition_features(
+                    self._pending_running_step_pre,
+                    post,
+                    transition_timestamp=post[0].timestamp,
+                )
+                spread = float(features.get("post_power_spread_w", math.inf))
+                delta = _finite_or_none(features.get("transition_delta_w"))
+                post_range = max(item.power_w for item in post) - min(
+                    item.power_w for item in post
+                )
+                if (
+                    delta is None
+                    or abs(delta) < _RUNNING_STEP_MATERIAL_FLOOR_W
+                    or spread > _RUNNING_STEP_MAX_POST_SPREAD_W
+                    or post_range > _RUNNING_STEP_MAX_POST_SPREAD_W
+                ):
+                    self._clear_pending_running_step()
+                    return None
+                event_timestamp = post[0].timestamp
+                self._last_running_step_at = event_timestamp
+                self._clear_pending_running_step()
+                features.update(
+                    {
+                        "transition_kind": "step",
+                        "lifecycle_state_before": OperatingState.RUNNING.value,
+                        "lifecycle_state_after": OperatingState.RUNNING.value,
+                    }
+                )
+                return CircuitEvent(
+                    timestamp=event_timestamp,
+                    circuit_id=sample.circuit_id,
+                    event_type=EventType.POWER_TRANSITION,
+                    features=features,
+                )
 
         if not self._running_step_cooldown_elapsed(sample.timestamp):
             return None
@@ -1027,6 +1030,11 @@ class OperatingStateMachine:
         return self._last_running_step_at is None or (
             timestamp - self._last_running_step_at
         ).total_seconds() >= _RUNNING_STEP_COOLDOWN_SECONDS
+
+    def _running_step_candidate_expired(self, timestamp: datetime) -> bool:
+        return (
+            timestamp - self._pending_running_step_pre[-1].timestamp
+        ).total_seconds() > _TRANSITION_CONTEXT_MAX_AGE_SECONDS
 
     def _clear_pending_running_step(self) -> None:
         self._pending_running_step_pre = ()

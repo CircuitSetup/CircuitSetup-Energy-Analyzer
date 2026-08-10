@@ -519,6 +519,27 @@ def test_pending_off_cancellation_clears_running_step_candidate() -> None:
     assert transitions[0].features["post_power_median_w"] == 1100.0
 
 
+def test_expired_running_step_candidate_cannot_reuse_frozen_pre_plateau() -> None:
+    machine = _machine()
+    events = []
+    for seconds, watts in (
+        (0, 5.0), (5, 500.0), (15, 500.0), (20, 500.0), (25, 500.0),
+        (30, 900.0), (70, 920.0), (110, 910.0), (150, 905.0),
+        (160, 900.0), (165, 900.0), (170, 900.0), (175, 1300.0),
+        (180, 1300.0), (185, 1300.0),
+    ):
+        events.extend(
+            machine.process(_sample(seconds, watts, circuit_id="fridge")).events
+        )
+
+    transitions = [
+        event for event in events if event.event_type is EventType.POWER_TRANSITION
+    ]
+    assert len(transitions) == 1
+    assert transitions[0].features["pre_power_median_w"] == 900.0
+    assert transitions[0].features["post_power_median_w"] == 1300.0
+
+
 def test_operating_state_machine_confirms_stop_after_off_dwell() -> None:
     from custom_components.circuitsetup_energy_analyzer.operating_detection import (
         OperatingDetectionProfile,
