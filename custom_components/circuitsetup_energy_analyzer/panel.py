@@ -62,6 +62,7 @@ from .panel_contracts import (
     STATIC_URL_PATH,
 )
 from .panel_nilm import (
+    MAX_NILM_WORKSPACE_HISTORY_HOURS,
     MAX_NILM_WORKSPACE_HISTORY_POINTS_PER_ENTITY,
     _nilm_history_live_real_power_metadata,
     _nilm_known_load_overlays,
@@ -75,6 +76,7 @@ from .panel_views import (
     ApplianceDetailView,
     ApplianceInsightsView,
     HvacAssociationsView,
+    NilmIntervalEvidenceView,
     NilmWorkspaceHistoryView,
     NilmWorkspaceView,
     SetupHealthView,
@@ -110,6 +112,7 @@ from .services import (
     SERVICE_START_MAINTENANCE,
     SERVICE_UNDO_SETTING_RECOMMENDATION,
     SERVICE_VALIDATE_NILM_SESSION,
+    _async_manual_interval_evidence,
 )
 from .settings_advisor import SETTING_LABELS
 from .state import circuit_is_learning
@@ -2097,6 +2100,65 @@ async def nilm_workspace_history_payload(
     return annotated
 
 
+async def nilm_interval_evidence_payload(
+    hass: Any,
+    coordinators: Iterable[Any],
+    *,
+    circuit_id: str | None = None,
+    start: Any = None,
+    end: Any = None,
+    entry_id: str | None = None,
+) -> dict[str, Any]:
+    """Return bounded schema-2 evidence through the manual save extraction path."""
+
+    requested_entry_id = str(entry_id or "").strip()
+    requested_circuit_id = str(circuit_id or "").strip()
+    if not requested_entry_id or not requested_circuit_id:
+        return {"interval_evidence": None, "error": "not_found"}
+
+    interval = _nilm_interval_evidence_window(start, end)
+    if interval is None:
+        return {"interval_evidence": None, "error": "invalid_interval"}
+
+    coordinator_target = _nilm_workspace_target(
+        tuple(coordinators), requested_circuit_id, entry_id=requested_entry_id
+    )
+    if coordinator_target is None:
+        return {"interval_evidence": None, "error": "not_found"}
+    coordinator, config, _sources = coordinator_target
+    start_at, end_at = interval
+    evidence = await _async_manual_interval_evidence(
+        hass,
+        coordinator,
+        config.circuit_id,
+        [{"start": start_at.isoformat(), "end": end_at.isoformat()}],
+    )
+    return {"interval_evidence": evidence[0] if evidence else None}
+
+
+def _nilm_interval_evidence_window(
+    start: Any,
+    end: Any,
+) -> tuple[datetime, datetime] | None:
+    """Validate one aware selection against the NILM workspace history cap."""
+
+    try:
+        start_at = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+        end_at = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
+        if start_at.tzinfo is None or end_at.tzinfo is None:
+            return None
+        start_at = start_at.astimezone(UTC)
+        end_at = end_at.astimezone(UTC)
+        if (
+            end_at <= start_at
+            or end_at - start_at > timedelta(hours=MAX_NILM_WORKSPACE_HISTORY_HOURS)
+        ):
+            return None
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return start_at, end_at
+
+
 async def _async_history_rows(
     hass: Any,
     start: str,
@@ -2375,6 +2437,7 @@ def _register_view(hass: Any) -> None:
         register_view(SetupHealthView())
         register_view(NilmWorkspaceView())
         register_view(NilmWorkspaceHistoryView())
+        register_view(NilmIntervalEvidenceView())
 
 
 async def _async_register_panel(hass: Any) -> bool:

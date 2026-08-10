@@ -11,6 +11,7 @@ from .panel_contracts import (
     APPLIANCE_INSIGHTS_API_PATH,
     EVIDENCE_API_PATH,
     HVAC_ASSOCIATIONS_API_PATH,
+    NILM_INTERVAL_EVIDENCE_API_PATH,
     NILM_WORKSPACE_API_PATH,
     NILM_WORKSPACE_HISTORY_API_PATH,
     SETUP_HEALTH_API_PATH,
@@ -218,5 +219,28 @@ class NilmWorkspaceHistoryView(HomeAssistantView):
                 if hasattr(request.query, "getall")
                 else []
             ),
+        )
+        return panel.web.json_response(payload)
+
+
+class NilmIntervalEvidenceView(HomeAssistantView):
+    """Authenticated bounded preview of manual NILM interval evidence."""
+
+    url = NILM_INTERVAL_EVIDENCE_API_PATH
+    name = f"api:{DOMAIN}:nilm_interval_evidence"
+    requires_auth = True
+
+    async def get(self, request: Any) -> Any:
+        """Return backend-derived manual evidence for one selected interval."""
+        from . import panel
+
+        hass = request.app[panel.KEY_HASS]
+        payload = await panel.nilm_interval_evidence_payload(
+            hass,
+            panel._loaded_coordinators(hass),
+            circuit_id=request.query.get("circuit_id"),
+            start=request.query.get("start"),
+            end=request.query.get("end"),
+            entry_id=request.query.get(panel.ATTR_ENTRY_ID),
         )
         return panel.web.json_response(payload)

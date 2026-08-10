@@ -456,7 +456,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260809-2"
+    assert PANEL_MODULE_VERSION == "20260810-1"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -6419,6 +6419,7 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
         APPLIANCE_INSIGHTS_API_PATH,
         EVIDENCE_API_PATH,
         HVAC_ASSOCIATIONS_API_PATH,
+        NILM_INTERVAL_EVIDENCE_API_PATH,
         NILM_WORKSPACE_API_PATH,
         NILM_WORKSPACE_HISTORY_API_PATH,
         SETUP_HEALTH_API_PATH,
@@ -6471,6 +6472,7 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
         SETUP_HEALTH_API_PATH,
         NILM_WORKSPACE_API_PATH,
         NILM_WORKSPACE_HISTORY_API_PATH,
+        NILM_INTERVAL_EVIDENCE_API_PATH,
     ]
     assert {view.name for view in http.views} >= {
         "api:circuitsetup_energy_analyzer:hvac_associations"
@@ -6632,7 +6634,7 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
 
     assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
     assert len(http.static_paths) == 1
-    assert len(http.views) == 7
+    assert len(http.views) == 8
     assert resource_updates == [
         (
             "dashboard-graph-module",
@@ -7277,3 +7279,196 @@ def test_nilm_inventory_keeps_raw_off_signature_as_diagnostic_evidence() -> None
     ]
     assert signatures[0]["component_id"] == "on-1"
     assert "component_id" not in signatures[1]
+
+
+@pytest.mark.asyncio
+async def test_nilm_interval_evidence_view_is_authenticated_and_registered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+    from custom_components.circuitsetup_energy_analyzer.panel_contracts import (
+        NILM_INTERVAL_EVIDENCE_API_PATH,
+    )
+
+    registered = []
+    hass = SimpleNamespace(http=SimpleNamespace(register_view=registered.append))
+
+    panel._register_view(hass)
+
+    view = next(
+        item for item in registered if item.url == NILM_INTERVAL_EVIDENCE_API_PATH
+    )
+    assert view.name == f"api:{DOMAIN}:nilm_interval_evidence"
+    assert view.requires_auth is True
+
+
+@pytest.mark.asyncio
+async def test_nilm_interval_evidence_preview_routes_entry_through_shared_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    first = _nilm_workspace_coordinator(
+        entry_id="entry-1", name="First Mains", entity_id="sensor.first_mains_power"
+    )
+    second = _nilm_workspace_coordinator(
+        entry_id="entry-2",
+        name="Second Mains",
+        entity_id="sensor.second_mains_power",
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": first, "entry-2": second}})
+    request = SimpleNamespace(
+        app={panel.KEY_HASS: hass},
+        query={
+            "entry_id": "entry-2",
+            "circuit_id": "mains",
+            "start": "2026-08-10T12:00:00Z",
+            "end": "2026-08-10T12:15:00Z",
+            "entity_id": "sensor.browser_controlled",
+        },
+    )
+    expected = {"evidence_schema_version": 2, "evidence_source": "manual_backend"}
+    captured = {}
+
+    async def shared_path(received_hass, coordinator, circuit_id, drafts):
+        captured.update(
+            hass=received_hass,
+            coordinator=coordinator,
+            circuit_id=circuit_id,
+            drafts=list(drafts),
+        )
+        return [expected]
+
+    monkeypatch.setattr(panel, "_async_manual_interval_evidence", shared_path)
+    monkeypatch.setattr(panel.web, "json_response", lambda payload: payload)
+
+    payload = await panel.NilmIntervalEvidenceView().get(request)
+
+    assert payload == {"interval_evidence": expected}
+    assert captured == {
+        "hass": hass,
+        "coordinator": second,
+        "circuit_id": "mains",
+        "drafts": [
+            {
+                "start": "2026-08-10T12:00:00+00:00",
+                "end": "2026-08-10T12:15:00+00:00",
+            }
+        ],
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [
+        ("2026-08-10T12:00:00", "2026-08-10T12:15:00Z"),
+        ("2026-08-10T12:15:00Z", "2026-08-10T12:00:00Z"),
+        ("2026-08-09T12:00:00Z", "2026-08-10T12:00:01Z"),
+    ],
+)
+async def test_nilm_interval_evidence_rejects_invalid_selection_before_extraction(
+    monkeypatch: pytest.MonkeyPatch,
+    start: str,
+    end: str,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1", name="Mains", entity_id="sensor.mains_power"
+    )
+    called = False
+
+    async def shared_path(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        return []
+
+    monkeypatch.setattr(panel, "_async_manual_interval_evidence", shared_path)
+
+    payload = await panel.nilm_interval_evidence_payload(
+        SimpleNamespace(),
+        [coordinator],
+        entry_id="entry-1",
+        circuit_id="mains",
+        start=start,
+        end=end,
+    )
+
+    assert payload == {"interval_evidence": None, "error": "invalid_interval"}
+    assert called is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("entry_id", "circuit_id"),
+    [
+        (None, "mains"),
+        ("   ", "mains"),
+        ("entry-1", None),
+        ("entry-1", "   "),
+    ],
+)
+async def test_nilm_interval_evidence_requires_explicit_entry_and_circuit(
+    monkeypatch: pytest.MonkeyPatch,
+    entry_id: str | None,
+    circuit_id: str | None,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1", name="Mains", entity_id="sensor.mains_power"
+    )
+    called = False
+
+    async def shared_path(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        return []
+
+    monkeypatch.setattr(panel, "_async_manual_interval_evidence", shared_path)
+
+    payload = await panel.nilm_interval_evidence_payload(
+        SimpleNamespace(),
+        [coordinator],
+        entry_id=entry_id,
+        circuit_id=circuit_id,
+        start="2026-08-10T12:00:00Z",
+        end="2026-08-10T12:15:00Z",
+    )
+
+    assert payload == {"interval_evidence": None, "error": "not_found"}
+    assert called is False
+
+
+@pytest.mark.asyncio
+async def test_nilm_interval_evidence_preview_returns_shared_manual_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1", name="Mains", entity_id="sensor.mains_power"
+    )
+    shared_evidence = {
+        "evidence_schema_version": 2,
+        "evidence_source": "manual_backend",
+        "median_power_w": 750.0,
+        "quality_flags": ["history_unavailable"],
+    }
+
+    async def shared_path(*_args, **_kwargs):
+        return [shared_evidence]
+
+    monkeypatch.setattr(panel, "_async_manual_interval_evidence", shared_path)
+
+    payload = await panel.nilm_interval_evidence_payload(
+        SimpleNamespace(),
+        [coordinator],
+        entry_id="entry-1",
+        circuit_id="mains",
+        start="2026-08-10T12:00:00Z",
+        end="2026-08-10T12:15:00Z",
+    )
+
+    assert payload["interval_evidence"] == shared_evidence

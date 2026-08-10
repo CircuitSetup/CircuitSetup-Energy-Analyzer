@@ -74,7 +74,7 @@ def test_assignment_model_uses_recent_confirmed_complete_sessions() -> None:
     assert nilm_assignment_model_is_compound_eligible(model) is True
 
 
-def test_assignment_model_uses_one_assigned_label_interval() -> None:
+def test_assignment_model_falls_back_to_one_legacy_manual_label_interval() -> None:
     model = build_nilm_assignment_model(
         {"assignment_id": "pump", "label_interval_ids": ["interval-1"]},
         [],
@@ -95,10 +95,11 @@ def test_assignment_model_uses_one_assigned_label_interval() -> None:
     ]
     assert model["transition_prototypes"][0]["sample_count"] == 1
     assert "delta_var" not in model["transition_prototypes"][0]
-    assert model["model_confidence"] == 0.3
+    assert model["model_confidence"] == 0.083
 
 
-def test_assignment_model_label_intervals_change_the_representative_median() -> None:
+def test_assignment_model_reviewed_session_transitions_outrank_legacy_intervals(
+) -> None:
     assignment = {
         "assignment_id": "pump",
         "confirmed_session_ids": ["session-1"],
@@ -137,9 +138,248 @@ def test_assignment_model_label_intervals_change_the_representative_median() -> 
     )
 
     assert sessions_only["power_states_w"] == [0.0, 60.0]
-    assert combined["power_states_w"] == [0.0, 90.0]
-    assert combined["transition_prototypes"][0]["sample_count"] == 3
-    assert combined["model_confidence"] == 0.9
+    assert combined["power_states_w"] == [0.0, 60.0]
+    assert combined["transition_prototypes"][0]["sample_count"] == 1
+    assert combined["model_confidence"] == 0.3
+
+
+def test_assignment_model_schema_2_start_only_adds_only_an_on_prototype() -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "label_interval_ids": ["interval-1"]},
+        [],
+        label_intervals=[
+            {
+                "interval_id": "interval-1",
+                "assignment_id": "pump",
+                "evidence_schema_version": 2,
+                "start_transition_eligible": True,
+                "start_transition_w": 120.0,
+                "stop_transition_eligible": False,
+                "stop_transition_w": -120.0,
+                "plateau_eligible": False,
+                "power_coverage": 0.5,
+                "evidence_confidence": 0.9,
+            }
+        ],
+    )
+
+    assert model["power_states_w"] == [0.0, 120.0]
+    assert [item["direction"] for item in model["transition_prototypes"]] == [
+        "on"
+    ]
+    assert model["transition_prototypes"][0]["delta_w"] == 120.0
+    assert model["model_confidence"] == 0.15
+
+
+def test_assignment_model_schema_2_stop_only_adds_only_an_off_prototype() -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "label_interval_ids": ["interval-1"]},
+        [],
+        label_intervals=[
+            {
+                "interval_id": "interval-1",
+                "assignment_id": "pump",
+                "evidence_schema_version": 2,
+                "start_transition_eligible": False,
+                "start_transition_w": 140.0,
+                "stop_transition_eligible": True,
+                "stop_transition_w": -140.0,
+                "plateau_eligible": False,
+                "power_coverage": 1.0,
+                "evidence_confidence": 0.9,
+            }
+        ],
+    )
+
+    assert model["power_states_w"] == [0.0, 140.0]
+    assert [item["direction"] for item in model["transition_prototypes"]] == [
+        "off"
+    ]
+    assert model["transition_prototypes"][0]["delta_w"] == -140.0
+
+
+def test_assignment_model_schema_2_ineligible_boundaries_add_no_transitions() -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "label_interval_ids": ["interval-1"]},
+        [],
+        label_intervals=[
+            {
+                "interval_id": "interval-1",
+                "assignment_id": "pump",
+                "evidence_schema_version": 2,
+                "observed_transition_w": 110.0,
+                "start_transition_eligible": False,
+                "start_transition_w": 110.0,
+                "stop_transition_eligible": False,
+                "stop_transition_w": -110.0,
+                "plateau_eligible": False,
+                "power_coverage": 1.0,
+                "evidence_confidence": 0.9,
+            }
+        ],
+    )
+
+    assert model["power_states_w"] == []
+    assert model["transition_prototypes"] == []
+
+
+def test_assignment_model_schema_2_eligible_plateau_adds_active_state_power() -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "label_interval_ids": ["interval-1"]},
+        [],
+        label_intervals=[
+            {
+                "interval_id": "interval-1",
+                "assignment_id": "pump",
+                "evidence_schema_version": 2,
+                "start_transition_eligible": False,
+                "stop_transition_eligible": False,
+                "plateau_eligible": True,
+                "median_power_w": 95.0,
+                "average_power_w": 92.0,
+                "power_coverage": 0.95,
+                "power_confidence": 0.8,
+            }
+        ],
+    )
+
+    assert model["power_states_w"] == [0.0, 95.0]
+    assert model["transition_prototypes"] == []
+    assert model["model_confidence"] == 0.253
+
+
+def test_assignment_model_schema_2_low_coverage_plateau_is_not_active_evidence(
+) -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "label_interval_ids": ["interval-1"]},
+        [],
+        label_intervals=[
+            {
+                "interval_id": "interval-1",
+                "assignment_id": "pump",
+                "evidence_schema_version": 2,
+                "observed_transition_w": 95.0,
+                "start_transition_eligible": False,
+                "stop_transition_eligible": False,
+                "plateau_eligible": True,
+                "median_power_w": 95.0,
+                "partial_energy_kwh": 0.08,
+                "measured_energy_kwh": None,
+                "power_coverage": 0.5,
+                "power_confidence": 0.9,
+            }
+        ],
+    )
+
+    assert model["power_states_w"] == []
+    assert model["transition_prototypes"] == []
+
+
+def test_assignment_model_schema_2_transitions_outrank_legacy_manual_fallback() -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "label_interval_ids": ["legacy", "schema-2"]},
+        [],
+        label_intervals=[
+            {
+                "interval_id": "legacy",
+                "assignment_id": "pump",
+                "observed_transition_w": 75.0,
+                "confidence": 1.0,
+            },
+            {
+                "interval_id": "schema-2",
+                "assignment_id": "pump",
+                "evidence_schema_version": 2,
+                "start_transition_eligible": True,
+                "start_transition_w": 120.0,
+                "stop_transition_eligible": False,
+                "plateau_eligible": False,
+                "power_coverage": 1.0,
+                "evidence_confidence": 0.9,
+            },
+        ],
+    )
+
+    assert [item["delta_w"] for item in model["transition_prototypes"]] == [120.0]
+    assert model["power_states_w"] == [0.0, 120.0]
+
+
+def test_assignment_model_uses_legacy_transitions_when_schema_2_has_only_plateau(
+) -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "label_interval_ids": ["legacy", "schema-2"]},
+        [],
+        label_intervals=[
+            {
+                "interval_id": "legacy",
+                "assignment_id": "pump",
+                "observed_transition_w": 80.0,
+                "confidence": 0.9,
+            },
+            {
+                "interval_id": "schema-2",
+                "assignment_id": "pump",
+                "evidence_schema_version": 2,
+                "start_transition_eligible": False,
+                "stop_transition_eligible": False,
+                "plateau_eligible": True,
+                "median_power_w": 95.0,
+                "power_coverage": 0.95,
+                "power_confidence": 0.8,
+            },
+        ],
+    )
+
+    assert model["power_states_w"] == [0.0, 95.0]
+    assert [item["delta_w"] for item in model["transition_prototypes"]] == [
+        80.0,
+        -80.0,
+    ]
+
+
+def test_assignment_model_keeps_reviewed_session_transition_behavior() -> None:
+    model = build_nilm_assignment_model(
+        {"assignment_id": "pump", "confirmed_session_ids": ["session-1"]},
+        [
+            {
+                "session_id": "session-1",
+                "assignment_id": "pump",
+                "end": "2026-06-01T10:00:00+00:00",
+                "on_delta_w": 80.0,
+                "off_delta_w": -80.0,
+                "confidence": 0.9,
+            }
+        ],
+    )
+
+    assert model["power_states_w"] == [0.0, 80.0]
+    assert [item["delta_w"] for item in model["transition_prototypes"]] == [
+        80.0,
+        -80.0,
+    ]
+    assert model["model_confidence"] == 0.3
+
+
+def test_assignment_model_caps_confidence_for_multiple_legacy_intervals() -> None:
+    model = build_nilm_assignment_model(
+        {
+            "assignment_id": "pump",
+            "label_interval_ids": ["legacy-1", "legacy-2", "legacy-3"],
+        },
+        [],
+        label_intervals=[
+            {
+                "interval_id": interval_id,
+                "assignment_id": "pump",
+                "observed_transition_w": 84.0,
+                "confidence": 1.0,
+            }
+            for interval_id in ("legacy-1", "legacy-2", "legacy-3")
+        ],
+    )
+
+    assert model["transition_prototypes"][0]["sample_count"] == 3
+    assert model["model_confidence"] == 0.25
 
 
 def test_assignment_model_retains_reviewed_session_var_prototypes() -> None:

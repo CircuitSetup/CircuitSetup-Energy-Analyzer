@@ -1122,18 +1122,20 @@ def test_nilm_reference_history_calculates_measured_power_and_energy() -> None:
     assert interval_id.startswith("reference-")
 
     assert _nilm_reference_power_metrics(
-        [[
-            {
-                "entity_id": "sensor.pump_power",
-                "state": state,
-                "last_changed": timestamp,
-            }
-            for state, timestamp in (
-                ("80", "2026-08-01T00:10:00+00:00"),
-                ("unknown", "2026-08-01T00:20:00+00:00"),
-                ("80", "2026-08-01T00:40:00+00:00"),
-            )
-        ]],
+        [
+            [
+                {
+                    "entity_id": "sensor.pump_power",
+                    "state": state,
+                    "last_changed": timestamp,
+                }
+                for state, timestamp in (
+                    ("80", "2026-08-01T00:10:00+00:00"),
+                    ("unknown", "2026-08-01T00:20:00+00:00"),
+                    ("80", "2026-08-01T00:40:00+00:00"),
+                )
+            ]
+        ],
         "sensor.pump_power",
         start="2026-08-01T00:10:00+00:00",
         end="2026-08-01T00:40:00+00:00",
@@ -1229,6 +1231,270 @@ async def test_nilm_reference_history_service_attaches_measured_evidence(
     assert kwargs["measured_energy_kwh"] == 0.04
     assert kwargs["interval_id"].startswith("reference-")
     other.async_label_nilm_interval.assert_not_awaited()
+
+
+def _manual_evidence_config(*sensors: SensorRef) -> CircuitConfig:
+    return CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=sensors,
+    )
+
+
+def _manual_evidence_rows(entity_id: str) -> list[list[dict[str, str]]]:
+    return [
+        [
+            {
+                "entity_id": entity_id,
+                "state": "100",
+                "last_changed": "2026-08-01T00:00:00+00:00",
+            },
+            {
+                "entity_id": entity_id,
+                "state": "200",
+                "last_changed": "2026-08-01T00:00:20+00:00",
+            },
+            {
+                "entity_id": entity_id,
+                "state": "200",
+                "last_changed": "2026-08-01T00:01:40+00:00",
+            },
+            {
+                "entity_id": entity_id,
+                "state": "100",
+                "last_changed": "2026-08-01T00:02:00+00:00",
+            },
+        ]
+    ]
+
+
+def test_manual_power_sources_normalize_case_varied_units() -> None:
+    """Catches valid real-power source units being dropped due to unit casing."""
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        _configured_manual_power_sources,
+    )
+
+    config = _manual_evidence_config(
+        SensorRef("sensor.configured_kw", SensorRole.REAL_POWER, unit="kw"),
+        SensorRef("sensor.configured_milli", SensorRole.REAL_POWER, unit="mW"),
+        SensorRef("sensor.configured_mega", SensorRole.REAL_POWER, unit="MW"),
+        SensorRef("sensor.metadata", SensorRole.REAL_POWER),
+    )
+    hass = SimpleNamespace(
+        states=SimpleNamespace(
+            get=lambda entity_id: SimpleNamespace(
+                attributes={
+                    "device_class": "power",
+                    "unit_of_measurement": (
+                        "KW" if entity_id == "sensor.metadata" else ""
+                    ),
+                }
+            )
+        )
+    )
+    coordinator = SimpleNamespace(circuit_configs=[config])
+
+    assert _configured_manual_power_sources(hass, coordinator, "mains") == (
+        ("sensor.configured_kw", 1_000.0),
+        ("sensor.configured_milli", 0.001),
+        ("sensor.configured_mega", 1_000_000.0),
+        ("sensor.metadata", 1_000.0),
+    )
+
+
+@pytest.mark.asyncio
+async def test_manual_label_uses_configured_power_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches browser-supplied electrical claims bypassing recorder evidence."""
+    from custom_components.circuitsetup_energy_analyzer import services
+
+    history = AsyncMock(return_value=_manual_evidence_rows("sensor.configured_power"))
+    monkeypatch.setattr(services, "_async_nilm_sensor_history_rows", history)
+    coordinator = SimpleNamespace(
+        circuit_configs=[
+            _manual_evidence_config(
+                SensorRef("sensor.configured_power", SensorRole.REAL_POWER, unit="W")
+            )
+        ],
+        async_set_updated_data=lambda _: None,
+        async_label_nilm_interval=AsyncMock(),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    await services._dispatch_service(
+        hass,
+        services.SERVICE_LABEL_NILM_INTERVAL,
+        {
+            "entry_id": "entry-1",
+            "circuit_id": "mains",
+            "label": "Load",
+            "start": "2026-08-01T00:00:20+00:00",
+            "end": "2026-08-01T00:01:40+00:00",
+            "mains_entity_id": "sensor.browser_claim",
+            "observed_transition_w": 9999,
+        },
+    )
+
+    kwargs = coordinator.async_label_nilm_interval.await_args.kwargs
+    assert history.await_args.args[1] == "sensor.configured_power"
+    assert "observed_transition_w" not in kwargs
+    assert kwargs["evidence"]["start_transition_w"] == 100.0
+    assert kwargs["evidence"]["evidence_source"] == "manual_backend"
+
+
+@pytest.mark.asyncio
+async def test_manual_batch_fetches_each_configured_source_once_for_union_context(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches per-interval recorder queries that make atomic batch saves expensive."""
+    from custom_components.circuitsetup_energy_analyzer import services
+
+    history = AsyncMock(
+        side_effect=[
+            _manual_evidence_rows("sensor.leg_a"),
+            _manual_evidence_rows("sensor.leg_b"),
+        ]
+    )
+    monkeypatch.setattr(services, "_async_nilm_sensor_history_rows", history)
+    coordinator = SimpleNamespace(
+        circuit_configs=[
+            _manual_evidence_config(
+                SensorRef("sensor.leg_a", SensorRole.REAL_POWER, unit="W"),
+                SensorRef("sensor.leg_b", SensorRole.REAL_POWER, unit="W"),
+            )
+        ],
+        async_set_updated_data=lambda _: None,
+        async_save_nilm_interval_changes=AsyncMock(),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    intervals = [
+        {
+            "interval_id": "one",
+            "start": "2026-08-01T00:00:20+00:00",
+            "end": "2026-08-01T00:01:40+00:00",
+            "observed_transition_w": 9999,
+        },
+        {
+            "interval_id": "two",
+            "start": "2026-08-01T00:03:20+00:00",
+            "end": "2026-08-01T00:04:40+00:00",
+            "median_power_w": 9999,
+        },
+    ]
+
+    await services._dispatch_service(
+        hass,
+        services.SERVICE_SAVE_NILM_INTERVAL_CHANGES,
+        {
+            "entry_id": "entry-1",
+            "circuit_id": "mains",
+            "label": "Load",
+            "intervals": intervals,
+        },
+    )
+
+    assert history.await_count == 2
+    assert {call.args[1] for call in history.await_args_list} == {
+        "sensor.leg_a",
+        "sensor.leg_b",
+    }
+    assert {
+        (call.args[2], call.args[3]) for call in history.await_args_list
+    } == {
+        (
+            datetime(2026, 7, 31, 23, 59, 20, tzinfo=UTC),
+            datetime(2026, 8, 1, 0, 5, 40, tzinfo=UTC),
+        )
+    }
+    saved = coordinator.async_save_nilm_interval_changes.await_args.kwargs["intervals"]
+    assert all(
+        "evidence" in draft
+        and "observed_transition_w" not in draft
+        and "median_power_w" not in draft
+        for draft in saved
+    )
+
+
+@pytest.mark.asyncio
+async def test_manual_history_unavailable_saves_review_only_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches unavailable history becoming fabricated measured evidence."""
+    from custom_components.circuitsetup_energy_analyzer import services
+
+    monkeypatch.setattr(
+        services, "_async_nilm_sensor_history_rows", AsyncMock(return_value=[])
+    )
+    coordinator = SimpleNamespace(
+        circuit_configs=[
+            _manual_evidence_config(
+                SensorRef("sensor.mains", SensorRole.REAL_POWER, unit="W")
+            )
+        ],
+        async_set_updated_data=lambda _: None,
+        async_label_nilm_interval=AsyncMock(),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    await services._dispatch_service(
+        hass,
+        services.SERVICE_LABEL_NILM_INTERVAL,
+        {
+            "entry_id": "entry-1",
+            "circuit_id": "mains",
+            "label": "Load",
+            "start": "2026-08-01T00:00:00+00:00",
+            "end": "2026-08-01T00:01:00+00:00",
+        },
+    )
+
+    evidence = coordinator.async_label_nilm_interval.await_args.kwargs["evidence"]
+    assert evidence["evidence_confidence"] == 0.0
+    assert evidence["measured_energy_kwh"] is None
+    assert evidence["start_transition_w"] is None
+    assert evidence["start_transition_eligible"] is False
+    assert "history_unavailable" in evidence["quality_flags"]
+
+
+@pytest.mark.asyncio
+async def test_manual_evidence_excludes_non_real_or_incompatible_configured_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Catches apparent-power and unsupported-unit sensors entering trusted evidence."""
+    from custom_components.circuitsetup_energy_analyzer import services
+
+    history = AsyncMock(return_value=_manual_evidence_rows("sensor.real"))
+    monkeypatch.setattr(services, "_async_nilm_sensor_history_rows", history)
+    coordinator = SimpleNamespace(
+        circuit_configs=[
+            _manual_evidence_config(
+                SensorRef("sensor.real", SensorRole.REAL_POWER, unit="kW"),
+                SensorRef("sensor.apparent", SensorRole.APPARENT_POWER, unit="VA"),
+                SensorRef("sensor.bad", SensorRole.REAL_POWER, unit="VA"),
+            )
+        ],
+        async_set_updated_data=lambda _: None,
+        async_label_nilm_interval=AsyncMock(),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    await services._dispatch_service(
+        hass,
+        services.SERVICE_LABEL_NILM_INTERVAL,
+        {
+            "entry_id": "entry-1",
+            "circuit_id": "mains",
+            "label": "Load",
+            "start": "2026-08-01T00:00:20+00:00",
+            "end": "2026-08-01T00:01:40+00:00",
+        },
+    )
+
+    assert history.await_count == 1
+    assert history.await_args.args[1] == "sensor.real"
 
 
 def test_nilm_assignment_service_schemas_validate_required_fields() -> None:
@@ -2828,6 +3094,7 @@ async def test_nilm_label_interval_services_accept_create_update_and_delete() ->
             source: str = "manual",
             confidence: float = 1.0,
             observed_transition_w=None,
+            evidence=None,
         ) -> None:
             self.calls.append(
                 (
@@ -2846,6 +3113,7 @@ async def test_nilm_label_interval_services_accept_create_update_and_delete() ->
                         source,
                         confidence,
                         observed_transition_w,
+                        evidence,
                     ),
                 )
             )
@@ -2886,31 +3154,31 @@ async def test_nilm_label_interval_services_accept_create_update_and_delete() ->
         SimpleNamespace(data={"circuit_id": "mains", "interval_id": "label-1"})
     )
 
-    assert coordinator.calls == [
-        (
-            "async_label_nilm_interval",
-            (
-                "mains",
-                "Dishwasher",
-                "2026-06-02T12:00:00+00:00",
-                "2026-06-02T12:45:00+00:00",
-                "dishwasher",
-                "washer",
-                "assignment-dishwasher",
-                "sensor.mains_power",
-                "sensor.dishwasher_power",
-                None,
-                "manual",
-                1.0,
-                None,
-            ),
-        ),
-        ("async_delete_nilm_label_interval", ("mains", "label-1")),
-    ]
+    call = coordinator.calls[0][1]
+    assert call[:13] == (
+        "mains",
+        "Dishwasher",
+        "2026-06-02T12:00:00+00:00",
+        "2026-06-02T12:45:00+00:00",
+        "dishwasher",
+        "washer",
+        "assignment-dishwasher",
+        "sensor.mains_power",
+        "sensor.dishwasher_power",
+        None,
+        "manual",
+        1.0,
+        None,
+    )
+    assert call[13]["evidence_source"] == "manual_backend"
+    assert coordinator.calls[1] == (
+        "async_delete_nilm_label_interval",
+        ("mains", "label-1"),
+    )
 
 
 @pytest.mark.asyncio
-async def test_nilm_label_interval_service_rejects_boolean_transition() -> None:
+async def test_nilm_label_interval_service_ignores_boolean_transition() -> None:
     from datetime import UTC, datetime
     from unittest.mock import AsyncMock
 
@@ -2948,18 +3216,20 @@ async def test_nilm_label_interval_service_rejects_boolean_transition() -> None:
     )
     await async_setup_services(hass)
 
-    with pytest.raises(ValueError, match="observed transition"):
-        await hass.services.registered[(DOMAIN, SERVICE_LABEL_NILM_INTERVAL)](
-            SimpleNamespace(
-                data={
-                    "circuit_id": "mains",
-                    "label": "Pump",
-                    "start": "2026-08-02T10:00:00+00:00",
-                    "end": "2026-08-02T10:05:00+00:00",
-                    "observed_transition_w": True,
-                }
-            )
+    await hass.services.registered[(DOMAIN, SERVICE_LABEL_NILM_INTERVAL)](
+        SimpleNamespace(
+            data={
+                "circuit_id": "mains",
+                "label": "Pump",
+                "start": "2026-08-02T10:00:00+00:00",
+                "end": "2026-08-02T10:05:00+00:00",
+                "observed_transition_w": True,
+            }
         )
+    )
+    saved = coordinator.store_data.nilm_label_intervals_by_circuit["mains"][0]
+    assert saved["evidence_source"] == "manual_backend"
+    assert "observed_transition_w" not in saved
 
 
 @pytest.mark.asyncio
@@ -3086,14 +3356,14 @@ async def test_nilm_sensor_label_interval_service_generates_from_history(
                 "sensor.dishwasher_power",
                 "2026-06-02T12:00:00+00:00",
                 "2026-06-02T13:00:00+00:00",
-                    services._nilm_reference_interval_id(
-                        "mains",
-                        "",
-                        "sensor.dishwasher_power",
-                        "2026-06-02T12:10:00+00:00",
-                        "2026-06-02T12:40:00+00:00",
-                    ),
-                    "reference_sensor",
+                services._nilm_reference_interval_id(
+                    "mains",
+                    "",
+                    "sensor.dishwasher_power",
+                    "2026-06-02T12:10:00+00:00",
+                    "2026-06-02T12:40:00+00:00",
+                ),
+                "reference_sensor",
                 1.0,
             ),
         )
@@ -3701,23 +3971,19 @@ async def test_nilm_interval_change_services_validate_and_dispatch() -> None:
         )
     )
 
-    assert coordinator.calls == [
-        (
-            "save",
-            (
-                "mains",
-                {
-                    "label": "Dishwasher",
-                    "intervals": payload["intervals"],
-                    "removed_interval_ids": ["label-old"],
-                    "assignment_id": "assignment-dishwasher",
-                    "appliance_id": None,
-                    "appliance_profile": None,
-                },
-            ),
-        ),
-        ("delete", ("mains", "assignment-dishwasher")),
-    ]
+    save_circuit, save_kwargs = coordinator.calls[0][1]
+    assert save_circuit == "mains"
+    assert {key: value for key, value in save_kwargs.items() if key != "intervals"} == {
+        "label": "Dishwasher",
+        "removed_interval_ids": ["label-old"],
+        "assignment_id": "assignment-dishwasher",
+        "appliance_id": None,
+        "appliance_profile": None,
+    }
+    assert (
+        save_kwargs["intervals"][0]["evidence"]["evidence_source"] == "manual_backend"
+    )
+    assert coordinator.calls[1] == ("delete", ("mains", "assignment-dishwasher"))
 
 
 @pytest.mark.asyncio

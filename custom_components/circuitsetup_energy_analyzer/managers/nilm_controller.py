@@ -612,6 +612,150 @@ class NilmController:
         signatures.append({"signature_id": signature_id, "user_label": label})
         await self._async_save_nilm_review_change(circuit_id)
 
+    @staticmethod
+    def _validated_schema_2_evidence(
+        evidence: Mapping[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Validate backend-derived interval evidence before any store mutation."""
+        if evidence is None:
+            return None
+        if not isinstance(evidence, Mapping):
+            raise ValueError("Invalid schema-2 evidence.")
+        version = evidence.get("evidence_schema_version")
+        if isinstance(version, bool) or not isinstance(version, int) or version != 2:
+            raise ValueError("Invalid schema-2 evidence version.")
+
+        source = evidence.get("evidence_source")
+        if (
+            not isinstance(source, str)
+            or not source.strip()
+            or len(source) > 64
+            or source not in {
+                "manual_backend",
+                "reference_backend",
+                "legacy_client",
+            }
+        ):
+            raise ValueError("Invalid schema-2 evidence source.")
+        generated_at = evidence.get("evidence_generated_at")
+        if (
+            not isinstance(generated_at, str)
+            or len(generated_at) > 128
+            or _datetime_or_none(generated_at) is None
+        ):
+            raise ValueError("Invalid schema-2 evidence timestamp.")
+
+        normalized: dict[str, Any] = {
+            "evidence_schema_version": 2,
+            "evidence_source": source,
+            "evidence_generated_at": generated_at,
+        }
+        numeric_fields = {
+            "start_transition_w": (False, None),
+            "stop_transition_w": (False, None),
+            "median_power_w": (True, None),
+            "average_power_w": (True, None),
+            "measured_energy_kwh": (True, None),
+            "partial_energy_kwh": (True, None),
+            "maximum_source_skew_seconds": (True, None),
+            "longest_power_gap_seconds": (True, None),
+            "start_boundary_uncertainty_seconds": (True, None),
+            "end_boundary_uncertainty_seconds": (True, None),
+        }
+        for key, (nonnegative, _default) in numeric_fields.items():
+            value = evidence.get(key)
+            if value is None:
+                normalized[key] = None
+                continue
+            if isinstance(value, bool):
+                raise ValueError(f"Invalid schema-2 evidence {key}.")
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError) as err:
+                raise ValueError(f"Invalid schema-2 evidence {key}.") from err
+            if not math.isfinite(parsed) or (nonnegative and parsed < 0.0):
+                raise ValueError(f"Invalid schema-2 evidence {key}.")
+            normalized[key] = parsed
+        if (
+            normalized["start_transition_w"] is not None
+            and normalized["start_transition_w"] < 0.0
+        ):
+            raise ValueError("Invalid schema-2 evidence start_transition_w.")
+        if (
+            normalized["stop_transition_w"] is not None
+            and normalized["stop_transition_w"] > 0.0
+        ):
+            raise ValueError("Invalid schema-2 evidence stop_transition_w.")
+
+        for key in (
+            "source_coverage",
+            "power_coverage",
+            "evidence_confidence",
+            "power_confidence",
+        ):
+            value = evidence.get(key)
+            if isinstance(value, bool):
+                raise ValueError(f"Invalid schema-2 evidence {key}.")
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError) as err:
+                raise ValueError(f"Invalid schema-2 evidence {key}.") from err
+            if not math.isfinite(parsed) or not 0.0 <= parsed <= 1.0:
+                raise ValueError(f"Invalid schema-2 evidence {key}.")
+            normalized[key] = parsed
+        for key in (
+            "start_transition_eligible",
+            "stop_transition_eligible",
+            "plateau_eligible",
+            "energy_complete",
+        ):
+            value = evidence.get(key)
+            if not isinstance(value, bool):
+                raise ValueError(f"Invalid schema-2 evidence {key}.")
+            normalized[key] = value
+
+        if (
+            normalized["start_transition_eligible"]
+            and (
+                normalized.get("start_transition_w") is None
+                or normalized["start_transition_w"] <= 0.0
+            )
+        ):
+            raise ValueError("Invalid schema-2 evidence start transition eligibility.")
+        if (
+            normalized["stop_transition_eligible"]
+            and (
+                normalized.get("stop_transition_w") is None
+                or normalized["stop_transition_w"] >= 0.0
+            )
+        ):
+            raise ValueError("Invalid schema-2 evidence stop transition eligibility.")
+        if (
+            normalized["energy_complete"]
+            and normalized.get("measured_energy_kwh") is None
+        ):
+            raise ValueError("Invalid schema-2 evidence complete energy.")
+
+        flags = evidence.get("quality_flags")
+        if not isinstance(flags, list):
+            raise ValueError("Invalid schema-2 evidence quality_flags.")
+        if len(flags) > 32 or any(
+            not isinstance(flag, str) or not flag.strip() or len(flag) > 128
+            for flag in flags
+        ):
+            raise ValueError("Invalid schema-2 evidence quality_flags.")
+        normalized["quality_flags"] = list(flags)
+
+        if not normalized["plateau_eligible"]:
+            normalized.pop("median_power_w", None)
+            normalized.pop("average_power_w", None)
+        if not normalized["energy_complete"]:
+            normalized.pop("measured_energy_kwh", None)
+        for key in tuple(numeric_fields):
+            if normalized.get(key) is None:
+                normalized.pop(key, None)
+        return normalized
+
     async def async_label_nilm_interval(
         self,
         circuit_id: str,
@@ -632,6 +776,7 @@ class NilmController:
         observed_transition_w: Any = None,
         median_power_w: Any = None,
         measured_energy_kwh: Any = None,
+        evidence: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Persist one labeled NILM interval atomically."""
         async with self._review_transaction_lock:
@@ -664,6 +809,7 @@ class NilmController:
                     observed_transition_w=observed_transition_w,
                     median_power_w=median_power_w,
                     measured_energy_kwh=measured_energy_kwh,
+                    evidence=evidence,
                 )
             except Exception:
                 for name, snapshot in snapshots.items():
@@ -691,6 +837,7 @@ class NilmController:
         observed_transition_w: Any = None,
         median_power_w: Any = None,
         measured_energy_kwh: Any = None,
+        evidence: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Persist a user-labeled NILM graph interval."""
         label_text = str(label or "").strip()
@@ -700,6 +847,7 @@ class NilmController:
         end_dt = self._label_interval_datetime(end, "end")
         if end_dt <= start_dt:
             raise ValueError("NILM label interval end must be after start.")
+        schema_2_evidence = self._validated_schema_2_evidence(evidence)
 
         coordinator = self._coordinator
         now_dt = coordinator.current_time()
@@ -736,6 +884,8 @@ class NilmController:
             confidence_value = float(confidence)
         except (TypeError, ValueError):
             confidence_value = 1.0
+        if schema_2_evidence is not None:
+            confidence_value = schema_2_evidence["evidence_confidence"]
         payload: dict[str, Any] = {
             "interval_id": interval_id_text,
             "mains_circuit_id": circuit_id,
@@ -749,7 +899,7 @@ class NilmController:
             "created_at": str(existing.get("created_at") if existing else now),
             "updated_at": now,
         }
-        if existing and observed_transition_w is None:
+        if existing and observed_transition_w is None and schema_2_evidence is None:
             previous_transition_w = existing.get("observed_transition_w")
             if (
                 isinstance(previous_transition_w, (int, float))
@@ -758,7 +908,7 @@ class NilmController:
                 and previous_transition_w >= 0
             ):
                 payload["observed_transition_w"] = float(previous_transition_w)
-        if observed_transition_w is not None:
+        if observed_transition_w is not None and schema_2_evidence is None:
             if isinstance(observed_transition_w, bool):
                 raise ValueError("Invalid observed transition watts.")
             try:
@@ -768,20 +918,30 @@ class NilmController:
             if not math.isfinite(transition_w) or transition_w < 0.0:
                 raise ValueError("Invalid observed transition watts.")
             payload["observed_transition_w"] = transition_w
-        for key, value in (
-            ("median_power_w", median_power_w),
-            ("measured_energy_kwh", measured_energy_kwh),
-        ):
-            if value is None:
-                if existing and self._float_or_none(existing.get(key)) is not None:
-                    payload[key] = float(existing[key])
-                continue
-            if isinstance(value, bool):
-                raise ValueError(f"Invalid {key}.")
-            parsed = self._float_or_none(value)
-            if parsed is None or parsed < 0:
-                raise ValueError(f"Invalid {key}.")
-            payload[key] = parsed
+        if schema_2_evidence is None:
+            for key, value in (
+                ("median_power_w", median_power_w),
+                ("measured_energy_kwh", measured_energy_kwh),
+            ):
+                if value is None:
+                    if existing and self._float_or_none(existing.get(key)) is not None:
+                        payload[key] = float(existing[key])
+                    continue
+                if isinstance(value, bool):
+                    raise ValueError(f"Invalid {key}.")
+                parsed = self._float_or_none(value)
+                if parsed is None or parsed < 0:
+                    raise ValueError(f"Invalid {key}.")
+                payload[key] = parsed
+        else:
+            payload.update(schema_2_evidence)
+            start_transition_w = schema_2_evidence.get("start_transition_w")
+            if (
+                schema_2_evidence["start_transition_eligible"]
+                and start_transition_w is not None
+                and start_transition_w > 0.0
+            ):
+                payload["observed_transition_w"] = start_transition_w
         ground_truth_text = str(ground_truth_entity_id or "").strip()
         if ground_truth_text:
             payload["ground_truth_entity_id"] = ground_truth_text
@@ -980,6 +1140,9 @@ class NilmController:
             end_dt = self._label_interval_datetime(draft.get("end"), "end")
             if end_dt <= start_dt:
                 raise ValueError("NILM label interval end must be after start.")
+            schema_2_evidence = self._validated_schema_2_evidence(
+                draft.get("evidence")
+            )
             draft_label = str(draft.get("label") or label_text).strip()
             if not draft_label:
                 raise ValueError("Missing label.")
@@ -1001,6 +1164,8 @@ class NilmController:
                 raise ValueError("Invalid confidence.") from err
             if not math.isfinite(confidence_value) or confidence_value < 0.0:
                 raise ValueError("Invalid confidence.")
+            if schema_2_evidence is not None:
+                confidence_value = schema_2_evidence["evidence_confidence"]
             payload = {
                 "interval_id": interval_id,
                 "mains_circuit_id": circuit_id,
@@ -1024,6 +1189,12 @@ class NilmController:
                 "median_power_w",
                 "measured_energy_kwh",
             ):
+                if schema_2_evidence is not None and key in {
+                    "observed_transition_w",
+                    "median_power_w",
+                    "measured_energy_kwh",
+                }:
+                    continue
                 value = draft.get(key, existing.get(key))
                 if value is None:
                     continue
@@ -1046,6 +1217,15 @@ class NilmController:
                     payload[key] = parsed
                 elif key in draft or key in existing:
                     payload[key] = value
+            if schema_2_evidence is not None:
+                payload.update(schema_2_evidence)
+                start_transition_w = schema_2_evidence.get("start_transition_w")
+                if (
+                    schema_2_evidence["start_transition_eligible"]
+                    and start_transition_w is not None
+                    and start_transition_w > 0.0
+                ):
+                    payload["observed_transition_w"] = start_transition_w
             payloads.append(payload)
 
         stored_interval_count = len(

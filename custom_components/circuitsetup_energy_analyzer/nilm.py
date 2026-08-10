@@ -21,6 +21,9 @@ from .models import (
     EventType,
     SensorRole,
 )
+from .nilm_interval_evidence import DEFAULT_THRESHOLDS
+
+_LEGACY_INTERVAL_CONFIDENCE_CAP = 0.25
 
 
 def build_nilm_assignment_model(
@@ -41,7 +44,7 @@ def build_nilm_assignment_model(
         for value in assignment.get("rejected_session_ids", ())
         if str(value or "").strip()
     }
-    eligible = []
+    evidence = []
     for session in sessions:
         session_id = str(session.get("session_id") or "").strip()
         owner = str(session.get("assignment_id") or "").strip()
@@ -56,64 +59,113 @@ def build_nilm_assignment_model(
             and off_delta is not None
             and off_delta < 0
         ):
-            eligible.append((session, on_delta, off_delta))
+            evidence.append(
+                {
+                    "source": session,
+                    "on": on_delta,
+                    "off": off_delta,
+                    "on_var": _session_edge_metric(
+                        session,
+                        value_key="on_delta_var",
+                        edge_id_key="on_edge_id",
+                        metric="var",
+                    ),
+                    "off_var": _session_edge_metric(
+                        session,
+                        value_key="off_delta_var",
+                        edge_id_key="off_edge_id",
+                        metric="var",
+                    ),
+                    "confidence": (
+                        _model_number(session.get("confidence")) or 0.0
+                    ),
+                    "plateau": None,
+                }
+            )
     assigned_interval_ids = {
         str(value or "").strip()
         for value in assignment.get("label_interval_ids", ())
         if str(value or "").strip()
     }
+    schema_evidence = []
+    legacy_intervals = []
     for interval in label_intervals:
         interval_id = str(interval.get("interval_id") or "").strip()
         owner = str(interval.get("assignment_id") or "").strip()
-        observed_transition_w = _model_number(interval.get("observed_transition_w"))
-        if (
-            interval_id in assigned_interval_ids
-            and (not owner or owner == assignment_id)
-            and observed_transition_w is not None
-            and observed_transition_w > 0
+        if interval_id not in assigned_interval_ids or (
+            owner and owner != assignment_id
         ):
-            eligible.append(
-                (interval, observed_transition_w, -observed_transition_w)
+            continue
+        if _is_schema_2_interval(interval):
+            on_value = _model_number(interval.get("start_transition_w"))
+            off_value = _model_number(interval.get("stop_transition_w"))
+            on_value = (
+                on_value
+                if interval.get("start_transition_eligible") is True
+                and on_value is not None
+                and on_value > 0
+                else None
             )
-    eligible.sort(
-        key=lambda item: str(item[0].get("end") or item[0].get("start") or ""),
+            off_value = (
+                off_value
+                if interval.get("stop_transition_eligible") is True
+                and off_value is not None
+                and off_value < 0
+                else None
+            )
+            plateau = _schema_2_interval_plateau(interval)
+            if on_value is not None or off_value is not None or plateau is not None:
+                schema_evidence.append(
+                    {
+                        "source": interval,
+                        "on": on_value,
+                        "off": off_value,
+                        "on_var": None,
+                        "off_var": None,
+                        "confidence": _schema_2_interval_confidence(interval),
+                        "plateau": plateau,
+                    }
+                )
+        else:
+            observed_transition_w = _model_number(interval.get("observed_transition_w"))
+            if observed_transition_w is not None and observed_transition_w > 0:
+                legacy_intervals.append((interval, observed_transition_w))
+    evidence.extend(schema_evidence)
+    if not any(item["on"] is not None or item["off"] is not None for item in evidence):
+        evidence.extend(
+            {
+                "source": interval,
+                "on": observed_transition_w,
+                "off": -observed_transition_w,
+                "on_var": None,
+                "off_var": None,
+                "confidence": min(
+                    _model_number(interval.get("confidence")) or 0.0,
+                    _LEGACY_INTERVAL_CONFIDENCE_CAP,
+                ),
+                "plateau": None,
+            }
+            for interval, observed_transition_w in legacy_intervals
+        )
+    evidence.sort(
+        key=lambda item: str(
+            item["source"].get("end") or item["source"].get("start") or ""
+        ),
         reverse=True,
     )
-    eligible = eligible[:32]
-    on_values = [item[1] for item in eligible]
-    off_values = [item[2] for item in eligible]
+    evidence = evidence[:32]
+    on_values = [item["on"] for item in evidence if item["on"] is not None]
+    off_values = [item["off"] for item in evidence if item["off"] is not None]
+    plateau_values = [
+        item["plateau"] for item in evidence if item["plateau"] is not None
+    ]
     on_var_values = [
-        value
-        for session, _, _ in eligible
-        if (
-            value := _session_edge_metric(
-                session,
-                value_key="on_delta_var",
-                edge_id_key="on_edge_id",
-                metric="var",
-            )
-        )
-        is not None
+        item["on_var"] for item in evidence if item["on_var"] is not None
     ]
     off_var_values = [
-        value
-        for session, _, _ in eligible
-        if (
-            value := _session_edge_metric(
-                session,
-                value_key="off_delta_var",
-                edge_id_key="off_edge_id",
-                metric="var",
-            )
-        )
-        is not None
+        item["off_var"] for item in evidence if item["off_var"] is not None
     ]
-    confidences = [
-        value
-        if (value := _model_number(session.get("confidence"))) is not None
-        else 0.0
-        for session, _, _ in eligible
-    ]
+    confidences = [item["confidence"] for item in evidence]
     normalized = normalize_nilm_assignment_model(assignment)
     model: dict[str, Any] = {
         "role": normalized["role"],
@@ -122,23 +174,39 @@ def build_nilm_assignment_model(
         "model_confidence": 0.0,
         "model_revision": normalized["model_revision"],
     }
-    if not on_values or not off_values:
+    if not on_values and not off_values and not plateau_values:
         return model
-    on_median = median(on_values)
-    off_median = median(off_values)
-    active_state = round(max(on_median, abs(off_median)), 3)
+    on_median = median(on_values) if on_values else None
+    off_median = median(off_values) if off_values else None
+    active_state = round(
+        median(plateau_values)
+        if plateau_values
+        else max(
+            value
+            for value in (
+                on_median,
+                abs(off_median) if off_median is not None else None,
+            )
+            if value is not None
+        ),
+        3,
+    )
     model["power_states_w"] = [0.0, active_state]
-    model["transition_prototypes"] = [
-        _transition_prototype(
-            "on", 0.0, active_state, on_median, on_values, on_var_values
-        ),
-        _transition_prototype(
-            "off", active_state, 0.0, off_median, off_values, off_var_values
-        ),
-    ]
+    if on_median is not None:
+        model["transition_prototypes"].append(
+            _transition_prototype(
+                "on", 0.0, active_state, on_median, on_values, on_var_values
+            )
+        )
+    if off_median is not None:
+        model["transition_prototypes"].append(
+            _transition_prototype(
+                "off", active_state, 0.0, off_median, off_values, off_var_values
+            )
+        )
     model["model_confidence"] = round(
         min(max(median(confidences) if confidences else 0.0, 0.0), 1.0)
-        * min(len(eligible) / 3, 1),
+        * min(len(evidence) / 3, 1),
         3,
     )
     previous = {
@@ -152,6 +220,43 @@ def build_nilm_assignment_model(
     if current != previous:
         model["model_revision"] += 1
     return model
+
+
+def _is_schema_2_interval(interval: Mapping[str, Any]) -> bool:
+    """Return whether an interval uses backend-derived directional evidence."""
+    version = _model_number(interval.get("evidence_schema_version"))
+    return version is not None and version >= 2
+
+
+def _schema_2_interval_confidence(interval: Mapping[str, Any]) -> float:
+    """Bound backend evidence confidence by its actual power coverage."""
+    confidence = next(
+        (
+            value
+            for key in ("evidence_confidence", "power_confidence", "confidence")
+            if (value := _model_number(interval.get(key))) is not None
+        ),
+        0.0,
+    )
+    coverage = _model_number(interval.get("power_coverage"))
+    if coverage is not None:
+        confidence *= min(max(coverage, 0.0), 1.0)
+    return min(max(confidence, 0.0), 1.0)
+
+
+def _schema_2_interval_plateau(interval: Mapping[str, Any]) -> float | None:
+    """Return complete, eligible schema-2 active-state evidence if available."""
+    coverage = _model_number(interval.get("power_coverage"))
+    if (
+        interval.get("plateau_eligible") is not True
+        or coverage is None
+        or coverage < DEFAULT_THRESHOLDS.complete_energy_coverage
+    ):
+        return None
+    for key in ("median_power_w", "average_power_w"):
+        if (value := _model_number(interval.get(key))) is not None and value > 0:
+            return value
+    return None
 
 
 def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, Any]:

@@ -2,6 +2,7 @@ export const EVIDENCE_API_PATH = "/api/circuitsetup_energy_analyzer/alert_eviden
 export const EVIDENCE_CALL_API_PATH = "circuitsetup_energy_analyzer/alert_evidence";
 export const NILM_WORKSPACE_API_PATH = "/api/circuitsetup_energy_analyzer/nilm_workspace";
 export const NILM_WORKSPACE_CALL_API_PATH = "circuitsetup_energy_analyzer/nilm_workspace";
+export const NILM_INTERVAL_EVIDENCE_API_PATH = "/api/circuitsetup_energy_analyzer/nilm_interval_evidence";
 export const APPLIANCE_DETAIL_API_PATH = "/api/circuitsetup_energy_analyzer/appliance_detail";
 export const APPLIANCE_DETAIL_CALL_API_PATH = "circuitsetup_energy_analyzer/appliance_detail";
 export const APPLIANCE_INSIGHTS_API_PATH = "/api/circuitsetup_energy_analyzer/appliance_insights";
@@ -49,6 +50,7 @@ export const PANEL_METHOD_DEPENDENCIES = {
   SETUP_HEALTH_CALL_API_PATH,
   NILM_WORKSPACE_API_PATH,
   NILM_WORKSPACE_CALL_API_PATH,
+  NILM_INTERVAL_EVIDENCE_API_PATH,
   HISTORY_CALL_API_PREFIX,
   MAX_CHART_POINTS_PER_SERIES,
   MAX_NILM_CHART_POINTS_PER_SERIES,

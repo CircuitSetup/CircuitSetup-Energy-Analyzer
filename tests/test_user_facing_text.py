@@ -1586,8 +1586,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         "this._nilmExistingAssignmentSelection(sourceKey) : null",
         "_renderNilmExistingAssignmentField",
         "_saveNilmAssignmentChanges",
-        "nilm_interval_energy_preview",
-        "_nilmLabelIntervalEnergyPreview",
+        "data-nilm-interval-evidence",
+        "_requestNilmIntervalEvidence",
         "datetime-local",
         "MAX_CHART_POINTS_PER_SERIES",
         "_boundedChartPoints",
@@ -6648,21 +6648,19 @@ panel._rememberNilmLabelIntervalDraft({
   dataset: { nilmLabelIntervalInput: "start", nilmIntervalIndex: "0" },
   value: changedStart,
 });
-assert.equal(renders, 1);
+assert.equal(renders, 2, "boundary edits render both the draft and cleared backend evidence");
 const bands = panel._nilmGraphBands(workspace, []);
 assert.equal(bands.length, 1);
 assert.equal(bands[0].band_kind, "draft");
 assert.equal(bands[0].start, changedStartIso);
-assert.equal(panel._nilmLabelIntervalPowerPreview(), 84);
 const previewHtml = panel._renderNilmLabelIntervalEditor(workspace);
-assert.ok(previewHtml.includes("Estimated load 84 W"), previewHtml);
-assert.ok(!previewHtml.includes("Unknown W"), previewHtml);
+assert.ok(!previewHtml.includes("Estimated load"), previewHtml);
 
 await panel._callNilmLabelIntervalAction(-1, "save");
 assert.equal(calls.length, 1, JSON.stringify(panel._inlineFeedback));
 assert.equal(calls[0].data.interval_id, "saved-interval");
 assert.equal(calls[0].data.start, changedStartIso);
-assert.equal(calls[0].data.observed_transition_w, 84);
+assert.ok(!("observed_transition_w" in calls[0].data));
 assert.ok(!("appliance_profile" in calls[0].data));
 assert.equal(panel._nilmIntervalEditorOpen, false);
 })().catch((error) => {
@@ -6671,6 +6669,16 @@ assert.equal(panel._nilmIntervalEditorOpen, false);
 });
 """
     )
+
+
+def test_nilm_interval_evidence_preview_is_backend_authoritative() -> None:
+    workspace_source = NILM_WORKSPACE_ASSET.read_text(encoding="utf-8")
+
+    assert "NILM_INTERVAL_EVIDENCE_API_PATH" in workspace_source
+    assert "_requestNilmIntervalEvidence" in workspace_source
+    assert "data-nilm-interval-evidence" in workspace_source
+    assert "saved.observed_transition_w" not in workspace_source
+    assert "_nilmLabelIntervalPowerPreview" not in workspace_source
 
 
 def test_nilm_assigned_interval_is_visible_and_persistently_removable() -> None:
@@ -6738,34 +6746,116 @@ assert.equal(JSON.stringify(panel._nilmRemovedIntervalIds), '["saved-interval"]'
     )
 
 
-def test_nilm_interval_power_combines_only_mains_source_legs() -> None:
+def test_nilm_interval_evidence_preview_uses_explicit_target_and_ignores_stale_results() -> None:
     _run_panel_node_script(
         """
 const workspace = makeWorkspace({
-  history: { source_entities: ["sensor.mains_l1_watts", "sensor.mains_l2_watts"] },
+  circuit: { circuit_id: "mains" },
   label_intervals: [{
     start: "2026-08-04T08:00:00Z",
     end: "2026-08-04T08:10:00Z",
   }],
 });
-const panel = makePanel({ _nilmWorkspace: workspace, _nilmActiveIntervalIndex: 0 });
-panel._nilmWorkspaceHistorySeries = [
-  [
-    { entity_id: "sensor.mains_l1_watts", state: "100", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:00:00Z" },
-    { entity_id: "sensor.mains_l1_watts", state: "142", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:01:00Z" },
-    { entity_id: "sensor.mains_l1_watts", state: "100", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:10:00Z" },
-  ],
-  [
-    { entity_id: "sensor.mains_l2_watts", state: "80", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:00:00Z" },
-    { entity_id: "sensor.mains_l2_watts", state: "122", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:01:00Z" },
-    { entity_id: "sensor.mains_l2_watts", state: "80", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:10:00Z" },
-  ],
-  [
-    { entity_id: "sensor.helper_power", state: "0", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:00:00Z" },
-    { entity_id: "sensor.helper_power", state: "100", effective_role: "real_power", source_unit: "W", last_changed: "2026-08-04T08:01:00Z" },
-  ],
-];
-assert.equal(panel._nilmLabelIntervalPowerPreview(workspace.label_intervals[0]), 84);
+(async () => {
+const panel = makePanel({
+  _nilmWorkspace: workspace,
+  _nilmActiveIntervalIndex: 0,
+  _nilmLabelIntervalDraft: { intervals: workspace.label_intervals },
+  _loadedRouteKey: "/panel?entry_id=entry-1&circuit_id=wrong-circuit",
+});
+const path = panel._nilmIntervalEvidenceRequest();
+assert.ok(path.includes("entry_id=entry-1"), path);
+assert.ok(path.includes("circuit_id=mains"), path);
+assert.equal(new URL(path, "http://example.local").searchParams.get("start"), "2026-08-04T08:00:00.000Z");
+let rendered = 0;
+panel._render = () => { rendered += 1; };
+const requestedPaths = [];
+panel._requestJson = async (requestPath) => {
+  requestedPaths.push(requestPath);
+  return { interval_evidence: {
+  start_transition_w: 500, stop_transition_w: -490, average_power_w: 480,
+  median_power_w: 475, partial_energy_kwh: 0.12, source_coverage: 0.9,
+  power_coverage: 0.8, quality_flags: ["power_gap"],
+  } };
+};
+const timers = new Map();
+let nextTimer = 0;
+context.setTimeout = (callback) => { const id = ++nextTimer; timers.set(id, callback); return id; };
+context.clearTimeout = (id) => timers.delete(id);
+panel._nilmIntervalEvidence = { start_transition_w: 1 };
+panel._scheduleNilmIntervalEvidence();
+panel._nilmLabelIntervalDraft.intervals[0].end = "2026-08-04T08:12:00Z";
+panel._scheduleNilmIntervalEvidence();
+assert.equal(panel._nilmIntervalEvidence, null, "new bounds must immediately clear stale evidence");
+assert.equal(rendered, 2, "each valid boundary edit renders its cleared preview");
+assert.equal(timers.size, 1, "rapid boundary edits retain only the final debounce timer");
+for (const callback of timers.values()) callback();
+await new Promise((resolve) => setImmediate(resolve));
+assert.equal(requestedPaths.length, 1, "only the final bounds request may be fetched");
+const finalQuery = new URL(requestedPaths[0], "http://example.local").searchParams;
+assert.equal(finalQuery.get("entry_id"), "entry-1");
+assert.equal(finalQuery.get("circuit_id"), "mains");
+assert.equal(finalQuery.get("start"), "2026-08-04T08:00:00.000Z");
+assert.equal(finalQuery.get("end"), "2026-08-04T08:12:00.000Z");
+panel._nilmIntervalEvidenceToken = 2;
+panel._nilmIntervalEvidence = null;
+await panel._requestNilmIntervalEvidence(path, 1);
+assert.equal(panel._nilmIntervalEvidence, null, "stale response must not update evidence");
+await panel._requestNilmIntervalEvidence(path, 2);
+assert.equal(panel._nilmIntervalEvidence.start_transition_w, 500);
+assert.equal(rendered, 4);
+const html = panel._renderNilmIntervalEvidence(panel._nilmIntervalEvidence);
+for (const text of ["Start: 500 W", "Stop: -490 W", "Average: 480 W", "Median: 475 W", "Partial energy: 0.12 kWh", "Source coverage: 0.9", "Power coverage: 0.8", "Quality: power_gap"]) {
+  assert.ok(html.includes(text), html);
+}
+})().catch((error) => { console.error(error); process.exit(1); });
+"""
+    )
+
+
+def test_nilm_interval_editor_loads_one_backend_evidence_preview() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+const interval = {
+  interval_id: "saved-interval",
+  assignment_id: "assignment-pump",
+  start: "2026-08-04T08:00:00Z",
+  end: "2026-08-04T08:10:00Z",
+};
+const workspace = makeWorkspace({
+  circuit: { circuit_id: "mains" },
+  label_intervals: [interval],
+  assignments: [{ assignment_id: "assignment-pump", display_name: "Pump" }],
+});
+const panel = makePanel({
+  _nilmWorkspace: workspace,
+  _nilmFocusedInterval: {
+    start: Date.parse(interval.start), end: Date.parse(interval.end),
+  },
+  _loadedRouteKey: "/panel?entry_id=entry-1&circuit_id=mains",
+});
+let rendered = 0;
+panel._render = () => { rendered += 1; };
+const timers = new Map();
+let nextTimer = 0;
+context.setTimeout = (callback) => { const id = ++nextTimer; timers.set(id, callback); return id; };
+context.clearTimeout = (id) => timers.delete(id);
+const requests = [];
+panel._requestJson = async (path) => {
+  requests.push(path);
+  return { interval_evidence: { average_power_w: 480 } };
+};
+panel._nilmIntervalEvidence = { average_power_w: 1 };
+assert.equal(panel._editNilmFocusedInterval(), true);
+assert.equal(panel._nilmIntervalEvidence, null, "loading clears stale evidence");
+assert.equal(timers.size, 1, "loading schedules exactly one preview");
+for (const callback of timers.values()) callback();
+await new Promise((resolve) => setImmediate(resolve));
+assert.equal(requests.length, 1, "loading fetches exactly one preview");
+assert.equal(panel._nilmIntervalEvidence.average_power_w, 480);
+assert.ok(rendered >= 2, "loading renders the draft and preview state");
+})().catch((error) => { console.error(error); process.exit(1); });
 """
     )
 
