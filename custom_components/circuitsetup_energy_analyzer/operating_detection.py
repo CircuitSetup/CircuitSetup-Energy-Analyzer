@@ -529,7 +529,9 @@ class OperatingStateMachine:
         )
         self._pending_transition_kind: str | None = None
         self._pending_transition_pre: tuple[_TransitionSample, ...] = ()
-        self._pending_transition_post: list[_TransitionSample] = []
+        self._pending_transition_post: deque[_TransitionSample] = deque(
+            maxlen=_TRANSITION_CONTEXT_SAMPLE_LIMIT
+        )
         self._run_idle_upper_w: float | None = None
         self._run_idle_sample_count = 0
         self._nominal_voltage: float | None = None
@@ -869,11 +871,18 @@ class OperatingStateMachine:
         timestamp: datetime,
         watts: float,
     ) -> None:
-        while context and (
-            timestamp - context[0].timestamp
-        ).total_seconds() > _TRANSITION_CONTEXT_MAX_AGE_SECONDS:
-            context.popleft()
+        self._prune_transition_buffer(context, timestamp)
         context.append(_TransitionSample(timestamp=timestamp, power_w=watts))
+
+    def _prune_transition_buffer(
+        self,
+        buffer: deque[_TransitionSample],
+        timestamp: datetime,
+    ) -> None:
+        while buffer and (
+            timestamp - buffer[0].timestamp
+        ).total_seconds() > _TRANSITION_CONTEXT_MAX_AGE_SECONDS:
+            buffer.popleft()
 
     def _begin_pending_transition(
         self,
@@ -882,11 +891,13 @@ class OperatingStateMachine:
         watts: float,
         context: deque[_TransitionSample],
     ) -> None:
+        self._prune_transition_buffer(context, timestamp)
         self._pending_transition_kind = kind
         self._pending_transition_pre = tuple(context)
-        self._pending_transition_post = [
+        self._pending_transition_post.clear()
+        self._pending_transition_post.append(
             _TransitionSample(timestamp=timestamp, power_w=watts)
-        ]
+        )
 
     def _append_pending_transition_sample(
         self,
@@ -894,6 +905,7 @@ class OperatingStateMachine:
         watts: float,
     ) -> None:
         if self._pending_transition_kind is not None:
+            self._prune_transition_buffer(self._pending_transition_post, timestamp)
             self._pending_transition_post.append(
                 _TransitionSample(timestamp=timestamp, power_w=watts)
             )
@@ -911,7 +923,7 @@ class OperatingStateMachine:
     def _clear_pending_transition(self) -> None:
         self._pending_transition_kind = None
         self._pending_transition_pre = ()
-        self._pending_transition_post = []
+        self._pending_transition_post.clear()
 
     def _clear_transition_context(self) -> None:
         self._off_transition_context.clear()
@@ -935,6 +947,7 @@ class OperatingStateMachine:
             self._nominal_voltage = sample.voltage
 
         if self._should_mark_unavailable(sample):
+            self._clear_transition_context()
             stop_event = self._unavailable_stop_event(sample)
             self._set_unavailable(sample.timestamp, reason="source_data_unavailable")
             if stop_event is not None:

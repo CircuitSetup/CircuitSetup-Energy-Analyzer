@@ -963,6 +963,50 @@ def test_unavailable_stop_is_legacy_fallback_without_fabricated_delta() -> None:
     assert "post_plateau_power_w" not in stop.features
 
 
+def test_unavailable_stop_after_pending_off_drops_measured_transition_evidence(
+) -> None:
+    machine = _machine(
+        on_threshold_w=30.0,
+        off_threshold_w=25.0,
+        max_sample_gap_seconds=30.0,
+    )
+    machine.process(_sample(0, 20.0, circuit_id="fridge"))
+    machine.process(_sample(5, 120.0, circuit_id="fridge"))
+    machine.process(_sample(15, 120.0, circuit_id="fridge"))
+    machine.process(_sample(16, 120.0, circuit_id="fridge"))
+    machine.process(_sample(20, 20.0, circuit_id="fridge"))
+    stop = machine.process(_sample(51, None, circuit_id="fridge")).events[0]
+
+    assert stop.features["stop_power_w"] == 120.0
+    assert stop.features["transition_quality"] == "legacy_fallback"
+    assert "transition_delta_w" not in stop.features
+    assert "post_plateau_power_w" not in stop.features
+
+
+def test_transition_crossing_prunes_pre_context_older_than_sixty_seconds() -> None:
+    machine = _machine(max_sample_gap_seconds=600.0)
+    machine.process(_sample(0, 20.0, circuit_id="fridge"))
+    machine.process(_sample(61, 120.0, circuit_id="fridge"))
+    start = machine.process(_sample(71, 120.0, circuit_id="fridge")).events[0]
+
+    assert start.features["pre_sample_count"] == 0
+    assert start.features["post_sample_count"] == 2
+    assert start.features["transition_quality"] == "partial"
+    assert "transition_delta_w" not in start.features
+
+
+def test_pending_transition_post_samples_remain_bounded_and_age_pruned() -> None:
+    machine = _machine(on_dwell_seconds=100.0)
+    machine.process(_sample(0, 20.0, circuit_id="fridge"))
+    for seconds in range(1, 100, 5):
+        machine.process(_sample(seconds, 120.0, circuit_id="fridge"))
+    start = machine.process(_sample(101, 120.0, circuit_id="fridge")).events[0]
+
+    assert start.features["post_sample_count"] == 12
+    assert start.features["post_power_median_w"] == 120.0
+    assert start.features["transition_window_end"] == "2026-06-18T12:01:41+00:00"
+
+
 def test_operating_state_machine_recovers_from_unavailable_without_false_start(
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.operating_detection import (
