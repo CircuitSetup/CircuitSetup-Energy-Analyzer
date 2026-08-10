@@ -1011,6 +1011,10 @@ def reconcile_component_runtime(
             validation_scores.get(assignment_id) is not None
             for assignment_id in candidate_assignment_ids
         )
+        helper_available = any(
+            helper_scores.get(assignment_id) is not None
+            for assignment_id in candidate_assignment_ids
+        )
         evidence_diagnostics["duration_channel_available_count"] += int(
             duration_available
         )
@@ -1042,7 +1046,7 @@ def reconcile_component_runtime(
                 ambiguous_event_increment += 1
                 evidence_diagnostics[
                     "ambiguous_with_secondary_evidence_count"
-                    if duration_available or validation_available or helper_scores
+                    if duration_available or validation_available or helper_available
                     else "ambiguous_without_secondary_evidence_count"
                 ] += 1
             if result.reason == "helper_conflict":
@@ -1100,6 +1104,7 @@ def reconcile_component_runtime(
                             f"{edge.timestamp.isoformat()}"
                         ),
                         "session_start": edge.timestamp.isoformat(),
+                        "session_source": "nilm",
                         "energy_kwh": 0.0,
                         "on_delta_w": transition.delta_w,
                         "on_delta_var": edge.delta_var,
@@ -1259,6 +1264,7 @@ def reconcile_component_runtime(
                 "state_path": [],
                 "accepted_predictions": [],
                 "start_prediction": None,
+                "session_source": None,
             })
     consistent = conflict is None
     for payload in next_runtime.values():
@@ -1321,6 +1327,7 @@ def _runtime_provenance_defaults(payload: dict[str, Any]) -> None:
         payload.get("session_start") if status == NilmComponentStatus.ON else None,
     )
     payload.setdefault("last_stop", None)
+    payload.setdefault("session_source", None)
     payload["state_path"] = [
         dict(item)
         for item in _list_items(payload.get("state_path"))
@@ -1675,16 +1682,20 @@ def _apply_direct_component_sample(
             and str(link.get("helper_circuit_id") or "") == helper_id
             and link.get("relationship") == "direct_component"
         )
+        if is_on and payload.get("session_source") != "direct_helper":
+            payload.update({
+                "session_source": "direct_helper",
+                "start_prediction": None,
+                "last_prediction": None,
+                "accepted_predictions": [],
+                "state_path": [],
+            })
         if is_on and not has_open_session:
             payload.update({
                 "session_id": f"{assignment_id}|{timestamp.isoformat()}",
                 "session_start": timestamp.isoformat(),
                 "energy_kwh": 0.0,
                 "on_delta_w": power - previous_power,
-                "start_prediction": None,
-                "last_prediction": None,
-                "accepted_predictions": [],
-                "state_path": [],
             })
         elif has_open_session and not is_on:
             closes.append((assignment_id, NilmTransitionPrototype(

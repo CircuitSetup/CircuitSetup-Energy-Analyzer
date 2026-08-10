@@ -10207,6 +10207,50 @@ def test_nilm_runtime_diagnostics_ignore_unrelated_validation_scores() -> None:
     }
 
 
+def test_nilm_runtime_ambiguity_ignores_unrelated_helper_score() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    assignments = (
+        _reconciliation_assignment("first", 100.0),
+        _reconciliation_assignment("second", 100.0),
+        {
+            **_reconciliation_assignment("unrelated", 300.0),
+            "helper_links": [{
+                "helper_circuit_id": "helper",
+                "relationship": "corroborates",
+                "status": "confirmed",
+                "confidence": 1.0,
+                "start_lag_seconds": 0.0,
+                "start_lag_mad_seconds": 0.0,
+            }],
+        },
+    )
+    runtime = {
+        assignment_id: {
+            "status": "off", "state_power_w": 0.0,
+            "estimated_power_w": 0.0, "consistent": True,
+        }
+        for assignment_id in ("first", "second", "unrelated")
+    }
+
+    _, reconciliation, _, accepted = reconcile_component_runtime(
+        source_power_w=100.0, timestamp=now, assignments=assignments,
+        runtime=runtime,
+        edges=(NilmEdge(now, 100.0, 0.0, 100.0, 0.0, "on"),),
+        standby_w=0.0, noise_spread_w=0.0,
+        helper_events=(CircuitEvent(now, "helper", EventType.START, features={}),),
+        available_helper_ids={"helper"},
+    )
+
+    assert accepted == []
+    assert reconciliation["ambiguous_with_secondary_evidence_count"] == 0
+    assert reconciliation["ambiguous_without_secondary_evidence_count"] == 1
+
+
 @pytest.mark.parametrize(
     ("validation_fields", "expected_reason"),
     [
@@ -11613,6 +11657,61 @@ def test_direct_component_clears_stale_nilm_prediction_provenance() -> None:
     assert completed[0]["stop_prototype_id"] is None
     assert completed[0]["accepted_predictions"] == []
     assert completed[0]["state_path"] == []
+
+
+def test_direct_component_takeover_clears_open_nilm_session_provenance() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    assignment = {
+        **_reconciliation_assignment("pump", 60.0),
+        "helper_links": [{
+            "helper_circuit_id": "meter", "relationship": "direct_component",
+            "status": "confirmed", "confidence": 0.95,
+        }],
+    }
+    stale = {
+        "prototype_id": "nilm-start",
+        "model_revision": 4,
+        "prediction_timestamp": (now - timedelta(hours=1)).isoformat(),
+    }
+    runtime = {
+        "pump": {
+            "status": "on", "state_power_w": 60.0, "estimated_power_w": 60.0,
+            "session_id": "legacy-nilm-session",
+            "session_start": (now - timedelta(hours=1)).isoformat(),
+            "energy_kwh": 0.01, "start_prediction": stale,
+            "last_prediction": stale, "accepted_predictions": [stale],
+            "state_path": [{"prototype_id": "nilm-start"}],
+        }
+    }
+
+    runtime, first, _, _ = reconcile_component_runtime(
+        source_power_w=60.0, timestamp=now, assignments=(assignment,),
+        runtime=runtime, edges=(), standby_w=0.0, noise_spread_w=0.0,
+        direct_helper_powers={"meter": 60.0},
+    )
+
+    assert runtime["pump"]["session_id"] == "legacy-nilm-session"
+    assert runtime["pump"]["session_source"] == "direct_helper"
+    assert runtime["pump"]["start_prediction"] is None
+    assert runtime["pump"]["last_prediction"] is None
+    assert runtime["pump"]["accepted_predictions"] == []
+    assert runtime["pump"]["state_path"] == []
+
+    _, _, completed, _ = reconcile_component_runtime(
+        source_power_w=0.0, timestamp=now + timedelta(minutes=5),
+        assignments=(assignment,), runtime=runtime, edges=(), standby_w=0.0,
+        noise_spread_w=0.0, previous_reconciliation=first,
+        direct_helper_powers={"meter": 0.0},
+    )
+
+    assert completed[0]["session_id"] == "legacy-nilm-session"
+    assert completed[0]["start_prototype_id"] is None
+    assert completed[0]["stop_prototype_id"] is None
+    assert completed[0]["accepted_predictions"] == []
 
 
 def test_completed_session_records_only_matched_corroborating_helper() -> None:
