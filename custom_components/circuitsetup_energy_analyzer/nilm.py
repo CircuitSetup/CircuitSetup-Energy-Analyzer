@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
+from dataclasses import field as dataclass_field
 from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 from hashlib import sha256
@@ -80,17 +81,20 @@ def build_nilm_assignment_model(
     sessions: Iterable[Mapping[str, Any]],
     *,
     label_intervals: Iterable[Mapping[str, Any]] = (),
+    time_zone: str | None = None,
 ) -> dict[str, Any]:
     """Build a deterministic schema-v2 binary model and legacy projection."""
     assignment_id = str(assignment.get("assignment_id") or "").strip()
+    session_items = tuple(sessions)
+    local_day_key = _nilm_local_day_key(time_zone)
     confirmed = _assignment_ids(assignment, "confirmed_session_ids")
     rejected = _assignment_ids(assignment, "rejected_session_ids")
     records = [
         record
-        for session in sessions
+        for session in session_items
         if (
             record := _normalize_session_evidence(
-                session, assignment_id, confirmed, rejected
+                session, assignment_id, confirmed, rejected, local_day_key
             )
         )
         is not None
@@ -101,7 +105,7 @@ def build_nilm_assignment_model(
         for interval in label_intervals
         if (
             record := _normalize_interval_evidence(
-                interval, assignment_id, interval_ids
+                interval, assignment_id, interval_ids, local_day_key
             )
         )
         is not None
@@ -271,7 +275,7 @@ def build_nilm_assignment_model(
             )
     model["transition_prototypes"].extend(
         _state_path_transition_prototypes(
-            sessions,
+            session_items,
             positives,
             assignment_id,
             model["states"],
@@ -295,7 +299,7 @@ def build_nilm_assignment_model(
         record.plateau_source for record in plateau
     )
     state_dwell_profiles = _build_nilm_state_dwell_profiles(
-        sessions,
+        session_items,
         positives,
         assignment_id,
         {state["id"] for state in model["states"] if state["id"] != "off"},
@@ -414,6 +418,7 @@ def _normalize_session_evidence(
     assignment_id: str,
     confirmed: set[str],
     rejected: set[str],
+    local_day_key: Callable[[datetime], str] | None = None,
 ) -> _NormalizedAssignmentEvidence | None:
     evidence_id = str(session.get("session_id") or "").strip()
     owner = str(session.get("assignment_id") or "").strip()
@@ -458,6 +463,7 @@ def _normalize_session_evidence(
         energy_source,
         _quality(session),
         False,
+        local_day_key=local_day_key,
     )
     return replace(
         record,
@@ -471,7 +477,10 @@ def _normalize_session_evidence(
 
 
 def _normalize_interval_evidence(
-    interval: Mapping[str, Any], assignment_id: str, interval_ids: set[str]
+    interval: Mapping[str, Any],
+    assignment_id: str,
+    interval_ids: set[str],
+    local_day_key: Callable[[datetime], str] | None = None,
 ) -> _NormalizedAssignmentEvidence | None:
     evidence_id = str(interval.get("interval_id") or "").strip()
     owner = str(interval.get("assignment_id") or "").strip()
@@ -500,6 +509,7 @@ def _normalize_interval_evidence(
             "measured" if energy is not None else None,
             min(_quality(interval), _LEGACY_INTERVAL_CONFIDENCE_CAP),
             True,
+            local_day_key=local_day_key,
         )
     on = (
         _positive_number(interval.get("start_transition_w"))
@@ -541,6 +551,7 @@ def _normalize_interval_evidence(
         quality,
         False,
         tuple(issues),
+        local_day_key=local_day_key,
     )
 
 
@@ -559,13 +570,17 @@ def _evidence_record(
     quality: float,
     inferred_stop: bool,
     issues: tuple[str, ...] = (),
+    *,
+    local_day_key: Callable[[datetime], str] | None = None,
 ) -> _NormalizedAssignmentEvidence:
     timestamp = _nilm_datetime(source.get("end") or source.get("start"))
     return _NormalizedAssignmentEvidence(
         evidence_id,
         source_type,
         timestamp,
-        timestamp.date().isoformat()
+        local_day_key(timestamp)
+        if timestamp and local_day_key
+        else timestamp.date().isoformat()
         if timestamp
         else str(source.get("end") or source.get("start") or evidence_id)[:10],
         positive,
@@ -1265,6 +1280,7 @@ def _model_fingerprint(model: Mapping[str, Any]) -> str:
                 for item in model.get("transition_prototypes", [])
             ),
             model.get("run_profile"),
+            model.get("state_dwell_profiles"),
             model.get("evidence_summary"),
             model.get("model_confidence"),
             model.get("evidence_confidence"),
@@ -1993,6 +2009,11 @@ def _nilm_zone(name: str) -> ZoneInfo:
         return ZoneInfo("UTC")
 
 
+def _nilm_local_day_key(time_zone: str | None) -> Callable[[datetime], str]:
+    zone = _nilm_zone(time_zone or "UTC")
+    return lambda value: value.astimezone(zone).date().isoformat()
+
+
 def _nilm_number(value: Any) -> float | None:
     try:
         return float(value)
@@ -2064,6 +2085,7 @@ class NilmAssignmentModel:
     model_confidence: float
     lifecycle_state: str
     last_observed: datetime | None
+    state_powers_by_id: Mapping[str, float] = dataclass_field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -2760,6 +2782,16 @@ def _nilm_transition_legal(
         current_id = str(current_state_ids.get(model.assignment_id) or "").strip()
         if not expected_id or current_id != expected_id:
             return False
+    if model.state_powers_by_id:
+        for state_id, expected_power in (
+            (prototype.from_state_id, prototype.from_state_w),
+            (prototype.to_state_id, prototype.to_state_w),
+        ):
+            state_power = model.state_powers_by_id.get(state_id)
+            if state_power is None or not isclose(
+                state_power, expected_power, abs_tol=1e-6
+            ):
+                return False
     if lifecycle == "retired" and prototype.to_state_id != "off":
         return False
     if prototype.direction != ("on" if prototype.delta_w > 0 else "off"):

@@ -449,6 +449,7 @@ class NilmController:
                         assignment,
                         history,
                         label_intervals=label_intervals,
+                        time_zone=self._nilm_model_time_zone(),
                     )
                     if self._model_has_usable_evidence(rebuilt_model):
                         model = rebuilt_model
@@ -580,8 +581,15 @@ class NilmController:
                 label_intervals=self._coordinator.store_data.nilm_label_intervals_by_circuit.get(
                     circuit_id, ()
                 ),
+                time_zone=self._nilm_model_time_zone(),
             )
         )
+
+    def _nilm_model_time_zone(self) -> str | None:
+        context_builder = getattr(self._coordinator, "context_builder", None)
+        provider = getattr(context_builder, "time_zone", None)
+        value = provider() if callable(provider) else None
+        return str(value) if value else None
 
     def upsert_assignment(
         self,

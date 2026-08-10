@@ -103,6 +103,29 @@ def test_assignment_model_requires_distinct_days_for_active_state_split() -> Non
     assert [state["id"] for state in model["states"]] == ["off", "running"]
 
 
+def test_assignment_model_uses_configured_timezone_for_evidence_days() -> None:
+    intervals = _multistate_intervals([("02", 100.0), ("02", 105.0)])
+    intervals[0]["start"] = "2026-06-02T03:00:00+00:00"
+    intervals[1]["start"] = "2026-06-02T05:00:00+00:00"
+    assignment = {
+        "assignment_id": "pump",
+        "label_interval_ids": [item["interval_id"] for item in intervals],
+    }
+
+    utc_model = build_nilm_assignment_model(
+        assignment, [], label_intervals=intervals
+    )
+    local_model = build_nilm_assignment_model(
+        assignment,
+        [],
+        label_intervals=intervals,
+        time_zone="America/New_York",
+    )
+
+    assert utc_model["run_profile"]["plateau_w"]["distinct_days"] == 1
+    assert local_model["run_profile"]["plateau_w"]["distinct_days"] == 2
+
+
 def test_assignment_model_uses_variable_envelope_for_broad_unsplittable_plateaus() -> (
     None
 ):
@@ -1091,6 +1114,24 @@ def test_assignment_model_fingerprint_tracks_reactive_and_confidence_fields() ->
     assert (
         nilm_domain.normalize_nilm_assignment_model(base)["model_fingerprint"]
         != nilm_domain.normalize_nilm_assignment_model(changed)["model_fingerprint"]
+    )
+    dwell_changed = {
+        **base,
+        "state_dwell_profiles": {
+            "running": {
+                "effective_support": 5,
+                "distinct_days": 3,
+                "median_seconds": 120,
+                "p10_seconds": 90,
+                "p90_seconds": 150,
+            }
+        },
+    }
+    assert (
+        nilm_domain.normalize_nilm_assignment_model(base)["model_fingerprint"]
+        != nilm_domain.normalize_nilm_assignment_model(dwell_changed)[
+            "model_fingerprint"
+        ]
     )
 
 
@@ -2425,6 +2466,41 @@ def test_reconciliation_requires_supplied_state_id_to_match_prototype_source() -
 
     assert accepted.accepted is True
     assert rejected.accepted is False
+
+
+def test_reconciliation_rejects_state_id_with_mismatched_state_power() -> None:
+    """A named state cannot be paired with another state's wattage."""
+    prototype = nilm_domain.NilmTransitionPrototype(
+        assignment_id="pump",
+        direction="off",
+        from_state_w=100.0,
+        to_state_w=0.0,
+        delta_w=-100.0,
+        spread_w=5.0,
+        sample_count=3,
+        prototype_id="pump:stop:active_2->off",
+        transition_kind="stop",
+        from_state_id="active_2",
+        to_state_id="off",
+    )
+    model = nilm_domain.NilmAssignmentModel(
+        assignment_id="pump",
+        power_states_w=(0.0, 100.0, 300.0),
+        transition_prototypes=(prototype,),
+        model_confidence=0.9,
+        lifecycle_state="validated",
+        last_observed=BASE_TIME,
+        state_powers_by_id={"off": 0.0, "active_1": 100.0, "active_2": 300.0},
+    )
+
+    result = reconcile(
+        edge(100, -100.0),
+        [model],
+        {"pump": 100.0},
+        state_ids={"pump": "active_2"},
+    )
+
+    assert result.accepted is False
 
 
 def test_nilm_candidate_masks_lifecycle_and_illegal_state_but_allows_retired_stop() -> (

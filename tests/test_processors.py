@@ -10727,6 +10727,136 @@ def test_nilm_runtime_rejects_transition_from_a_different_active_state_id() -> N
     assert completed == []
 
 
+def test_nilm_runtime_retired_assignment_can_only_return_to_off() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    assignment = {
+        "assignment_id": "load",
+        "lifecycle_state": "retired",
+        "model_confidence": 0.9,
+        "power_states_w": [0.0, 100.0, 200.0],
+        "states": [
+            {"id": "off", "kind": "off", "power_w": 0.0, "spread_w": 0.0},
+            {"id": "active_1", "kind": "active", "power_w": 100.0, "spread_w": 1.0},
+            {"id": "active_2", "kind": "active", "power_w": 200.0, "spread_w": 1.0},
+        ],
+        "transition_prototypes": [
+            {"id": "load-state-down", "kind": "state_down", "direction": "off",
+             "from_state_id": "active_2", "to_state_id": "active_1",
+             "from_state_w": 200.0, "to_state_w": 100.0,
+             "delta_w": -100.0, "spread_w": 2.0, "sample_count": 4},
+        ],
+    }
+    runtime, _, completed, accepted = reconcile_component_runtime(
+        source_power_w=100.0,
+        timestamp=now,
+        assignments=(assignment,),
+        runtime={
+            "load": {
+                "status": "on", "state_power_w": 200.0,
+                "current_state_id": "active_2", "estimated_power_w": 200.0,
+                "session_id": "load|open", "session_start": now.isoformat(),
+                "consistent": True,
+            }
+        },
+        edges=(NilmEdge(now, -100.0, 0.0, -100.0, 0.0, "off"),),
+        standby_w=0.0,
+        noise_spread_w=0.0,
+    )
+
+    assert accepted == []
+    assert completed == []
+    assert runtime["load"]["current_state_id"] == "active_2"
+
+
+def test_nilm_runtime_keeps_full_dwell_summary_when_state_path_is_bounded() -> None:
+    """Path compaction must not discard earlier state dwell from a long session."""
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    started_at = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    assignment = {
+        "assignment_id": "dryer",
+        "lifecycle_state": "validated",
+        "model_confidence": 0.9,
+        "power_states_w": [0.0, 100.0, 200.0],
+        "states": [
+            {"id": "off", "kind": "off", "power_w": 0.0, "spread_w": 0.0},
+            {"id": "active_1", "kind": "active", "power_w": 100.0, "spread_w": 2.0},
+            {"id": "active_2", "kind": "active", "power_w": 200.0, "spread_w": 2.0},
+        ],
+        "transition_prototypes": [
+            {"kind": "start", "direction": "on", "from_state_id": "off",
+             "to_state_id": "active_1", "from_state_w": 0.0,
+             "to_state_w": 100.0, "delta_w": 100.0, "spread_w": 2.0,
+             "sample_count": 4},
+            {"kind": "state_up", "direction": "on", "from_state_id": "active_1",
+             "to_state_id": "active_2", "from_state_w": 100.0,
+             "to_state_w": 200.0, "delta_w": 100.0, "spread_w": 2.0,
+             "sample_count": 4},
+            {"kind": "state_down", "direction": "off", "from_state_id": "active_2",
+             "to_state_id": "active_1", "from_state_w": 200.0,
+             "to_state_w": 100.0, "delta_w": -100.0, "spread_w": 2.0,
+             "sample_count": 4},
+            {"kind": "stop", "direction": "off", "from_state_id": "active_2",
+             "to_state_id": "off", "from_state_w": 200.0,
+             "to_state_w": 0.0, "delta_w": -200.0, "spread_w": 2.0,
+             "sample_count": 4},
+        ],
+    }
+    runtime: dict[str, dict[str, object]] = {
+        "dryer": {"status": "off", "state_power_w": 0.0,
+                  "estimated_power_w": 0.0, "consistent": True}
+    }
+    previous = None
+    for minute in range(14):
+        timestamp = started_at + timedelta(minutes=minute)
+        if minute == 0:
+            delta_w, source_power_w, direction = 100.0, 100.0, "on"
+        elif minute % 2:
+            delta_w, source_power_w, direction = 100.0, 200.0, "on"
+        else:
+            delta_w, source_power_w, direction = -100.0, 100.0, "off"
+        runtime, previous, _, accepted = reconcile_component_runtime(
+            source_power_w=source_power_w,
+            timestamp=timestamp,
+            assignments=(assignment,),
+            runtime=runtime,
+            edges=(NilmEdge(timestamp, delta_w, 0.0, delta_w, 0.0, direction),),
+            standby_w=0.0,
+            noise_spread_w=0.0,
+            previous_reconciliation=previous,
+        )
+        assert accepted
+
+    stopped_at = started_at + timedelta(minutes=14)
+    runtime, _, completed, accepted = reconcile_component_runtime(
+        source_power_w=0.0,
+        timestamp=stopped_at,
+        assignments=(assignment,),
+        runtime=runtime,
+        edges=(NilmEdge(stopped_at, -200.0, 0.0, -200.0, 0.0, "off"),),
+        standby_w=0.0,
+        noise_spread_w=0.0,
+        previous_reconciliation=previous,
+    )
+
+    assert accepted
+    assert len(completed) == 1
+    assert len(completed[0]["state_path"]) == 12
+    assert completed[0]["state_dwell_seconds"] == {
+        "active_1": 420.0,
+        "active_2": 420.0,
+    }
+    assert completed[0]["time_weighted_mean_power_w"] == 150.0
+
+
 def test_nilm_source_unavailable_preserves_metrics_and_counts_input_edge() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (

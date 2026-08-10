@@ -1114,6 +1114,8 @@ def reconcile_component_runtime(
                 available_helper_ids,
             )
             if not is_stop:
+                if not is_start:
+                    _record_runtime_state_dwell(payload, edge.timestamp)
                 payload.update({
                     "status": NilmComponentStatus.ON,
                     "state_power_w": transition.to_state_w,
@@ -1138,6 +1140,8 @@ def reconcile_component_runtime(
                         "on_delta_var": edge.delta_var,
                         "helper_evidence": matched_helper_evidence,
                         "state_path": [],
+                        "state_dwell_seconds": {},
+                        "state_dwell_power_w": {},
                         "accepted_predictions": [],
                         "start_prediction": None,
                     })
@@ -1156,6 +1160,7 @@ def reconcile_component_runtime(
                     ),
                 ]
                 if payload.get("session_id") and payload.get("session_start"):
+                    _record_runtime_state_dwell(payload, edge.timestamp)
                     pending_sessions.append(
                         (transition.assignment_id, transition, edge)
                     )
@@ -1294,6 +1299,8 @@ def reconcile_component_runtime(
                 "energy_kwh": 0.0,
                 "helper_evidence": [],
                 "state_path": [],
+                "state_dwell_seconds": {},
+                "state_dwell_power_w": {},
                 "accepted_predictions": [],
                 "start_prediction": None,
                 "session_source": None,
@@ -1365,6 +1372,24 @@ def _runtime_provenance_defaults(payload: dict[str, Any]) -> None:
         for item in _list_items(payload.get("state_path"))
         if isinstance(item, Mapping)
     ][-_NILM_RUNTIME_STATE_PATH_LIMIT:]
+    payload["state_dwell_seconds"] = {
+        str(state_id): seconds
+        for state_id, raw_seconds in (
+            payload.get("state_dwell_seconds", {}).items()
+            if isinstance(payload.get("state_dwell_seconds"), Mapping)
+            else ()
+        )
+        if (seconds := _finite_float(raw_seconds)) is not None and seconds > 0
+    }
+    payload["state_dwell_power_w"] = {
+        str(state_id): power_w
+        for state_id, raw_power_w in (
+            payload.get("state_dwell_power_w", {}).items()
+            if isinstance(payload.get("state_dwell_power_w"), Mapping)
+            else ()
+        )
+        if (power_w := _finite_float(raw_power_w)) is not None and power_w > 0
+    }
     payload["accepted_predictions"] = [
         dict(item)
         for item in _list_items(payload.get("accepted_predictions"))
@@ -1383,6 +1408,9 @@ def _runtime_session_snapshot(payload: Mapping[str, Any]) -> dict[str, Any]:
         ]
     if isinstance(payload.get("start_prediction"), Mapping):
         snapshot["start_prediction"] = dict(payload["start_prediction"])
+    for name in ("state_dwell_seconds", "state_dwell_power_w"):
+        if isinstance(payload.get(name), Mapping):
+            snapshot[name] = dict(payload[name])
     return snapshot
 
 
@@ -1507,6 +1535,26 @@ def _record_runtime_prediction(
     runtime["last_prediction"] = summary
 
 
+def _record_runtime_state_dwell(
+    runtime: dict[str, Any], timestamp: datetime
+) -> None:
+    """Accumulate completed state dwell before a bounded path entry is replaced."""
+    state_id = str(runtime.get("current_state_id") or "").strip()
+    power_w = _finite_float(runtime.get("current_state_power_w"))
+    started_at = _runtime_datetime(runtime.get("state_since"))
+    if not state_id or state_id == "off" or power_w is None or started_at is None:
+        return
+    seconds = (timestamp - started_at).total_seconds()
+    if seconds <= 0:
+        return
+    dwell = dict(runtime.get("state_dwell_seconds", {}))
+    powers = dict(runtime.get("state_dwell_power_w", {}))
+    dwell[state_id] = (_finite_float(dwell.get(state_id)) or 0.0) + seconds
+    powers[state_id] = power_w
+    runtime["state_dwell_seconds"] = dwell
+    runtime["state_dwell_power_w"] = powers
+
+
 def _restore_unique_component_state(
     source_power_w: Any,
     standby_w: float,
@@ -1547,6 +1595,10 @@ def _restore_unique_component_state(
             prototype.direction
             for prototype in model.transition_prototypes
             if prototype.sample_count >= 3
+            and (
+                prototype.effective_support is None
+                or prototype.effective_support >= 3.0
+            )
         }
         == {"on", "off"}
     }
@@ -1909,6 +1961,7 @@ def _runtime_assignment_model(
                 for value in _list_items(item.get("legacy_ids"))
                 if str(value or "").strip()
             ),
+            effective_support=_finite_float(item.get("effective_support")),
         )
         for item in normalized["transition_prototypes"]
         if component_eligible
@@ -1924,6 +1977,13 @@ def _runtime_assignment_model(
         model_schema_version=_nonnegative_int(normalized["model_schema_version"]),
         model_revision=_nonnegative_int(normalized["model_revision"]),
         model_fingerprint=str(normalized["model_fingerprint"] or ""),
+        state_powers_by_id={
+            str(state.get("id") or "").strip(): state["power_w"]
+            for state in _list_items(normalized.get("states"))
+            if isinstance(state, Mapping)
+            and str(state.get("id") or "").strip()
+            and _finite_float(state.get("power_w")) is not None
+        },
     )
 
 
@@ -2019,10 +2079,7 @@ def _runtime_legal_transitions(
         not in {"hidden", "ignored", "rejected", "converted"}
         if not (
             model.lifecycle_state.strip().lower() == "retired"
-            and not (
-                prototype.direction == "off"
-                and current_states_w.get(model.assignment_id)
-            )
+            and prototype.to_state_id == "off"
         )
         if (current := current_states_w.get(model.assignment_id)) is not None
         if isfinite(current)
@@ -2033,6 +2090,15 @@ def _runtime_legal_transitions(
         if all(
             any(abs(state - expected) <= 1e-6 for state in model.power_states_w)
             for expected in (prototype.from_state_w, prototype.to_state_w)
+        )
+        if not model.state_powers_by_id
+        or all(
+            (state_power := model.state_powers_by_id.get(state_id)) is not None
+            and abs(state_power - expected_power) <= 1e-6
+            for state_id, expected_power in (
+                (prototype.from_state_id, prototype.from_state_w),
+                (prototype.to_state_id, prototype.to_state_w),
+            )
         )
         if abs(current - prototype.from_state_w) <= 1e-6
     )
@@ -2403,6 +2469,8 @@ def _completed_runtime_session(
         state_path,
         runtime.get("session_start"),
         edge.timestamp,
+        runtime.get("state_dwell_seconds"),
+        runtime.get("state_dwell_power_w"),
     )
     return {
         "session_id": runtime.get("session_id"),
@@ -2471,8 +2539,25 @@ def _runtime_state_path_summary(
     state_path: Iterable[Mapping[str, Any]],
     session_start: Any,
     session_end: datetime,
+    accumulated_dwell: Mapping[str, Any] | None = None,
+    accumulated_powers: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, float], float | None, float | None]:
     """Return bounded dwell and time-weighted power summaries for one run."""
+    if isinstance(accumulated_dwell, Mapping) and isinstance(
+        accumulated_powers, Mapping
+    ):
+        dwell = {
+            str(state_id): seconds
+            for state_id, raw_seconds in accumulated_dwell.items()
+            if (seconds := _finite_float(raw_seconds)) is not None and seconds > 0
+        }
+        powers = {
+            str(state_id): power_w
+            for state_id, raw_power_w in accumulated_powers.items()
+            if (power_w := _finite_float(raw_power_w)) is not None and power_w > 0
+        }
+        if dwell and set(dwell) <= set(powers):
+            return _runtime_weighted_state_summary(dwell, powers)
     started_at = _runtime_datetime(session_start)
     if started_at is None or session_end <= started_at:
         return {}, None, None
@@ -2499,10 +2584,24 @@ def _runtime_state_path_summary(
             continue
         dwell[state_id] = dwell.get(state_id, 0.0) + seconds
         weighted.append((power_w, seconds))
+    return _runtime_weighted_state_summary(
+        dwell,
+        {state_id: power_w for state_id, power_w, _ in entries},
+    )
+
+
+def _runtime_weighted_state_summary(
+    dwell: Mapping[str, float], powers: Mapping[str, float]
+) -> tuple[dict[str, float], float | None, float | None]:
+    """Summarize finite per-state dwell with its corresponding nominal power."""
+    weighted = sorted(
+        (powers[state_id], seconds)
+        for state_id, seconds in dwell.items()
+        if state_id in powers and seconds > 0
+    )
     total_seconds = sum(seconds for _, seconds in weighted)
     if total_seconds <= 0:
         return {}, None, None
-    weighted.sort()
     cumulative = 0.0
     median_power_w = None
     for power_w, seconds in weighted:
