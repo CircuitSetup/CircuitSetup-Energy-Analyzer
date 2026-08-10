@@ -35,6 +35,7 @@ from .nilm import (
     pair_nilm_sessions_for_signatures,
     resolve_nilm_signature_fingerprint,
 )
+from .nilm_interval_evidence import NilmReferenceExtractionSettings
 from .nilm_virtual import (
     nilm_live_runtime,
     nilm_model_status,
@@ -1473,6 +1474,14 @@ def _add_nilm_reference_evidence(
                     "reference_state_entity_id",
                     "reference_power_entity_id",
                     "reference_threshold_w",
+                    "reference_on_threshold",
+                    "reference_off_threshold",
+                    "reference_on_dwell_seconds",
+                    "reference_off_dwell_seconds",
+                    "reference_minimum_interval_seconds",
+                    "reference_merge_gap_seconds",
+                    "reference_maximum_unknown_gap_seconds",
+                    "reference_maximum_power_gap_seconds",
                 ],
             }
         }
@@ -1502,12 +1511,16 @@ def _add_nilm_reference_evidence(
                 "data": dict(action_data),
             }
         runtime = nilm_reference_runtime(coordinator, assignment)
+        reference_settings = _nilm_reference_settings_payload(assignment)
         assignment["reference"] = {
             "state_entity_id": state_entity_id or None,
             "power_entity_id": power_entity_id or None,
-            "threshold_w": _clamped_float(
-                assignment.get("reference_threshold_w"), default=0.0
-            ),
+            **reference_settings,
+            **({"import_summary": summary} if (
+                summary := _nilm_reference_import_summary(
+                    assignment.get("reference_import_summary")
+                )
+            ) is not None else {}),
             **runtime,
             "state_options": state_options,
             "power_options": power_options,
@@ -2465,6 +2478,102 @@ def _clamped_float(value: Any, *, default: float, upper: float | None = None) ->
     if upper is not None:
         return min(number, upper)
     return number
+
+
+def _nilm_reference_settings_payload(
+    assignment: Mapping[str, Any],
+) -> dict[str, float | None]:
+    """Return only normalized persisted reference settings for the panel."""
+
+    def number(value: Any) -> float | None:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if math.isfinite(parsed) and parsed >= 0 else None
+
+    legacy = number(assignment.get("reference_threshold_w"))
+    on_threshold = number(assignment.get("reference_on_threshold"))
+    off_threshold = number(assignment.get("reference_off_threshold"))
+    if on_threshold is None and off_threshold is None:
+        on_threshold = off_threshold = legacy
+    settings_values = {
+        "on_threshold": on_threshold,
+        "off_threshold": off_threshold,
+        "on_dwell_seconds": number(
+            assignment.get("reference_on_dwell_seconds")
+        )
+        or 0.0,
+        "off_dwell_seconds": number(
+            assignment.get("reference_off_dwell_seconds")
+        )
+        or 0.0,
+        "minimum_interval_seconds": number(
+            assignment.get("reference_minimum_interval_seconds")
+        )
+        or 0.0,
+        "merge_gap_seconds": number(
+            assignment.get("reference_merge_gap_seconds")
+        )
+        or 0.0,
+        "maximum_unknown_gap_seconds": number(
+            assignment.get("reference_maximum_unknown_gap_seconds")
+        )
+        or 0.0,
+        "maximum_power_gap_seconds": number(
+            assignment.get("reference_maximum_power_gap_seconds")
+        ),
+    }
+    try:
+        settings = NilmReferenceExtractionSettings(**settings_values)
+    except ValueError:
+        settings = NilmReferenceExtractionSettings(
+            on_threshold=legacy,
+            off_threshold=legacy,
+        )
+    return {
+        "threshold_w": legacy if legacy is not None else (settings.on_threshold or 0.0),
+        "on_threshold": settings.on_threshold,
+        "off_threshold": settings.off_threshold,
+        "on_dwell_seconds": settings.on_dwell_seconds,
+        "off_dwell_seconds": settings.off_dwell_seconds,
+        "minimum_interval_seconds": settings.minimum_interval_seconds,
+        "merge_gap_seconds": settings.merge_gap_seconds,
+        "maximum_unknown_gap_seconds": settings.maximum_unknown_gap_seconds,
+        "maximum_power_gap_seconds": settings.maximum_power_gap_seconds,
+    }
+
+
+def _nilm_reference_import_summary(value: Any) -> dict[str, Any] | None:
+    """Return a bounded, display-only summary for the latest reference import."""
+    if not isinstance(value, Mapping):
+        return None
+    count_keys = (
+        "candidate_interval_count",
+        "imported_interval_count",
+        "discarded_minimum_duration_count",
+        "bridged_unknown_gap_count",
+        "merged_inactive_gap_count",
+        "low_coverage_interval_count",
+    )
+    summary: dict[str, Any] = {}
+    for key in count_keys:
+        count = value.get(key, 0)
+        summary[key] = (
+            min(count, 10_000)
+            if isinstance(count, int) and not isinstance(count, bool) and count >= 0
+            else 0
+        )
+    warnings = value.get("warnings")
+    if isinstance(warnings, list):
+        summary["warnings"] = [
+            warning.strip()[:128]
+            for warning in warnings
+            if isinstance(warning, str) and warning.strip()
+        ][:16]
+    else:
+        summary["warnings"] = []
+    return summary
 
 
 def _nilm_workspace_paths(coordinator: Any, circuit_id: str) -> dict[str, str]:

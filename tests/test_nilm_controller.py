@@ -881,6 +881,44 @@ async def test_schema_2_evidence_preserves_valid_one_sided_backend_evidence(
         assert saved["observed_transition_w"] == observed
 
 
+def test_reference_evidence_rejects_bad_resolved_settings() -> None:
+    evidence = {
+        "evidence_schema_version": 2,
+        "evidence_source": "reference_backend",
+        "evidence_generated_at": "2026-06-02T12:00:00+00:00",
+        "source_coverage": 1.0,
+        "power_coverage": 0.0,
+        "evidence_confidence": 1.0,
+        "power_confidence": 0.0,
+        "start_transition_eligible": False,
+        "stop_transition_eligible": False,
+        "plateau_eligible": False,
+        "energy_complete": False,
+        "quality_flags": [],
+        "state_coverage": 1.0,
+        "unknown_duration_seconds": 0.0,
+        "merged_gap_count": 0,
+        "left_censored": False,
+        "right_censored": False,
+        "resolved_reference_settings": {
+            "on_threshold": 10.0,
+            "off_threshold": 20.0,
+            "on_dwell_seconds": 0.0,
+            "off_dwell_seconds": 0.0,
+            "minimum_interval_seconds": 0.0,
+            "merge_gap_seconds": 0.0,
+            "maximum_unknown_gap_seconds": 0.0,
+            "maximum_power_gap_seconds": None,
+        },
+    }
+
+    with pytest.raises(ValueError, match="resolved_reference_settings"):
+        NilmController._validated_schema_2_evidence(evidence)
+    evidence["resolved_reference_settings"].pop("maximum_power_gap_seconds")
+    with pytest.raises(ValueError, match="resolved_reference_settings"):
+        NilmController._validated_schema_2_evidence(evidence)
+
+
 @pytest.mark.asyncio
 async def test_batch_schema_2_validation_rolls_back_and_legacy_is_readable(
 ) -> None:
@@ -1812,9 +1850,7 @@ async def test_removed_interval_does_not_match_former_assignment_by_label() -> N
 
 
 @pytest.mark.asyncio
-async def test_save_nilm_interval_changes_restores_collections_after_save_failure() -> (
-    None
-):
+async def test_batch_rolls_back_after_multi_interval_failure() -> None:
     save = AsyncMock(side_effect=[RuntimeError("save failed"), None])
     coordinator = SimpleNamespace(
         current_time=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
@@ -1849,7 +1885,12 @@ async def test_save_nilm_interval_changes_restores_collections_after_save_failur
                     "interval_id": "new",
                     "start": "2026-06-02T11:00:00+00:00",
                     "end": "2026-06-02T11:05:00+00:00",
-                }
+                },
+                {
+                    "interval_id": "second-new",
+                    "start": "2026-06-02T11:10:00+00:00",
+                    "end": "2026-06-02T11:15:00+00:00",
+                },
             ],
         )
 
@@ -2361,17 +2402,30 @@ def test_nilm_reference_runtime_uses_state_then_power_only_fallback() -> None:
         "measured_power_w": 84.0,
         "source_entity_id": "switch.pump",
         "fallback_to_nilm": False,
+        "state_mode": "binary_state",
     }
 
     power_reference = nilm_reference_runtime(
         coordinator,
         {
             "reference_power_entity_id": "sensor.pump_power",
-            "reference_threshold_w": 25,
+            "reference_threshold_w": 100,
+            "reference_on_threshold": 25,
         },
     )
     assert power_reference["is_running"] is True
     assert power_reference["source_entity_id"] == "sensor.pump_power"
+    assert power_reference["state_mode"] == "stateless_numeric"
+
+    legacy_power_reference = nilm_reference_runtime(
+        coordinator,
+        {
+            "reference_power_entity_id": "sensor.pump_power",
+            "reference_threshold_w": 100,
+        },
+    )
+    assert legacy_power_reference["is_running"] is False
+    assert legacy_power_reference["state_mode"] == "stateless_numeric"
 
     assert nilm_reference_runtime(
         coordinator,
@@ -3437,6 +3491,91 @@ async def test_nilm_reference_link_persists_updates_and_removes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_reference_link_persists_canonical_settings_and_legacy_alias(
+) -> None:
+    controller, _ = _helper_link_controller()
+
+    linked = await controller.async_set_nilm_reference_link(
+        "mixed",
+        "assignment-load",
+        power_entity_id="sensor.load_power",
+        on_threshold=20,
+        off_threshold=12,
+        on_dwell_seconds=3,
+        off_dwell_seconds=4,
+        minimum_interval_seconds=5,
+        merge_gap_seconds=6,
+        maximum_unknown_gap_seconds=7,
+        maximum_power_gap_seconds=8,
+    )
+
+    assert linked["reference_on_threshold"] == 20.0
+    assert linked["reference_off_threshold"] == 12.0
+    assert linked["reference_on_dwell_seconds"] == 3.0
+    assert linked["reference_off_dwell_seconds"] == 4.0
+    assert linked["reference_minimum_interval_seconds"] == 5.0
+    assert linked["reference_merge_gap_seconds"] == 6.0
+    assert linked["reference_maximum_unknown_gap_seconds"] == 7.0
+    assert linked["reference_maximum_power_gap_seconds"] == 8.0
+    assert linked["reference_threshold_w"] == 20.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("settings", "message"),
+    [
+        ({"on_threshold": 10, "off_threshold": 11}, "ordered"),
+        ({"on_threshold": float("inf"), "off_threshold": 1}, "thresholds"),
+        ({"on_dwell_seconds": -1}, "durations"),
+    ],
+)
+async def test_nilm_reference_link_rejects_invalid_canonical_settings_before_mutation(
+    settings: dict[str, object], message: str
+) -> None:
+    controller, assignment = _helper_link_controller()
+    before = dict(assignment)
+
+    with pytest.raises(ValueError, match=message):
+        await controller.async_set_nilm_reference_link(
+            "mixed",
+            "assignment-load",
+            power_entity_id="sensor.load_power",
+            **settings,
+        )
+
+    assert assignment == before
+
+
+@pytest.mark.asyncio
+async def test_nilm_reference_link_uses_legacy_threshold_for_both_canonical_values(
+) -> None:
+    controller, _ = _helper_link_controller()
+
+    linked = await controller.async_set_nilm_reference_link(
+        "mixed",
+        "assignment-load",
+        power_entity_id="sensor.load_power",
+        threshold_w=12.5,
+    )
+
+    assert linked["reference_on_threshold"] == 12.5
+    assert linked["reference_off_threshold"] == 12.5
+
+
+@pytest.mark.asyncio
+async def test_nilm_reference_binary_link_omits_numeric_thresholds() -> None:
+    controller, _ = _helper_link_controller()
+
+    linked = await controller.async_set_nilm_reference_link(
+        "mixed", "assignment-load", state_entity_id="switch.load", on_dwell_seconds=5
+    )
+
+    assert "reference_on_threshold" not in linked
+    assert "reference_off_threshold" not in linked
+    assert linked["reference_on_dwell_seconds"] == 5.0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("threshold", (-1, float("inf"), True))
 async def test_nilm_reference_link_rejects_invalid_values(threshold: object) -> None:
     controller, _ = _helper_link_controller()
@@ -3513,6 +3652,38 @@ async def test_nilm_reference_history_updates_measured_interval_evidence() -> No
     assert second["median_power_w"] == 84
     assert second["measured_energy_kwh"] == 0.042
     assert assignment["label_interval_ids"] == ["reference-stable"]
+
+
+@pytest.mark.asyncio
+async def test_reference_import_summary_persists_with_interval_batch() -> None:
+    controller, assignment = _helper_link_controller()
+    summary = {
+        "candidate_interval_count": 2,
+        "imported_interval_count": 1,
+        "discarded_minimum_duration_count": 1,
+        "bridged_unknown_gap_count": 1,
+        "merged_inactive_gap_count": 0,
+        "low_coverage_interval_count": 1,
+        "warnings": ["incomplete_power_coverage"],
+    }
+
+    saved = await controller.async_save_nilm_interval_changes(
+        "mixed",
+        label="Pump",
+        assignment_id="assignment-load",
+        intervals=[
+            {
+                "interval_id": "reference-summary",
+                "start": "2026-06-02T10:00:00+00:00",
+                "end": "2026-06-02T10:30:00+00:00",
+                "source": "reference_sensor",
+            }
+        ],
+        reference_import_summary=summary,
+    )
+
+    assert assignment["reference_import_summary"] == summary
+    assert saved["reference_import_summary"] == summary
 
 
 @pytest.mark.asyncio
@@ -3800,3 +3971,111 @@ def _nilm_controller(coordinator: object) -> NilmController:
         label_interval_max_items=1,
         assignment_max_items=1,
     )
+
+
+@pytest.mark.asyncio
+async def test_reference_schema_2_metadata_survives_legacy_and_manual_reload() -> None:
+    """Feature-store serialization keeps all supported interval generations together."""
+    now = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+    legacy = {
+        "interval_id": "legacy",
+        "label": "Pump",
+        "start": "2026-08-01T09:00:00+00:00",
+        "end": "2026-08-01T09:10:00+00:00",
+    }
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        store_data=FeatureStoreData(
+            nilm_label_intervals_by_circuit={"mixed": [legacy]}
+        ),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=AsyncMock(),
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    controller = NilmController(
+        coordinator, label_interval_max_items=10, assignment_max_items=10
+    )
+    manual_evidence = {
+        "evidence_schema_version": 2,
+        "evidence_source": "manual_backend",
+        "evidence_generated_at": now.isoformat(),
+        "source_coverage": 1.0,
+        "power_coverage": 1.0,
+        "start_transition_eligible": False,
+        "stop_transition_eligible": False,
+        "plateau_eligible": False,
+        "energy_complete": False,
+        "evidence_confidence": 0.9,
+        "power_confidence": 0.9,
+        "quality_flags": [],
+    }
+    reference_evidence = {
+        "evidence_schema_version": 2,
+        "evidence_source": "reference_backend",
+        "evidence_generated_at": now.isoformat(),
+        "source_coverage": 0.9,
+        "power_coverage": 1.0,
+        "start_transition_eligible": False,
+        "stop_transition_eligible": False,
+        "plateau_eligible": False,
+        "energy_complete": False,
+        "evidence_confidence": 0.72,
+        "power_confidence": 0.9,
+        "quality_flags": ["unknown_gap_bridged"],
+        "ground_truth_entity_id": "switch.pump",
+        "reference_power_entity_id": "sensor.pump_power",
+        "state_coverage": 0.9,
+        "unknown_duration_seconds": 60.0,
+        "merged_gap_count": 0,
+        "left_censored": False,
+        "right_censored": False,
+        "resolved_reference_settings": {
+            "on_threshold": 50.0,
+            "off_threshold": 25.0,
+            "on_dwell_seconds": 0.0,
+            "off_dwell_seconds": 0.0,
+            "minimum_interval_seconds": 0.0,
+            "merge_gap_seconds": 0.0,
+            "maximum_unknown_gap_seconds": 120.0,
+            "maximum_power_gap_seconds": None,
+        },
+    }
+
+    await controller.async_label_nilm_interval(
+        "mixed",
+        label="Pump",
+        start="2026-08-01T10:00:00+00:00",
+        end="2026-08-01T10:10:00+00:00",
+        interval_id="manual-schema-2",
+        evidence=manual_evidence,
+    )
+    await controller.async_label_nilm_interval(
+        "mixed",
+        label="Pump",
+        start="2026-08-01T11:00:00+00:00",
+        end="2026-08-01T11:10:00+00:00",
+        interval_id="reference-schema-2",
+        source="reference_sensor",
+        evidence=reference_evidence,
+    )
+
+    reloaded = feature_store_data_from_dict(
+        feature_store_data_to_dict(coordinator.store_data)
+    )
+    intervals = reloaded.nilm_label_intervals_by_circuit["mixed"]
+    assert [item["interval_id"] for item in intervals] == [
+        "legacy",
+        "manual-schema-2",
+        "reference-schema-2",
+    ]
+    reference = intervals[-1]
+    assert reference["source"] == "reference_sensor"
+    assert reference["evidence_source"] == "reference_backend"
+    assert reference["ground_truth_entity_id"] == "switch.pump"
+    assert reference["reference_power_entity_id"] == "sensor.pump_power"
+    assert reference["resolved_reference_settings"] == reference_evidence[
+        "resolved_reference_settings"
+    ]

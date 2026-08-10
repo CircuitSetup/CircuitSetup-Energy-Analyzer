@@ -456,7 +456,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260810-1"
+    assert PANEL_MODULE_VERSION == "20260810-3"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -2491,6 +2491,24 @@ def test_nilm_workspace_reference_options_are_bounded_and_metadata_safe() -> Non
                 "display_name": "Pump",
                 "lifecycle_state": "assigned",
                 "reference_state_entity_id": "switch.pump",
+                "reference_threshold_w": 100.0,
+                "reference_on_threshold": 84.0,
+                "reference_off_threshold": 42.0,
+                "reference_on_dwell_seconds": 3.0,
+                "reference_off_dwell_seconds": 4.0,
+                "reference_minimum_interval_seconds": 5.0,
+                "reference_merge_gap_seconds": 6.0,
+                "reference_maximum_unknown_gap_seconds": 7.0,
+                "reference_maximum_power_gap_seconds": 8.0,
+                "reference_import_summary": {
+                    "candidate_interval_count": 3,
+                    "imported_interval_count": 2,
+                    "discarded_minimum_duration_count": 1,
+                    "bridged_unknown_gap_count": 4,
+                    "merged_inactive_gap_count": 5,
+                    "low_coverage_interval_count": 1,
+                    "warnings": ["coverage_below_target"],
+                },
             }
         ]
     }
@@ -2570,6 +2588,50 @@ def test_nilm_workspace_reference_options_are_bounded_and_metadata_safe() -> Non
     assert reference["power_options"][0]["role"] == "real_power"
     assert reference["suggested_power_entity_id"] == "sensor.pump_power"
     assert reference["actions"]["set"]["data"]["entry_id"] == "entry-1"
+    assert reference["threshold_w"] == 100.0
+    assert reference["on_threshold"] == 84.0
+    assert reference["off_threshold"] == 42.0
+    assert reference["on_dwell_seconds"] == 3.0
+    assert reference["off_dwell_seconds"] == 4.0
+    assert reference["minimum_interval_seconds"] == 5.0
+    assert reference["merge_gap_seconds"] == 6.0
+    assert reference["maximum_unknown_gap_seconds"] == 7.0
+    assert reference["maximum_power_gap_seconds"] == 8.0
+    assert reference["import_summary"] == {
+        "candidate_interval_count": 3,
+        "imported_interval_count": 2,
+        "discarded_minimum_duration_count": 1,
+        "bridged_unknown_gap_count": 4,
+        "merged_inactive_gap_count": 5,
+        "low_coverage_interval_count": 1,
+        "warnings": ["coverage_below_target"],
+    }
+    assert "reference_on_threshold" in reference["actions"]["set"]["requires"]
+
+
+def test_nilm_reference_import_summary_is_bounded_and_legacy_safe() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_reference_import_summary,
+    )
+
+    assert _nilm_reference_import_summary(None) is None
+    assert _nilm_reference_import_summary({
+        "candidate_interval_count": 99_999,
+        "imported_interval_count": -5,
+        "discarded_minimum_duration_count": True,
+        "bridged_unknown_gap_count": 3,
+        "merged_inactive_gap_count": "4",
+        "low_coverage_interval_count": 1,
+        "warnings": ["  keep  ", 3, "", "x" * 200] + ["extra"] * 20,
+    }) == {
+        "candidate_interval_count": 10_000,
+        "imported_interval_count": 0,
+        "discarded_minimum_duration_count": 0,
+        "bridged_unknown_gap_count": 3,
+        "merged_inactive_gap_count": 0,
+        "low_coverage_interval_count": 1,
+        "warnings": ["keep", "x" * 128, *("extra" for _ in range(14))],
+    }
 
 
 def test_nilm_workspace_placeholder_session_is_evidence_only() -> None:

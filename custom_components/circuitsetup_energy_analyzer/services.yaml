@@ -442,7 +442,7 @@ generate_nilm_sensor_label_intervals:
     ground_truth_entity_id:
       name: Reference Entity
       description: On/off entity or directly metered real-power entity used to generate reference intervals.
-      required: true
+      required: false
       example: sensor.dishwasher_power
       selector:
         entity:
@@ -1066,6 +1066,78 @@ set_nilm_reference_link:
         number:
           min: 0
           max: 100000
+          mode: box
+    reference_on_threshold:
+      name: Reference ON Threshold
+      description: Optional watts threshold to enter the active state for numeric references.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 100000
+          mode: box
+    reference_off_threshold:
+      name: Reference OFF Threshold
+      description: Optional watts threshold to leave the active state; it must not exceed the ON threshold.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 100000
+          mode: box
+    reference_on_dwell_seconds:
+      name: Reference ON Dwell Seconds
+      description: Optional time the numeric reference must remain above its ON threshold before becoming active.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 86400
+          mode: box
+    reference_off_dwell_seconds:
+      name: Reference OFF Dwell Seconds
+      description: Optional time the numeric reference must remain below its OFF threshold before becoming inactive.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 86400
+          mode: box
+    reference_minimum_interval_seconds:
+      name: Reference Minimum Interval Seconds
+      description: Optional minimum duration retained for an active reference interval.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 86400
+          mode: box
+    reference_merge_gap_seconds:
+      name: Reference Merge Gap Seconds
+      description: Optional inactive gap duration that can join adjacent active reference intervals.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 86400
+          mode: box
+    reference_maximum_unknown_gap_seconds:
+      name: Reference Maximum Unknown Gap Seconds
+      description: Optional maximum unavailable-state gap before reference evidence becomes uncertain.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 86400
+          mode: box
+    reference_maximum_power_gap_seconds:
+      name: Reference Maximum Power Gap Seconds
+      description: Optional maximum gap permitted when integrating reference power evidence.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 86400
           mode: box
     entry_id:
       name: Entry ID

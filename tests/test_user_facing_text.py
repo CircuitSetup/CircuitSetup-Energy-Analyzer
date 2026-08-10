@@ -437,6 +437,14 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "reference_power_entity_id": "Reference Power Entity",
     "reference_state_entity_id": "Reference State Entity",
     "reference_threshold_w": "Reference Threshold W",
+    "reference_on_threshold": "Reference ON Threshold",
+    "reference_off_threshold": "Reference OFF Threshold",
+    "reference_on_dwell_seconds": "Reference ON Dwell Seconds",
+    "reference_off_dwell_seconds": "Reference OFF Dwell Seconds",
+    "reference_minimum_interval_seconds": "Reference Minimum Interval Seconds",
+    "reference_merge_gap_seconds": "Reference Merge Gap Seconds",
+    "reference_maximum_unknown_gap_seconds": "Reference Maximum Unknown Gap Seconds",
+    "reference_maximum_power_gap_seconds": "Reference Maximum Power Gap Seconds",
     "relearn": "Relearn",
     "relearn_on_end": "Relearn On End",
     "removed_interval_ids": "Removed interval IDs",
@@ -6344,6 +6352,23 @@ def test_nilm_reference_sensor_controls_and_import_order() -> None:
     state_entity_id: "switch.pump",
     power_entity_id: null,
     threshold_w: 25,
+    on_threshold: 25,
+    off_threshold: 20,
+    on_dwell_seconds: 3,
+    off_dwell_seconds: 4,
+    minimum_interval_seconds: 30,
+    merge_gap_seconds: 5,
+    maximum_unknown_gap_seconds: 60,
+    maximum_power_gap_seconds: 120,
+    import_summary: {
+      candidate_interval_count: 5,
+      imported_interval_count: 3,
+      discarded_minimum_duration_count: 1,
+      bridged_unknown_gap_count: 2,
+      merged_inactive_gap_count: 1,
+      low_coverage_interval_count: 1,
+      warnings: ["coverage_below_target", "<unsafe warning>"],
+    },
     suggested_power_entity_id: "sensor.pump_power",
     state_options: [
       { entity_id: "switch.pump", name: "Pump switch", device_id: "device-1" },
@@ -6381,12 +6406,20 @@ def test_nilm_reference_sensor_controls_and_import_order() -> None:
   assert.ok(html.includes('data-nilm-reference-input="stateEntityId"'));
   assert.ok(html.includes('data-nilm-reference-input="powerEntityId"'));
   assert.ok(!html.includes("<option"));
-  assert.ok(!html.includes('type="number"'));
+  assert.ok(!html.includes('data-nilm-reference-input="onThreshold"'));
+  assert.ok(html.includes('data-nilm-reference-input="onDwellSeconds"'));
+  assert.ok(html.includes("UNKNOWN is neither OFF nor ON"));
+  assert.ok(html.includes('data-nilm-reference-import-summary'));
+  assert.ok(html.includes("Last import: 3 of 5 intervals imported."));
+  assert.ok(html.includes('data-nilm-reference-low-coverage'));
+  assert.ok(html.includes("&lt;unsafe warning&gt;"));
 
   panel._nilmReferenceDrafts.set("pump", {
     stateEntityId: "",
     powerEntityId: "sensor.other_power",
-    thresholdW: "12",
+    thresholdW: "12", onThreshold: "12", offThreshold: "10",
+    onDwellSeconds: "", offDwellSeconds: "", minimumIntervalSeconds: "",
+    mergeGapSeconds: "", maximumUncertainGapSeconds: "", maximumPowerGapSeconds: "",
     start: "2026-08-01T00:00",
     end: "2026-08-02T00:00",
     open: true,
@@ -6394,13 +6427,16 @@ def test_nilm_reference_sensor_controls_and_import_order() -> None:
   });
   html = panel._renderNilmReferenceSensors(item, 0);
   assert.ok(!html.includes('value="sensor.other_power" selected'));
-  assert.ok(html.includes('type="number"'));
+  assert.ok(html.includes('data-nilm-reference-input="onThreshold"'));
+  assert.ok(html.includes('data-nilm-reference-input="offThreshold"'));
   assert.ok(html.includes("<details open"));
 
   panel._nilmReferenceDrafts.set("pump", {
     stateEntityId: "switch.pump",
     powerEntityId: "sensor.pump_power",
-    thresholdW: "25",
+    thresholdW: "25", onThreshold: "25", offThreshold: "20",
+    onDwellSeconds: "3", offDwellSeconds: "4", minimumIntervalSeconds: "30",
+    mergeGapSeconds: "5", maximumUncertainGapSeconds: "60", maximumPowerGapSeconds: "120",
     start: "2026-08-01T00:00",
     end: "2026-08-02T00:00",
     open: true,
@@ -6408,13 +6444,44 @@ def test_nilm_reference_sensor_controls_and_import_order() -> None:
   });
   await panel._callNilmReferenceAction(0, "link_import");
   assert.deepEqual(calls.map((call) => call.service), [
-    "generate_nilm_sensor_label_intervals",
     "set_nilm_reference_link",
+    "generate_nilm_sensor_label_intervals",
   ]);
-  assert.equal(calls[0].data.ground_truth_entity_id, "switch.pump");
-  assert.equal(calls[0].data.reference_power_entity_id, "sensor.pump_power");
-  assert.equal(calls[1].data.reference_state_entity_id, "switch.pump");
+  assert.equal(calls[0].data.reference_state_entity_id, "switch.pump");
+  assert.equal(calls[0].data.reference_on_dwell_seconds, 3);
+  assert.equal(calls[0].data.reference_maximum_unknown_gap_seconds, 60);
+  assert.equal(calls[0].data.reference_maximum_power_gap_seconds, 120);
+  assert.ok(!("reference_threshold_w" in calls[0].data));
+  assert.ok(!("reference_on_threshold" in calls[0].data));
+  assert.equal(calls[1].data.ground_truth_entity_id, "switch.pump");
+  assert.equal(calls[1].data.reference_power_entity_id, "sensor.pump_power");
+  assert.ok(!("threshold_w" in calls[1].data));
   assert.equal(panel._nilmReferenceDrafts.get("pump").open, true);
+
+  panel._nilmReferenceDrafts.set("pump", {
+    stateEntityId: "", powerEntityId: "sensor.pump_power",
+    thresholdW: "25", onThreshold: "25", offThreshold: "20",
+    onDwellSeconds: "", offDwellSeconds: "", minimumIntervalSeconds: "",
+    mergeGapSeconds: "", maximumUncertainGapSeconds: "", maximumPowerGapSeconds: "",
+    start: "2026-08-01T00:00", end: "2026-08-02T00:00", open: true, error: "",
+  });
+  await panel._callNilmReferenceAction(0, "link_import");
+  assert.equal(calls.at(-2).data.reference_on_threshold, 25);
+  assert.equal(calls.at(-2).data.reference_off_threshold, 20);
+  assert.equal(calls.at(-2).data.reference_threshold_w, 25);
+  assert.equal(calls.at(-1).data.threshold_w, 25);
+
+  panel._nilmReferenceDrafts.set("pump", {
+    stateEntityId: "", powerEntityId: "sensor.pump_power",
+    thresholdW: "25", onThreshold: "10", offThreshold: "20",
+    onDwellSeconds: "", offDwellSeconds: "", minimumIntervalSeconds: "",
+    mergeGapSeconds: "", maximumUncertainGapSeconds: "", maximumPowerGapSeconds: "",
+    start: "2026-08-01T00:00", end: "2026-08-02T00:00", open: true, error: "",
+  });
+  const callCount = calls.length;
+  await panel._callNilmReferenceAction(0, "link_import");
+  assert.equal(calls.length, callCount);
+  assert.match(panel._nilmReferenceDrafts.get("pump").error, /OFF threshold/);
 
   const failed = makePanel({
     _nilmWorkspace: makeWorkspace({ assignments: [item] }),

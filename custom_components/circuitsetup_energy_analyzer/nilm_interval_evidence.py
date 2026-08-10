@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from math import isfinite
 from statistics import median
 
@@ -29,6 +30,521 @@ class NilmEvidenceThresholds:
 
 
 DEFAULT_THRESHOLDS = NilmEvidenceThresholds()
+MAX_REFERENCE_DURATION_SECONDS = 86_400.0
+
+
+class ReferenceActivityState(StrEnum):
+    """The only states a reference-history row may contribute."""
+
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class NilmReferenceExtractionSettings:
+    on_threshold: float | None
+    off_threshold: float | None
+    on_dwell_seconds: float = 0.0
+    off_dwell_seconds: float = 0.0
+    minimum_interval_seconds: float = 0.0
+    merge_gap_seconds: float = 0.0
+    maximum_unknown_gap_seconds: float = 0.0
+    maximum_power_gap_seconds: float | None = None
+
+    def __post_init__(self) -> None:
+        values = (
+            self.on_dwell_seconds,
+            self.off_dwell_seconds,
+            self.minimum_interval_seconds,
+            self.merge_gap_seconds,
+            self.maximum_unknown_gap_seconds,
+        )
+        if any(
+            not isfinite(value) or not 0 <= value <= MAX_REFERENCE_DURATION_SECONDS
+            for value in values
+        ):
+            raise ValueError("reference durations must be finite and bounded")
+        if (self.on_threshold is None) != (self.off_threshold is None):
+            raise ValueError("reference thresholds must be configured together")
+        if self.on_threshold is not None and (
+            not isfinite(self.on_threshold)
+            or self.on_threshold < 0
+            or not isfinite(self.off_threshold)  # type: ignore[arg-type]
+            or self.off_threshold < 0  # type: ignore[operator]
+            or self.off_threshold > self.on_threshold  # type: ignore[operator]
+        ):
+            raise ValueError("reference thresholds must be non-negative and ordered")
+        if self.maximum_power_gap_seconds is not None and (
+            not isfinite(self.maximum_power_gap_seconds)
+            or not 0 <= self.maximum_power_gap_seconds <= MAX_REFERENCE_DURATION_SECONDS
+        ):
+            raise ValueError("maximum power gap must be finite and non-negative")
+
+
+@dataclass(frozen=True)
+class NilmReferenceSample:
+    timestamp: datetime
+    value: object
+    state: ReferenceActivityState
+    numeric_value: float | None
+
+
+@dataclass(frozen=True)
+class NilmReferenceInterval:
+    start: datetime
+    end: datetime
+    start_boundary_uncertainty_seconds: float | None
+    end_boundary_uncertainty_seconds: float | None
+    left_censored: bool
+    right_censored: bool
+    state_coverage: float
+    unknown_duration_seconds: float
+    merged_gap_count: int
+    evidence_confidence: float
+    quality_flags: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class NilmReferenceDiagnostics:
+    discarded_minimum_duration: int = 0
+    bridged_unknown_gap_count: int = 0
+    merged_inactive_gap_count: int = 0
+    candidate_interval_count: int = 0
+    imported_interval_count: int = 0
+    low_coverage_interval_count: int = 0
+
+    @property
+    def discarded_short_interval_count(self) -> int:
+        return self.discarded_minimum_duration
+
+    @property
+    def merged_short_gap_count(self) -> int:
+        return self.merged_inactive_gap_count
+
+
+@dataclass(frozen=True)
+class NilmReferenceExtractionResult:
+    intervals: tuple[NilmReferenceInterval, ...]
+    diagnostics: NilmReferenceDiagnostics
+
+
+def normalize_reference_samples(
+    rows: Iterable[tuple[datetime, object]],
+) -> tuple[NilmReferenceSample, ...]:
+    """Sort rows and retain the final duplicate timestamp without guessing state."""
+    latest: dict[datetime, tuple[int, NilmReferenceSample]] = {}
+    for index, (timestamp, value) in enumerate(rows):
+        state, numeric = _reference_value(value)
+        latest[timestamp] = (
+            index,
+            NilmReferenceSample(timestamp, value, state, numeric),
+        )
+    return tuple(
+        item[1]
+        for item in sorted(
+            latest.values(), key=lambda item: (item[1].timestamp, item[0])
+        )
+    )
+
+
+def extract_reference_intervals(
+    rows: Iterable[tuple[datetime, object]],
+    *,
+    start: datetime,
+    end: datetime,
+    settings: NilmReferenceExtractionSettings,
+) -> NilmReferenceExtractionResult:
+    """Extract bounded, dwell-confirmed active intervals from reference history."""
+    if end <= start:
+        raise ValueError("end must be after start")
+    normalized = normalize_reference_samples(rows)
+    before_start = tuple(sample for sample in normalized if sample.timestamp < start)
+    samples = tuple(sample for sample in normalized if start <= sample.timestamp <= end)
+    if not samples:
+        return NilmReferenceExtractionResult((), NilmReferenceDiagnostics())
+    active = False
+    candidate: ReferenceActivityState | None = None
+    candidate_at: datetime | None = None
+    interval_start: datetime | None = None
+    left_censored = False
+    unknown_at: datetime | None = None
+    unknown_total = 0.0
+    bridged = 0
+    resumed_after_unknown_gap = False
+    interval_flags: set[str] = set()
+    raw: list[tuple[datetime, datetime, bool, bool, float, int, float, set[str]]] = []
+    previous: NilmReferenceSample | None = None
+    if before_start:
+        prior_state = _resolved_reference_state(before_start[-1], False, settings)
+        if prior_state is ReferenceActivityState.ACTIVE:
+            active, interval_start, left_censored = True, start, True
+        previous = before_start[-1]
+    for sample in samples:
+        prior = previous
+        previous = sample
+        state = _resolved_reference_state(sample, active, settings)
+        if state is ReferenceActivityState.UNKNOWN:
+            unknown_at = unknown_at or sample.timestamp
+            candidate, candidate_at = None, None
+            if (
+                active
+                and (sample.timestamp - unknown_at).total_seconds()
+                > settings.maximum_unknown_gap_seconds
+            ):
+                raw.append(
+                    (
+                        interval_start or start,
+                        unknown_at,
+                        left_censored,
+                        False,
+                        unknown_total,
+                        0,
+                        0.0,
+                        {"unknown_gap_split"},
+                    )
+                )
+                active, interval_start, candidate, candidate_at = (
+                    False,
+                    None,
+                    None,
+                    None,
+                )
+                resumed_after_unknown_gap = True
+            continue
+        confirmed_this_row = False
+        confirmed_state: ReferenceActivityState | None = None
+        confirmed_at: datetime | None = None
+        if candidate is not None and candidate_at is not None:
+            candidate_dwell = (
+                settings.on_dwell_seconds
+                if candidate is ReferenceActivityState.ACTIVE
+                else settings.off_dwell_seconds
+            )
+            if (sample.timestamp - candidate_at).total_seconds() >= candidate_dwell:
+                confirmed_state, confirmed_at = candidate, candidate_at
+                if candidate is ReferenceActivityState.ACTIVE and not active:
+                    active, interval_start, left_censored = True, candidate_at, False
+                    if resumed_after_unknown_gap:
+                        left_censored = True
+                        interval_flags = {"left_uncertain_after_unknown_gap"}
+                        resumed_after_unknown_gap = False
+                confirmed_this_row = True
+                candidate, candidate_at = None, None
+        if unknown_at is not None:
+            gap = (sample.timestamp - unknown_at).total_seconds()
+            if active and gap <= settings.maximum_unknown_gap_seconds:
+                unknown_total += gap
+                bridged += 1
+            elif active:
+                raw.append(
+                    (
+                        interval_start or start,
+                        unknown_at,
+                        left_censored,
+                        False,
+                        unknown_total,
+                        0,
+                        0.0,
+                        {"unknown_gap_split"},
+                    )
+                )
+                active, interval_start, candidate, candidate_at = (
+                    False,
+                    None,
+                    None,
+                    None,
+                )
+                resumed_after_unknown_gap = True
+            unknown_at = None
+        if (
+            confirmed_this_row
+            and confirmed_state is ReferenceActivityState.INACTIVE
+            and active
+            and state is ReferenceActivityState.INACTIVE
+        ):
+            raw.append(
+                (
+                    interval_start or start,
+                    (
+                        confirmed_at
+                        if confirmed_state is ReferenceActivityState.INACTIVE
+                        else sample.timestamp
+                    ),
+                    left_censored,
+                    False,
+                    unknown_total,
+                    0,
+                    0.0,
+                    set(interval_flags),
+                )
+            )
+            active, interval_start, unknown_total = False, None, 0.0
+            continue
+        if state is (
+            ReferenceActivityState.ACTIVE if active else ReferenceActivityState.INACTIVE
+        ):
+            candidate, candidate_at = None, None
+            continue
+        dwell = (
+            settings.on_dwell_seconds
+            if state is ReferenceActivityState.ACTIVE
+            else settings.off_dwell_seconds
+        )
+        if candidate is not state:
+            candidate = state
+            candidate_at, _ = _interpolated_transition_boundary(
+                prior, sample, state, settings
+            )
+            if sample.timestamp == start and state is ReferenceActivityState.ACTIVE:
+                active, interval_start, left_censored = True, start, True
+            continue
+        assert candidate_at is not None
+        if (sample.timestamp - candidate_at).total_seconds() < dwell:
+            continue
+        if state is ReferenceActivityState.ACTIVE:
+            active, interval_start, left_censored = True, candidate_at, False
+            if resumed_after_unknown_gap:
+                left_censored = True
+                interval_flags = {"left_uncertain_after_unknown_gap"}
+                resumed_after_unknown_gap = False
+        elif active:
+            raw.append(
+                (
+                    interval_start or start,
+                    candidate_at,
+                    left_censored,
+                    False,
+                    unknown_total,
+                    0,
+                    0.0,
+                    set(interval_flags),
+                )
+            )
+            active, interval_start, unknown_total = False, None, 0.0
+        candidate, candidate_at = None, None
+    if (
+        unknown_at is None
+        and candidate is not None
+        and candidate_at is not None
+        and (end - candidate_at).total_seconds()
+        >= (
+            settings.on_dwell_seconds
+            if candidate is ReferenceActivityState.ACTIVE
+            else settings.off_dwell_seconds
+        )
+    ):
+        if candidate is ReferenceActivityState.ACTIVE and not active:
+            active, interval_start, left_censored = True, candidate_at, False
+            if resumed_after_unknown_gap:
+                left_censored = True
+                interval_flags = {"left_uncertain_after_unknown_gap"}
+                resumed_after_unknown_gap = False
+        elif candidate is ReferenceActivityState.INACTIVE and active:
+            raw.append(
+                (
+                    interval_start or start,
+                    candidate_at,
+                    left_censored,
+                    False,
+                    unknown_total,
+                    0,
+                    0.0,
+                    set(),
+                )
+            )
+            active = False
+    if active:
+        raw.append(
+            (
+                interval_start or start,
+                end,
+                left_censored,
+                True,
+                unknown_total,
+                0,
+                0.0,
+                interval_flags | {"right_censored"},
+            )
+        )
+    merged: list[
+        tuple[datetime, datetime, bool, bool, float, int, float, set[str]]
+    ] = []
+    merged_count = 0
+    for item in raw:
+        if (
+            merged
+            and (item[0] - merged[-1][1]).total_seconds() <= settings.merge_gap_seconds
+            and "unknown_gap_split" not in item[7]
+            and "unknown_gap_split" not in merged[-1][7]
+        ):
+            previous = merged.pop()
+            merged_count += 1
+            merged.append(
+                (
+                    previous[0],
+                    item[1],
+                    previous[2],
+                    item[3],
+                    previous[4] + item[4],
+                    previous[5] + item[5] + 1,
+                    previous[6] + item[6] + (item[0] - previous[1]).total_seconds(),
+                    previous[7] | item[7] | {"inactive_gap_merged"},
+                )
+            )
+        else:
+            merged.append(item)
+    intervals: list[NilmReferenceInterval] = []
+    discarded = 0
+    for (
+        interval_start,
+        interval_end,
+        left,
+        right,
+        unknown,
+        gap_count,
+        inactive_gap,
+        flags,
+    ) in merged:
+        interval_duration = (interval_end - interval_start).total_seconds()
+        if interval_duration < settings.minimum_interval_seconds:
+            discarded += 1
+            continue
+        coverage = max(0.0, min(1.0, 1 - (unknown + inactive_gap) / interval_duration))
+        confidence = coverage * (0.85 if left or right else 1.0)
+        if "left_uncertain_after_unknown_gap" in flags:
+            confidence *= 0.8
+        intervals.append(
+            NilmReferenceInterval(
+                interval_start,
+                interval_end,
+                _boundary_uncertainty(
+                    samples, interval_start, settings.on_threshold, settings
+                ),
+                _boundary_uncertainty(
+                    samples, interval_end, settings.off_threshold, settings
+                ),
+                left,
+                right,
+                coverage,
+                unknown,
+                gap_count,
+                max(0.0, min(1.0, confidence)),
+                tuple(sorted(flags)),
+            )
+        )
+    return NilmReferenceExtractionResult(
+        tuple(intervals),
+        NilmReferenceDiagnostics(
+            discarded_minimum_duration=discarded,
+            bridged_unknown_gap_count=bridged,
+            merged_inactive_gap_count=merged_count,
+            candidate_interval_count=len(merged),
+            imported_interval_count=len(intervals),
+            low_coverage_interval_count=sum(
+                interval.state_coverage < 1.0 for interval in intervals
+            ),
+        ),
+    )
+
+
+def _reference_value(value: object) -> tuple[ReferenceActivityState, float | None]:
+    if isinstance(value, bool):
+        return (
+            ReferenceActivityState.ACTIVE if value else ReferenceActivityState.INACTIVE
+        ), None
+    if (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and isfinite(float(value))
+    ):
+        return ReferenceActivityState.UNKNOWN, float(value)
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in {"on", "true", "active"}:
+            return ReferenceActivityState.ACTIVE, None
+        if text in {"off", "false", "inactive"}:
+            return ReferenceActivityState.INACTIVE, None
+        try:
+            numeric = float(text)
+        except ValueError:
+            return ReferenceActivityState.UNKNOWN, None
+        if isfinite(numeric):
+            return ReferenceActivityState.UNKNOWN, numeric
+    return ReferenceActivityState.UNKNOWN, None
+
+
+def _resolved_reference_state(
+    sample: NilmReferenceSample, active: bool, settings: NilmReferenceExtractionSettings
+) -> ReferenceActivityState:
+    if sample.numeric_value is None:
+        return sample.state
+    if settings.on_threshold is None:
+        return ReferenceActivityState.UNKNOWN
+    if sample.numeric_value >= settings.on_threshold:
+        return ReferenceActivityState.ACTIVE
+    if sample.numeric_value <= settings.off_threshold:  # type: ignore[operator]
+        return ReferenceActivityState.INACTIVE
+    return ReferenceActivityState.ACTIVE if active else ReferenceActivityState.INACTIVE
+
+
+def _interpolated_transition_boundary(
+    previous: NilmReferenceSample | None,
+    current: NilmReferenceSample,
+    state: ReferenceActivityState,
+    settings: NilmReferenceExtractionSettings,
+) -> tuple[datetime, float | None]:
+    """Return a threshold crossing only when adjacent numeric data supports it."""
+    threshold = (
+        settings.on_threshold
+        if state is ReferenceActivityState.ACTIVE
+        else settings.off_threshold
+    )
+    if (
+        previous is None
+        or threshold is None
+        or previous.numeric_value is None
+        or current.numeric_value is None
+    ):
+        return current.timestamp, None
+    span = (current.timestamp - previous.timestamp).total_seconds()
+    maximum_span = settings.maximum_power_gap_seconds
+    if maximum_span is None:
+        maximum_span = max(60.0, settings.maximum_unknown_gap_seconds)
+    low, high = sorted((previous.numeric_value, current.numeric_value))
+    if span <= 0 or span > maximum_span or not low <= threshold <= high or low == high:
+        return current.timestamp, min(max(span, 0.0), maximum_span) / 2
+    from datetime import timedelta
+
+    fraction = (threshold - previous.numeric_value) / (
+        current.numeric_value - previous.numeric_value
+    )
+    return previous.timestamp + timedelta(seconds=span * fraction), span / 2
+
+
+def _boundary_uncertainty(
+    samples: Sequence[NilmReferenceSample],
+    boundary: datetime,
+    threshold: float | None,
+    settings: NilmReferenceExtractionSettings,
+) -> float | None:
+    if threshold is None:
+        return None
+    for previous, current in zip(samples, samples[1:], strict=False):
+        candidate, uncertainty = _interpolated_transition_boundary(
+            previous,
+            current,
+            (
+                ReferenceActivityState.ACTIVE
+                if current.numeric_value is not None
+                and current.numeric_value >= threshold
+                else ReferenceActivityState.INACTIVE
+            ),
+            settings,
+        )
+        if candidate == boundary:
+            return uncertainty
+    return None
 
 
 @dataclass(frozen=True)
@@ -83,14 +599,7 @@ def normalize_power_samples(
     """Normalize units, retain missing boundaries, and keep the last duplicate."""
     latest: dict[tuple[str, datetime], tuple[int, NilmPowerSample]] = {}
     for index, sample in enumerate(samples):
-        unit = sample.unit.strip().lower()
-        factor = {
-            "w": 1.0,
-            "watt": 1.0,
-            "watts": 1.0,
-            "kw": 1000.0,
-            "kilowatt": 1000.0,
-        }.get(unit)
+        factor = _power_unit_factor(sample.unit)
         value = sample.value_w
         quality = sample.quality
         if factor is None:
@@ -112,6 +621,193 @@ def normalize_power_samples(
             key=lambda item: (item[1].timestamp, item[1].source_entity_id, item[0]),
         )
     )
+
+
+@dataclass(frozen=True)
+class NilmReferencePowerMetrics:
+    """Gap-aware, time-weighted power evidence for a reference interval."""
+
+    interval_duration_seconds: float
+    covered_duration_seconds: float
+    power_coverage: float
+    longest_power_gap_seconds: float | None
+    valid_sample_count: int
+    invalid_sample_count: int
+    clipped_negative_sample_count: int
+    median_power_w: float | None
+    average_power_w: float | None
+    partial_energy_kwh: float | None
+    measured_energy_kwh: float | None
+    energy_complete: bool
+    power_confidence: float
+    quality_flags: tuple[str, ...]
+
+
+def calculate_reference_power_metrics(
+    samples: Iterable[NilmPowerSample],
+    *,
+    start: datetime,
+    end: datetime,
+    maximum_power_gap_seconds: float | None = None,
+    thresholds: NilmEvidenceThresholds = DEFAULT_THRESHOLDS,
+) -> NilmReferencePowerMetrics:
+    """Calculate time-weighted power evidence without bridging missing samples."""
+    if end <= start:
+        raise ValueError("end must be after start")
+    if maximum_power_gap_seconds is not None and (
+        not isfinite(maximum_power_gap_seconds) or maximum_power_gap_seconds < 0
+    ):
+        raise ValueError("maximum power gap must be finite and non-negative")
+    series = tuple(
+        sample
+        for sample in normalize_power_samples(samples)
+        if start <= sample.timestamp <= end
+    )
+    duration = (end - start).total_seconds()
+    cadence = _cadence(
+        tuple(sample for sample in series if _valid_power_sample(sample))
+    )
+    maximum_gap = (
+        maximum_power_gap_seconds
+        if maximum_power_gap_seconds is not None
+        else _freshness_seconds(cadence, thresholds)
+    )
+    flags: set[str] = set()
+    valid_count = 0
+    invalid_count = 0
+    clipped_negative_count = 0
+    values: list[tuple[datetime, float | None]] = []
+    material_negative = False
+    for sample in series:
+        if not _valid_power_sample(sample):
+            invalid_count += 1
+            values.append((sample.timestamp, None))
+            continue
+        value = sample.value_w
+        assert value is not None
+        valid_count += 1
+        if value < 0 and value >= -thresholds.numerical_noise_w:
+            value = 0.0
+            clipped_negative_count += 1
+        elif value < -thresholds.numerical_noise_w:
+            material_negative = True
+        values.append((sample.timestamp, value))
+    if invalid_count:
+        flags.update({"missing_power_samples", "invalid_power_samples"})
+    if clipped_negative_count:
+        flags.add("negative_power_clipped")
+    if material_negative:
+        flags.add("material_negative_power")
+    covered = 0.0
+    energy_ws = 0.0
+    weighted_segments: list[tuple[float, float]] = []
+    covered_spans: list[tuple[datetime, datetime]] = []
+    for (left_time, left_power), (right_time, right_power) in zip(
+        values, values[1:], strict=False
+    ):
+        seconds = (right_time - left_time).total_seconds()
+        if (
+            left_power is None
+            or right_power is None
+            or seconds <= 0
+            or seconds > maximum_gap
+        ):
+            continue
+        segment_power = (left_power + right_power) / 2
+        covered += seconds
+        energy_ws += segment_power * seconds
+        weighted_segments.append((segment_power, seconds))
+        covered_spans.append((left_time, right_time))
+    longest_gap = _longest_uncovered_power_gap(covered_spans, start, end)
+    coverage = covered / duration
+    if coverage < thresholds.complete_energy_coverage:
+        flags.add("incomplete_power_coverage")
+    if longest_gap and longest_gap > maximum_gap:
+        flags.add("long_power_gap")
+    partial_energy = energy_ws / 3_600_000 if covered else None
+    complete = coverage >= thresholds.complete_energy_coverage and not material_negative
+    measured_energy = partial_energy if complete else None
+    average = energy_ws / covered if covered else None
+    median_power = _weighted_median(weighted_segments)
+    sample_factor = min(1.0, valid_count / 2)
+    invalid_factor = valid_count / (valid_count + invalid_count) if series else 0.0
+    longest_gap_factor = max(0.0, 1.0 - (longest_gap or 0.0) / duration)
+    negative_factor = (
+        0.5 if material_negative else 0.95 if clipped_negative_count else 1.0
+    )
+    confidence = max(
+        0.0,
+        min(
+            1.0,
+            coverage
+            * sample_factor
+            * invalid_factor
+            * longest_gap_factor
+            * negative_factor,
+        ),
+    )
+    return NilmReferencePowerMetrics(
+        duration,
+        covered,
+        coverage,
+        longest_gap,
+        valid_count,
+        invalid_count,
+        clipped_negative_count,
+        median_power,
+        average,
+        partial_energy,
+        measured_energy,
+        complete,
+        confidence,
+        tuple(sorted(flags)),
+    )
+
+
+def _power_unit_factor(unit: str) -> float | None:
+    text = unit.strip()
+    if text == "MW":
+        return 1_000_000.0
+    return {
+        "w": 1.0,
+        "watt": 1.0,
+        "watts": 1.0,
+        "kw": 1_000.0,
+        "kilowatt": 1_000.0,
+        "mw": 0.001,
+    }.get(text.casefold())
+
+
+def _valid_power_sample(sample: NilmPowerSample) -> bool:
+    return sample.quality == "valid" and sample.value_w is not None
+
+
+def _longest_uncovered_power_gap(
+    covered_spans: Sequence[tuple[datetime, datetime]],
+    start: datetime,
+    end: datetime,
+) -> float | None:
+    if not covered_spans:
+        return (end - start).total_seconds()
+    longest = (covered_spans[0][0] - start).total_seconds()
+    previous_end = covered_spans[0][1]
+    for span_start, span_end in covered_spans[1:]:
+        longest = max(longest, (span_start - previous_end).total_seconds())
+        previous_end = max(previous_end, span_end)
+    return max(longest, (end - previous_end).total_seconds()) or None
+
+
+def _weighted_median(segments: Sequence[tuple[float, float]]) -> float | None:
+    if not segments:
+        return None
+    ordered = sorted(segments)
+    midpoint = sum(weight for _, weight in ordered) / 2
+    cumulative = 0.0
+    for value, weight in ordered:
+        cumulative += weight
+        if cumulative >= midpoint:
+            return value
+    return ordered[-1][0]
 
 
 def aggregate_power_samples(

@@ -28,7 +28,85 @@ from ..nilm import (
     nilm_signature_is_assignable,
     normalize_nilm_assignment_model,
 )
+from ..nilm_interval_evidence import NilmReferenceExtractionSettings
 from ..profiles import nilm_source_kind, supports_direct_appliance_analysis
+
+
+def _reference_link_number(value: Any, field: str) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be a finite number")
+    try:
+        return float(value)
+    except (TypeError, ValueError) as err:
+        raise ValueError(f"{field} must be a finite number") from err
+
+
+def _reference_link_settings(
+    assignment: Mapping[str, Any],
+    *,
+    has_power_entity: bool,
+    threshold_w: Any,
+    on_threshold: Any,
+    off_threshold: Any,
+    on_dwell_seconds: Any,
+    off_dwell_seconds: Any,
+    minimum_interval_seconds: Any,
+    merge_gap_seconds: Any,
+    maximum_unknown_gap_seconds: Any,
+    maximum_power_gap_seconds: Any,
+) -> NilmReferenceExtractionSettings:
+    """Resolve persisted link settings through the shared extraction policy."""
+    legacy = _reference_link_number(
+        threshold_w
+        if threshold_w is not None
+        else assignment.get("reference_threshold_w"),
+        "reference_threshold_w",
+    )
+    current_on = assignment.get("reference_on_threshold", legacy)
+    current_off = assignment.get("reference_off_threshold", legacy)
+    requested_on = _reference_link_number(on_threshold, "reference_on_threshold")
+    requested_off = _reference_link_number(off_threshold, "reference_off_threshold")
+    if requested_on is not None or requested_off is not None:
+        resolved_on, resolved_off = requested_on, requested_off
+    elif has_power_entity or legacy is not None:
+        resolved_on = _reference_link_number(current_on, "reference_on_threshold")
+        resolved_off = _reference_link_number(current_off, "reference_off_threshold")
+        if resolved_on is None and resolved_off is None:
+            resolved_on = resolved_off = 0.0
+    else:
+        resolved_on = resolved_off = None
+
+    def duration(value: Any, key: str, default: float | None) -> float | None:
+        return _reference_link_number(
+            assignment.get(key, default) if value is None else value, key
+        )
+
+    return NilmReferenceExtractionSettings(
+        on_threshold=resolved_on,
+        off_threshold=resolved_off,
+        on_dwell_seconds=duration(
+            on_dwell_seconds, "reference_on_dwell_seconds", 0.0
+        ) or 0.0,
+        off_dwell_seconds=duration(
+            off_dwell_seconds, "reference_off_dwell_seconds", 0.0
+        ) or 0.0,
+        minimum_interval_seconds=duration(
+            minimum_interval_seconds, "reference_minimum_interval_seconds", 0.0
+        ) or 0.0,
+        merge_gap_seconds=duration(
+            merge_gap_seconds, "reference_merge_gap_seconds", 0.0
+        )
+        or 0.0,
+        maximum_unknown_gap_seconds=duration(
+            maximum_unknown_gap_seconds, "reference_maximum_unknown_gap_seconds", 0.0
+        )
+        or 0.0,
+        maximum_power_gap_seconds=duration(
+            maximum_power_gap_seconds, "reference_maximum_power_gap_seconds", None
+        ),
+    )
 
 
 def configured_primary_assignment_id(circuit_id: str) -> str:
@@ -746,6 +824,113 @@ class NilmController:
             raise ValueError("Invalid schema-2 evidence quality_flags.")
         normalized["quality_flags"] = list(flags)
 
+        if source == "reference_backend" and any(
+            key in evidence
+            for key in (
+                "state_coverage", "unknown_duration_seconds", "merged_gap_count",
+                "left_censored", "right_censored", "resolved_reference_settings",
+            )
+        ):
+            for key in ("ground_truth_entity_id", "reference_power_entity_id"):
+                value = evidence.get(key, "")
+                if not isinstance(value, str) or len(value) > 255:
+                    raise ValueError(f"Invalid schema-2 evidence {key}.")
+                if value:
+                    normalized[key] = value
+            for key in ("state_coverage",):
+                value = evidence.get(key)
+                if isinstance(value, bool):
+                    raise ValueError(f"Invalid schema-2 evidence {key}.")
+                try:
+                    parsed = float(value)
+                except (TypeError, ValueError) as err:
+                    raise ValueError(f"Invalid schema-2 evidence {key}.") from err
+                if not math.isfinite(parsed) or not 0.0 <= parsed <= 1.0:
+                    raise ValueError(f"Invalid schema-2 evidence {key}.")
+                normalized[key] = parsed
+            value = evidence.get("unknown_duration_seconds")
+            if isinstance(value, bool):
+                raise ValueError(
+                    "Invalid schema-2 evidence unknown_duration_seconds."
+                )
+            try:
+                parsed_unknown = float(value)
+            except (TypeError, ValueError) as err:
+                raise ValueError(
+                    "Invalid schema-2 evidence unknown_duration_seconds."
+                ) from err
+            if not math.isfinite(parsed_unknown) or parsed_unknown < 0.0:
+                raise ValueError("Invalid schema-2 evidence unknown_duration_seconds.")
+            normalized["unknown_duration_seconds"] = parsed_unknown
+            merged = evidence.get("merged_gap_count")
+            if (
+                isinstance(merged, bool)
+                or not isinstance(merged, int)
+                or not 0 <= merged <= 10_000
+            ):
+                raise ValueError("Invalid schema-2 evidence merged_gap_count.")
+            normalized["merged_gap_count"] = merged
+            for key in ("left_censored", "right_censored"):
+                value = evidence.get(key)
+                if not isinstance(value, bool):
+                    raise ValueError(f"Invalid schema-2 evidence {key}.")
+                normalized[key] = value
+            settings = evidence.get("resolved_reference_settings")
+            if not isinstance(settings, Mapping):
+                raise ValueError(
+                    "Invalid schema-2 evidence resolved_reference_settings."
+                )
+            expected_settings = {
+                "on_threshold",
+                "off_threshold",
+                "on_dwell_seconds",
+                "off_dwell_seconds",
+                "minimum_interval_seconds",
+                "merge_gap_seconds",
+                "maximum_unknown_gap_seconds",
+                "maximum_power_gap_seconds",
+            }
+            if set(settings) != expected_settings:
+                raise ValueError(
+                    "Invalid schema-2 evidence resolved_reference_settings."
+                )
+            normalized_settings: dict[str, float | None] = {}
+            for key, value in settings.items():
+                if value is None:
+                    normalized_settings[key] = None
+                    continue
+                if isinstance(value, bool):
+                    raise ValueError(f"Invalid schema-2 evidence {key}.")
+                try:
+                    parsed = float(value)
+                except (TypeError, ValueError) as err:
+                    raise ValueError(f"Invalid schema-2 evidence {key}.") from err
+                if not math.isfinite(parsed) or parsed < 0.0:
+                    raise ValueError(f"Invalid schema-2 evidence {key}.")
+                normalized_settings[key] = parsed
+            try:
+                NilmReferenceExtractionSettings(
+                    on_threshold=normalized_settings["on_threshold"],
+                    off_threshold=normalized_settings["off_threshold"],
+                    on_dwell_seconds=normalized_settings["on_dwell_seconds"] or 0.0,
+                    off_dwell_seconds=normalized_settings["off_dwell_seconds"] or 0.0,
+                    minimum_interval_seconds=(
+                        normalized_settings["minimum_interval_seconds"] or 0.0
+                    ),
+                    merge_gap_seconds=normalized_settings["merge_gap_seconds"] or 0.0,
+                    maximum_unknown_gap_seconds=(
+                        normalized_settings["maximum_unknown_gap_seconds"] or 0.0
+                    ),
+                    maximum_power_gap_seconds=normalized_settings[
+                        "maximum_power_gap_seconds"
+                    ],
+                )
+            except ValueError as err:
+                raise ValueError(
+                    "Invalid schema-2 evidence resolved_reference_settings."
+                ) from err
+            normalized["resolved_reference_settings"] = normalized_settings
+
         if not normalized["plateau_eligible"]:
             normalized.pop("median_power_w", None)
             normalized.pop("average_power_w", None)
@@ -754,6 +939,48 @@ class NilmController:
         for key in tuple(numeric_fields):
             if normalized.get(key) is None:
                 normalized.pop(key, None)
+        return normalized
+
+    @staticmethod
+    def _validated_reference_import_summary(
+        summary: Mapping[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Retain a bounded, UI-safe summary of one reference import."""
+        if summary is None:
+            return None
+        if not isinstance(summary, Mapping):
+            raise ValueError("Invalid reference import summary.")
+        count_keys = {
+            "candidate_interval_count",
+            "imported_interval_count",
+            "discarded_minimum_duration_count",
+            "bridged_unknown_gap_count",
+            "merged_inactive_gap_count",
+            "low_coverage_interval_count",
+        }
+        if set(summary) - (count_keys | {"warnings"}):
+            raise ValueError("Invalid reference import summary.")
+        normalized: dict[str, Any] = {}
+        for key in count_keys:
+            value = summary.get(key, 0)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or not 0 <= value <= 10_000
+            ):
+                raise ValueError("Invalid reference import summary.")
+            normalized[key] = value
+        warnings = summary.get("warnings", [])
+        if (
+            not isinstance(warnings, list)
+            or len(warnings) > 16
+            or any(
+                not isinstance(item, str) or not item.strip() or len(item) > 128
+                for item in warnings
+            )
+        ):
+            raise ValueError("Invalid reference import summary.")
+        normalized["warnings"] = list(warnings)
         return normalized
 
     async def async_label_nilm_interval(
@@ -1054,6 +1281,7 @@ class NilmController:
         assignment_id: str | None = None,
         appliance_id: str | None = None,
         appliance_profile: str | None = None,
+        reference_import_summary: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Atomically save a NILM assignment's interval membership."""
         async with self._review_transaction_lock:
@@ -1065,6 +1293,7 @@ class NilmController:
                 assignment_id=assignment_id,
                 appliance_id=appliance_id,
                 appliance_profile=appliance_profile,
+                reference_import_summary=reference_import_summary,
             )
 
     async def _async_save_nilm_interval_changes(
@@ -1077,10 +1306,14 @@ class NilmController:
         assignment_id: str | None = None,
         appliance_id: str | None = None,
         appliance_profile: str | None = None,
+        reference_import_summary: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         label_text = str(label or "").strip()
         if not label_text:
             raise ValueError("Missing label.")
+        normalized_import_summary = self._validated_reference_import_summary(
+            reference_import_summary
+        )
         drafts = list(intervals)
         if not all(isinstance(draft, Mapping) for draft in drafts):
             raise ValueError("Each NILM interval must be a mapping.")
@@ -1286,6 +1519,8 @@ class NilmController:
             assignment["label_interval_ids"] = self._clean_string_list(
                 assignment.get("label_interval_ids")
             ) + [interval["interval_id"] for interval in payloads]
+            if normalized_import_summary is not None:
+                assignment["reference_import_summary"] = normalized_import_summary
             assignment["updated_at"] = now
             updated_by_id = {payload["interval_id"]: payload for payload in payloads}
             stored_intervals = []
@@ -2764,26 +2999,37 @@ class NilmController:
         *,
         state_entity_id: str | None = None,
         power_entity_id: str | None = None,
-        threshold_w: Any = 0.0,
+        threshold_w: Any = None,
+        on_threshold: Any = None,
+        off_threshold: Any = None,
+        on_dwell_seconds: Any = None,
+        off_dwell_seconds: Any = None,
+        minimum_interval_seconds: Any = None,
+        merge_gap_seconds: Any = None,
+        maximum_unknown_gap_seconds: Any = None,
+        maximum_power_gap_seconds: Any = None,
     ) -> dict[str, Any]:
         """Link authoritative state and optional measured-power evidence."""
         state_id = str(state_entity_id or "").strip()
         power_id = str(power_entity_id or "").strip()
         if not state_id and not power_id:
             raise ValueError("Select a reference state or power entity.")
-        if isinstance(threshold_w, bool):
-            raise ValueError("reference_threshold_w must be a non-negative number.")
-        try:
-            threshold = float(threshold_w)
-        except (TypeError, ValueError) as err:
-            raise ValueError(
-                "reference_threshold_w must be a non-negative number."
-            ) from err
-        if not math.isfinite(threshold) or threshold < 0:
-            raise ValueError("reference_threshold_w must be a non-negative number.")
         self._validate_reference_entities(state_id, power_id)
 
         assignment = self.assignment_for_id(circuit_id, assignment_id)
+        settings = _reference_link_settings(
+            assignment,
+            has_power_entity=bool(power_id),
+            threshold_w=threshold_w,
+            on_threshold=on_threshold,
+            off_threshold=off_threshold,
+            on_dwell_seconds=on_dwell_seconds,
+            off_dwell_seconds=off_dwell_seconds,
+            minimum_interval_seconds=minimum_interval_seconds,
+            merge_gap_seconds=merge_gap_seconds,
+            maximum_unknown_gap_seconds=maximum_unknown_gap_seconds,
+            maximum_power_gap_seconds=maximum_power_gap_seconds,
+        )
         if state_id:
             assignment["reference_state_entity_id"] = state_id
         else:
@@ -2792,7 +3038,30 @@ class NilmController:
             assignment["reference_power_entity_id"] = power_id
         else:
             assignment.pop("reference_power_entity_id", None)
-        assignment["reference_threshold_w"] = threshold
+        if settings.on_threshold is None:
+            assignment.pop("reference_on_threshold", None)
+            assignment.pop("reference_off_threshold", None)
+        else:
+            assignment["reference_on_threshold"] = settings.on_threshold
+            assignment["reference_off_threshold"] = settings.off_threshold
+        assignment["reference_on_dwell_seconds"] = settings.on_dwell_seconds
+        assignment["reference_off_dwell_seconds"] = settings.off_dwell_seconds
+        assignment["reference_minimum_interval_seconds"] = (
+            settings.minimum_interval_seconds
+        )
+        assignment["reference_merge_gap_seconds"] = settings.merge_gap_seconds
+        assignment["reference_maximum_unknown_gap_seconds"] = (
+            settings.maximum_unknown_gap_seconds
+        )
+        if settings.maximum_power_gap_seconds is None:
+            assignment.pop("reference_maximum_power_gap_seconds", None)
+        else:
+            assignment["reference_maximum_power_gap_seconds"] = (
+                settings.maximum_power_gap_seconds
+            )
+        assignment["reference_threshold_w"] = (
+            settings.on_threshold if settings.on_threshold is not None else 0.0
+        )
         assignment["updated_at"] = self._coordinator.current_time().isoformat()
         await self.async_save_assignment_change()
         return dict(assignment)
@@ -2850,6 +3119,14 @@ class NilmController:
             "reference_state_entity_id",
             "reference_power_entity_id",
             "reference_threshold_w",
+            "reference_on_threshold",
+            "reference_off_threshold",
+            "reference_on_dwell_seconds",
+            "reference_off_dwell_seconds",
+            "reference_minimum_interval_seconds",
+            "reference_merge_gap_seconds",
+            "reference_maximum_unknown_gap_seconds",
+            "reference_maximum_power_gap_seconds",
         ):
             assignment.pop(key, None)
         assignment["updated_at"] = self._coordinator.current_time().isoformat()
