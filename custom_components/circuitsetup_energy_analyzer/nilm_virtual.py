@@ -23,6 +23,7 @@ from .nilm import (
     nilm_session_to_dict,
     nilm_signature_is_assignable,
     pair_nilm_sessions_for_signatures,
+    resolve_nilm_signature_fingerprint,
     summarize_nilm_assignment_sessions,
 )
 
@@ -1010,17 +1011,22 @@ def _nilm_assignment_sessions(
     signatures_by_id: Mapping[str, Mapping[str, Any]],
 ) -> list[NilmSession]:
     specs: list[dict[str, Any]] = []
+    unique_signatures = {
+        id(value): value for value in signatures_by_id.values()
+    }
+    signatures = list(unique_signatures.values())
     for assignment in assignments:
         assignment_id = str(assignment.get("assignment_id") or "").strip() or None
         for value in _iter_items(assignment.get("signature_fingerprints")):
             fingerprint = str(value or "").strip()
             if not fingerprint:
                 continue
-            signature = signatures_by_id.get(fingerprint)
+            resolved = resolve_nilm_signature_fingerprint(fingerprint, signatures)
+            signature = signatures_by_id.get(resolved or fingerprint)
             if not signature:
                 continue
             spec = dict(signature)
-            spec["signature_fingerprint"] = fingerprint
+            spec["signature_fingerprint"] = resolved or fingerprint
             spec["assignment_id"] = assignment_id
             for key in ("min_duration_seconds", "max_duration_seconds"):
                 if key in assignment:

@@ -2646,7 +2646,8 @@ def test_cluster_recurring_signatures_groups_similar_edges_conservatively() -> N
     assert signatures[0].occurrence_count == 3
     assert signatures[0].median_delta_w == 300.0
     assert signatures[0].median_delta_var == 35.0
-    assert signatures[0].confidence >= 0.6
+    assert signatures[0].confidence_kind == "evidence"
+    assert 0.0 <= signatures[0].confidence <= 0.75
 
 
 def test_cluster_recurring_signatures_separates_same_w_by_apparent_power() -> None:
@@ -2677,7 +2678,7 @@ def test_cluster_recurring_signatures_separates_same_w_by_apparent_power() -> No
     assert {signature.median_delta_va for signature in signatures} == {320.0, 600.0}
 
 
-def test_cluster_recurring_signatures_does_not_bridge_distinct_reactive_loads() -> None:
+def test_cluster_recurring_signatures_prevents_reactive_chain_bridge() -> None:
     signatures = cluster_recurring_signatures(
         [
             *[edge(index * 30, 500.0, delta_var=100.0) for index in range(3)],
@@ -2686,8 +2687,93 @@ def test_cluster_recurring_signatures_does_not_bridge_distinct_reactive_loads() 
         ]
     )
 
-    assert [signature.occurrence_count for signature in signatures] == [6, 3]
-    assert [signature.median_delta_var for signature in signatures] == [125.0, 225.0]
+    assert [signature.occurrence_count for signature in signatures] == [3, 3, 3]
+    assert [signature.median_delta_var for signature in signatures] == [
+        100.0,
+        150.0,
+        225.0,
+    ]
+
+
+def test_cluster_recurring_signatures_keeps_ambiguous_w_only_edges_uncertain() -> None:
+    signatures = cluster_recurring_signatures(
+        [
+            *[edge(index * 30, 500.0, delta_var=25.0) for index in range(3)],
+            *[edge(100 + index * 30, 500.0, delta_var=125.0) for index in range(3)],
+            *[
+                edge(
+                    200 + index * 30,
+                    500.0,
+                    delta_var=None,
+                    delta_va=None,
+                    delta_pf=None,
+                )
+                for index in range(3)
+            ],
+        ]
+    )
+
+    assert [signature.median_delta_var for signature in signatures] == [
+        25.0,
+        125.0,
+        None,
+    ]
+    assert [signature.occurrence_count for signature in signatures] == [3, 3, 3]
+
+
+def test_cluster_recurring_signatures_uses_nearest_unique_candidate() -> None:
+    signatures = cluster_recurring_signatures(
+        [
+            *[edge(index * 30, 500.0, delta_var=25.0) for index in range(3)],
+            *[edge(100 + index * 30, 500.0, delta_var=125.0) for index in range(3)],
+            *[edge(200 + index * 30, 500.0, delta_var=30.0) for index in range(3)],
+        ]
+    )
+
+    assert [(item.median_delta_var, item.occurrence_count) for item in signatures] == [
+        (27.5, 6),
+        (125.0, 3),
+    ]
+
+
+def test_signature_confidence_uses_days_dispersion_and_on_off_support() -> None:
+    one_day = cluster_recurring_signatures(
+        [edge(index * 60, 300.0, delta_var=20.0) for index in range(3)]
+    )[0]
+    multi_day = cluster_recurring_signatures(
+        [
+            edge(index * 86_400, 300.0, delta_var=20.0)
+            for index in range(3)
+        ]
+    )[0]
+    dispersed = cluster_recurring_signatures(
+        [
+            edge(0, 288.0, delta_var=20.0),
+            edge(60, 300.0, delta_var=20.0),
+            edge(120, 315.0, delta_var=20.0),
+        ]
+    )[0]
+    paired = cluster_recurring_signatures(
+        [
+            event
+            for index in range(3)
+            for event in (
+                edge(index * 86_400, 300.0, delta_var=20.0),
+                edge(index * 86_400 + 3_600, -300.0, delta_var=-20.0),
+            )
+        ]
+    )
+    paired_on = next(item for item in paired if item.signature_id.startswith("on-"))
+
+    assert one_day.unique_day_count == 1
+    assert one_day.confidence <= 0.65
+    assert multi_day.confidence > one_day.confidence
+    assert dispersed.normalized_cluster_radius > multi_day.normalized_cluster_radius
+    assert dispersed.confidence < multi_day.confidence
+    assert paired_on.paired_occurrence_count == 3
+    assert paired_on.on_off_support == 1.0
+    assert paired_on.confidence > multi_day.confidence
+    assert all(0.0 <= item.confidence <= 0.95 for item in paired)
 
 
 def test_w_only_signatures_keep_missing_features_and_still_pair() -> None:
@@ -2951,13 +3037,13 @@ def test_cluster_recurring_signatures_is_stable_for_permuted_similar_edges() -> 
         [
             edge(0, 121.0, delta_var=10.0),
             edge(30, 100.0, delta_var=8.0),
-            edge(60, 144.0, delta_var=12.0),
+            edge(60, 125.0, delta_var=12.0),
         ]
     )
     second_order = cluster_recurring_signatures(
         [
             edge(30, 100.0, delta_var=8.0),
-            edge(60, 144.0, delta_var=12.0),
+            edge(60, 125.0, delta_var=12.0),
             edge(0, 121.0, delta_var=10.0),
         ]
     )
@@ -2989,9 +3075,9 @@ def test_nilm_signature_fingerprint_ignores_cluster_order_id() -> None:
     reordered = NilmSignature(
         signature_id="on-2",
         median_delta_w=625.0,
-        median_delta_var=151.0,
+        median_delta_var=148.0,
         median_delta_va=638.0,
-        median_delta_pf=-0.02,
+        median_delta_pf=-0.03,
         occurrence_count=6,
         confidence=0.9,
         median_leg_a_delta_w=625.0,
@@ -3016,6 +3102,19 @@ def test_nilm_signature_fingerprint_ignores_cluster_order_id() -> None:
     assert nilm_signature_fingerprint(first) != nilm_signature_fingerprint(
         off_signature
     )
+
+
+def test_nilm_signature_fingerprint_v2_splits_legacy_reactive_collision() -> None:
+    first = NilmSignature("on-1", 500.0, 100.0, occurrence_count=3)
+    second = NilmSignature("on-2", 500.0, 150.0, occurrence_count=3)
+
+    assert nilm_domain.nilm_signature_fingerprint_v1(first) == (
+        nilm_domain.nilm_signature_fingerprint_v1(second)
+    )
+    assert nilm_domain.nilm_signature_fingerprint(first) != (
+        nilm_domain.nilm_signature_fingerprint(second)
+    )
+    assert "revision=2" in nilm_domain.nilm_signature_fingerprint(first)
 
 
 def test_legacy_fingerprint_resolves_unique_w_direction_despite_var_drift() -> None:
@@ -3110,6 +3209,34 @@ def test_session_specs_reject_off_only_assignment_fingerprint() -> None:
             }
         ],
     ) == []
+
+
+def test_virtual_assignment_sessions_resolve_unique_legacy_fingerprint() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        _nilm_assignment_sessions,
+    )
+
+    signature = NilmSignature("on-1", 300.0, 20.0, occurrence_count=3)
+    fingerprint = nilm_domain.nilm_signature_fingerprint(signature)
+    legacy = nilm_domain.nilm_signature_fingerprint_v1(signature)
+    payload = {
+        "signature_id": signature.signature_id,
+        "feedback_fingerprint": fingerprint,
+        "legacy_feedback_fingerprint": legacy,
+        "median_delta_w": signature.median_delta_w,
+        "median_delta_var": signature.median_delta_var,
+    }
+
+    sessions = _nilm_assignment_sessions(
+        "mains",
+        [{"assignment_id": "pump", "signature_fingerprints": [legacy]}],
+        [edge(0, 300.0, delta_var=20.0), edge(60, -300.0, delta_var=-20.0)],
+        {signature.signature_id: payload, fingerprint: payload},
+    )
+
+    assert len(sessions) == 1
+    assert sessions[0].assignment_id == "pump"
+    assert sessions[0].signature_fingerprint == fingerprint
 
 
 def test_classify_signature_is_conservative_and_allows_user_label_override() -> None:

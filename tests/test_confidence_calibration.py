@@ -848,8 +848,12 @@ def test_overlapping_unknown_load_fixture_reconstructs_nilm_sessions() -> None:
         800,
     }
     assert {session["signature_fingerprint"] for session in simultaneous_sessions} == {
-        "direction=on|watts=400-500|var=unknown|va=400-500|pf=0.00-0.05|split=unknown|leg=unknown|balance=unknown",
-        "direction=on|watts=800-900|var=unknown|va=800-900|pf=0.00-0.05|split=unknown|leg=unknown|balance=unknown",
+        "revision=2|direction=on|watts=450-500|var=unknown|va=450-500|"
+        "pf=0.000-0.025|split=unknown|leg=unknown|leg_a=unknown|"
+        "leg_b=unknown|balance=unknown",
+        "revision=2|direction=on|watts=800-850|var=unknown|va=800-850|"
+        "pf=0.000-0.025|split=unknown|leg=unknown|leg_a=unknown|"
+        "leg_b=unknown|balance=unknown",
     }
     assert {session["overlap_count"] for session in simultaneous_sessions} == {0}
     assert result.alerts == []

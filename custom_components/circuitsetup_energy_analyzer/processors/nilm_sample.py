@@ -27,6 +27,7 @@ from ..nilm import (
     nilm_helper_candidate_to_dict,
     nilm_session_to_dict,
     nilm_signature_fingerprint,
+    nilm_signature_fingerprint_v1,
     nilm_signature_is_assignable,
     nilm_signature_is_off_direction,
     normalize_nilm_assignment_model,
@@ -511,32 +512,50 @@ class NilmSampleProcessor:
         signatures: Iterable[NilmSignature],
         context: ProcessingContext,
     ) -> list[dict[str, Any]]:
-        existing = {
-            str(signature.get("signature_id")): dict(signature)
+        existing = [
+            dict(signature)
             for signature in context.store_data.nilm_signatures.get(circuit_id, [])
-        }
-        existing_by_fingerprint = {
-            str(signature.get("feedback_fingerprint")): dict(signature)
-            for signature in context.store_data.nilm_signatures.get(circuit_id, [])
-            if signature.get("feedback_fingerprint")
-        }
+            if isinstance(signature, Mapping)
+        ]
         signature_list = list(signatures)
+        current_records = _nilm_signature_records(signature_list)
+        existing_by_v2 = _nilm_signature_multimap(
+            existing,
+            key="feedback_fingerprint",
+            revision=2,
+        )
+        existing_by_legacy = _nilm_signature_legacy_multimap(existing)
+        current_by_legacy = _nilm_signature_legacy_multimap(current_records)
         current_id_by_fingerprint = {
-            nilm_signature_fingerprint(signature): signature.signature_id
-            for signature in signature_list
+            str(record["feedback_fingerprint"]): str(record["signature_id"])
+            for record in current_records
         }
         payloads: list[dict[str, Any]] = []
         seen: set[str] = set()
-        for signature in signature_list:
-            feedback_fingerprint = nilm_signature_fingerprint(signature)
-            current = existing.get(
-                signature.signature_id,
-                existing_by_fingerprint.get(feedback_fingerprint, {}),
+        ambiguous_existing_ids: set[str] = set()
+        for signature, current_record in zip(
+            signature_list,
+            current_records,
+            strict=True,
+        ):
+            feedback_fingerprint = str(current_record["feedback_fingerprint"])
+            legacy_feedback_fingerprint = str(
+                current_record["legacy_feedback_fingerprint"]
             )
-            metadata_current = (
-                current if _nilm_signature_metadata_compatible(signature, current)
-                else {}
+            current, migration_status = _nilm_signature_metadata_source(
+                signature,
+                feedback_fingerprint=feedback_fingerprint,
+                legacy_feedback_fingerprint=legacy_feedback_fingerprint,
+                existing_by_v2=existing_by_v2,
+                existing_by_legacy=existing_by_legacy,
+                current_by_legacy=current_by_legacy,
             )
+            if migration_status == "ambiguous_split":
+                ambiguous_existing_ids.update(
+                    str(item.get("signature_id") or "")
+                    for item in existing_by_legacy.get(legacy_feedback_fingerprint, ())
+                )
+            metadata_current = current or {}
             user_label = metadata_current.get("user_label")
             classified_signature = replace(signature, user_label=user_label)
             ignored = bool(metadata_current.get("ignored")) or (
@@ -555,9 +574,27 @@ class NilmSampleProcessor:
                 "dominant_leg": signature.dominant_leg,
                 "split_phase_type": signature.split_phase_type,
                 "occurrence_count": signature.occurrence_count,
+                "unique_day_count": signature.unique_day_count,
+                "observation_span_seconds": signature.observation_span_seconds,
+                "dispersion_w": signature.dispersion_w,
+                "dispersion_var": signature.dispersion_var,
+                "dispersion_va": signature.dispersion_va,
+                "dispersion_pf": signature.dispersion_pf,
+                "normalized_cluster_radius": signature.normalized_cluster_radius,
+                "feature_coverage": signature.feature_coverage,
+                "topology_consistency": signature.topology_consistency,
+                "paired_occurrence_count": signature.paired_occurrence_count,
+                "on_off_support": signature.on_off_support,
+                "evidence_strength": signature.evidence_strength,
+                "model_fit": signature.model_fit,
+                "intrinsic_confidence": signature.intrinsic_confidence,
+                "validated_precision": signature.validated_precision,
                 "confidence": signature.confidence,
+                "confidence_kind": signature.confidence_kind,
                 "classification": classify_signature(classified_signature),
                 "feedback_fingerprint": feedback_fingerprint,
+                "legacy_feedback_fingerprint": legacy_feedback_fingerprint,
+                "fingerprint_revision": 2,
             }
             matching_edges = [
                 edge
@@ -577,17 +614,20 @@ class NilmSampleProcessor:
                         )
                     )
                     if isinstance(item, dict)
-                    and feedback_fingerprint
-                    in {
-                        str(value or "").strip()
-                        for value in _list_items(
-                            item.get("signature_fingerprints")
-                        )
-                    }
+                    and _nilm_assignment_owns_signature(
+                        item,
+                        feedback_fingerprint,
+                        current_records,
+                    )
                 ),
                 None,
             )
             legacy_owner = None
+            if assignment is not None and _ensure_nilm_assignment_fingerprint(
+                assignment,
+                feedback_fingerprint,
+            ):
+                self._helper_links_dirty = True
             if assignment is None:
                 legacy_owner = _confirmed_placeholder_owner(
                     payload,
@@ -617,6 +657,8 @@ class NilmSampleProcessor:
                 assignment, feedback_fingerprint, signature_edges
             ):
                 self._helper_links_dirty = True
+            if assignment is not None:
+                _enrich_nilm_payload_confidence(payload, assignment)
             observations = self._helper_events_by_source.get(circuit_id, [])
             if observations:
                 by_circuit: defaultdict[str, list[CircuitEvent]] = defaultdict(list)
@@ -641,17 +683,31 @@ class NilmSampleProcessor:
                 payload["user_label"] = user_label
             if ignored:
                 payload["ignored"] = True
-            for key in ("review_state", "merged_into"):
+            for key in ("expected", "review_state", "merged_into"):
                 if key in metadata_current:
                     payload[key] = metadata_current[key]
             if legacy_owner is not None:
                 payload["review_state"] = "assigned"
                 payload["assignment_id"] = legacy_owner["assignment_id"]
+            elif migration_status:
+                payload["migration_status"] = migration_status
+                payload["review_state"] = "needs_review"
+                payload["split_into_fingerprints"] = sorted(
+                    str(item["feedback_fingerprint"])
+                    for item in current_by_legacy.get(
+                        legacy_feedback_fingerprint,
+                        (),
+                    )
+                )
             target_fingerprint = metadata_current.get("merged_into_fingerprint")
             if target_fingerprint:
                 payload["merged_into_fingerprint"] = target_fingerprint
-                payload["merged_into"] = current_id_by_fingerprint.get(
+                resolved_target = resolve_nilm_signature_fingerprint(
                     str(target_fingerprint),
+                    current_records,
+                )
+                payload["merged_into"] = current_id_by_fingerprint.get(
+                    resolved_target or str(target_fingerprint),
                     payload.get("merged_into"),
                 )
             payloads.append(payload)
@@ -659,7 +715,23 @@ class NilmSampleProcessor:
             if metadata_current.get("signature_id"):
                 seen.add(str(metadata_current["signature_id"]))
 
-        for signature_id, signature in existing.items():
+        for signature in existing:
+            signature_id = str(signature.get("signature_id") or "")
+            if signature_id in ambiguous_existing_ids:
+                signature = {
+                    **signature,
+                    "migration_status": "ambiguous_split",
+                    "review_state": "needs_review",
+                    "split_into_fingerprints": sorted(
+                        str(item["feedback_fingerprint"])
+                        for item in current_by_legacy.get(
+                            str(signature.get("legacy_feedback_fingerprint")
+                            or signature.get("feedback_fingerprint")
+                            or ""),
+                            (),
+                        )
+                    ),
+                }
             if signature_id not in seen and (
                 signature.get("user_label") or signature.get("ignored")
                 or signature.get("merged_into")
@@ -669,6 +741,155 @@ class NilmSampleProcessor:
                 payloads.append(payload)
 
         return payloads
+
+
+def _nilm_signature_records(
+    signatures: Iterable[NilmSignature],
+) -> list[dict[str, Any]]:
+    """Build the small identity records used for safe fingerprint migration."""
+    return [
+        {
+            "signature_id": signature.signature_id,
+            "feedback_fingerprint": nilm_signature_fingerprint(signature),
+            "legacy_feedback_fingerprint": nilm_signature_fingerprint_v1(signature),
+            "fingerprint_revision": 2,
+            "median_delta_w": signature.median_delta_w,
+            "median_delta_var": signature.median_delta_var,
+            "median_delta_va": signature.median_delta_va,
+            "median_delta_pf": signature.median_delta_pf,
+            "median_leg_a_delta_w": signature.median_leg_a_delta_w,
+            "median_leg_b_delta_w": signature.median_leg_b_delta_w,
+            "leg_balance_ratio": signature.leg_balance_ratio,
+            "dominant_leg": signature.dominant_leg,
+            "split_phase_type": signature.split_phase_type,
+        }
+        for signature in signatures
+    ]
+
+
+def _nilm_signature_multimap(
+    signatures: Iterable[Mapping[str, Any]],
+    *,
+    key: str,
+    revision: int | None = None,
+) -> defaultdict[str, list[dict[str, Any]]]:
+    """Index identities without silently selecting one collided persisted row."""
+    indexed: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+    for signature in signatures:
+        value = str(signature.get(key) or "").strip()
+        if not value:
+            continue
+        if revision is not None and _nilm_fingerprint_revision(value) != revision:
+            continue
+        indexed[value].append(dict(signature))
+    return indexed
+
+
+def _nilm_signature_legacy_multimap(
+    signatures: Iterable[Mapping[str, Any]],
+) -> defaultdict[str, list[dict[str, Any]]]:
+    """Index every persisted v1 alias, including unversioned legacy primaries."""
+    indexed: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+    for signature in signatures:
+        values = [
+            str(signature.get("legacy_feedback_fingerprint") or "").strip(),
+        ]
+        fingerprint = str(signature.get("feedback_fingerprint") or "").strip()
+        if fingerprint and _nilm_fingerprint_revision(fingerprint) != 2:
+            values.append(fingerprint)
+        for value in dict.fromkeys(values):
+            if value:
+                indexed[value].append(dict(signature))
+    return indexed
+
+
+def _nilm_fingerprint_revision(value: str) -> int | None:
+    first = str(value or "").split("|", 1)[0]
+    if not first.startswith("revision="):
+        return None
+    try:
+        return int(first.split("=", 1)[1])
+    except ValueError:
+        return None
+
+
+def _nilm_signature_metadata_source(
+    signature: NilmSignature,
+    *,
+    feedback_fingerprint: str,
+    legacy_feedback_fingerprint: str,
+    existing_by_v2: Mapping[str, list[dict[str, Any]]],
+    existing_by_legacy: Mapping[str, list[dict[str, Any]]],
+    current_by_legacy: Mapping[str, list[dict[str, Any]]],
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Select metadata only when the old durable identity resolves uniquely."""
+    exact = existing_by_v2.get(feedback_fingerprint, ())
+    if len(exact) == 1:
+        return exact[0], None
+    legacy = existing_by_legacy.get(legacy_feedback_fingerprint, ())
+    children = current_by_legacy.get(legacy_feedback_fingerprint, ())
+    if len(legacy) == 1 and len(children) == 1:
+        candidate = legacy[0]
+        if _nilm_signature_metadata_compatible(signature, candidate):
+            return candidate, None
+    if legacy and len(children) > 1:
+        return None, "ambiguous_split"
+    return None, None
+
+
+def _nilm_assignment_owns_signature(
+    assignment: Mapping[str, Any],
+    feedback_fingerprint: str,
+    current_records: Iterable[Mapping[str, Any]],
+) -> bool:
+    for value in _list_items(assignment.get("signature_fingerprints")):
+        fingerprint = str(value or "").strip()
+        if fingerprint == feedback_fingerprint:
+            return True
+        if (
+            fingerprint
+            and resolve_nilm_signature_fingerprint(fingerprint, current_records)
+            == feedback_fingerprint
+        ):
+            return True
+    return False
+
+
+def _ensure_nilm_assignment_fingerprint(
+    assignment: dict[str, Any],
+    feedback_fingerprint: str,
+) -> bool:
+    """Persist the uniquely resolved v2 ownership alias beside its legacy key."""
+    fingerprints = [
+        str(value or "").strip()
+        for value in _list_items(assignment.get("signature_fingerprints"))
+        if str(value or "").strip()
+    ]
+    if feedback_fingerprint in fingerprints:
+        return False
+    assignment["signature_fingerprints"] = list(
+        dict.fromkeys((*fingerprints, feedback_fingerprint))
+    )
+    return True
+
+
+def _enrich_nilm_payload_confidence(
+    payload: dict[str, Any],
+    assignment: Mapping[str, Any],
+) -> None:
+    """Blend history precision only after enough evaluable predictions exist."""
+    evaluated = _nonnegative_int(assignment.get("validation_evaluable_session_count"))
+    precision = _finite_float(assignment.get("validation_precision"))
+    if evaluated < 3 or precision is None or not 0.0 <= precision <= 1.0:
+        return
+    intrinsic = _finite_float(payload.get("intrinsic_confidence")) or 0.0
+    confidence = (0.9 * intrinsic) + (0.1 * precision)
+    if _nonnegative_int(payload.get("unique_day_count")) <= 1:
+        confidence = min(confidence, 0.65)
+    if (_finite_float(payload.get("on_off_support")) or 0.0) <= 0.0:
+        confidence = min(confidence, 0.75)
+    payload["validated_precision"] = round(precision, 3)
+    payload["confidence"] = round(min(max(confidence, 0.0), 0.95), 3)
 
 
 def reconcile_component_runtime(

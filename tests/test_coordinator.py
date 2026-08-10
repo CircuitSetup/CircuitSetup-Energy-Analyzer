@@ -12955,9 +12955,9 @@ def test_nilm_signature_payloads_reuse_review_by_stable_fingerprint() -> None:
             NilmSignature(
                 signature_id="on-2",
                 median_delta_w=625.0,
-                median_delta_var=151.0,
+                    median_delta_var=148.0,
                 median_delta_va=638.0,
-                median_delta_pf=-0.02,
+                    median_delta_pf=-0.03,
                 occurrence_count=6,
                 confidence=0.9,
                 median_leg_a_delta_w=625.0,
