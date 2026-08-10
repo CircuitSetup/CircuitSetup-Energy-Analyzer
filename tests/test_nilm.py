@@ -442,6 +442,72 @@ def test_normalize_assignment_model_preserves_valid_v2_nested_fields() -> None:
     assert normalized["evidence_summary"]["quality_issues"] == ["x"]
 
 
+def test_assignment_model_fingerprint_tracks_reactive_and_confidence_fields() -> None:
+    base = {
+        "power_states_w": [0, 80],
+        "transition_prototypes": [
+            {
+                "direction": "on",
+                "from_state_w": 0,
+                "to_state_w": 80,
+                "delta_w": 80,
+                "spread_w": 1,
+                "delta_var": 10,
+                "spread_var": 1,
+                "sample_count": 3,
+            }
+        ],
+        "model_confidence": 0.7,
+    }
+    changed = {
+        **base,
+        "transition_prototypes": [
+            {**base["transition_prototypes"][0], "delta_var": 20}
+        ],
+    }
+    assert (
+        nilm_domain.normalize_nilm_assignment_model(base)["model_fingerprint"]
+        != nilm_domain.normalize_nilm_assignment_model(changed)["model_fingerprint"]
+    )
+
+
+def test_normalize_assignment_model_orders_prototypes_and_backfills_power_states() -> (
+    None
+):
+    prototypes = [
+        {
+            "direction": "off",
+            "from_state_w": 80,
+            "to_state_w": 0,
+            "delta_w": -80,
+            "spread_w": 1,
+            "sample_count": 3,
+        },
+        {
+            "direction": "on",
+            "from_state_w": 0,
+            "to_state_w": 80,
+            "delta_w": 80,
+            "spread_w": 1,
+            "sample_count": 3,
+        },
+    ]
+    first = nilm_domain.normalize_nilm_assignment_model(
+        {
+            "states": [{"id": "running", "power_w": 80}, {"id": "off", "power_w": 0}],
+            "transition_prototypes": prototypes,
+        }
+    )
+    second = nilm_domain.normalize_nilm_assignment_model(
+        {
+            "states": [{"id": "off", "power_w": 0}, {"id": "running", "power_w": 80}],
+            "transition_prototypes": list(reversed(prototypes)),
+        }
+    )
+    assert first["power_states_w"] == [0.0, 80.0]
+    assert first == second
+
+
 def test_assignment_model_uses_recent_confirmed_complete_sessions() -> None:
     assignment = {
         "assignment_id": "pump",

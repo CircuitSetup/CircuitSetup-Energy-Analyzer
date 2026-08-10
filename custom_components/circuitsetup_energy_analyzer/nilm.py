@@ -216,6 +216,12 @@ def build_nilm_assignment_model(
         for key in ("power_states_w", "transition_prototypes", "model_fingerprint")
     }
     current = {key: model.get(key) for key in previous}
+    previous["transition_prototypes"] = sorted(
+        previous["transition_prototypes"], key=lambda item: item["direction"]
+    )
+    current["transition_prototypes"] = sorted(
+        current["transition_prototypes"], key=lambda item: item["direction"]
+    )
     if current != previous:
         model["model_revision"] += 1
     return model
@@ -670,11 +676,22 @@ def _model_fingerprint(model: Mapping[str, Any]) -> str:
     parts = repr(
         (
             model.get("power_states_w"),
-            [
-                (item.get("direction"), item.get("delta_w"), item.get("spread_w"))
+            sorted(
+                (
+                    item.get("direction"),
+                    item.get("delta_w"),
+                    item.get("spread_w"),
+                    item.get("delta_var"),
+                    item.get("spread_var"),
+                    item.get("sample_count"),
+                    item.get("effective_support"),
+                    item.get("distinct_days"),
+                )
                 for item in model.get("transition_prototypes", [])
-            ],
+            ),
             model.get("run_profile"),
+            model.get("model_confidence"),
+            model.get("evidence_confidence"),
         )
     )
     return sha256(parts.encode()).hexdigest()[:16]
@@ -833,6 +850,9 @@ def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, 
             )
         if {item["id"] for item in rich_states} == {"off", "running"}:
             states = sorted(rich_states, key=lambda item: item["id"] != "off")
+            if not state_values:
+                state_values = [states[0]["power_w"], states[1]["power_w"]]
+    prototypes.sort(key=lambda item: (item["direction"], item["delta_w"], item["id"]))
     normalized = {
         "model_schema_version": 2,
         "model_kind": str(assignment.get("model_kind") or "binary")
