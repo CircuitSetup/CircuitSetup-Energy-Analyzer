@@ -22,7 +22,9 @@ from custom_components.circuitsetup_energy_analyzer.managers.store_persistence i
 from custom_components.circuitsetup_energy_analyzer.models import (
     ApplianceProfile,
     CircuitConfig,
+    CircuitEvent,
     CircuitMode,
+    EventType,
     NilmSourceKind,
     PowerFlowMode,
 )
@@ -111,15 +113,49 @@ def test_nilm_controller_filters_known_load_events_from_registry() -> None:
             ),
         )
     )
+    timestamp = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     events = [
-        SimpleNamespace(circuit_id="mains"),
-        SimpleNamespace(circuit_id="fridge"),
-        SimpleNamespace(circuit_id="hvac"),
+        CircuitEvent(timestamp, "mains", EventType.START),
+        CircuitEvent(
+            timestamp,
+            "fridge",
+            EventType.POWER_TRANSITION,
+            features={"transition_delta_w": 100.0},
+        ),
+        CircuitEvent(timestamp, "hvac", EventType.START),
     ]
 
     assert [
         event.circuit_id for event in controller.known_load_events("mains", events)
     ] == ["fridge"]
+
+
+def test_nilm_controller_keeps_detector_transition_for_masking_but_not_helpers(
+) -> None:
+    mains_config = SimpleNamespace(
+        mode=CircuitMode.MAINS_NILM,
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+    )
+    direct_config = _config(ApplianceProfile.HVAC_BLOWER)
+    controller = _nilm_controller(
+        SimpleNamespace(
+            circuit_registry=SimpleNamespace(
+                known_load_circuit_ids=frozenset({"variable-speed-load"}),
+                config_for_circuit=lambda circuit_id: (
+                    mains_config if circuit_id == "mains" else direct_config
+                ),
+            ),
+        )
+    )
+    transition = CircuitEvent(
+        datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
+        "variable-speed-load",
+        EventType.POWER_TRANSITION,
+        features={"transition_delta_w": 100.0},
+    )
+
+    assert tuple(controller.known_load_events("mains", [transition])) == (transition,)
+    assert tuple(controller.helper_candidate_events("mains", [transition])) == ()
 
 
 def test_nilm_controller_filters_helpers_to_current_direct_loads() -> None:
@@ -269,7 +305,7 @@ def test_nilm_controller_masks_known_loads_only_for_mains(
     assert [
         event.circuit_id
         for event in controller.known_load_events(
-            "source", [SimpleNamespace(circuit_id="fridge")]
+            "source", [SimpleNamespace(circuit_id="fridge", event_type=EventType.START)]
         )
     ] == expected_circuit_ids
 

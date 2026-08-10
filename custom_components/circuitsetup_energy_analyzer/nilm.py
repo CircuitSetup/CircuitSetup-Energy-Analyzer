@@ -2136,19 +2136,27 @@ def attribute_known_loads(
         if edge.origin != "aggregate":
             continue
         for event_index, event in enumerate(events):
-            if event.event_type not in {EventType.START, EventType.STOP}:
+            if event.event_type not in {
+                EventType.START,
+                EventType.STOP,
+                EventType.POWER_TRANSITION,
+            }:
                 continue
-            if event.event_type is EventType.START and edge.direction != "on":
+            estimate = _event_power_estimate(event)
+            if estimate is None:
                 continue
-            if event.event_type is EventType.STOP and edge.direction != "off":
+            event_direction = (
+                "on"
+                if event.event_type is EventType.START
+                or estimate.signed_delta_w is not None and estimate.signed_delta_w > 0.0
+                else "off"
+            )
+            if edge.direction != event_direction:
                 continue
             time_distance_seconds, time_offset_seconds = _known_event_time_distance(
                 event, edge.timestamp
             )
             if time_distance_seconds > time_window_seconds:
-                continue
-            estimate = _event_power_estimate(event)
-            if estimate is None:
                 continue
             known_watts = estimate.magnitude_w
             power_source = estimate.source
@@ -2916,6 +2924,19 @@ def _event_power_estimate(event: CircuitEvent) -> KnownEventPowerEstimate | None
     """Select the transition delta first, then retain legacy power precedence."""
 
     signed_delta_w = _finite_event_feature_number(event, "transition_delta_w")
+    if event.event_type is EventType.POWER_TRANSITION:
+        if signed_delta_w is None or signed_delta_w == 0.0:
+            return None
+        return KnownEventPowerEstimate(
+            abs(signed_delta_w),
+            signed_delta_w,
+            "transition_delta_w",
+            _optional_nonnegative_event_feature_number(event, "transition_spread_w"),
+            _event_feature_datetime(event, "transition_timestamp"),
+            _optional_nonnegative_event_feature_number(
+                event, "transition_timing_uncertainty_s"
+            ),
+        )
     if (
         signed_delta_w is not None
         and (

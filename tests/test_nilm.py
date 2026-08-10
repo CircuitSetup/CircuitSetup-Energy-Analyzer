@@ -1538,6 +1538,78 @@ def test_attribute_known_loads_uses_signed_transition_delta_for_stop() -> None:
     assert match.explained_delta_w == -100.0
 
 
+@pytest.mark.parametrize("transition_delta_w", [100.0, -100.0])
+def test_attribute_known_loads_uses_power_transition_signed_delta_and_direction(
+    transition_delta_w: float,
+) -> None:
+    event = CircuitEvent(
+        timestamp=BASE_TIME + timedelta(seconds=10),
+        circuit_id="variable-speed-load",
+        event_type=EventType.POWER_TRANSITION,
+        features={
+            "transition_delta_w": transition_delta_w,
+            "startup_power_w": 1200.0,
+            "stop_power_w": 1200.0,
+        },
+    )
+    matching_edge = edge(10, transition_delta_w)
+    opposite_edge = edge(10, -transition_delta_w)
+
+    result = attribute_known_loads([matching_edge, opposite_edge], [event])
+
+    assert [match.edge for match in result.matched_edges] == [matching_edge]
+    match = result.matched_edges[0]
+    assert match.known_power_source == "transition_delta_w"
+    assert match.explained_delta_w == transition_delta_w
+    assert result.unmatched_edges == (opposite_edge,)
+
+
+@pytest.mark.parametrize("transition_delta_w", [None, 0.0, float("inf"), float("nan")])
+def test_attribute_known_loads_never_falls_back_for_invalid_power_transition_delta(
+    transition_delta_w: float | None,
+) -> None:
+    event = CircuitEvent(
+        timestamp=BASE_TIME + timedelta(seconds=10),
+        circuit_id="variable-speed-load",
+        event_type=EventType.POWER_TRANSITION,
+        features={
+            "transition_delta_w": transition_delta_w,
+            "startup_power_w": 100.0,
+            "stop_power_w": 100.0,
+            "state_power_w": 100.0,
+        },
+    )
+    aggregate = edge(10, 100.0)
+
+    result = attribute_known_loads([aggregate], [event])
+
+    assert result.matched_edges == ()
+    assert result.unmatched_edges == (aggregate,)
+
+
+def test_attribute_known_loads_retains_power_transition_topology_rejection() -> None:
+    aggregate = edge(10, 100.0, split_phase_type="balanced_240v")
+    event = CircuitEvent(
+        aggregate.timestamp,
+        "variable-speed-load",
+        EventType.POWER_TRANSITION,
+        features={"transition_delta_w": 100.0},
+    )
+
+    result = attribute_known_loads(
+        [aggregate],
+        [event],
+        topology_by_circuit={
+            "variable-speed-load": nilm_domain.KnownLoadTopology(("single_leg_a",))
+        },
+    )
+
+    assert result.matched_edges == ()
+    assert result.unmatched_edges == (aggregate,)
+    assert result.topology_rejections[0].event_type is EventType.POWER_TRANSITION
+    assert result.topology_rejections[0].explained_delta_w == 100.0
+
+
 @pytest.mark.parametrize(
     "transition_delta_w",
     [-100.0, 0.0, None, float("inf"), float("nan")],
