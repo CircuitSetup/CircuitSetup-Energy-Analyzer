@@ -701,6 +701,186 @@ async def test_invalid_schema_2_evidence_is_rejected_without_mutating_intervals(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "quality_flags",
+    (
+        {"complete": True},
+        {"complete"},
+        (flag for flag in ("complete",)),
+    ),
+)
+async def test_schema_2_evidence_rejects_non_list_quality_flags_before_mutation(
+    quality_flags: object,
+) -> None:
+    """Only a concrete bounded list can cross the persistence boundary."""
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        store_data=FeatureStoreData(),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=AsyncMock(),
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    controller = NilmController(
+        coordinator, label_interval_max_items=10, assignment_max_items=10
+    )
+    evidence = {
+        "evidence_schema_version": 2,
+        "evidence_source": "manual_backend",
+        "evidence_generated_at": "2026-06-02T12:00:00+00:00",
+        "source_coverage": 1.0,
+        "power_coverage": 1.0,
+        "start_transition_eligible": False,
+        "stop_transition_eligible": False,
+        "plateau_eligible": False,
+        "energy_complete": False,
+        "evidence_confidence": 1.0,
+        "power_confidence": 1.0,
+        "quality_flags": quality_flags,
+    }
+
+    with pytest.raises(ValueError, match="quality_flags"):
+        await controller.async_label_nilm_interval(
+            "mixed",
+            label="Pump",
+            start="2026-06-02T10:00:00+00:00",
+            end="2026-06-02T10:30:00+00:00",
+            evidence=evidence,
+        )
+
+    assert coordinator.store_data.nilm_label_intervals_by_circuit == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "overrides",
+    (
+        {"start_transition_eligible": True},
+        {"stop_transition_eligible": True},
+        {"energy_complete": True},
+        {"start_transition_w": -20.0},
+        {"stop_transition_w": 20.0},
+    ),
+)
+async def test_schema_2_evidence_rejects_inconsistent_transition_and_energy_fields(
+    overrides: dict[str, object],
+) -> None:
+    """Eligibility and completeness claims require compatible observed values."""
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        store_data=FeatureStoreData(),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=AsyncMock(),
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    controller = NilmController(
+        coordinator, label_interval_max_items=10, assignment_max_items=10
+    )
+    evidence = {
+        "evidence_schema_version": 2,
+        "evidence_source": "reference_backend",
+        "evidence_generated_at": "2026-06-02T12:00:00+00:00",
+        "source_coverage": 1.0,
+        "power_coverage": 1.0,
+        "start_transition_eligible": False,
+        "stop_transition_eligible": False,
+        "plateau_eligible": False,
+        "energy_complete": False,
+        "evidence_confidence": 1.0,
+        "power_confidence": 1.0,
+        "quality_flags": [],
+        **overrides,
+    }
+
+    with pytest.raises(ValueError, match="schema-2 evidence"):
+        await controller.async_label_nilm_interval(
+            "mixed",
+            label="Pump",
+            start="2026-06-02T10:00:00+00:00",
+            end="2026-06-02T10:30:00+00:00",
+            evidence=evidence,
+        )
+
+    assert coordinator.store_data.nilm_label_intervals_by_circuit == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    (
+        "source",
+        "start_transition_w",
+        "stop_transition_w",
+        "start_eligible",
+        "stop_eligible",
+        "observed",
+    ),
+    (
+        ("manual_backend", 75.0, None, True, False, 75.0),
+        ("reference_backend", None, -75.0, False, True, None),
+    ),
+)
+async def test_schema_2_evidence_preserves_valid_one_sided_backend_evidence(
+    source: str,
+    start_transition_w: float | None,
+    stop_transition_w: float | None,
+    start_eligible: bool,
+    stop_eligible: bool,
+    observed: float | None,
+) -> None:
+    """Valid one-sided backend evidence remains accepted for each backend source."""
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        store_data=FeatureStoreData(),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=AsyncMock(),
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    controller = NilmController(
+        coordinator, label_interval_max_items=10, assignment_max_items=10
+    )
+
+    saved = await controller.async_label_nilm_interval(
+        "mixed",
+        label="Pump",
+        start="2026-06-02T10:00:00+00:00",
+        end="2026-06-02T10:30:00+00:00",
+        evidence={
+            "evidence_schema_version": 2,
+            "evidence_source": source,
+            "evidence_generated_at": "2026-06-02T12:00:00+00:00",
+            "start_transition_w": start_transition_w,
+            "stop_transition_w": stop_transition_w,
+            "source_coverage": 1.0,
+            "power_coverage": 1.0,
+            "start_transition_eligible": start_eligible,
+            "stop_transition_eligible": stop_eligible,
+            "plateau_eligible": False,
+            "energy_complete": False,
+            "evidence_confidence": 1.0,
+            "power_confidence": 1.0,
+            "quality_flags": [],
+        },
+    )
+
+    assert saved["evidence_source"] == source
+    if observed is None:
+        assert "observed_transition_w" not in saved
+    else:
+        assert saved["observed_transition_w"] == observed
+
+
+@pytest.mark.asyncio
 async def test_batch_schema_2_validation_rolls_back_and_legacy_is_readable(
 ) -> None:
     """A bad schema-2 item changes neither legacy data nor membership."""

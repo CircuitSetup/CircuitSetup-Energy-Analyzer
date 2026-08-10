@@ -714,16 +714,37 @@ class NilmController:
                 raise ValueError(f"Invalid schema-2 evidence {key}.")
             normalized[key] = value
 
+        if (
+            normalized["start_transition_eligible"]
+            and (
+                normalized.get("start_transition_w") is None
+                or normalized["start_transition_w"] <= 0.0
+            )
+        ):
+            raise ValueError("Invalid schema-2 evidence start transition eligibility.")
+        if (
+            normalized["stop_transition_eligible"]
+            and (
+                normalized.get("stop_transition_w") is None
+                or normalized["stop_transition_w"] >= 0.0
+            )
+        ):
+            raise ValueError("Invalid schema-2 evidence stop transition eligibility.")
+        if (
+            normalized["energy_complete"]
+            and normalized.get("measured_energy_kwh") is None
+        ):
+            raise ValueError("Invalid schema-2 evidence complete energy.")
+
         flags = evidence.get("quality_flags")
-        if isinstance(flags, (str, bytes)) or not isinstance(flags, Iterable):
+        if not isinstance(flags, list):
             raise ValueError("Invalid schema-2 evidence quality_flags.")
-        normalized_flags = list(flags)
-        if len(normalized_flags) > 32 or any(
+        if len(flags) > 32 or any(
             not isinstance(flag, str) or not flag.strip() or len(flag) > 128
-            for flag in normalized_flags
+            for flag in flags
         ):
             raise ValueError("Invalid schema-2 evidence quality_flags.")
-        normalized["quality_flags"] = normalized_flags
+        normalized["quality_flags"] = list(flags)
 
         if not normalized["plateau_eligible"]:
             normalized.pop("median_power_w", None)
