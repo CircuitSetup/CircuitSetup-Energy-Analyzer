@@ -1007,6 +1007,24 @@ def test_pending_transition_post_samples_remain_bounded_and_age_pruned() -> None
     assert start.features["transition_window_end"] == "2026-06-18T12:01:41+00:00"
 
 
+def test_pending_transition_post_window_excludes_samples_older_than_sixty_seconds(
+) -> None:
+    machine = _machine(on_dwell_seconds=100.0)
+    machine.process(_sample(0, 20.0, circuit_id="fridge"))
+    for seconds, watts in (
+        (1, 100.0),
+        (21, 110.0),
+        (41, 120.0),
+        (61, 130.0),
+        (81, 140.0),
+    ):
+        machine.process(_sample(seconds, watts, circuit_id="fridge"))
+    start = machine.process(_sample(101, 150.0, circuit_id="fridge")).events[0]
+
+    assert start.features["post_sample_count"] == 4
+    assert start.features["post_power_median_w"] == 135.0
+
+
 def test_operating_state_machine_recovers_from_unavailable_without_false_start(
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.operating_detection import (
