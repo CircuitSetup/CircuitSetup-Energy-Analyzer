@@ -1611,10 +1611,52 @@ def test_nilm_duration_score_uses_full_age_only_for_supported_stop_to_off() -> N
     ) is None
 
 
+def test_nilm_duration_score_legacy_fallback_requires_transition_to_zero() -> None:
+    assignment = {
+        "run_profile": {
+            "duration_s": {
+                "effective_support": 5.0,
+                "distinct_days": 3,
+                "median_seconds": 100.0,
+                "p10_seconds": 90.0,
+                "p90_seconds": 110.0,
+            }
+        }
+    }
+    runtime = {"session_started_at": BASE_TIME - timedelta(seconds=100)}
+    active_drop = nilm_domain.NilmTransitionPrototype(
+        assignment_id="dryer",
+        direction="off",
+        from_state_w=200.0,
+        to_state_w=100.0,
+        delta_w=-100.0,
+        spread_w=5.0,
+        sample_count=5,
+    )
+    legacy_stop = nilm_domain.NilmTransitionPrototype(
+        assignment_id="dryer",
+        direction="off",
+        from_state_w=100.0,
+        to_state_w=0.0,
+        delta_w=-100.0,
+        spread_w=5.0,
+        sample_count=5,
+    )
+
+    assert nilm_domain.duration_state_score_for_transition(
+        active_drop, assignment, runtime, BASE_TIME
+    ) is None
+    assert nilm_domain.duration_state_score_for_transition(
+        legacy_stop, assignment, runtime, BASE_TIME
+    ) == 1.0
+
+
 def test_nilm_validation_feedback_is_smoothed_and_revision_gated() -> None:
     assignment = {"model_revision": 7, "model_fingerprint": "model-seven"}
     sparse = [
         {
+            "outcome_id": "feedback-0",
+            "source": "feedback",
             "outcome": "correct",
             "timestamp": BASE_TIME.isoformat(),
             "model_revision": 7,
@@ -1630,6 +1672,8 @@ def test_nilm_validation_feedback_is_smoothed_and_revision_gated() -> None:
 
     eligible = [
         {
+            "outcome_id": f"feedback-{index}",
+            "source": "feedback",
             "outcome": "wrong" if index == 4 else "correct",
             "timestamp": (BASE_TIME + timedelta(days=index % 3)).isoformat(),
             "model_revision": 7,
@@ -1638,6 +1682,8 @@ def test_nilm_validation_feedback_is_smoothed_and_revision_gated() -> None:
     ]
     eligible.append(
         {
+            "outcome_id": "feedback-mismatched",
+            "source": "feedback",
             "outcome": "wrong",
             "timestamp": (BASE_TIME + timedelta(days=4)).isoformat(),
             "model_revision": 6,
@@ -1662,6 +1708,8 @@ def test_nilm_validation_accepts_only_trusted_ground_truth_and_held_out_data() -
         "validation_method": "overlap",
         "validation_outcomes": [
             {
+                "outcome_id": f"ground-truth-{index}",
+                "source": "ground_truth",
                 "outcome": "correct",
                 "timestamp": (BASE_TIME + timedelta(days=index % 3)).isoformat(),
                 "model_revision": 2,
@@ -1683,6 +1731,8 @@ def test_nilm_validation_accepts_only_trusted_ground_truth_and_held_out_data() -
         {"model_fingerprint": "current"},
         held_out_replay=[
             {
+                "replay_id": f"replay-{index}",
+                "source": "held_out_replay",
                 "outcome": "correct",
                 "timestamp": (BASE_TIME + timedelta(days=index % 3)).isoformat(),
                 "model_fingerprint": "current",
@@ -1692,6 +1742,42 @@ def test_nilm_validation_accepts_only_trusted_ground_truth_and_held_out_data() -
     )
     assert held_out["source_counts"] == {"held_out_replay": 5}
     assert held_out["runtime_score"] is not None
+
+
+def test_nilm_validation_requires_provenance_and_deduplicates_stable_ids() -> None:
+    assignment = {"model_revision": 7}
+    duplicated = [
+        {
+            "outcome_id": "same-outcome",
+            "source": "feedback" if index < 3 else "held_out_replay",
+            "outcome": "correct",
+            "timestamp": (BASE_TIME + timedelta(days=index % 3)).isoformat(),
+            "model_revision": 7,
+        }
+        for index in range(5)
+    ]
+
+    profile = nilm_domain.build_nilm_validation_profile(
+        assignment,
+        session_outcomes=duplicated[:3],
+        held_out_replay=duplicated[3:],
+    )
+
+    assert profile["sample_count"] == 1
+    assert profile["runtime_eligible"] is False
+    assert profile["runtime_score"] is None
+    unprovenanced = [
+        {
+            "outcome_id": f"untrusted-{index}",
+            "outcome": "correct",
+            "timestamp": (BASE_TIME + timedelta(days=index % 3)).isoformat(),
+            "model_revision": 7,
+        }
+        for index in range(5)
+    ]
+    assert nilm_domain.build_nilm_validation_profile(
+        assignment, session_outcomes=unprovenanced
+    )["sample_count"] == 0
 
 
 def test_nilm_compound_uses_each_component_prototype_evidence_deterministically(

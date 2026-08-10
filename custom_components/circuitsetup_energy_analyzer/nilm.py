@@ -1705,6 +1705,13 @@ def duration_state_score_for_transition(
         return None
     if prototype.direction != "off" or prototype.delta_w >= 0:
         return None
+    if (
+        not isfinite(prototype.from_state_w)
+        or prototype.from_state_w <= 0
+        or not isfinite(prototype.to_state_w)
+        or not isclose(prototype.to_state_w, 0.0, abs_tol=1e-6)
+    ):
+        return None
     if prototype.to_state_id and prototype.to_state_id != "off":
         return None
     if prototype.from_state_id == "off":
@@ -1778,17 +1785,16 @@ def build_nilm_validation_profile(
     held_out_replay: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Build a deterministic, revision-matched validation reliability profile."""
-    trusted: list[tuple[str, bool, str | None]] = []
-    for source, records in (
-        ("session_outcome", session_outcomes),
-        ("held_out_replay", held_out_replay),
-    ):
-        trusted.extend(
-            item
-            for record in records
-            if (item := _nilm_trusted_validation_outcome(assignment, record, source))
-            is not None
+    trusted = [
+        item
+        for record in (*tuple(session_outcomes), *tuple(held_out_replay))
+        if (
+            item := _nilm_trusted_validation_outcome(
+                assignment, record, allow_ground_truth=False
+            )
         )
+        is not None
+    ]
 
     schema = _nilm_finite_number(assignment.get("validation_schema_version"))
     method = str(assignment.get("validation_method") or "").strip().lower()
@@ -1801,34 +1807,40 @@ def build_nilm_validation_profile(
                 if isinstance(record, Mapping)
                 and (
                     item := _nilm_trusted_validation_outcome(
-                        assignment, record, "ground_truth"
+                        assignment, record, allow_ground_truth=True
                     )
                 )
                 is not None
             )
 
-    correct_count = sum(outcome for _, outcome, _ in trusted)
-    wrong_count = len(trusted) - correct_count
-    days = {day for _, _, day in trusted if day is not None}
+    deduplicated = _nilm_deduplicate_validation_outcomes(trusted)
+
+    correct_count = sum(outcome for _, _, outcome, _ in deduplicated)
+    wrong_count = len(deduplicated) - correct_count
+    days = {day for _, _, _, day in deduplicated if day is not None}
     reliability = (
         (correct_count + NILM_VALIDATION_PRIOR_CORRECT)
         / (
-            len(trusted)
+            len(deduplicated)
             + NILM_VALIDATION_PRIOR_CORRECT
             + NILM_VALIDATION_PRIOR_WRONG
         )
     )
     eligible = (
-        len(trusted) >= NILM_VALIDATION_MIN_OUTCOMES
+        len(deduplicated) >= NILM_VALIDATION_MIN_OUTCOMES
         and len(days) >= NILM_VALIDATION_MIN_DISTINCT_DAYS
     )
     source_counts = {
-        source: sum(item_source == source for item_source, _, _ in trusted)
-        for source in sorted({item_source for item_source, _, _ in trusted})
+        source: sum(
+            item_source == source for _, item_source, _, _ in deduplicated
+        )
+        for source in sorted(
+            {item_source for _, item_source, _, _ in deduplicated}
+        )
     }
     return {
-        "sample_count": len(trusted),
-        "effective_support": float(len(trusted)),
+        "sample_count": len(deduplicated),
+        "effective_support": float(len(deduplicated)),
         "distinct_days": len(days),
         "correct_count": correct_count,
         "wrong_count": wrong_count,
@@ -1842,8 +1854,21 @@ def build_nilm_validation_profile(
 def _nilm_trusted_validation_outcome(
     assignment: Mapping[str, Any],
     record: Mapping[str, Any],
-    source: str,
-) -> tuple[str, bool, str | None] | None:
+    *,
+    allow_ground_truth: bool,
+) -> tuple[str, str, bool, str | None] | None:
+    outcome_id = str(
+        record.get("outcome_id")
+        or record.get("session_id")
+        or record.get("replay_id")
+        or record.get("validation_outcome_id")
+        or ""
+    ).strip()
+    if not outcome_id:
+        return None
+    source = _nilm_validation_source(record)
+    if source is None or (source == "ground_truth" and not allow_ground_truth):
+        return None
     outcome = str(record.get("outcome") or record.get("result") or "").strip().lower()
     if outcome not in {"correct", "wrong"}:
         return None
@@ -1851,7 +1876,48 @@ def _nilm_trusted_validation_outcome(
         return None
     timestamp = _nilm_datetime(record.get("timestamp") or record.get("created_at"))
     day = timestamp.date().isoformat() if timestamp else None
-    return source, outcome == "correct", day
+    return outcome_id, source, outcome == "correct", day
+
+
+def _nilm_validation_source(record: Mapping[str, Any]) -> str | None:
+    source = str(
+        record.get("source")
+        or record.get("validation_source")
+        or record.get("outcome_source")
+        or record.get("source_type")
+        or ""
+    ).strip().lower()
+    if source in {"feedback", "explicit_feedback", "session_feedback", "user_feedback"}:
+        return "feedback"
+    if source in {"held_out_replay", "heldout_replay", "held-out-replay"}:
+        return "held_out_replay"
+    if source in {"ground_truth", "assignment_ground_truth"}:
+        return "ground_truth"
+    return None
+
+
+def _nilm_deduplicate_validation_outcomes(
+    records: Iterable[tuple[str, str, bool, str | None]],
+) -> list[tuple[str, str, bool, str | None]]:
+    by_id: dict[str, list[tuple[str, str, bool, str | None]]] = defaultdict(list)
+    for record in records:
+        by_id[record[0]].append(record)
+    deduplicated: list[tuple[str, str, bool, str | None]] = []
+    source_order = {"feedback": 0, "held_out_replay": 1, "ground_truth": 2}
+    for outcome_id in sorted(by_id):
+        duplicates = by_id[outcome_id]
+        outcomes = {item[2] for item in duplicates}
+        if len(outcomes) != 1:
+            continue
+        source = min(
+            (item[1] for item in duplicates),
+            key=lambda item: (source_order[item], item),
+        )
+        days = sorted(item[3] for item in duplicates if item[3] is not None)
+        deduplicated.append(
+            (outcome_id, source, outcomes.pop(), days[0] if days else None)
+        )
+    return deduplicated
 
 
 def _nilm_validation_revision_matches(
