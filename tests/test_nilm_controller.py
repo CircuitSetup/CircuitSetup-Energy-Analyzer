@@ -4352,7 +4352,7 @@ async def test_session_feedback_preserves_matching_schema_v2_ground_truth_outcom
                 "outcome_id": "session-1",
                 "session_id": "session-1",
                 "source": "ground_truth",
-                "outcome": "correct",
+                "outcome": "wrong",
                 "timestamp": now.isoformat(),
                 "model_revision": 7,
                 "model_fingerprint": "model-seven",
@@ -4384,6 +4384,9 @@ async def test_session_feedback_preserves_matching_schema_v2_ground_truth_outcom
         (record["outcome_id"], record["source"])
         for record in assignment["validation_outcomes"]
     } == {("session-1", "ground_truth"), ("session-1", "explicit_feedback")}
+    profile = assignment["validation_profiles_by_revision"]["7:model-seven"]
+    assert profile["sample_count"] == 0
+    assert profile["runtime_score"] is None
 
 
 @pytest.mark.asyncio

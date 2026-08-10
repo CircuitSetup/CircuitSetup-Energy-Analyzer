@@ -2869,14 +2869,20 @@ class NilmController:
             if revision is None and not fingerprint:
                 continue
             key = f"{revision or 0}:{fingerprint}"
+            profile_records: list[dict[str, Any]] = []
             projection, records = grouped.setdefault(
                 key,
                 (
                     {
                         "model_revision": revision or 0,
                         "model_fingerprint": fingerprint,
+                        "validation_schema_version": assignment.get(
+                            "validation_schema_version"
+                        ),
+                        "validation_method": assignment.get("validation_method"),
+                        "validation_outcomes": profile_records,
                     },
-                    [],
+                    profile_records,
                 ),
             )
             records.append(dict(record))
