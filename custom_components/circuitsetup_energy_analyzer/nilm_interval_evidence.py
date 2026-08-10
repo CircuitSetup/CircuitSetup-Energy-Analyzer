@@ -158,11 +158,9 @@ def extract_reference_intervals(
     """Extract bounded, dwell-confirmed active intervals from reference history."""
     if end <= start:
         raise ValueError("end must be after start")
-    samples = tuple(
-        sample
-        for sample in normalize_reference_samples(rows)
-        if start <= sample.timestamp <= end
-    )
+    normalized = normalize_reference_samples(rows)
+    before_start = tuple(sample for sample in normalized if sample.timestamp < start)
+    samples = tuple(sample for sample in normalized if start <= sample.timestamp <= end)
     if not samples:
         return NilmReferenceExtractionResult((), NilmReferenceDiagnostics())
     active = False
@@ -173,14 +171,20 @@ def extract_reference_intervals(
     unknown_at: datetime | None = None
     unknown_total = 0.0
     bridged = 0
-    raw: list[tuple[datetime, datetime, bool, bool, float, int, set[str]]] = []
+    raw: list[tuple[datetime, datetime, bool, bool, float, int, float, set[str]]] = []
     previous: NilmReferenceSample | None = None
+    if before_start:
+        prior_state = _resolved_reference_state(before_start[-1], False, settings)
+        if prior_state is ReferenceActivityState.ACTIVE:
+            active, interval_start, left_censored = True, start, True
+        previous = before_start[-1]
     for sample in samples:
         prior = previous
         previous = sample
         state = _resolved_reference_state(sample, active, settings)
         if state is ReferenceActivityState.UNKNOWN:
             unknown_at = unknown_at or sample.timestamp
+            candidate, candidate_at = None, None
             if (
                 active
                 and (sample.timestamp - unknown_at).total_seconds()
@@ -194,6 +198,7 @@ def extract_reference_intervals(
                         False,
                         unknown_total,
                         0,
+                        0.0,
                         {"unknown_gap_split"},
                     )
                 )
@@ -204,6 +209,21 @@ def extract_reference_intervals(
                     None,
                 )
             continue
+        confirmed_this_row = False
+        confirmed_state: ReferenceActivityState | None = None
+        confirmed_at: datetime | None = None
+        if candidate is not None and candidate_at is not None:
+            candidate_dwell = (
+                settings.on_dwell_seconds
+                if candidate is ReferenceActivityState.ACTIVE
+                else settings.off_dwell_seconds
+            )
+            if (sample.timestamp - candidate_at).total_seconds() >= candidate_dwell:
+                confirmed_state, confirmed_at = candidate, candidate_at
+                if candidate is ReferenceActivityState.ACTIVE and not active:
+                    active, interval_start, left_censored = True, candidate_at, False
+                confirmed_this_row = True
+                candidate, candidate_at = None, None
         if unknown_at is not None:
             gap = (sample.timestamp - unknown_at).total_seconds()
             if active and gap <= settings.maximum_unknown_gap_seconds:
@@ -218,6 +238,7 @@ def extract_reference_intervals(
                         False,
                         unknown_total,
                         0,
+                        0.0,
                         {"unknown_gap_split"},
                     )
                 )
@@ -228,6 +249,25 @@ def extract_reference_intervals(
                     None,
                 )
             unknown_at = None
+        if confirmed_this_row and active and state is ReferenceActivityState.INACTIVE:
+            raw.append(
+                (
+                    interval_start or start,
+                    (
+                        confirmed_at
+                        if confirmed_state is ReferenceActivityState.INACTIVE
+                        else sample.timestamp
+                    ),
+                    left_censored,
+                    False,
+                    unknown_total,
+                    0,
+                    0.0,
+                    set(),
+                )
+            )
+            active, interval_start, unknown_total = False, None, 0.0
+            continue
         if state is (
             ReferenceActivityState.ACTIVE if active else ReferenceActivityState.INACTIVE
         ):
@@ -260,11 +300,39 @@ def extract_reference_intervals(
                     False,
                     unknown_total,
                     0,
+                    0.0,
                     set(),
                 )
             )
             active, interval_start, unknown_total = False, None, 0.0
         candidate, candidate_at = None, None
+    if (
+        unknown_at is None
+        and candidate is not None
+        and candidate_at is not None
+        and (end - candidate_at).total_seconds()
+        >= (
+            settings.on_dwell_seconds
+            if candidate is ReferenceActivityState.ACTIVE
+            else settings.off_dwell_seconds
+        )
+    ):
+        if candidate is ReferenceActivityState.ACTIVE and not active:
+            active, interval_start, left_censored = True, candidate_at, False
+        elif candidate is ReferenceActivityState.INACTIVE and active:
+            raw.append(
+                (
+                    interval_start or start,
+                    candidate_at,
+                    left_censored,
+                    False,
+                    unknown_total,
+                    0,
+                    0.0,
+                    set(),
+                )
+            )
+            active = False
     if active:
         raw.append(
             (
@@ -274,15 +342,20 @@ def extract_reference_intervals(
                 True,
                 unknown_total,
                 0,
+                0.0,
                 {"right_censored"},
             )
         )
-    merged: list[tuple[datetime, datetime, bool, bool, float, int, set[str]]] = []
+    merged: list[
+        tuple[datetime, datetime, bool, bool, float, int, float, set[str]]
+    ] = []
     merged_count = 0
     for item in raw:
         if (
             merged
             and (item[0] - merged[-1][1]).total_seconds() <= settings.merge_gap_seconds
+            and "unknown_gap_split" not in item[7]
+            and "unknown_gap_split" not in merged[-1][7]
         ):
             previous = merged.pop()
             merged_count += 1
@@ -294,20 +367,30 @@ def extract_reference_intervals(
                     item[3],
                     previous[4] + item[4],
                     previous[5] + item[5] + 1,
-                    previous[6] | item[6] | {"inactive_gap_merged"},
+                    previous[6] + item[6] + (item[0] - previous[1]).total_seconds(),
+                    previous[7] | item[7] | {"inactive_gap_merged"},
                 )
             )
         else:
             merged.append(item)
     intervals: list[NilmReferenceInterval] = []
     discarded = 0
-    for interval_start, interval_end, left, right, unknown, gap_count, flags in merged:
+    for (
+        interval_start,
+        interval_end,
+        left,
+        right,
+        unknown,
+        gap_count,
+        inactive_gap,
+        flags,
+    ) in merged:
         interval_duration = (interval_end - interval_start).total_seconds()
         if interval_duration < settings.minimum_interval_seconds:
             discarded += 1
             continue
-        coverage = max(0.0, min(1.0, 1 - unknown / interval_duration))
-        confidence = coverage * (0.85 if left or right else 1.0) * (0.9**gap_count)
+        coverage = max(0.0, min(1.0, 1 - (unknown + inactive_gap) / interval_duration))
+        confidence = coverage * (0.85 if left or right else 1.0)
         intervals.append(
             NilmReferenceInterval(
                 interval_start,

@@ -198,3 +198,62 @@ def test_diagnostics_report_candidate_imported_and_low_coverage_counts() -> None
     assert result.diagnostics.bridged_unknown_gap_count == 1
     assert result.diagnostics.merged_short_gap_count == 0
     assert result.diagnostics.low_coverage_interval_count == 1
+
+
+def test_binary_state_persists_between_rows_and_prestart_is_censored() -> None:
+    persisted = extract_reference_intervals(
+        rows((10, "on"), (40, "off")),
+        start=BASE,
+        end=BASE + timedelta(seconds=50),
+        settings=SETTINGS,
+    )
+    prestart = extract_reference_intervals(
+        rows((-10, "on"), (30, "on")),
+        start=BASE,
+        end=BASE + timedelta(seconds=40),
+        settings=SETTINGS,
+    )
+    assert [(item.start, item.end) for item in persisted.intervals] == [
+        (BASE + timedelta(seconds=10), BASE + timedelta(seconds=40))
+    ]
+    assert prestart.intervals[0].left_censored is True
+
+
+def test_unknown_resets_pending_dwell_and_unknown_splits_never_merge() -> None:
+    pending = extract_reference_intervals(
+        rows((0, "off"), (10, "on"), (20, "unknown"), (30, "on"), (40, "on")),
+        start=BASE,
+        end=BASE + timedelta(seconds=49),
+        settings=SETTINGS,
+    )
+    split = extract_reference_intervals(
+        rows(
+            (0, "on"), (20, "on"), (30, "unknown"), (60, "on"), (80, "on"), (100, "off")
+        ),
+        start=BASE,
+        end=BASE + timedelta(seconds=110),
+        settings=replace(SETTINGS, merge_gap_seconds=100),
+    )
+    assert pending.intervals == ()
+    assert len(split.intervals) == 2
+
+
+def test_request_end_confirms_persisted_binary_on_and_off_candidates() -> None:
+    on_pending = extract_reference_intervals(
+        rows((0, "off"), (10, "on")),
+        start=BASE,
+        end=BASE + timedelta(seconds=50),
+        settings=SETTINGS,
+    )
+    off_pending = extract_reference_intervals(
+        rows((0, "on"), (20, "on"), (30, "off")),
+        start=BASE,
+        end=BASE + timedelta(seconds=60),
+        settings=SETTINGS,
+    )
+    assert [
+        (item.start, item.end, item.right_censored) for item in on_pending.intervals
+    ] == [(BASE + timedelta(seconds=10), BASE + timedelta(seconds=50), True)]
+    assert [
+        (item.start, item.end, item.right_censored) for item in off_pending.intervals
+    ] == [(BASE, BASE + timedelta(seconds=30), False)]
