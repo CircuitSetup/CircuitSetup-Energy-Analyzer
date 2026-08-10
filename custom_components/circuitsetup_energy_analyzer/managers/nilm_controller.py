@@ -2440,6 +2440,14 @@ class NilmController:
             for match in result.matches[-64:]
         ]
         assignment["history_validation_revision"] = 2
+        self._record_history_validation_outcomes(
+            assignment,
+            circuit_id,
+            session_by_id=session_by_id,
+            matched_session_ids=matched_session_ids,
+            conflicting_session_ids=conflicting_session_ids,
+        )
+        self._rebuild_validation_profiles(assignment)
         self._update_assignment_duration_bounds(circuit_id, assignment)
         self._rebuild_assignment_model(circuit_id, assignment)
         assignment["confirmed_sessions"] = len(confirmed)
@@ -2742,6 +2750,55 @@ class NilmController:
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now_dt)
         return dict(assignment)
+
+    def _record_history_validation_outcomes(
+        self,
+        assignment: dict[str, Any],
+        circuit_id: str,
+        *,
+        session_by_id: Mapping[str, Mapping[str, Any]],
+        matched_session_ids: Iterable[str],
+        conflicting_session_ids: Iterable[str],
+    ) -> None:
+        """Replace one-to-one ground-truth outcomes with provenanced results."""
+        outcomes = [
+            dict(item)
+            for item in assignment.get("validation_outcomes", ())
+            if isinstance(item, Mapping)
+            and str(item.get("source") or "").strip().lower() != "ground_truth"
+        ]
+        decisions = {
+            **{session_id: "correct" for session_id in matched_session_ids},
+            **{session_id: "wrong" for session_id in conflicting_session_ids},
+        }
+        for session_id, outcome in sorted(decisions.items()):
+            provenance = self._session_prediction_provenance(circuit_id, session_id)
+            if provenance is None or provenance[0] is None:
+                continue
+            model_revision, model_fingerprint = provenance
+            session = session_by_id.get(session_id, {})
+            timestamp = str(
+                session.get("end") or session.get("start") or ""
+            ).strip()
+            if not timestamp:
+                continue
+            outcomes.append({
+                "outcome_id": session_id,
+                "session_id": session_id,
+                "source": "ground_truth",
+                "outcome": outcome,
+                "timestamp": timestamp,
+                "model_revision": model_revision,
+                "model_fingerprint": model_fingerprint,
+            })
+        assignment["validation_schema_version"] = 2
+        assignment["validation_method"] = "one_to_one_iou"
+        if outcomes:
+            assignment["validation_outcomes"] = outcomes[
+                -_NILM_VALIDATION_OUTCOME_MAX_ITEMS:
+            ]
+        else:
+            assignment.pop("validation_outcomes", None)
 
     def _record_session_validation_feedback(
         self,

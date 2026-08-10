@@ -10161,6 +10161,85 @@ def test_nilm_runtime_validation_breaks_equal_tie_for_current_revision() -> None
     assert reconciliation["validation_rank_impact_count"] == 1
 
 
+def test_nilm_runtime_uses_revision_matched_explicit_feedback_scores() -> None:
+    """Dropping persisted feedback from runtime profile construction must fail."""
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+
+    def assignment(
+        assignment_id: str,
+        outcome: str,
+        helper_id: str,
+        helper_confidence: float,
+    ) -> dict[str, object]:
+        return {
+            **_reconciliation_assignment(assignment_id, 100.0),
+            "model_revision": 7,
+            "model_fingerprint": f"{assignment_id}-model-seven",
+            "validation_outcomes": [
+                {
+                    "outcome_id": f"{assignment_id}-{index}",
+                    "source": "explicit_feedback",
+                    "outcome": outcome,
+                    "timestamp": (now - timedelta(days=index % 3)).isoformat(),
+                    "model_revision": 7,
+                    "model_fingerprint": f"{assignment_id}-model-seven",
+                }
+                for index in range(5)
+            ],
+            "helper_links": [{
+                "helper_circuit_id": helper_id,
+                "relationship": "corroborates",
+                "status": "confirmed",
+                "confidence": helper_confidence,
+                "start_lag_seconds": 0.0,
+                "start_lag_mad_seconds": 0.0,
+            }],
+        }
+
+    assignments = (
+        assignment("reliable", "correct", "helper-reliable", 0.7),
+        assignment("unreliable", "wrong", "helper-unreliable", 0.3),
+    )
+    runtime = {
+        assignment_id: {
+            "status": "off",
+            "state_power_w": 0.0,
+            "estimated_power_w": 0.0,
+            "consistent": True,
+            "energy_kwh": 0.0,
+        }
+        for assignment_id in ("reliable", "unreliable")
+    }
+    helper_events = (
+        CircuitEvent(now, "helper-reliable", EventType.START, features={}),
+        CircuitEvent(now, "helper-unreliable", EventType.START, features={}),
+    )
+    edge = NilmEdge(now, 100.0, 0.0, 100.0, 0.0, "on")
+
+    runtime, reconciliation, _, accepted = reconcile_component_runtime(
+        source_power_w=100.0,
+        timestamp=now,
+        assignments=assignments,
+        runtime=runtime,
+        edges=(edge,),
+        standby_w=0.0,
+        noise_spread_w=0.0,
+        helper_events=helper_events,
+        available_helper_ids={"helper-reliable", "helper-unreliable"},
+    )
+
+    assert accepted == [edge]
+    assert runtime["reliable"]["status"] == "on"
+    assert runtime["unreliable"]["status"] == "off"
+    assert reconciliation["validation_channel_available_count"] == 1
+    assert reconciliation["validation_rank_impact_count"] == 1
+
+
 def test_nilm_runtime_diagnostics_ignore_unrelated_validation_scores() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
@@ -10203,7 +10282,7 @@ def test_nilm_runtime_diagnostics_ignore_unrelated_validation_scores() -> None:
     assert reconciliation["validation_channel_available_count"] == 0
     assert reconciliation["evidence_unavailable_reason_counts"] == {
         "insufficient_validation_support": 1,
-        "duration_unavailable": 1,
+        "duration_unsupported_transition": 1,
     }
 
 
@@ -10390,14 +10469,14 @@ def test_nilm_runtime_persists_bounded_prediction_provenance_on_completion() -> 
     assert runtime["dryer"]["current_state_id"] == "running"
     assert runtime["dryer"]["state_since"] == started_at.isoformat()
     assert runtime["dryer"]["start_prediction"]["prototype_id"] == (
-        "dryer-start-v7"
+        "dryer:start:off->running"
     )
     assert runtime["dryer"]["accepted_predictions"][0] == {
         "prediction_timestamp": started_at.isoformat(),
         "model_schema_version": 2,
         "model_revision": 7,
         "model_fingerprint": "dryer-model-seven",
-        "prototype_id": "dryer-start-v7",
+        "prototype_id": "dryer:start:off->running",
         "transition_kind": "start",
         "candidate_score": 1.0,
         "winner_margin": None,
@@ -10424,16 +10503,16 @@ def test_nilm_runtime_persists_bounded_prediction_provenance_on_completion() -> 
     )
 
     session = completed[0]
-    assert session["start_prototype_id"] == "dryer-start-v7"
-    assert session["stop_prototype_id"] == "dryer-stop-v7"
+    assert session["start_prototype_id"] == "dryer:start:off->running"
+    assert session["stop_prototype_id"] == "dryer:stop:running->off"
     assert session["start_model_revision"] == session["stop_model_revision"] == 7
     assert [item["state_id"] for item in session["state_path"]] == [
         "running",
         "off",
     ]
     assert [item["prototype_id"] for item in session["accepted_predictions"]] == [
-        "dryer-start-v7",
-        "dryer-stop-v7",
+        "dryer:start:off->running",
+        "dryer:stop:running->off",
     ]
     assert runtime["dryer"]["last_stop"] == stopped_at.isoformat()
     assert runtime["dryer"]["state_path"] == []
@@ -10510,10 +10589,12 @@ def test_nilm_runtime_stop_then_start_keeps_each_session_provenance() -> None:
     assert completed[0]["session_id"] == "old-session"
     assert completed[0]["start"] == old_start.isoformat()
     assert completed[0]["start_prototype_id"] == "dryer-start-v6"
-    assert completed[0]["stop_prototype_id"] == "dryer-stop-v7"
+    assert completed[0]["stop_prototype_id"] == "dryer:stop:running->off"
     assert runtime["dryer"]["status"] == "on"
     assert runtime["dryer"]["session_start"] == restart_at.isoformat()
-    assert runtime["dryer"]["start_prediction"]["prototype_id"] == "dryer-start-v7"
+    assert runtime["dryer"]["start_prediction"]["prototype_id"] == (
+        "dryer:start:off->running"
+    )
 
 
 def test_nilm_source_unavailable_preserves_metrics_and_counts_input_edge() -> None:
@@ -11508,7 +11589,8 @@ def test_runtime_assignment_model_preserves_prediction_identity() -> None:
         prototype.transition_kind,
         prototype.from_state_id,
         prototype.to_state_id,
-    ) == ("dryer-start-v7", "start", "off", "running")
+    ) == ("dryer:start:off->running", "start", "off", "running")
+    assert prototype.prototype_aliases == ("dryer-start-v7",)
     assert (
         model.model_schema_version,
         model.model_revision,

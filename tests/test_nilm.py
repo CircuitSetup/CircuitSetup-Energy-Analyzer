@@ -182,6 +182,77 @@ def test_assignment_model_keeps_asymmetric_directional_prototypes() -> None:
     ]
 
 
+def test_assignment_prototypes_have_global_semantic_identity() -> None:
+    """Assignment-agnostic IDs or on/off transition kinds must fail this test."""
+    models: dict[str, dict[str, object]] = {}
+    for assignment_id in ("pump", "dryer"):
+        session_id = f"{assignment_id}-session"
+        models[assignment_id] = build_nilm_assignment_model(
+            {
+                "assignment_id": assignment_id,
+                "confirmed_session_ids": [session_id],
+            },
+            [{
+                "session_id": session_id,
+                "assignment_id": assignment_id,
+                "end": "2026-06-01T10:00:00+00:00",
+                "on_delta_w": 80.0,
+                "off_delta_w": -80.0,
+                "confidence": 1.0,
+            }],
+        )
+
+    assert [
+        (item["id"], item["kind"])
+        for item in models["pump"]["transition_prototypes"]
+    ] == [
+        ("pump:start:off->running", "start"),
+        ("pump:stop:running->off", "stop"),
+    ]
+    assert {
+        item["id"]
+        for model in models.values()
+        for item in model["transition_prototypes"]
+    } == {
+        "pump:start:off->running",
+        "pump:stop:running->off",
+        "dryer:start:off->running",
+        "dryer:stop:running->off",
+    }
+
+    normalized = [
+        nilm_domain.normalize_nilm_assignment_model({
+            "assignment_id": assignment_id,
+            "power_states_w": [0.0, 80.0],
+            "transition_prototypes": [{
+                "id": "shared-legacy-start",
+                "kind": "on",
+                "direction": "on",
+                "from_state_w": 0.0,
+                "to_state_w": 80.0,
+                "delta_w": 80.0,
+                "spread_w": 1.0,
+                "sample_count": 3,
+            }],
+        })
+        for assignment_id in ("pump", "dryer")
+    ]
+    assert [
+        (
+            model["transition_prototypes"][0]["id"],
+            model["transition_prototypes"][0]["kind"],
+        )
+        for model in normalized
+    ] == [
+        ("pump:start:off->running", "start"),
+        ("dryer:start:off->running", "start"),
+    ]
+    assert [
+        model["transition_prototypes"][0]["legacy_ids"]
+        for model in normalized
+    ] == [["shared-legacy-start"], ["shared-legacy-start"]]
+
+
 def test_assignment_model_marks_legacy_stop_inferred_and_lower_effective_support() -> (
     None
 ):
@@ -1651,6 +1722,74 @@ def test_nilm_duration_score_legacy_fallback_requires_transition_to_zero() -> No
     ) == 1.0
 
 
+def test_nilm_duration_score_uses_supported_active_state_dwell() -> None:
+    """Rejecting every active-to-active dwell candidate must fail this test."""
+    transition = nilm_domain.NilmTransitionPrototype(
+        assignment_id="dryer",
+        direction="on",
+        from_state_w=100.0,
+        to_state_w=200.0,
+        delta_w=100.0,
+        spread_w=5.0,
+        sample_count=5,
+        prototype_id="dryer:state_up:low->high",
+        transition_kind="state_up",
+        from_state_id="low",
+        to_state_id="high",
+    )
+    assignment = {
+        "state_dwell_profiles": {
+            "low": {
+                "effective_support": 5.0,
+                "distinct_days": 3,
+                "median_seconds": 100.0,
+                "p10_seconds": 90.0,
+                "p90_seconds": 110.0,
+            }
+        }
+    }
+
+    assert nilm_domain.duration_state_score_for_transition(
+        transition,
+        assignment,
+        {"state_since": BASE_TIME - timedelta(seconds=100)},
+        BASE_TIME,
+    ) == 1.0
+
+
+def test_nilm_duration_score_rejects_unsupported_active_state_dwell() -> None:
+    transition = nilm_domain.NilmTransitionPrototype(
+        assignment_id="dryer",
+        direction="off",
+        from_state_w=200.0,
+        to_state_w=100.0,
+        delta_w=-100.0,
+        spread_w=5.0,
+        sample_count=5,
+        transition_kind="state_down",
+        from_state_id="high",
+        to_state_id="low",
+    )
+    assignment = {
+        "state_dwell_profiles": {
+            "high": {
+                "effective_support": 4.0,
+                "distinct_days": 3,
+                "median_seconds": 100.0,
+                "p10_seconds": 90.0,
+                "p90_seconds": 110.0,
+            }
+        }
+    }
+
+    assert nilm_domain.duration_state_score_for_transition(
+        transition,
+        assignment,
+        {"state_since": BASE_TIME - timedelta(seconds=100)},
+        BASE_TIME,
+    ) is None
+
+
 def test_nilm_validation_feedback_is_smoothed_and_revision_gated() -> None:
     assignment = {"model_revision": 7, "model_fingerprint": "model-seven"}
     sparse = [
@@ -1728,20 +1867,82 @@ def test_nilm_validation_accepts_only_trusted_ground_truth_and_held_out_data() -
     assert ground_truth["runtime_eligible"] is True
 
     held_out = nilm_domain.build_nilm_validation_profile(
-        {"model_fingerprint": "current"},
+        {"model_revision": 7, "model_fingerprint": "current"},
         held_out_replay=[
             {
                 "replay_id": f"replay-{index}",
                 "source": "held_out_replay",
                 "outcome": "correct",
                 "timestamp": (BASE_TIME + timedelta(days=index % 3)).isoformat(),
+                "model_revision": 7,
                 "model_fingerprint": "current",
+                "test_window_id": "window-2026-06",
+                "test_window_start": (
+                    BASE_TIME - timedelta(days=1)
+                ).isoformat(),
+                "test_window_end": (BASE_TIME + timedelta(days=4)).isoformat(),
             }
             for index in range(5)
         ],
     )
     assert held_out["source_counts"] == {"held_out_replay": 5}
     assert held_out["runtime_score"] is not None
+
+
+@pytest.mark.parametrize(
+    "invalid_record",
+    [
+        {
+            "replay_id": "fingerprint-only",
+            "source": "held_out_replay",
+            "outcome": "correct",
+            "timestamp": BASE_TIME.isoformat(),
+            "model_fingerprint": "current",
+            "test_window_id": "window-1",
+            "test_window_start": (BASE_TIME - timedelta(days=1)).isoformat(),
+            "test_window_end": (BASE_TIME + timedelta(days=1)).isoformat(),
+        },
+        {
+            "session_id": "session-id-is-not-a-replay-id",
+            "source": "held_out_replay",
+            "outcome": "correct",
+            "timestamp": BASE_TIME.isoformat(),
+            "model_revision": 7,
+            "test_window_id": "window-1",
+            "test_window_start": (BASE_TIME - timedelta(days=1)).isoformat(),
+            "test_window_end": (BASE_TIME + timedelta(days=1)).isoformat(),
+        },
+        {
+            "replay_id": "missing-window-id",
+            "source": "held_out_replay",
+            "outcome": "correct",
+            "timestamp": BASE_TIME.isoformat(),
+            "model_revision": 7,
+            "test_window_start": (BASE_TIME - timedelta(days=1)).isoformat(),
+            "test_window_end": (BASE_TIME + timedelta(days=1)).isoformat(),
+        },
+        {
+            "replay_id": "backwards-window",
+            "source": "held_out_replay",
+            "outcome": "correct",
+            "timestamp": BASE_TIME.isoformat(),
+            "model_revision": 7,
+            "test_window_id": "window-1",
+            "test_window_start": (BASE_TIME + timedelta(days=1)).isoformat(),
+            "test_window_end": (BASE_TIME - timedelta(days=1)).isoformat(),
+        },
+    ],
+)
+def test_nilm_held_out_replay_requires_revision_id_and_bounded_window(
+    invalid_record: dict[str, object],
+) -> None:
+    """Permissive held-out replay admission must fail this test."""
+    profile = nilm_domain.build_nilm_validation_profile(
+        {"model_revision": 7, "model_fingerprint": "current"},
+        held_out_replay=[invalid_record],
+    )
+
+    assert profile["sample_count"] == 0
 
 
 def test_nilm_validation_requires_provenance_and_deduplicates_stable_ids() -> None:

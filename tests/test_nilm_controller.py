@@ -4296,6 +4296,111 @@ def _validation_feedback_controller(
 
 
 @pytest.mark.asyncio
+async def test_history_validation_builds_current_provenanced_ground_truth_profile(
+) -> None:
+    """Skipping trusted workflow outcomes or inventing provenance must fail."""
+    base = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+    sessions = [
+        {
+            "session_id": f"session-{index}",
+            "assignment_id": "assignment-pump",
+            "start": (base + timedelta(days=index % 3)).isoformat(),
+            "end": (
+                base + timedelta(days=index % 3, minutes=10)
+            ).isoformat(),
+            "on_delta_w": 100.0,
+            "off_delta_w": -100.0,
+            "median_power_w": 100.0,
+            "confidence": 1.0,
+        }
+        for index in range(6)
+    ]
+    confirmed_ids = [str(session["session_id"]) for session in sessions]
+    model = build_nilm_assignment_model(
+        {
+            "assignment_id": "assignment-pump",
+            "confirmed_session_ids": confirmed_ids,
+        },
+        sessions,
+    )
+    assignment: dict[str, object] = {
+        "assignment_id": "assignment-pump",
+        "session_ids": confirmed_ids,
+        "confirmed_session_ids": confirmed_ids,
+        "lifecycle_state": "validated",
+        **model,
+    }
+    for session in sessions[:5]:
+        session.update({
+            "start_model_revision": model["model_revision"],
+            "stop_model_revision": model["model_revision"],
+            "start_model_fingerprint": model["model_fingerprint"],
+            "stop_model_fingerprint": model["model_fingerprint"],
+        })
+    intervals = [
+        {
+            "interval_id": f"interval-{index}",
+            "assignment_id": "assignment-pump",
+            "ground_truth_entity_id": "sensor.pump_power",
+            "start": session["start"],
+            "end": session["end"],
+            "validation_start": session["start"],
+            "validation_end": session["end"],
+            "median_power_w": 100.0,
+        }
+        for index, session in enumerate(sessions)
+    ]
+
+    async def noop(*_args: object) -> None:
+        return None
+
+    coordinator = SimpleNamespace(
+        current_time=lambda: base + timedelta(days=10),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mixed": [assignment]},
+            nilm_label_intervals_by_circuit={"mixed": intervals},
+            nilm_session_history_by_circuit={"mixed": sessions},
+        ),
+        state=SimpleNamespace(),
+        async_set_updated_data=lambda _state: None,
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=noop,
+        ),
+    )
+    controller = NilmController(
+        coordinator,
+        label_interval_max_items=100,
+        assignment_max_items=100,
+    )
+
+    await controller.async_validate_nilm_assignment_history(
+        "mixed", "assignment-pump"
+    )
+
+    assert assignment["model_revision"] == model["model_revision"]
+    assert assignment["model_fingerprint"] == model["model_fingerprint"]
+    assert assignment["validation_schema_version"] == 2
+    assert assignment["validation_method"] == "one_to_one_iou"
+    assert {
+        record["outcome_id"] for record in assignment["validation_outcomes"]
+    } == {f"session-{index}" for index in range(5)}
+    assert {
+        record["model_revision"] for record in assignment["validation_outcomes"]
+    } == {model["model_revision"]}
+    key = f"{model['model_revision']}:{model['model_fingerprint']}"
+    profile = assignment["validation_profiles_by_revision"][key]
+    assert profile["sample_count"] == 5
+    assert profile["distinct_days"] == 3
+    assert profile["runtime_eligible"] is True
+    runtime_profile = build_nilm_validation_profile(
+        assignment,
+        session_outcomes=assignment["validation_outcomes"],
+    )
+    assert runtime_profile["runtime_score"] is not None
+
+
+@pytest.mark.asyncio
 async def test_session_feedback_upserts_a_revision_matched_explicit_outcome() -> None:
     """Removing the upsert or prediction provenance must fail this test."""
     now = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)

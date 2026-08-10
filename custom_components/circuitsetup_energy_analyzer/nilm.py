@@ -44,6 +44,7 @@ NILM_VALIDATION_MIN_OUTCOMES = 5
 NILM_VALIDATION_MIN_DISTINCT_DAYS = 3
 NILM_VALIDATION_PRIOR_CORRECT = 2.0
 NILM_VALIDATION_PRIOR_WRONG = 2.0
+NILM_VALIDATION_MAX_REPLAY_WINDOW = timedelta(days=31)
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,11 +202,15 @@ def build_nilm_assignment_model(
     ]
     if on:
         model["transition_prototypes"].append(
-            _rich_transition_prototype("on", 0.0, active_power, on)
+            _rich_transition_prototype(
+                assignment_id, "on", 0.0, active_power, on
+            )
         )
     if off:
         model["transition_prototypes"].append(
-            _rich_transition_prototype("off", active_power, 0.0, off)
+            _rich_transition_prototype(
+                assignment_id, "off", active_power, 0.0, off
+            )
         )
     profile_records = [
         record for record in positives if record.duration_s and record.duration_s > 0
@@ -689,6 +694,7 @@ def _weighted_percentile(
 
 
 def _rich_transition_prototype(
+    assignment_id: str,
     direction: str,
     start: float,
     end: float,
@@ -700,12 +706,23 @@ def _rich_transition_prototype(
     ]
     center = _weighted_median(values, records)
     inferred = direction == "off" and all(record.inferred_stop for record in records)
+    from_state_id = "off" if direction == "on" else "running"
+    to_state_id = "running" if direction == "on" else "off"
+    kind = _semantic_transition_kind(
+        direction,
+        from_state_id,
+        to_state_id,
+        start,
+        end,
+    )
     prototype = {
-        "id": f"{direction}:off-running",
-        "kind": direction,
+        "id": _canonical_prototype_id(
+            assignment_id, kind, from_state_id, to_state_id
+        ),
+        "kind": kind,
         "direction": direction,
-        "from_state_id": "off" if direction == "on" else "running",
-        "to_state_id": "running" if direction == "on" else "off",
+        "from_state_id": from_state_id,
+        "to_state_id": to_state_id,
         "from_state_w": round(start, 3),
         "to_state_w": round(end, 3),
         "delta_w": round(center, 3),
@@ -734,6 +751,39 @@ def _rich_transition_prototype(
             spread_var=round(_weighted_mad(var_values, var_records), 3),
         )
     return prototype
+
+
+def _semantic_transition_kind(
+    direction: str,
+    from_state_id: str,
+    to_state_id: str,
+    from_state_w: float,
+    to_state_w: float,
+) -> str:
+    """Return lifecycle semantics while retaining electrical direction separately."""
+    if from_state_id == "off" and to_state_id != "off":
+        return "start"
+    if from_state_id != "off" and to_state_id == "off":
+        return "stop"
+    if to_state_w > from_state_w:
+        return "state_up"
+    if to_state_w < from_state_w:
+        return "state_down"
+    return "state_up" if direction == "on" else "state_down"
+
+
+def _canonical_prototype_id(
+    assignment_id: str,
+    kind: str,
+    from_state_id: str,
+    to_state_id: str,
+) -> str:
+    """Return an assignment-scoped transition identity when ownership is known."""
+    return (
+        f"{assignment_id}:{kind}:{from_state_id}->{to_state_id}"
+        if assignment_id
+        else f"{kind}:{from_state_id}->{to_state_id}"
+    )
 
 
 def _evidence_weight(record: _NormalizedAssignmentEvidence) -> float:
@@ -972,6 +1022,7 @@ def _schema_2_interval_plateau(interval: Mapping[str, Any]) -> float | None:
 
 def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, Any]:
     """Normalize optional persisted assignment model fields conservatively."""
+    assignment_id = str(assignment.get("assignment_id") or "").strip()
     role = assignment.get("role")
     states = assignment.get("power_states_w")
     confidence = _model_number(assignment.get("model_confidence"))
@@ -989,11 +1040,46 @@ def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, 
         ]
         if any(value is None for value in values):
             continue
+        direction = str(item["direction"])
+        from_state_id = str(item.get("from_state_id") or "").strip() or (
+            "off" if direction == "on" else "running"
+        )
+        to_state_id = str(item.get("to_state_id") or "").strip() or (
+            "running" if direction == "on" else "off"
+        )
+        kind = _semantic_transition_kind(
+            direction,
+            from_state_id,
+            to_state_id,
+            values[0],
+            values[1],
+        )
+        stored_id = str(item.get("id") or "").strip()
+        canonical_id = _canonical_prototype_id(
+            assignment_id,
+            kind,
+            from_state_id,
+            to_state_id,
+        )
+        prototype_id = canonical_id if assignment_id else stored_id or canonical_id
+        stored_aliases = item.get("legacy_ids")
+        aliases: list[str] = []
+        for value in (
+            stored_id,
+            *(
+                stored_aliases
+                if isinstance(stored_aliases, list | tuple)
+                else ()
+            ),
+        ):
+            alias = str(value or "").strip()
+            if alias and alias != prototype_id and alias not in aliases:
+                aliases.append(alias)
         spread_var = _model_number(item.get("spread_var"))
         prototype: dict[str, Any] = {
-            "id": str(item.get("id") or f"{item['direction']}:off-running"),
-            "kind": str(item.get("kind") or item["direction"]),
-            "direction": item["direction"],
+            "id": prototype_id,
+            "kind": kind,
+            "direction": direction,
             "from_state_w": values[0],
             "to_state_w": values[1],
             "delta_w": values[2],
@@ -1006,11 +1092,11 @@ def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, 
             ),
             "distinct_days": _model_nonnegative_int(item.get("distinct_days")),
             "evidence_kind": str(item.get("evidence_kind") or "observed"),
+            "from_state_id": from_state_id,
+            "to_state_id": to_state_id,
         }
-        if item.get("from_state_id") in {"off", "running"}:
-            prototype["from_state_id"] = item["from_state_id"]
-        if item.get("to_state_id") in {"off", "running"}:
-            prototype["to_state_id"] = item["to_state_id"]
+        if aliases:
+            prototype["legacy_ids"] = aliases
         if (delta_var := _model_number(item.get("delta_var"))) is not None:
             prototype["delta_var"] = delta_var
         if spread_var is not None:
@@ -1602,6 +1688,7 @@ class NilmTransitionPrototype:
     transition_kind: str = ""
     from_state_id: str = ""
     to_state_id: str = ""
+    prototype_aliases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1699,29 +1786,68 @@ def duration_state_score_for_transition(
     runtime: Mapping[str, Any],
     timestamp: datetime,
 ) -> float | None:
-    """Return soft full-run duration evidence for a stop-to-off transition."""
+    """Return soft run or supported active-state dwell evidence."""
     kind = prototype.transition_kind.strip().lower()
-    if kind and kind != "stop":
+    if kind == "start":
         return None
-    if prototype.direction != "off" or prototype.delta_w >= 0:
-        return None
-    if (
-        not isfinite(prototype.from_state_w)
-        or prototype.from_state_w <= 0
-        or not isfinite(prototype.to_state_w)
-        or not isclose(prototype.to_state_w, 0.0, abs_tol=1e-6)
-    ):
-        return None
-    if prototype.to_state_id and prototype.to_state_id != "off":
-        return None
-    if prototype.from_state_id == "off":
-        return None
-
-    run_profile = assignment.get("run_profile")
-    profile = (
-        run_profile.get("duration_s") if isinstance(run_profile, Mapping) else None
-    )
-    if not isinstance(profile, Mapping):
+    if kind in {"state_up", "state_down"}:
+        if (
+            not prototype.from_state_id
+            or not prototype.to_state_id
+            or prototype.from_state_id == "off"
+            or prototype.to_state_id == "off"
+            or prototype.from_state_id == prototype.to_state_id
+            or not isfinite(prototype.from_state_w)
+            or not isfinite(prototype.to_state_w)
+            or (
+                kind == "state_up"
+                and not (
+                    prototype.direction == "on"
+                    and prototype.delta_w > 0
+                    and prototype.to_state_w > prototype.from_state_w
+                )
+            )
+            or (
+                kind == "state_down"
+                and not (
+                    prototype.direction == "off"
+                    and prototype.delta_w < 0
+                    and prototype.to_state_w < prototype.from_state_w
+                )
+            )
+        ):
+            return None
+        profiles = assignment.get("state_dwell_profiles")
+        profile = (
+            profiles.get(prototype.from_state_id)
+            if isinstance(profiles, Mapping)
+            else None
+        )
+        started_at = _nilm_datetime(runtime.get("state_since"))
+    else:
+        if kind and kind != "stop":
+            return None
+        if prototype.direction != "off" or prototype.delta_w >= 0:
+            return None
+        if (
+            not isfinite(prototype.from_state_w)
+            or prototype.from_state_w <= 0
+            or not isfinite(prototype.to_state_w)
+            or not isclose(prototype.to_state_w, 0.0, abs_tol=1e-6)
+        ):
+            return None
+        if prototype.to_state_id and prototype.to_state_id != "off":
+            return None
+        if prototype.from_state_id == "off":
+            return None
+        run_profile = assignment.get("run_profile")
+        profile = (
+            run_profile.get("duration_s")
+            if isinstance(run_profile, Mapping)
+            else None
+        )
+        started_at = _nilm_runtime_started_at(runtime)
+    if not isinstance(profile, Mapping) or started_at is None:
         return None
     support = _nilm_finite_number(profile.get("effective_support"))
     distinct_days = _nilm_finite_number(profile.get("distinct_days"))
@@ -1747,9 +1873,8 @@ def duration_state_score_for_transition(
     ):
         return None
 
-    started_at = _nilm_runtime_started_at(runtime)
     observed_at = _nilm_datetime(timestamp)
-    if started_at is None or observed_at is None:
+    if observed_at is None:
         return None
     duration_seconds = (observed_at - started_at).total_seconds()
     if not isfinite(duration_seconds) or duration_seconds <= 0:
@@ -1857,26 +1982,79 @@ def _nilm_trusted_validation_outcome(
     *,
     allow_ground_truth: bool,
 ) -> tuple[str, str, bool, str | None] | None:
+    source = _nilm_validation_source(record)
+    if source is None or (source == "ground_truth" and not allow_ground_truth):
+        return None
     outcome_id = str(
         record.get("outcome_id")
-        or record.get("session_id")
         or record.get("replay_id")
+        or (
+            record.get("session_id")
+            if source != "held_out_replay"
+            else ""
+        )
         or record.get("validation_outcome_id")
         or ""
     ).strip()
     if not outcome_id:
         return None
-    source = _nilm_validation_source(record)
-    if source is None or (source == "ground_truth" and not allow_ground_truth):
-        return None
     outcome = str(record.get("outcome") or record.get("result") or "").strip().lower()
     if outcome not in {"correct", "wrong"}:
+        return None
+    if source == "held_out_replay" and not _nilm_valid_held_out_replay(
+        assignment, record
+    ):
         return None
     if not _nilm_validation_revision_matches(assignment, record):
         return None
     timestamp = _nilm_datetime(record.get("timestamp") or record.get("created_at"))
     day = timestamp.date().isoformat() if timestamp else None
     return outcome_id, source, outcome == "correct", day
+
+
+def _nilm_valid_held_out_replay(
+    assignment: Mapping[str, Any], record: Mapping[str, Any]
+) -> bool:
+    """Return whether replay provenance names one bounded prediction window."""
+    expected_revision = _model_nonnegative_int(assignment.get("model_revision"))
+    recorded_revision = _nilm_finite_number(
+        record.get("model_revision", record.get("prediction_model_revision"))
+    )
+    if (
+        expected_revision <= 0
+        or recorded_revision is None
+        or recorded_revision <= 0
+        or not recorded_revision.is_integer()
+        or int(recorded_revision) != expected_revision
+    ):
+        return False
+    window_id = str(
+        record.get("test_window_id")
+        or record.get("replay_window_id")
+        or record.get("window_id")
+        or ""
+    ).strip()
+    window_start = _nilm_datetime(
+        record.get("test_window_start")
+        or record.get("replay_window_start")
+        or record.get("window_start")
+    )
+    window_end = _nilm_datetime(
+        record.get("test_window_end")
+        or record.get("replay_window_end")
+        or record.get("window_end")
+    )
+    observed_at = _nilm_datetime(record.get("timestamp") or record.get("created_at"))
+    return bool(
+        window_id
+        and window_start is not None
+        and window_end is not None
+        and observed_at is not None
+        and window_start <= observed_at <= window_end
+        and timedelta(0)
+        < window_end - window_start
+        <= NILM_VALIDATION_MAX_REPLAY_WINDOW
+    )
 
 
 def _nilm_validation_source(record: Mapping[str, Any]) -> str | None:
@@ -2284,6 +2462,9 @@ def _nilm_score_lookup(
 ) -> float | None:
     if prototype.prototype_id and prototype.prototype_id in scores:
         return scores[prototype.prototype_id]
+    for alias in prototype.prototype_aliases:
+        if alias in scores:
+            return scores[alias]
     return scores.get(prototype.assignment_id)
 
 

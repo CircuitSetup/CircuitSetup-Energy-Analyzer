@@ -11,6 +11,9 @@ from typing import Any
 
 from ..models import AlertEvidence, CircuitConfig, CircuitEvent
 from ..nilm import (
+    NILM_DURATION_MAX_CENTRAL_RATIO,
+    NILM_DURATION_MIN_DISTINCT_DAYS,
+    NILM_DURATION_MIN_EFFECTIVE_SUPPORT,
     KnownLoadTopology,
     NilmAssignmentModel,
     NilmComponentStatus,
@@ -1022,7 +1025,16 @@ def reconcile_component_runtime(
             validation_available
         )
         if candidates and not duration_available:
-            unavailable_reasons["duration_unavailable"] += 1
+            for reason in {
+                _runtime_duration_unavailable_reason(
+                    prototype,
+                    assignments_by_id[prototype.assignment_id],
+                    next_runtime.get(prototype.assignment_id, {}),
+                    edge.timestamp,
+                )
+                for prototype in candidates
+            }:
+                unavailable_reasons[reason] += 1
         for reason in {
             _runtime_validation_unavailable_reason(
                 assignments_by_id[assignment_id],
@@ -1815,6 +1827,11 @@ def _runtime_assignment_model(
             transition_kind=_runtime_transition_kind(assignment, item),
             from_state_id=item.get("from_state_id", ""),
             to_state_id=item.get("to_state_id", ""),
+            prototype_aliases=tuple(
+                str(value)
+                for value in _list_items(item.get("legacy_ids"))
+                if str(value or "").strip()
+            ),
         )
         for item in normalized["transition_prototypes"]
         if component_eligible
@@ -1836,6 +1853,9 @@ def _runtime_assignment_model(
 def _runtime_transition_kind(
     assignment: Mapping[str, Any], normalized: Mapping[str, Any]
 ) -> str:
+    semantic_kind = str(normalized.get("kind") or "").strip()
+    if semantic_kind:
+        return semantic_kind
     return next(
         (
             str(item.get("kind") or "")
@@ -1936,7 +1956,100 @@ def _runtime_transition_score(
 ) -> float | None:
     if prototype.prototype_id and prototype.prototype_id in scores:
         return scores[prototype.prototype_id]
+    for alias in prototype.prototype_aliases:
+        if alias in scores:
+            return scores[alias]
     return scores.get(prototype.assignment_id)
+
+
+def _runtime_duration_unavailable_reason(
+    prototype: NilmTransitionPrototype,
+    assignment: Mapping[str, Any],
+    runtime: Mapping[str, Any],
+    timestamp: datetime,
+) -> str:
+    """Classify unavailable duration evidence into one bounded diagnostic."""
+    kind = prototype.transition_kind.strip().lower()
+    if kind in {"state_up", "state_down"}:
+        profiles = assignment.get("state_dwell_profiles")
+        profile = (
+            profiles.get(prototype.from_state_id)
+            if isinstance(profiles, Mapping)
+            else None
+        )
+        start_value = runtime.get("state_since")
+        missing_reason = "duration_missing_state_start"
+    elif (
+        kind in {"", "stop"}
+        and prototype.direction == "off"
+        and prototype.delta_w < 0
+        and prototype.from_state_w > 0
+        and abs(prototype.to_state_w) <= 1e-6
+        and prototype.from_state_id != "off"
+        and prototype.to_state_id in {"", "off"}
+    ):
+        run_profile = assignment.get("run_profile")
+        profile = (
+            run_profile.get("duration_s")
+            if isinstance(run_profile, Mapping)
+            else None
+        )
+        start_value = next(
+            (
+                runtime.get(key)
+                for key in (
+                    "session_start",
+                    "session_started_at",
+                    "current_session_started_at",
+                    "started_at",
+                    "start",
+                )
+                if runtime.get(key) is not None
+            ),
+            None,
+        )
+        missing_reason = "duration_missing_session_start"
+    else:
+        return "duration_unsupported_transition"
+    if not _runtime_duration_profile_supported(profile):
+        return "duration_insufficient_support"
+    if start_value is None:
+        return missing_reason
+    started_at = _runtime_datetime(start_value)
+    observed_at = _runtime_datetime(timestamp)
+    if (
+        started_at is None
+        or observed_at is None
+        or (observed_at - started_at).total_seconds() <= 0
+    ):
+        return "duration_malformed_timestamp"
+    return "duration_unavailable"
+
+
+def _runtime_duration_profile_supported(profile: Any) -> bool:
+    """Mirror the domain support gates solely for diagnostic classification."""
+    if not isinstance(profile, Mapping):
+        return False
+    support = _finite_float(profile.get("effective_support"))
+    distinct_days = _finite_float(profile.get("distinct_days"))
+    p10 = _finite_float(profile.get("p10_seconds", profile.get("p10")))
+    p90 = _finite_float(profile.get("p90_seconds", profile.get("p90")))
+    median_seconds = _finite_float(
+        profile.get("median_seconds", profile.get("median"))
+    )
+    return bool(
+        support is not None
+        and support >= NILM_DURATION_MIN_EFFECTIVE_SUPPORT
+        and distinct_days is not None
+        and distinct_days >= NILM_DURATION_MIN_DISTINCT_DAYS
+        and p10 is not None
+        and p10 > 0
+        and p90 is not None
+        and p90 > 0
+        and median_seconds is not None
+        and p10 <= median_seconds <= p90
+        and p90 / p10 <= NILM_DURATION_MAX_CENTRAL_RATIO
+    )
 
 
 def _runtime_validation_profiles(
@@ -1946,7 +2059,14 @@ def _runtime_validation_profiles(
     """Build assignment validation profiles once for one runtime update."""
     model_ids = {model.assignment_id for model in models}
     return {
-        assignment_id: build_nilm_validation_profile(assignment)
+        assignment_id: build_nilm_validation_profile(
+            assignment,
+            session_outcomes=(
+                item
+                for item in _list_items(assignment.get("validation_outcomes"))
+                if isinstance(item, Mapping)
+            ),
+        )
         for assignment in assignments
         if (assignment_id := str(assignment.get("assignment_id") or ""))
         in model_ids
