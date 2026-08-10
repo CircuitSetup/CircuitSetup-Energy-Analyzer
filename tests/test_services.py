@@ -1272,6 +1272,61 @@ async def test_nilm_reference_history_service_attaches_measured_evidence(
     other.async_save_nilm_interval_changes.assert_not_awaited()
 
 
+def test_nilm_reference_evidence_withholds_material_negative_power_metrics(
+) -> None:
+    """A bad power trace must not discard valid state evidence."""
+    from custom_components.circuitsetup_energy_analyzer.managers import nilm_controller
+    from custom_components.circuitsetup_energy_analyzer.nilm_interval_evidence import (
+        NilmPowerSample,
+        NilmReferenceExtractionSettings,
+        NilmReferenceInterval,
+        calculate_reference_power_metrics,
+    )
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        _nilm_reference_evidence,
+    )
+
+    start = datetime(2026, 8, 1, 0, 0, tzinfo=UTC)
+    end = datetime(2026, 8, 1, 0, 30, tzinfo=UTC)
+    metrics = calculate_reference_power_metrics(
+        (
+            NilmPowerSample(start, -100.0, "sensor.pump_power"),
+            NilmPowerSample(end, -100.0, "sensor.pump_power"),
+        ),
+        start=start,
+        end=end,
+        maximum_power_gap_seconds=3600.0,
+    )
+
+    evidence = _nilm_reference_evidence(
+        NilmReferenceInterval(
+            start, end, None, None, False, False, 1.0, 0.0, 0, 1.0, ()
+        ),
+        settings=NilmReferenceExtractionSettings(
+            on_threshold=None,
+            off_threshold=None,
+            maximum_power_gap_seconds=3600.0,
+        ),
+        state_entity_id="switch.pump",
+        power_entity_id="sensor.pump_power",
+        metrics=metrics,
+    )
+
+    assert "material_negative_power" in evidence["quality_flags"]
+    assert evidence["power_confidence"] < 1.0
+    assert evidence["plateau_eligible"] is False
+    assert evidence["energy_complete"] is False
+    for key in (
+        "median_power_w",
+        "average_power_w",
+        "partial_energy_kwh",
+        "measured_energy_kwh",
+    ):
+        assert evidence[key] is None
+    controller = nilm_controller.NilmController
+    assert controller._validated_schema_2_evidence(evidence) is not None
+
+
 @pytest.mark.asyncio
 async def test_nilm_reference_history_service_preserves_pre_window_state(
     monkeypatch: pytest.MonkeyPatch,

@@ -2712,6 +2712,7 @@ def _nilm_reference_evidence(
     flags = set(interval.quality_flags)
     if power is not None:
         flags.update(power.quality_flags)
+    usable_power = power is not None and "material_negative_power" not in flags
     return {
         "evidence_schema_version": 2,
         "evidence_source": "reference_backend",
@@ -2722,12 +2723,12 @@ def _nilm_reference_evidence(
         "power_confidence": power.power_confidence if power is not None else 0.0,
         "start_transition_eligible": False,
         "stop_transition_eligible": False,
-        "plateau_eligible": bool(power and power.median_power_w is not None),
-        "energy_complete": bool(power and power.energy_complete),
-        "median_power_w": power.median_power_w if power else None,
-        "average_power_w": power.average_power_w if power else None,
-        "partial_energy_kwh": power.partial_energy_kwh if power else None,
-        "measured_energy_kwh": power.measured_energy_kwh if power else None,
+        "plateau_eligible": bool(usable_power and power.median_power_w is not None),
+        "energy_complete": bool(usable_power and power.energy_complete),
+        "median_power_w": power.median_power_w if usable_power else None,
+        "average_power_w": power.average_power_w if usable_power else None,
+        "partial_energy_kwh": power.partial_energy_kwh if usable_power else None,
+        "measured_energy_kwh": power.measured_energy_kwh if usable_power else None,
         "longest_power_gap_seconds": (
             power.longest_power_gap_seconds if power else None
         ),
