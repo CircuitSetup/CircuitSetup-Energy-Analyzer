@@ -1133,6 +1133,47 @@ def test_assignment_model_fingerprint_tracks_reactive_and_confidence_fields() ->
             "model_fingerprint"
         ]
     )
+    rich_base = {
+        "assignment_id": "pump",
+        "model_kind": "multi_state",
+        "power_states_w": [0, 100, 200, 300],
+        "states": [
+            {"id": "off", "power_w": 0},
+            {"id": "active_1", "power_w": 100},
+            {"id": "active_2", "power_w": 200},
+            {"id": "active_3", "power_w": 300},
+        ],
+        "transition_prototypes": [
+            {
+                "direction": "on",
+                "from_state_id": "active_1",
+                "to_state_id": "active_2",
+                "from_state_w": 100,
+                "to_state_w": 200,
+                "delta_w": 100,
+                "spread_w": 1,
+                "sample_count": 3,
+            }
+        ],
+    }
+    rich_changed = {
+        **rich_base,
+        "transition_prototypes": [
+            {
+                **rich_base["transition_prototypes"][0],
+                "from_state_id": "active_2",
+                "to_state_id": "active_3",
+                "from_state_w": 200,
+                "to_state_w": 300,
+            }
+        ],
+    }
+    assert (
+        nilm_domain.normalize_nilm_assignment_model(rich_base)["model_fingerprint"]
+        != nilm_domain.normalize_nilm_assignment_model(rich_changed)[
+            "model_fingerprint"
+        ]
+    )
 
 
 def test_normalize_assignment_model_orders_prototypes_and_backfills_power_states() -> (

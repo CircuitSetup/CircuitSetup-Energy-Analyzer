@@ -1268,7 +1268,13 @@ def _model_fingerprint(model: Mapping[str, Any]) -> str:
             model.get("states"),
             sorted(
                 (
+                    item.get("id"),
+                    item.get("kind"),
                     item.get("direction"),
+                    item.get("from_state_id"),
+                    item.get("to_state_id"),
+                    item.get("from_state_w"),
+                    item.get("to_state_w"),
                     item.get("delta_w"),
                     item.get("spread_w"),
                     item.get("delta_var"),
