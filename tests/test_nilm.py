@@ -182,6 +182,77 @@ def test_assignment_model_keeps_asymmetric_directional_prototypes() -> None:
     ]
 
 
+def test_assignment_prototypes_have_global_semantic_identity() -> None:
+    """Assignment-agnostic IDs or on/off transition kinds must fail this test."""
+    models: dict[str, dict[str, object]] = {}
+    for assignment_id in ("pump", "dryer"):
+        session_id = f"{assignment_id}-session"
+        models[assignment_id] = build_nilm_assignment_model(
+            {
+                "assignment_id": assignment_id,
+                "confirmed_session_ids": [session_id],
+            },
+            [{
+                "session_id": session_id,
+                "assignment_id": assignment_id,
+                "end": "2026-06-01T10:00:00+00:00",
+                "on_delta_w": 80.0,
+                "off_delta_w": -80.0,
+                "confidence": 1.0,
+            }],
+        )
+
+    assert [
+        (item["id"], item["kind"])
+        for item in models["pump"]["transition_prototypes"]
+    ] == [
+        ("pump:start:off->running", "start"),
+        ("pump:stop:running->off", "stop"),
+    ]
+    assert {
+        item["id"]
+        for model in models.values()
+        for item in model["transition_prototypes"]
+    } == {
+        "pump:start:off->running",
+        "pump:stop:running->off",
+        "dryer:start:off->running",
+        "dryer:stop:running->off",
+    }
+
+    normalized = [
+        nilm_domain.normalize_nilm_assignment_model({
+            "assignment_id": assignment_id,
+            "power_states_w": [0.0, 80.0],
+            "transition_prototypes": [{
+                "id": "shared-legacy-start",
+                "kind": "on",
+                "direction": "on",
+                "from_state_w": 0.0,
+                "to_state_w": 80.0,
+                "delta_w": 80.0,
+                "spread_w": 1.0,
+                "sample_count": 3,
+            }],
+        })
+        for assignment_id in ("pump", "dryer")
+    ]
+    assert [
+        (
+            model["transition_prototypes"][0]["id"],
+            model["transition_prototypes"][0]["kind"],
+        )
+        for model in normalized
+    ] == [
+        ("pump:start:off->running", "start"),
+        ("dryer:start:off->running", "start"),
+    ]
+    assert [
+        model["transition_prototypes"][0]["legacy_ids"]
+        for model in normalized
+    ] == [["shared-legacy-start"], ["shared-legacy-start"]]
+
+
 def test_assignment_model_marks_legacy_stop_inferred_and_lower_effective_support() -> (
     None
 ):
@@ -1375,6 +1446,10 @@ def transition(
     sample_count: int = 3,
     delta_var: float | None = None,
     spread_var: float | None = None,
+    prototype_id: str = "",
+    transition_kind: str = "",
+    from_state_id: str = "",
+    to_state_id: str = "",
 ) -> nilm_domain.NilmTransitionPrototype:
     on = delta_w > 0
     return nilm_domain.NilmTransitionPrototype(
@@ -1387,6 +1462,10 @@ def transition(
         sample_count=sample_count,
         delta_var=delta_var,
         spread_var=spread_var,
+        prototype_id=prototype_id,
+        transition_kind=transition_kind,
+        from_state_id=from_state_id,
+        to_state_id=to_state_id,
     )
 
 
@@ -1469,6 +1548,465 @@ def test_nilm_transition_score_uses_electrical_fit_and_renormalizes() -> None:
         validation_score=None,
         optional_electrical_fit=0.0,
     ) == pytest.approx(0.7)
+
+
+def test_nilm_score_breakdown_preserves_missing_channel_renormalization() -> None:
+    prototype = transition("pump", 100, prototype_id="pump-start")
+
+    breakdown = nilm_domain.score_nilm_transition_breakdown(
+        edge(0, 100),
+        prototype,
+        helper_score=None,
+        duration_state_score=None,
+        validation_score=None,
+    )
+
+    assert breakdown.total == 1.0
+    assert breakdown.electrical_fit == 1.0
+    assert breakdown.helper_score is None
+    assert breakdown.duration_state_score is None
+    assert breakdown.validation_score is None
+    assert breakdown.available_weight == 0.55
+    assert breakdown.electrical_contribution == 1.0
+    assert breakdown.helper_contribution is None
+    assert breakdown.duration_contribution is None
+    assert breakdown.validation_contribution is None
+
+
+def test_nilm_prototype_score_lookup_wins_over_assignment_fallback() -> None:
+    preferred = assignment_model(
+        "a", transition("a", 100, prototype_id="a-start")
+    )
+    other = assignment_model("b", transition("b", 100, prototype_id="b-start"))
+
+    result = reconcile(
+        edge(0, 100),
+        [other, preferred],
+        {"a": 0.0, "b": 0.0},
+        validations={"a-start": 1.0, "a": 0.0, "b-start": 0.0, "b": 1.0},
+    )
+
+    assert result.accepted is True
+    assert result.transitions == preferred.transition_prototypes
+    assert result.accepted_prototype_ids == ("a-start",)
+    assert result.accepted_score == 1.0
+    assert result.runner_up_score == pytest.approx(0.55 / 0.65)
+    assert result.score_margin == pytest.approx(1.0 - (0.55 / 0.65))
+    assert result.unavailable_channels == ("helper", "duration")
+    assert tuple(item.prototype_id for item in result.score_breakdowns) == (
+        "a-start",
+        "b-start",
+    )
+
+
+def test_nilm_equal_candidates_are_separated_by_duration_soft_evidence() -> None:
+    short = assignment_model(
+        "short", transition("short", -100, prototype_id="short-stop")
+    )
+    long = assignment_model("long", transition("long", -100, prototype_id="long-stop"))
+
+    result = reconcile(
+        edge(0, -100),
+        [long, short],
+        {"short": 100.0, "long": 100.0},
+        durations={"short-stop": 1.0, "long-stop": 0.0},
+    )
+
+    assert result.accepted is True
+    assert result.transitions == short.transition_prototypes
+    assert result.score_margin == pytest.approx(1.0 - (0.55 / 0.65))
+
+
+def test_nilm_duration_score_uses_full_age_only_for_supported_stop_to_off() -> None:
+    stop = transition(
+        "dryer",
+        -100,
+        prototype_id="dryer-stop",
+        transition_kind="stop",
+        from_state_id="running",
+        to_state_id="off",
+    )
+    assignment = {
+        "run_profile": {
+            "duration_s": {
+                "effective_support": 5.0,
+                "distinct_days": 3,
+                "median_seconds": 100.0,
+                "p10_seconds": 90.0,
+                "p90_seconds": 110.0,
+                "median_log_seconds": 4.605,
+                "mad_log_seconds": 0.1,
+            }
+        }
+    }
+
+    assert nilm_domain.duration_state_score_for_transition(
+        stop,
+        assignment,
+        {"session_started_at": (BASE_TIME - timedelta(seconds=100)).isoformat()},
+        BASE_TIME.replace(tzinfo=None),
+    ) == 1.0
+    tapered = nilm_domain.duration_state_score_for_transition(
+        stop,
+        assignment,
+        {"session_started_at": BASE_TIME - timedelta(seconds=150)},
+        BASE_TIME,
+    )
+    assert tapered is not None and 0.0 < tapered < 1.0
+
+    start = transition(
+        "dryer",
+        100,
+        transition_kind="start",
+        from_state_id="off",
+        to_state_id="running",
+    )
+    active = transition(
+        "dryer",
+        20,
+        transition_kind="state_change",
+        from_state_id="low",
+        to_state_id="high",
+    )
+    assert nilm_domain.duration_state_score_for_transition(
+        start, assignment, {}, BASE_TIME
+    ) is None
+    assert nilm_domain.duration_state_score_for_transition(
+        active, assignment, {}, BASE_TIME
+    ) is None
+    assert nilm_domain.duration_state_score_for_transition(
+        stop,
+        {"run_profile": {"duration_s": {"effective_support": "bad"}}},
+        {"session_started_at": "not-a-time"},
+        BASE_TIME,
+    ) is None
+
+
+def test_nilm_duration_score_legacy_fallback_requires_transition_to_zero() -> None:
+    assignment = {
+        "run_profile": {
+            "duration_s": {
+                "effective_support": 5.0,
+                "distinct_days": 3,
+                "median_seconds": 100.0,
+                "p10_seconds": 90.0,
+                "p90_seconds": 110.0,
+            }
+        }
+    }
+    runtime = {"session_started_at": BASE_TIME - timedelta(seconds=100)}
+    active_drop = nilm_domain.NilmTransitionPrototype(
+        assignment_id="dryer",
+        direction="off",
+        from_state_w=200.0,
+        to_state_w=100.0,
+        delta_w=-100.0,
+        spread_w=5.0,
+        sample_count=5,
+    )
+    legacy_stop = nilm_domain.NilmTransitionPrototype(
+        assignment_id="dryer",
+        direction="off",
+        from_state_w=100.0,
+        to_state_w=0.0,
+        delta_w=-100.0,
+        spread_w=5.0,
+        sample_count=5,
+    )
+
+    assert nilm_domain.duration_state_score_for_transition(
+        active_drop, assignment, runtime, BASE_TIME
+    ) is None
+    assert nilm_domain.duration_state_score_for_transition(
+        legacy_stop, assignment, runtime, BASE_TIME
+    ) == 1.0
+
+
+def test_nilm_duration_score_uses_supported_active_state_dwell() -> None:
+    """Rejecting every active-to-active dwell candidate must fail this test."""
+    transition = nilm_domain.NilmTransitionPrototype(
+        assignment_id="dryer",
+        direction="on",
+        from_state_w=100.0,
+        to_state_w=200.0,
+        delta_w=100.0,
+        spread_w=5.0,
+        sample_count=5,
+        prototype_id="dryer:state_up:low->high",
+        transition_kind="state_up",
+        from_state_id="low",
+        to_state_id="high",
+    )
+    assignment = {
+        "state_dwell_profiles": {
+            "low": {
+                "effective_support": 5.0,
+                "distinct_days": 3,
+                "median_seconds": 100.0,
+                "p10_seconds": 90.0,
+                "p90_seconds": 110.0,
+            }
+        }
+    }
+
+    assert nilm_domain.duration_state_score_for_transition(
+        transition,
+        assignment,
+        {"state_since": BASE_TIME - timedelta(seconds=100)},
+        BASE_TIME,
+    ) == 1.0
+
+
+def test_nilm_duration_score_rejects_unsupported_active_state_dwell() -> None:
+    transition = nilm_domain.NilmTransitionPrototype(
+        assignment_id="dryer",
+        direction="off",
+        from_state_w=200.0,
+        to_state_w=100.0,
+        delta_w=-100.0,
+        spread_w=5.0,
+        sample_count=5,
+        transition_kind="state_down",
+        from_state_id="high",
+        to_state_id="low",
+    )
+    assignment = {
+        "state_dwell_profiles": {
+            "high": {
+                "effective_support": 4.0,
+                "distinct_days": 3,
+                "median_seconds": 100.0,
+                "p10_seconds": 90.0,
+                "p90_seconds": 110.0,
+            }
+        }
+    }
+
+    assert nilm_domain.duration_state_score_for_transition(
+        transition,
+        assignment,
+        {"state_since": BASE_TIME - timedelta(seconds=100)},
+        BASE_TIME,
+    ) is None
+
+
+def test_nilm_validation_feedback_is_smoothed_and_revision_gated() -> None:
+    assignment = {"model_revision": 7, "model_fingerprint": "model-seven"}
+    sparse = [
+        {
+            "outcome_id": "feedback-0",
+            "source": "feedback",
+            "outcome": "correct",
+            "timestamp": BASE_TIME.isoformat(),
+            "model_revision": 7,
+        }
+    ]
+
+    sparse_profile = nilm_domain.build_nilm_validation_profile(
+        assignment, session_outcomes=sparse
+    )
+    assert sparse_profile["sample_count"] == 1
+    assert 0.5 < sparse_profile["reliability"] < 1.0
+    assert sparse_profile["runtime_score"] is None
+
+    eligible = [
+        {
+            "outcome_id": f"feedback-{index}",
+            "source": "feedback",
+            "outcome": "wrong" if index == 4 else "correct",
+            "timestamp": (BASE_TIME + timedelta(days=index % 3)).isoformat(),
+            "model_revision": 7,
+        }
+        for index in range(5)
+    ]
+    eligible.append(
+        {
+            "outcome_id": "feedback-mismatched",
+            "source": "feedback",
+            "outcome": "wrong",
+            "timestamp": (BASE_TIME + timedelta(days=4)).isoformat(),
+            "model_revision": 6,
+        }
+    )
+    profile = nilm_domain.build_nilm_validation_profile(
+        assignment, session_outcomes=reversed(eligible)
+    )
+
+    assert profile["sample_count"] == 5
+    assert profile["correct_count"] == 4
+    assert profile["wrong_count"] == 1
+    assert profile["distinct_days"] == 3
+    assert profile["runtime_eligible"] is True
+    assert profile["runtime_score"] == pytest.approx(6 / 9)
+
+
+def test_nilm_validation_accepts_only_trusted_ground_truth_and_held_out_data() -> None:
+    overlap_only = {
+        "model_revision": 2,
+        "validation_schema_version": 1,
+        "validation_method": "overlap",
+        "validation_outcomes": [
+            {
+                "outcome_id": f"ground-truth-{index}",
+                "source": "ground_truth",
+                "outcome": "correct",
+                "timestamp": (BASE_TIME + timedelta(days=index % 3)).isoformat(),
+                "model_revision": 2,
+            }
+            for index in range(5)
+        ],
+    }
+    assert nilm_domain.build_nilm_validation_profile(overlap_only)["sample_count"] == 0
+
+    trusted = {
+        **overlap_only,
+        "validation_schema_version": 2,
+        "validation_method": "one_to_one_iou",
+    }
+    ground_truth = nilm_domain.build_nilm_validation_profile(trusted)
+    assert ground_truth["runtime_eligible"] is True
+
+    held_out = nilm_domain.build_nilm_validation_profile(
+        {"model_revision": 7, "model_fingerprint": "current"},
+        held_out_replay=[
+            {
+                "replay_id": f"replay-{index}",
+                "source": "held_out_replay",
+                "outcome": "correct",
+                "timestamp": (BASE_TIME + timedelta(days=index % 3)).isoformat(),
+                "model_revision": 7,
+                "model_fingerprint": "current",
+                "test_window_id": "window-2026-06",
+                "test_window_start": (
+                    BASE_TIME - timedelta(days=1)
+                ).isoformat(),
+                "test_window_end": (BASE_TIME + timedelta(days=4)).isoformat(),
+            }
+            for index in range(5)
+        ],
+    )
+    assert held_out["source_counts"] == {"held_out_replay": 5}
+    assert held_out["runtime_score"] is not None
+
+
+@pytest.mark.parametrize(
+    "invalid_record",
+    [
+        {
+            "replay_id": "fingerprint-only",
+            "source": "held_out_replay",
+            "outcome": "correct",
+            "timestamp": BASE_TIME.isoformat(),
+            "model_fingerprint": "current",
+            "test_window_id": "window-1",
+            "test_window_start": (BASE_TIME - timedelta(days=1)).isoformat(),
+            "test_window_end": (BASE_TIME + timedelta(days=1)).isoformat(),
+        },
+        {
+            "session_id": "session-id-is-not-a-replay-id",
+            "source": "held_out_replay",
+            "outcome": "correct",
+            "timestamp": BASE_TIME.isoformat(),
+            "model_revision": 7,
+            "test_window_id": "window-1",
+            "test_window_start": (BASE_TIME - timedelta(days=1)).isoformat(),
+            "test_window_end": (BASE_TIME + timedelta(days=1)).isoformat(),
+        },
+        {
+            "replay_id": "missing-window-id",
+            "source": "held_out_replay",
+            "outcome": "correct",
+            "timestamp": BASE_TIME.isoformat(),
+            "model_revision": 7,
+            "test_window_start": (BASE_TIME - timedelta(days=1)).isoformat(),
+            "test_window_end": (BASE_TIME + timedelta(days=1)).isoformat(),
+        },
+        {
+            "replay_id": "backwards-window",
+            "source": "held_out_replay",
+            "outcome": "correct",
+            "timestamp": BASE_TIME.isoformat(),
+            "model_revision": 7,
+            "test_window_id": "window-1",
+            "test_window_start": (BASE_TIME + timedelta(days=1)).isoformat(),
+            "test_window_end": (BASE_TIME - timedelta(days=1)).isoformat(),
+        },
+    ],
+)
+def test_nilm_held_out_replay_requires_revision_id_and_bounded_window(
+    invalid_record: dict[str, object],
+) -> None:
+    """Permissive held-out replay admission must fail this test."""
+    profile = nilm_domain.build_nilm_validation_profile(
+        {"model_revision": 7, "model_fingerprint": "current"},
+        held_out_replay=[invalid_record],
+    )
+
+    assert profile["sample_count"] == 0
+
+
+def test_nilm_validation_requires_provenance_and_deduplicates_stable_ids() -> None:
+    assignment = {"model_revision": 7}
+    duplicated = [
+        {
+            "outcome_id": "same-outcome",
+            "source": "feedback" if index < 3 else "held_out_replay",
+            "outcome": "correct",
+            "timestamp": (BASE_TIME + timedelta(days=index % 3)).isoformat(),
+            "model_revision": 7,
+        }
+        for index in range(5)
+    ]
+
+    profile = nilm_domain.build_nilm_validation_profile(
+        assignment,
+        session_outcomes=duplicated[:3],
+        held_out_replay=duplicated[3:],
+    )
+
+    assert profile["sample_count"] == 1
+    assert profile["runtime_eligible"] is False
+    assert profile["runtime_score"] is None
+    unprovenanced = [
+        {
+            "outcome_id": f"untrusted-{index}",
+            "outcome": "correct",
+            "timestamp": (BASE_TIME + timedelta(days=index % 3)).isoformat(),
+            "model_revision": 7,
+        }
+        for index in range(5)
+    ]
+    assert nilm_domain.build_nilm_validation_profile(
+        assignment, session_outcomes=unprovenanced
+    )["sample_count"] == 0
+
+
+def test_nilm_compound_uses_each_component_prototype_evidence_deterministically(
+) -> None:
+    a = assignment_model("a", transition("a", 60, prototype_id="a-start"))
+    b = assignment_model("b", transition("b", 40, prototype_id="b-start"))
+    states = {"a": 0.0, "b": 0.0}
+    scores = {"a-start": 1.0, "a": 0.0, "b-start": 0.5, "b": 0.0}
+
+    forward = reconcile(
+        edge(0, 100), [a, b], states, durations=scores, validations=scores
+    )
+    reverse = reconcile(
+        edge(0, 100), [b, a], states, durations=scores, validations=scores
+    )
+
+    assert forward == reverse
+    assert forward.accepted is True and forward.compound is True
+    assert forward.accepted_prototype_ids == ("a-start", "b-start")
+    assert len(forward.component_breakdowns) == 2
+    assert [item.duration_state_score for item in forward.component_breakdowns] == [
+        1.0,
+        0.5,
+    ]
+    assert [item.validation_score for item in forward.component_breakdowns] == [
+        1.0,
+        0.5,
+    ]
 
 
 def test_reconciliation_uses_var_to_separate_equal_w_components() -> None:

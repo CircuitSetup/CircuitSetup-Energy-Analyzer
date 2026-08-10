@@ -31,6 +31,7 @@ from custom_components.circuitsetup_energy_analyzer.models import (
 )
 from custom_components.circuitsetup_energy_analyzer.nilm import (
     build_nilm_assignment_model,
+    build_nilm_validation_profile,
 )
 from custom_components.circuitsetup_energy_analyzer.profiles import nilm_source_kind
 from custom_components.circuitsetup_energy_analyzer.storage import (
@@ -4263,6 +4264,409 @@ def _nilm_controller(coordinator: object) -> NilmController:
         label_interval_max_items=1,
         assignment_max_items=1,
     )
+
+
+def _validation_feedback_controller(
+    sessions: list[dict[str, object]],
+    *,
+    now_values: list[datetime],
+    assignment: dict[str, object] | None = None,
+) -> tuple[NilmController, dict[str, object]]:
+    async def noop(*_args: object) -> None:
+        return None
+
+    stored_assignment = assignment or {
+        "assignment_id": "assignment-pump",
+        "model_revision": 7,
+        "model_fingerprint": "model-seven",
+    }
+    coordinator = SimpleNamespace(
+        current_time=lambda: now_values.pop(0),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mixed": [stored_assignment]},
+            nilm_session_history_by_circuit={"mixed": sessions},
+        ),
+        state=SimpleNamespace(),
+        async_set_updated_data=lambda _state: None,
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None, async_save_if_dirty=noop
+        ),
+    )
+    return _nilm_controller(coordinator), stored_assignment
+
+
+@pytest.mark.asyncio
+async def test_history_validation_builds_current_provenanced_ground_truth_profile(
+) -> None:
+    """Skipping trusted workflow outcomes or inventing provenance must fail."""
+    base = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+    sessions = [
+        {
+            "session_id": f"session-{index}",
+            "assignment_id": "assignment-pump",
+            "start": (base + timedelta(days=index % 3)).isoformat(),
+            "end": (
+                base + timedelta(days=index % 3, minutes=10)
+            ).isoformat(),
+            "on_delta_w": 100.0,
+            "off_delta_w": -100.0,
+            "median_power_w": 100.0,
+            "confidence": 1.0,
+        }
+        for index in range(6)
+    ]
+    confirmed_ids = [str(session["session_id"]) for session in sessions]
+    model = build_nilm_assignment_model(
+        {
+            "assignment_id": "assignment-pump",
+            "confirmed_session_ids": confirmed_ids,
+        },
+        sessions,
+    )
+    assignment: dict[str, object] = {
+        "assignment_id": "assignment-pump",
+        "session_ids": confirmed_ids,
+        "confirmed_session_ids": confirmed_ids,
+        "lifecycle_state": "validated",
+        **model,
+    }
+    for session in sessions[:5]:
+        session.update({
+            "start_model_revision": model["model_revision"],
+            "stop_model_revision": model["model_revision"],
+            "start_model_fingerprint": model["model_fingerprint"],
+            "stop_model_fingerprint": model["model_fingerprint"],
+        })
+    intervals = [
+        {
+            "interval_id": f"interval-{index}",
+            "assignment_id": "assignment-pump",
+            "ground_truth_entity_id": "sensor.pump_power",
+            "start": session["start"],
+            "end": session["end"],
+            "validation_start": session["start"],
+            "validation_end": session["end"],
+            "median_power_w": 100.0,
+        }
+        for index, session in enumerate(sessions)
+    ]
+
+    async def noop(*_args: object) -> None:
+        return None
+
+    coordinator = SimpleNamespace(
+        current_time=lambda: base + timedelta(days=10),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={"mixed": [assignment]},
+            nilm_label_intervals_by_circuit={"mixed": intervals},
+            nilm_session_history_by_circuit={"mixed": sessions},
+        ),
+        state=SimpleNamespace(),
+        async_set_updated_data=lambda _state: None,
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=noop,
+        ),
+    )
+    controller = NilmController(
+        coordinator,
+        label_interval_max_items=100,
+        assignment_max_items=100,
+    )
+
+    await controller.async_validate_nilm_assignment_history(
+        "mixed", "assignment-pump"
+    )
+
+    assert assignment["model_revision"] == model["model_revision"]
+    assert assignment["model_fingerprint"] == model["model_fingerprint"]
+    assert assignment["validation_schema_version"] == 2
+    assert assignment["validation_method"] == "one_to_one_iou"
+    assert {
+        record["outcome_id"] for record in assignment["validation_outcomes"]
+    } == {f"session-{index}" for index in range(5)}
+    assert {
+        record["model_revision"] for record in assignment["validation_outcomes"]
+    } == {model["model_revision"]}
+    key = f"{model['model_revision']}:{model['model_fingerprint']}"
+    profile = assignment["validation_profiles_by_revision"][key]
+    assert profile["sample_count"] == 5
+    assert profile["distinct_days"] == 3
+    assert profile["runtime_eligible"] is True
+    runtime_profile = build_nilm_validation_profile(
+        assignment,
+        session_outcomes=assignment["validation_outcomes"],
+    )
+    assert runtime_profile["runtime_score"] is not None
+
+
+@pytest.mark.asyncio
+async def test_session_feedback_upserts_a_revision_matched_explicit_outcome() -> None:
+    """Removing the upsert or prediction provenance must fail this test."""
+    now = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+    controller, assignment = _validation_feedback_controller(
+        [
+            {
+                "session_id": "session-1",
+                "assignment_id": "assignment-pump",
+                "start": now.isoformat(),
+                "end": (now + timedelta(minutes=10)).isoformat(),
+                "start_model_revision": 7,
+                "stop_model_revision": 7,
+                "start_model_fingerprint": "model-seven",
+                "stop_model_fingerprint": "model-seven",
+            }
+        ],
+        now_values=[now, now + timedelta(minutes=1)],
+    )
+
+    await controller.async_record_nilm_session_validation(
+        "mixed", "session-1", assignment_id="assignment-pump", correct=True
+    )
+    await controller.async_record_nilm_session_validation(
+        "mixed", "session-1", assignment_id="assignment-pump", correct=False
+    )
+
+    assert assignment["validation_outcomes"] == [
+        {
+            "outcome_id": "session-1",
+            "session_id": "session-1",
+            "source": "explicit_feedback",
+            "outcome": "wrong",
+            "timestamp": "2026-08-01T12:01:00+00:00",
+            "model_revision": 7,
+            "model_fingerprint": "model-seven",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_session_feedback_preserves_matching_schema_v2_ground_truth_outcome() -> (
+    None
+):
+    """Removing another validation source during feedback upsert must fail."""
+    now = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+    assignment = {
+        "assignment_id": "assignment-pump",
+        "model_revision": 7,
+        "model_fingerprint": "model-seven",
+        "validation_schema_version": 2,
+        "validation_method": "one_to_one_iou",
+        "validation_outcomes": [
+            {
+                "outcome_id": "session-1",
+                "session_id": "session-1",
+                "source": "ground_truth",
+                "outcome": "wrong",
+                "timestamp": now.isoformat(),
+                "model_revision": 7,
+                "model_fingerprint": "model-seven",
+            }
+        ],
+    }
+    controller, assignment = _validation_feedback_controller(
+        [
+            {
+                "session_id": "session-1",
+                "assignment_id": "assignment-pump",
+                "start": now.isoformat(),
+                "end": (now + timedelta(minutes=10)).isoformat(),
+                "start_model_revision": 7,
+                "stop_model_revision": 7,
+                "start_model_fingerprint": "model-seven",
+                "stop_model_fingerprint": "model-seven",
+            }
+        ],
+        now_values=[now],
+        assignment=assignment,
+    )
+
+    await controller.async_record_nilm_session_validation(
+        "mixed", "session-1", assignment_id="assignment-pump", correct=True
+    )
+
+    assert {
+        (record["outcome_id"], record["source"])
+        for record in assignment["validation_outcomes"]
+    } == {("session-1", "ground_truth"), ("session-1", "explicit_feedback")}
+    profile = assignment["validation_profiles_by_revision"]["7:model-seven"]
+    assert profile["sample_count"] == 0
+    assert profile["runtime_score"] is None
+
+
+@pytest.mark.asyncio
+async def test_session_feedback_profiles_become_eligible_only_at_support_and_day_gates(
+) -> None:
+    """Dropping either Task-3 gate or smoothing must fail this test."""
+    base = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+    sessions = [
+        {
+            "session_id": f"session-{index}",
+            "assignment_id": "assignment-pump",
+            "start": (base + timedelta(days=index % 3)).isoformat(),
+            "end": (base + timedelta(days=index % 3, minutes=10)).isoformat(),
+            "start_model_revision": 7,
+            "stop_model_revision": 7,
+            "start_model_fingerprint": "model-seven",
+            "stop_model_fingerprint": "model-seven",
+        }
+        for index in range(5)
+    ]
+    controller, assignment = _validation_feedback_controller(
+        sessions,
+        now_values=[base + timedelta(days=index % 3) for index in range(5)],
+    )
+
+    for index in range(4):
+        await controller.async_record_nilm_session_validation(
+            "mixed", f"session-{index}", assignment_id="assignment-pump", correct=True
+        )
+    sparse = assignment["validation_profiles_by_revision"]["7:model-seven"]
+    assert sparse["sample_count"] == 4
+    assert sparse["runtime_score"] is None
+
+    await controller.async_record_nilm_session_validation(
+        "mixed", "session-4", assignment_id="assignment-pump", correct=False
+    )
+
+    profile = assignment["validation_profiles_by_revision"]["7:model-seven"]
+    assert profile["sample_count"] == 5
+    assert profile["distinct_days"] == 3
+    assert profile["correct_count"] == 4
+    assert profile["wrong_count"] == 1
+    assert profile["runtime_eligible"] is True
+    assert profile["runtime_score"] == pytest.approx(6 / 9)
+
+
+@pytest.mark.asyncio
+async def test_legacy_session_feedback_trains_without_runtime_validation_evidence(
+) -> None:
+    """Fabricating provenance from the current model must fail this test."""
+    now = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+    controller, assignment = _validation_feedback_controller(
+        [
+            {
+                "session_id": "legacy-confirmed",
+                "assignment_id": "assignment-pump",
+                "start": now.isoformat(),
+                "end": (now + timedelta(minutes=10)).isoformat(),
+            },
+            {
+                "session_id": "legacy-rejected",
+                "assignment_id": "assignment-pump",
+                "start": (now + timedelta(hours=1)).isoformat(),
+                "end": (now + timedelta(hours=1, minutes=10)).isoformat(),
+            }
+        ],
+        now_values=[now, now + timedelta(hours=1)],
+    )
+
+    await controller.async_record_nilm_session_validation(
+        "mixed", "legacy-confirmed", assignment_id="assignment-pump", correct=True
+    )
+    await controller.async_record_nilm_session_validation(
+        "mixed", "legacy-rejected", assignment_id="assignment-pump", correct=False
+    )
+
+    assert assignment["confirmed_session_ids"] == ["legacy-confirmed"]
+    assert assignment["rejected_session_ids"] == ["legacy-rejected"]
+    assert "validation_outcomes" not in assignment
+    assert "validation_profiles_by_revision" not in assignment
+
+
+@pytest.mark.asyncio
+async def test_feedback_for_an_older_prediction_revision_stays_separate() -> None:
+    """Reassigning old feedback to a rebuilt model must fail this test."""
+    now = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+    assignment = {
+        "assignment_id": "assignment-pump",
+        "model_revision": 8,
+        "model_fingerprint": "model-eight",
+    }
+    controller, assignment = _validation_feedback_controller(
+        [
+            {
+                "session_id": "older-session",
+                "assignment_id": "assignment-pump",
+                "start": now.isoformat(),
+                "end": (now + timedelta(minutes=10)).isoformat(),
+                "start_model_revision": 7,
+                "stop_model_revision": 7,
+                "start_model_fingerprint": "model-seven",
+                "stop_model_fingerprint": "model-seven",
+            }
+        ],
+        now_values=[now],
+        assignment=assignment,
+    )
+
+    await controller.async_record_nilm_session_validation(
+        "mixed", "older-session", assignment_id="assignment-pump", correct=True
+    )
+
+    assert assignment["validation_profiles_by_revision"] == {
+        "7:model-seven": {
+            "sample_count": 1,
+            "effective_support": 1.0,
+            "distinct_days": 1,
+            "correct_count": 1,
+            "wrong_count": 0,
+            "reliability": 0.6,
+            "runtime_eligible": False,
+            "runtime_score": None,
+            "source_counts": {"feedback": 1},
+        }
+    }
+    assert build_nilm_validation_profile(assignment)["sample_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_overlap_only_history_fields_do_not_become_runtime_feedback_outcomes(
+) -> None:
+    """Treating legacy overlap history as feedback must fail this test."""
+    now = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+    assignment = {
+        "assignment_id": "assignment-pump",
+        "model_revision": 7,
+        "model_fingerprint": "model-seven",
+        "validation_schema_version": 1,
+        "validation_method": "overlap",
+        "validation_outcomes": [
+            {
+                "outcome_id": "legacy-overlap",
+                "source": "ground_truth",
+                "outcome": "correct",
+                "timestamp": now.isoformat(),
+                "model_revision": 7,
+            }
+        ],
+    }
+    controller, assignment = _validation_feedback_controller(
+        [
+            {
+                "session_id": "session-1",
+                "assignment_id": "assignment-pump",
+                "start": now.isoformat(),
+                "end": (now + timedelta(minutes=10)).isoformat(),
+            }
+        ],
+        now_values=[now],
+        assignment=assignment,
+    )
+
+    await controller.async_record_nilm_session_validation(
+        "mixed", "session-1", assignment_id="assignment-pump", correct=True
+    )
+
+    assert assignment["validation_outcomes"] == [
+        {
+            "outcome_id": "legacy-overlap",
+            "source": "ground_truth",
+            "outcome": "correct",
+            "timestamp": "2026-08-01T12:00:00+00:00",
+            "model_revision": 7,
+        }
+    ]
 
 
 @pytest.mark.asyncio

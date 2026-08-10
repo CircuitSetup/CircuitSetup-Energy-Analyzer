@@ -24,6 +24,7 @@ from ..nilm import (
     KnownLoadTopology,
     NilmEdge,
     build_nilm_assignment_model,
+    build_nilm_validation_profile,
     known_load_topology_for_config,
     nilm_signature_is_assignable,
     normalize_nilm_assignment_model,
@@ -34,6 +35,9 @@ from ..nilm_validation import (
     nilm_validation_interval_id,
 )
 from ..profiles import nilm_source_kind, supports_direct_appliance_analysis
+
+_NILM_VALIDATION_OUTCOME_MAX_ITEMS = 64
+_NILM_VALIDATION_PROFILE_MAX_ITEMS = 12
 
 
 def _reference_link_number(value: Any, field: str) -> float | None:
@@ -2436,6 +2440,14 @@ class NilmController:
             for match in result.matches[-64:]
         ]
         assignment["history_validation_revision"] = 2
+        self._record_history_validation_outcomes(
+            assignment,
+            circuit_id,
+            session_by_id=session_by_id,
+            matched_session_ids=matched_session_ids,
+            conflicting_session_ids=conflicting_session_ids,
+        )
+        self._rebuild_validation_profiles(assignment)
         self._update_assignment_duration_bounds(circuit_id, assignment)
         self._rebuild_assignment_model(circuit_id, assignment)
         assignment["confirmed_sessions"] = len(confirmed)
@@ -2725,11 +2737,223 @@ class NilmController:
             assignment.get("energy_estimate_error"),
         )
         assignment["updated_at"] = now
+        self._record_session_validation_feedback(
+            assignment,
+            circuit_id,
+            session_id_text,
+            correct=correct,
+            timestamp=now,
+        )
         self._rebuild_assignment_model(circuit_id, assignment)
+        self._rebuild_validation_profiles(assignment)
         coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now_dt)
         return dict(assignment)
+
+    def _record_history_validation_outcomes(
+        self,
+        assignment: dict[str, Any],
+        circuit_id: str,
+        *,
+        session_by_id: Mapping[str, Mapping[str, Any]],
+        matched_session_ids: Iterable[str],
+        conflicting_session_ids: Iterable[str],
+    ) -> None:
+        """Replace one-to-one ground-truth outcomes with provenanced results."""
+        outcomes = [
+            dict(item)
+            for item in assignment.get("validation_outcomes", ())
+            if isinstance(item, Mapping)
+            and str(item.get("source") or "").strip().lower() != "ground_truth"
+        ]
+        decisions = {
+            **{session_id: "correct" for session_id in matched_session_ids},
+            **{session_id: "wrong" for session_id in conflicting_session_ids},
+        }
+        for session_id, outcome in sorted(decisions.items()):
+            provenance = self._session_prediction_provenance(circuit_id, session_id)
+            if provenance is None or provenance[0] is None:
+                continue
+            model_revision, model_fingerprint = provenance
+            session = session_by_id.get(session_id, {})
+            timestamp = str(
+                session.get("end") or session.get("start") or ""
+            ).strip()
+            if not timestamp:
+                continue
+            outcomes.append({
+                "outcome_id": session_id,
+                "session_id": session_id,
+                "source": "ground_truth",
+                "outcome": outcome,
+                "timestamp": timestamp,
+                "model_revision": model_revision,
+                "model_fingerprint": model_fingerprint,
+            })
+        assignment["validation_schema_version"] = 2
+        assignment["validation_method"] = "one_to_one_iou"
+        if outcomes:
+            assignment["validation_outcomes"] = outcomes[
+                -_NILM_VALIDATION_OUTCOME_MAX_ITEMS:
+            ]
+        else:
+            assignment.pop("validation_outcomes", None)
+
+    def _record_session_validation_feedback(
+        self,
+        assignment: dict[str, Any],
+        circuit_id: str,
+        session_id: str,
+        *,
+        correct: bool,
+        timestamp: str,
+    ) -> None:
+        """Upsert explicit feedback only when the session retains provenance."""
+        provenance = self._session_prediction_provenance(circuit_id, session_id)
+        if provenance is None:
+            return
+        model_revision, model_fingerprint = provenance
+        outcome = {
+            "outcome_id": session_id,
+            "session_id": session_id,
+            "source": "explicit_feedback",
+            "outcome": "correct" if correct else "wrong",
+            "timestamp": timestamp,
+            "model_revision": model_revision,
+            "model_fingerprint": model_fingerprint,
+        }
+        outcomes = [
+            dict(item)
+            for item in assignment.get("validation_outcomes", ())
+            if isinstance(item, Mapping)
+            and not (
+                str(item.get("source") or "").strip().lower()
+                == "explicit_feedback"
+                and str(
+                    item.get("outcome_id") or item.get("session_id") or ""
+                ).strip()
+                == session_id
+            )
+        ]
+        outcomes.append(outcome)
+        assignment["validation_outcomes"] = outcomes[
+            -_NILM_VALIDATION_OUTCOME_MAX_ITEMS:
+        ]
+
+    def _session_prediction_provenance(
+        self,
+        circuit_id: str,
+        session_id: str,
+    ) -> tuple[int | None, str] | None:
+        """Return one consistent prediction-time model identity for a session."""
+        session = next(
+            (
+                item
+                for item in (
+                    self._coordinator.store_data.nilm_session_history_by_circuit.get(
+                        circuit_id, ()
+                    )
+                )
+                if isinstance(item, Mapping)
+                and str(item.get("session_id") or "").strip() == session_id
+            ),
+            None,
+        )
+        if session is None:
+            return None
+
+        def revision(key: str) -> int | None:
+            value = session.get(key)
+            if isinstance(value, bool):
+                return None
+            try:
+                parsed = int(value)
+            except (TypeError, ValueError):
+                return None
+            return parsed if parsed > 0 else None
+
+        revisions = {
+            value
+            for key in (
+                "prediction_model_revision",
+                "model_revision",
+                "start_model_revision",
+                "stop_model_revision",
+            )
+            if (value := revision(key)) is not None
+        }
+        fingerprints = {
+            str(session.get(key) or "").strip()
+            for key in (
+                "prediction_model_fingerprint",
+                "model_fingerprint",
+                "start_model_fingerprint",
+                "stop_model_fingerprint",
+            )
+            if str(session.get(key) or "").strip()
+        }
+        if len(revisions) > 1 or len(fingerprints) > 1:
+            return None
+        model_revision = next(iter(revisions), None)
+        model_fingerprint = next(iter(fingerprints), "")
+        if model_revision or model_fingerprint:
+            return model_revision, model_fingerprint
+        return None
+
+    def _rebuild_validation_profiles(self, assignment: dict[str, Any]) -> None:
+        """Persist bounded profiles by the revision that generated each outcome."""
+        grouped: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
+        for record in assignment.get("validation_outcomes", ()):
+            if not isinstance(record, Mapping):
+                continue
+            revision = record.get(
+                "model_revision", record.get("prediction_model_revision")
+            )
+            if isinstance(revision, bool):
+                revision = None
+            try:
+                revision = int(revision) if revision is not None else None
+            except (TypeError, ValueError):
+                revision = None
+            if revision is not None and revision <= 0:
+                revision = None
+            fingerprint = str(
+                record.get("model_fingerprint")
+                or record.get("prediction_model_fingerprint")
+                or ""
+            ).strip()
+            if revision is None and not fingerprint:
+                continue
+            key = f"{revision or 0}:{fingerprint}"
+            profile_records: list[dict[str, Any]] = []
+            projection, records = grouped.setdefault(
+                key,
+                (
+                    {
+                        "model_revision": revision or 0,
+                        "model_fingerprint": fingerprint,
+                        "validation_schema_version": assignment.get(
+                            "validation_schema_version"
+                        ),
+                        "validation_method": assignment.get("validation_method"),
+                        "validation_outcomes": profile_records,
+                    },
+                    profile_records,
+                ),
+            )
+            records.append(dict(record))
+
+        profiles = {
+            key: build_nilm_validation_profile(projection, session_outcomes=records)
+            for key, (projection, records) in sorted(grouped.items())
+        }
+        if profiles:
+            assignment["validation_profiles_by_revision"] = dict(
+                list(profiles.items())[-_NILM_VALIDATION_PROFILE_MAX_ITEMS:]
+            )
+        else:
+            assignment.pop("validation_profiles_by_revision", None)
 
     def _update_assignment_duration_bounds(
         self,
