@@ -10506,10 +10506,7 @@ def test_nilm_runtime_persists_bounded_prediction_provenance_on_completion() -> 
     assert session["start_prototype_id"] == "dryer:start:off->running"
     assert session["stop_prototype_id"] == "dryer:stop:running->off"
     assert session["start_model_revision"] == session["stop_model_revision"] == 7
-    assert [item["state_id"] for item in session["state_path"]] == [
-        "running",
-        "off",
-    ]
+    assert [item["state_id"] for item in session["state_path"]] == ["running"]
     assert [item["prototype_id"] for item in session["accepted_predictions"]] == [
         "dryer:start:off->running",
         "dryer:stop:running->off",
@@ -10595,6 +10592,93 @@ def test_nilm_runtime_stop_then_start_keeps_each_session_provenance() -> None:
     assert runtime["dryer"]["start_prediction"]["prototype_id"] == (
         "dryer:start:off->running"
     )
+
+
+def test_nilm_runtime_keeps_one_session_through_active_state_changes() -> None:
+    """A state-down transition must not close a multi-state NILM session."""
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        reconcile_component_runtime,
+    )
+
+    started_at = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    raised_at = started_at + timedelta(minutes=1)
+    lowered_at = raised_at + timedelta(minutes=1)
+    stopped_at = lowered_at + timedelta(minutes=1)
+    assignment = {
+        "assignment_id": "dryer",
+        "lifecycle_state": "validated",
+        "model_confidence": 0.9,
+        "power_states_w": [0.0, 100.0, 200.0],
+        "states": [
+            {"id": "off", "kind": "off", "power_w": 0.0, "spread_w": 0.0},
+            {"id": "active_1", "kind": "active", "power_w": 100.0, "spread_w": 2.0},
+            {"id": "active_2", "kind": "active", "power_w": 200.0, "spread_w": 2.0},
+        ],
+        "transition_prototypes": [
+            {"id": "dryer-start", "kind": "start", "direction": "on",
+             "from_state_id": "off", "to_state_id": "active_1",
+             "from_state_w": 0.0, "to_state_w": 100.0,
+             "delta_w": 100.0, "spread_w": 2.0, "sample_count": 4},
+            {"id": "dryer-up", "kind": "state_up", "direction": "on",
+             "from_state_id": "active_1", "to_state_id": "active_2",
+             "from_state_w": 100.0, "to_state_w": 200.0,
+             "delta_w": 100.0, "spread_w": 2.0, "sample_count": 4},
+            {"id": "dryer-down", "kind": "state_down", "direction": "off",
+             "from_state_id": "active_2", "to_state_id": "active_1",
+             "from_state_w": 200.0, "to_state_w": 100.0,
+             "delta_w": -100.0, "spread_w": 2.0, "sample_count": 4},
+            {"id": "dryer-stop", "kind": "stop", "direction": "off",
+             "from_state_id": "active_1", "to_state_id": "off",
+             "from_state_w": 100.0, "to_state_w": 0.0,
+             "delta_w": -100.0, "spread_w": 2.0, "sample_count": 4},
+        ],
+    }
+    runtime: dict[str, dict[str, object]] = {
+        "dryer": {
+            "status": "off", "state_power_w": 0.0,
+            "estimated_power_w": 0.0, "consistent": True,
+        }
+    }
+    previous = None
+    completed: list[dict[str, object]] = []
+    for timestamp, source_power_w, delta_w, direction in (
+        (started_at, 100.0, 100.0, "on"),
+        (raised_at, 200.0, 100.0, "on"),
+        (lowered_at, 100.0, -100.0, "off"),
+        (stopped_at, 0.0, -100.0, "off"),
+    ):
+        runtime, previous, completed, accepted = reconcile_component_runtime(
+            source_power_w=source_power_w,
+            timestamp=timestamp,
+            assignments=(assignment,),
+            runtime=runtime,
+            edges=(NilmEdge(timestamp, delta_w, 0.0, delta_w, 0.0, direction),),
+            standby_w=0.0,
+            noise_spread_w=0.0,
+            previous_reconciliation=previous,
+        )
+        assert accepted
+
+    assert len(completed) == 1
+    session = completed[0]
+    assert session["on_delta_w"] == 100.0
+    assert session["off_delta_w"] == -100.0
+    assert [item["state_id"] for item in session["state_path"]] == [
+        "active_1", "active_2", "active_1",
+    ]
+    assert [item["started_at"] for item in session["state_path"]] == [
+        started_at.isoformat(), raised_at.isoformat(), lowered_at.isoformat(),
+    ]
+    assert [item["power_w"] for item in session["state_path"]] == [
+        100.0, 200.0, 100.0,
+    ]
+    assert session["state_dwell_seconds"] == {
+        "active_1": 120.0,
+        "active_2": 60.0,
+    }
+    assert session["time_weighted_mean_power_w"] == pytest.approx(133.333)
+    assert session["time_weighted_median_power_w"] == 100.0
 
 
 def test_nilm_source_unavailable_preserves_metrics_and_counts_input_edge() -> None:
@@ -10858,6 +10942,44 @@ def test_nilm_restart_restores_user_assigned_model() -> None:
     assert runtime["load"]["state_since"] == now.isoformat()
 
 
+def test_nilm_restart_restores_the_unique_supported_active_state() -> None:
+    """Hydration must retain the matching multi-state ID, not collapse to running."""
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _initial_component_runtime,
+        _restore_unique_component_state,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    assignment = {
+        "assignment_id": "load",
+        "lifecycle_state": "assigned",
+        "model_confidence": 0.9,
+        "power_states_w": [0.0, 80.0, 160.0],
+        "states": [
+            {"id": "off", "kind": "off", "power_w": 0.0, "spread_w": 0.0},
+            {"id": "active_1", "kind": "active", "power_w": 80.0, "spread_w": 1.0},
+            {"id": "active_2", "kind": "active", "power_w": 160.0, "spread_w": 1.0},
+        ],
+        "transition_prototypes": [
+            {"direction": "on", "kind": "start", "from_state_id": "off",
+             "to_state_id": "active_2", "from_state_w": 0.0,
+             "to_state_w": 160.0, "delta_w": 160.0, "spread_w": 2.0,
+             "sample_count": 4},
+            {"direction": "off", "kind": "stop", "from_state_id": "active_2",
+             "to_state_id": "off", "from_state_w": 160.0,
+             "to_state_w": 0.0, "delta_w": -160.0, "spread_w": 2.0,
+             "sample_count": 4},
+        ],
+    }
+    runtime = _initial_component_runtime((assignment,), {}, now)
+
+    _restore_unique_component_state(160.0, 0.0, 0.0, (assignment,), runtime, now)
+
+    assert runtime["load"]["status"] == "on"
+    assert runtime["load"]["current_state_id"] == "active_2"
+    assert runtime["load"]["current_state_power_w"] == 160.0
+
+
 def test_nilm_restart_restores_multiple_assigned_signature_models() -> None:
     from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
         _initial_component_runtime,
@@ -10936,6 +11058,44 @@ def test_confirmed_legacy_off_signature_drives_component_runtime() -> None:
         ("off", -82.0, 4.0),
     ]
     assert model.model_confidence == 0.85
+
+
+def test_provisional_signature_model_remains_binary_with_multiple_signatures() -> None:
+    """Unreviewed signatures cannot invent separate durable active states."""
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _runtime_assignment_model,
+    )
+
+    model = _runtime_assignment_model(
+        {
+            "assignment_id": "pump",
+            "lifecycle_state": "assigned",
+            "signature_fingerprints": ["signature-low", "signature-high"],
+        },
+        [
+            {
+                "feedback_fingerprint": "signature-low",
+                "median_delta_w": 80.0,
+                "occurrence_count": 3,
+                "confidence": 0.70,
+            },
+            {
+                "feedback_fingerprint": "signature-high",
+                "median_delta_w": 160.0,
+                "occurrence_count": 4,
+                "confidence": 0.80,
+            },
+        ],
+    )
+
+    assert model.power_states_w == (0.0, 160.0)
+    assert [
+        (item.from_state_w, item.to_state_w)
+        for item in model.transition_prototypes
+    ] == [
+        (0.0, 160.0),
+        (160.0, 0.0),
+    ]
 
 
 def test_assigned_on_signature_replaces_legacy_off_fallback() -> None:
