@@ -3,6 +3,7 @@
 from datetime import UTC, datetime, timedelta
 
 from custom_components.circuitsetup_energy_analyzer.nilm_interval_evidence import (
+    NilmEvidenceThresholds,
     NilmPowerSample,
     aggregate_power_samples,
     context_window_seconds,
@@ -25,6 +26,7 @@ def test_boundary_deltas_are_not_replaced_by_larger_interior_transition() -> Non
             sample(-30, 200),
             sample(0, 700),
             sample(30, 700),
+            sample(45, 700),
             sample(60, 1600),
             sample(90, 1600),
             sample(120, 700),
@@ -322,6 +324,7 @@ def test_interior_residual_diagnostics_exclude_boundary_steps() -> None:
             sample(-30, 200),
             sample(0, 700),
             sample(30, 700),
+            sample(45, 700),
             sample(60, 1600),
             sample(90, 700),
             sample(150, 700),
@@ -343,3 +346,103 @@ def test_longest_gap_includes_uncovered_interval_edges() -> None:
     )
 
     assert evidence.longest_power_gap_seconds == 30
+
+
+def test_transition_crossing_out_of_early_window_does_not_count_as_interior() -> None:
+    evidence = derive_manual_interval_evidence(
+        [
+            sample(-30, 200),
+            sample(0, 700),
+            sample(30, 700),
+            sample(60, 1600),
+            sample(90, 1600),
+            sample(150, 700),
+            sample(190, 200),
+        ],
+        start=BASE,
+        end=BASE + timedelta(seconds=180),
+    )
+
+    assert evidence.interior_transition_count == 0
+
+
+def test_edge_gaps_begin_at_selection_edge_not_first_unavailable_sample() -> None:
+    leading = derive_manual_interval_evidence(
+        [
+            sample(-20, 200),
+            NilmPowerSample(
+                BASE + timedelta(seconds=10), None, "sensor.mains", "unavailable"
+            ),
+            sample(30, 700),
+            sample(60, 700),
+            sample(90, 700),
+            sample(120, 700),
+            sample(130, 200),
+        ],
+        start=BASE,
+        end=BASE + timedelta(seconds=120),
+    )
+    trailing = derive_manual_interval_evidence(
+        [
+            sample(-20, 200),
+            sample(0, 700),
+            sample(60, 700),
+            NilmPowerSample(
+                BASE + timedelta(seconds=110), None, "sensor.mains", "unavailable"
+            ),
+            sample(130, 200),
+        ],
+        start=BASE,
+        end=BASE + timedelta(seconds=120),
+    )
+
+    assert leading.longest_power_gap_seconds == 30
+    assert trailing.longest_power_gap_seconds == 60
+
+
+def test_boundary_coverage_threshold_is_inclusive() -> None:
+    def evidence(invalid_count: int):
+        return derive_manual_interval_evidence(
+            [sample(-20, 200), sample(0, 700), sample(5, 700), sample(10, 700)]
+            + [
+                NilmPowerSample(
+                    BASE + timedelta(seconds=15 + index),
+                    None,
+                    "sensor.mains",
+                    "unavailable",
+                )
+                for index in range(invalid_count)
+            ],
+            start=BASE,
+            end=BASE + timedelta(seconds=120),
+        )
+
+    assert evidence(0).start_transition_eligible is True
+    assert evidence(1).start_transition_eligible is True
+    assert evidence(2).start_transition_eligible is False
+
+
+def test_boundary_spread_threshold_is_inclusive() -> None:
+    def eligible(second_value: int) -> bool:
+        return derive_manual_interval_evidence(
+            [sample(-20, 200), sample(0, 700), sample(10, second_value)],
+            start=BASE, end=BASE + timedelta(seconds=120),
+        ).start_transition_eligible
+
+    assert eligible(799) is True
+    assert eligible(800) is True
+    assert eligible(801) is False
+
+
+def test_boundary_gap_threshold_is_inclusive() -> None:
+    settings = NilmEvidenceThresholds(maximum_context_seconds=120)
+
+    def eligible(pre_seconds: int) -> bool:
+        return derive_manual_interval_evidence(
+            [sample(pre_seconds, 200), sample(0, 700), sample(30, 700)],
+            start=BASE, end=BASE + timedelta(seconds=600), thresholds=settings,
+        ).start_transition_eligible
+
+    assert eligible(-59) is True
+    assert eligible(-60) is True
+    assert eligible(-61) is False

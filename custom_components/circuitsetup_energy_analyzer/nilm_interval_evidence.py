@@ -525,11 +525,12 @@ def _material_changes_net(
 ) -> list[float]:
     return [
         right_power - left_power
-        for (_, left_power), (right_time, right_power) in zip(
+        for (left_time, left_power), (right_time, right_power) in zip(
             points, points[1:], strict=False
         )
         if left_power is not None
         and right_power is not None
+        and start <= left_time <= end
         and start <= right_time <= end
         and abs(right_power - left_power) >= threshold
     ]
@@ -577,10 +578,7 @@ def _integrate(
     longest_gap = 0.0
     if not points:
         return None, 0.0, duration or None, None
-    longest_gap = max(
-        (points[0][0] - start).total_seconds(), (end - points[-1][0]).total_seconds()
-    )
-    gap_start: datetime | None = None
+    covered_spans: list[tuple[datetime, datetime]] = []
     for (left_time, left_power), (right_time, right_power) in zip(
         points, points[1:], strict=False
     ):
@@ -588,10 +586,16 @@ def _integrate(
         if left_power is not None and right_power is not None:
             covered += seconds
             energy_ws += (left_power + right_power) * seconds / 2
-            gap_start = None
-        else:
-            gap_start = gap_start or left_time
-            longest_gap = max(longest_gap, (right_time - gap_start).total_seconds())
+            covered_spans.append((left_time, right_time))
+    if covered_spans:
+        longest_gap = (covered_spans[0][0] - start).total_seconds()
+        previous_end = covered_spans[0][1]
+        for span_start, span_end in covered_spans[1:]:
+            longest_gap = max(longest_gap, (span_start - previous_end).total_seconds())
+            previous_end = max(previous_end, span_end)
+        longest_gap = max(longest_gap, (end - previous_end).total_seconds())
+    else:
+        longest_gap = duration
     coverage = covered / duration if duration else 0.0
     average = energy_ws / covered if covered else None
     return (
