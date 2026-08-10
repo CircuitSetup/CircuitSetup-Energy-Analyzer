@@ -5916,6 +5916,28 @@ test("NILM workspace uses Home Assistant surfaces", async ({ page }) => {
   await expect(panel.locator("[data-nilm-apply-decision]")).toBeEnabled();
 });
 
+test("NILM workspace says when an edge has no dominant leg", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.edges = [{
+      timestamp: "2026-07-13T18:00:00Z",
+      direction: "on",
+      delta_w: 900,
+      split_phase_type: "unknown",
+      dominant_leg: null,
+    }];
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+
+  await expect(panel.locator("[data-nilm-secondary-collections]")).toContainText(
+    "No dominant leg",
+  );
+});
+
 test("NILM component graph focuses and navigates complete occurrences", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (url.pathname.endsWith("/nilm_workspace_history")) {

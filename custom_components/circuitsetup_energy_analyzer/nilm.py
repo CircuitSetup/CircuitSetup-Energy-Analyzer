@@ -2063,7 +2063,7 @@ class NilmEdge:
     leg_a_delta_w: float | None = None
     leg_b_delta_w: float | None = None
     leg_balance_ratio: float | None = None
-    dominant_leg: str = "unknown"
+    dominant_leg: str | None = "unknown"
     split_phase_type: str = "unknown"
     origin: str = "aggregate"
     parent_edge_id: str | None = None
@@ -7302,8 +7302,8 @@ def _nilm_edge_id(edge: NilmEdge) -> str:
         edge.timestamp.isoformat(),
         f"w={edge.delta_w:.3f}",
         f"var={_optional_number_text(edge.delta_var)}",
-        edge.split_phase_type,
-        edge.dominant_leg,
+        str(edge.split_phase_type or "unknown"),
+        str(edge.dominant_leg or "none"),
     )
     if edge.origin != "aggregate":
         fields += (

@@ -3909,6 +3909,31 @@ def test_nilm_edge_id_distinguishes_known_load_residual_provenance() -> None:
     )
 
 
+def test_session_pairing_handles_residual_edges_without_a_dominant_leg() -> None:
+    sessions = pair_nilm_sessions_for_signatures(
+        [
+            replace(
+                edge(0, 200.0),
+                origin="known_load_residual",
+                dominant_leg=None,
+            ),
+            replace(
+                edge(60, -200.0),
+                origin="known_load_residual",
+                dominant_leg=None,
+            ),
+        ],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {"signature_fingerprint": "residual-load", "typical_watts": 200.0}
+        ],
+    )
+
+    assert len(sessions) == 1
+    assert "|unknown|none|" in sessions[0].on_edge_id
+    assert "|unknown|none|" in sessions[0].off_edge_id
+
+
 @pytest.mark.parametrize("aggregate_delta_w", [1005.0, -1005.0])
 def test_attribute_known_loads_skips_residual_below_threshold(
     aggregate_delta_w: float,
