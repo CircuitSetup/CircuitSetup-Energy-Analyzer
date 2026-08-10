@@ -360,14 +360,16 @@ def _transition_features(
         features["post_power_spread_w"] = float(
             median([abs(value - post_median) for value in post_values])
         )
-        features["transition_window_end"] = post[0].timestamp.isoformat()
+        features["transition_window_end"] = (
+            transition_timestamp or post[0].timestamp
+        ).isoformat()
     if pre and post:
         features["transition_delta_w"] = post_median - pre_median
         features["transition_spread_w"] = (
             features["pre_power_spread_w"] + features["post_power_spread_w"]
         )
         features["transition_timing_uncertainty_s"] = (
-            post[0].timestamp - pre[-1].timestamp
+            (transition_timestamp or post[0].timestamp) - pre[-1].timestamp
         ).total_seconds()
         features["transition_quality"] = "measured"
     elif post:
@@ -538,10 +540,12 @@ class OperatingStateMachine:
         self._pending_transition_post: deque[_TransitionSample] = deque(
             maxlen=_TRANSITION_CONTEXT_SAMPLE_LIMIT
         )
+        self._pending_transition_first_post_at: datetime | None = None
         self._pending_running_step_pre: tuple[_TransitionSample, ...] = ()
         self._pending_running_step_post: deque[_TransitionSample] = deque(
             maxlen=_TRANSITION_CONTEXT_SAMPLE_LIMIT
         )
+        self._pending_running_step_first_post_at: datetime | None = None
         self._last_running_step_at: datetime | None = None
         self._run_idle_upper_w: float | None = None
         self._run_idle_sample_count = 0
@@ -922,6 +926,7 @@ class OperatingStateMachine:
         self._pending_transition_kind = kind
         self._pending_transition_pre = tuple(context)
         self._pending_transition_post.clear()
+        self._pending_transition_first_post_at = timestamp
         self._pending_transition_post.append(
             _TransitionSample(timestamp=timestamp, power_w=watts)
         )
@@ -944,13 +949,16 @@ class OperatingStateMachine:
         return _transition_features(
             self._pending_transition_pre,
             tuple(self._pending_transition_post),
-            transition_timestamp=transition_timestamp,
+            transition_timestamp=(
+                self._pending_transition_first_post_at or transition_timestamp
+            ),
         )
 
     def _clear_pending_transition(self) -> None:
         self._pending_transition_kind = None
         self._pending_transition_pre = ()
         self._pending_transition_post.clear()
+        self._pending_transition_first_post_at = None
 
     def _clear_transition_context(self) -> None:
         self._off_transition_context.clear()
@@ -989,7 +997,9 @@ class OperatingStateMachine:
                 ):
                     self._clear_pending_running_step()
                     return None
-                event_timestamp = post[0].timestamp
+                event_timestamp = (
+                    self._pending_running_step_first_post_at or post[0].timestamp
+                )
                 self._last_running_step_at = event_timestamp
                 self._clear_pending_running_step()
                 features.update(
@@ -1012,9 +1022,16 @@ class OperatingStateMachine:
         if len(pre) < 2:
             return None
         pre_median = float(median([item.power_w for item in pre]))
-        if abs(watts - pre_median) < _RUNNING_STEP_MATERIAL_FLOOR_W:
+        pre_range = max(item.power_w for item in pre) - min(
+            item.power_w for item in pre
+        )
+        if (
+            pre_range > _RUNNING_STEP_MAX_POST_SPREAD_W
+            or abs(watts - pre_median) < _RUNNING_STEP_MATERIAL_FLOOR_W
+        ):
             return None
         self._pending_running_step_pre = pre
+        self._pending_running_step_first_post_at = sample.timestamp
         self._pending_running_step_post.append(
             _TransitionSample(timestamp=sample.timestamp, power_w=watts)
         )
@@ -1039,6 +1056,7 @@ class OperatingStateMachine:
     def _clear_pending_running_step(self) -> None:
         self._pending_running_step_pre = ()
         self._pending_running_step_post.clear()
+        self._pending_running_step_first_post_at = None
 
     def _clear_learning_state(self) -> None:
         self._stable_off_power_w.clear()

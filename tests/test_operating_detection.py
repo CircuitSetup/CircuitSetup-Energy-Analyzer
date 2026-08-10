@@ -471,7 +471,27 @@ def test_running_power_step_rejects_continuous_gradual_ramp() -> None:
         (seconds, 500.0 + (seconds - 25) * 4.0)
         for seconds in range(30, 190, 5)
     )
+    samples.extend(((190, 1140.0), (195, 1140.0), (200, 1140.0)))
     for seconds, watts in samples:
+        events.extend(
+            machine.process(_sample(seconds, watts, circuit_id="fridge")).events
+        )
+
+    assert EventType.POWER_TRANSITION not in [event.event_type for event in events]
+
+
+def test_running_power_step_rejects_early_spike_without_stable_pre_plateau() -> None:
+    machine = _machine()
+    events = []
+    for seconds, watts in (
+        (0, 5.0),
+        (5, 500.0),
+        (15, 500.0),
+        (20, 900.0),
+        (25, 500.0),
+        (30, 500.0),
+        (35, 500.0),
+    ):
         events.extend(
             machine.process(_sample(seconds, watts, circuit_id="fridge")).events
         )
@@ -485,7 +505,8 @@ def test_rejected_running_step_does_not_reuse_stale_pre_plateau() -> None:
     for seconds, watts in (
         (0, 5.0), (5, 500.0), (15, 500.0), (20, 500.0), (25, 500.0),
         (30, 900.0), (35, 1200.0), (40, 900.0), (45, 900.0), (50, 900.0),
-        (55, 900.0), (60, 1300.0), (65, 1300.0), (70, 1300.0),
+        (55, 900.0), (90, 900.0), (95, 900.0), (100, 1300.0),
+        (105, 1300.0), (110, 1300.0),
     ):
         events.extend(
             machine.process(_sample(seconds, watts, circuit_id="fridge")).events
@@ -1231,7 +1252,8 @@ def test_pending_transition_post_samples_remain_bounded_and_age_pruned() -> None
 
     assert start.features["post_sample_count"] == 12
     assert start.features["post_power_median_w"] == 120.0
-    assert start.features["transition_window_end"] == "2026-06-18T12:00:46+00:00"
+    assert start.features["transition_window_end"] == "2026-06-18T12:00:01+00:00"
+    assert start.features["transition_timing_uncertainty_s"] == 1.0
 
 
 def test_pending_transition_post_window_excludes_samples_older_than_sixty_seconds(

@@ -120,7 +120,7 @@ def test_recent_activity_timeline_limits_items_and_reports_quiet() -> None:
     assert quiet.items == []
 
 
-def test_recent_activity_timeline_uses_only_lifecycle_events() -> None:
+def test_recent_activity_timeline_excludes_only_power_transitions() -> None:
     now = datetime(2026, 6, 3, 18, 0, tzinfo=UTC)
     start = CircuitEvent(
         timestamp=now - timedelta(minutes=10),
@@ -132,6 +132,11 @@ def test_recent_activity_timeline_uses_only_lifecycle_events() -> None:
         circuit_id="pump",
         event_type=EventType.POWER_TRANSITION,
     )
+    sag = CircuitEvent(
+        timestamp=now - timedelta(minutes=3),
+        circuit_id="pump",
+        event_type=EventType.VOLTAGE_SAG,
+    )
     stop = CircuitEvent(
         timestamp=now - timedelta(minutes=1),
         circuit_id="pump",
@@ -140,14 +145,18 @@ def test_recent_activity_timeline_uses_only_lifecycle_events() -> None:
 
     summary = build_recent_activity_timeline(
         circuit_id="pump",
-        events=[start, transition, stop],
+        events=[start, transition, sag, stop],
         alerts=[],
         now=now,
     )
 
-    assert summary.event_count == 2
-    assert summary.total_count == 2
-    assert [item["event_type"] for item in summary.items] == ["stop", "start"]
+    assert summary.event_count == 3
+    assert summary.total_count == 3
+    assert [item["event_type"] for item in summary.items] == [
+        "stop",
+        "voltage_sag",
+        "start",
+    ]
 
 
 def test_recent_activity_timeline_deduplicates_identical_items() -> None:

@@ -48,7 +48,7 @@ def build_recent_activity_timeline(
         for event in events
         if (
             event.circuit_id == circuit_id
-            and event.event_type in {EventType.START, EventType.STOP}
+            and event.event_type is not EventType.POWER_TRANSITION
             and event.timestamp >= cutoff
         )
     ]
