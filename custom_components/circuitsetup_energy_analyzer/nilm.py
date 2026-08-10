@@ -151,6 +151,7 @@ def build_nilm_assignment_model(
     off = [record for record in positives if record.off_delta_w is not None]
     plateau = [record for record in positives if record.plateau_w is not None]
     weighted_plateau = _weighted_plateau_records(plateau)
+    state_evidence = _state_evidence_records(weighted_plateau, positives)
     power_source = "plateau"
     if plateau:
         active_power = _weighted_median(
@@ -186,7 +187,7 @@ def build_nilm_assignment_model(
             )
             power_source = "transition_fallback"
     active_power = round(active_power, 3)
-    learned_states = _learn_nilm_active_states(weighted_plateau)
+    learned_states = _learn_nilm_active_states(state_evidence)
     model_kind = "binary"
     if learned_states is not None and len(learned_states) > 1:
         model_kind = "multi_state"
@@ -211,7 +212,7 @@ def build_nilm_assignment_model(
                 "power_source": power_source,
             }
             for index, (power, members) in enumerate(
-                _state_members(state_powers, weighted_plateau), 1
+                _state_members(state_powers, state_evidence), 1
             )
         ],
     ]
@@ -220,7 +221,7 @@ def build_nilm_assignment_model(
             [record.plateau_w for record in weighted_plateau], weighted_plateau
         )
     for index, (power, members) in enumerate(
-        _state_members(state_powers, weighted_plateau), 1
+        _state_members(state_powers, state_evidence), 1
     ):
         state_id = f"active_{index}" if model_kind == "multi_state" else "running"
         member_ids = {record.evidence_id for record in members}
@@ -268,6 +269,14 @@ def build_nilm_assignment_model(
                     to_state_id="off",
                 )
             )
+    model["transition_prototypes"].extend(
+        _state_path_transition_prototypes(
+            sessions,
+            positives,
+            assignment_id,
+            model["states"],
+        )
+    )
     profile_records = [
         record for record in positives if record.duration_s and record.duration_s > 0
     ]
@@ -295,7 +304,7 @@ def build_nilm_assignment_model(
         model["state_dwell_profiles"] = state_dwell_profiles
     conflicts = _close_rejected_conflicts(negatives, on, off)
     issues = sorted({issue for record in positives for issue in record.issues})
-    state_support = min(_weighted_support(weighted_plateau) / 3, 1.0)
+    state_support = min(_weighted_support(state_evidence) / 3, 1.0)
     confidence = _evidence_confidence(
         positives, on, off, conflicts, state_support=state_support
     )
@@ -769,6 +778,101 @@ def _weighted_plateau_records(
         )
         for record in records
     ]
+
+
+def _state_evidence_records(
+    plateau: list[_NormalizedAssignmentEvidence],
+    positives: list[_NormalizedAssignmentEvidence],
+) -> list[_NormalizedAssignmentEvidence]:
+    """Include qualified energy means only where direct plateau evidence is absent."""
+    derived = [
+        replace(
+            record,
+            plateau_w=record.energy_kwh * 3_600_000 / record.duration_s,
+            plateau_source="energy_mean",
+        )
+        for record in positives
+        if record.plateau_w is None
+        and record.energy_kwh is not None
+        and record.duration_s is not None
+        and record.duration_s > 0
+    ]
+    return [*plateau, *derived]
+
+
+def _state_path_transition_prototypes(
+    sessions: Iterable[Mapping[str, Any]],
+    records: list[_NormalizedAssignmentEvidence],
+    assignment_id: str,
+    states: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build active-state transitions only from completed reviewed state paths."""
+    by_id = {
+        record.evidence_id: record
+        for record in records
+        if record.source_type == "session"
+    }
+    active = [state for state in states if state.get("id") != "off"]
+    grouped: defaultdict[tuple[str, str], list[_NormalizedAssignmentEvidence]] = (
+        defaultdict(list)
+    )
+    for session in sessions:
+        record = by_id.get(str(session.get("session_id") or "").strip())
+        path = session.get("state_path")
+        if (
+            record is None
+            or _nilm_datetime(session.get("end")) is None
+            or not isinstance(path, list)
+        ):
+            continue
+        mapped = [_map_state_path_entry(item, active) for item in path]
+        for source, target in zip(mapped, mapped[1:], strict=False):
+            if source is None or target is None or source["id"] == target["id"]:
+                continue
+            delta = target["power_w"] - source["power_w"]
+            grouped[(source["id"], target["id"])].append(
+                replace(
+                    record,
+                    on_delta_w=delta if delta > 0 else None,
+                    off_delta_w=delta if delta < 0 else None,
+                )
+            )
+    prototypes: list[dict[str, Any]] = []
+    state_by_id = {state["id"]: state for state in active}
+    for (source_id, target_id), members in sorted(grouped.items()):
+        if _effective_support(members) < 3.0 or _distinct_days(members) < 2:
+            continue
+        source, target = state_by_id[source_id], state_by_id[target_id]
+        direction = "on" if target["power_w"] > source["power_w"] else "off"
+        prototypes.append(
+            _rich_transition_prototype(
+                assignment_id,
+                direction,
+                source["power_w"],
+                target["power_w"],
+                members,
+                from_state_id=source_id,
+                to_state_id=target_id,
+            )
+        )
+    return prototypes
+
+
+def _map_state_path_entry(
+    entry: Any, active_states: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    if not isinstance(entry, Mapping):
+        return None
+    state_id = str(entry.get("state_id") or "").strip()
+    power = _model_number(entry.get("power_w"))
+    matches = [state for state in active_states if state["id"] == state_id]
+    if len(matches) != 1:
+        return None
+    state = matches[0]
+    tolerance = max(15.0, 0.20 * state["power_w"], 3.0 * state.get("spread_w", 0.0))
+    return (
+        state if power is None or abs(power - state["power_w"]) <= tolerance else None
+    )
 
 
 def _learn_nilm_active_states(
@@ -1366,6 +1470,13 @@ def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, 
             )
             if not state_values:
                 state_values = [item["power_w"] for item in states]
+    state_by_id = {item["id"]: item["power_w"] for item in states}
+    if state_by_id:
+        prototypes = [
+            item
+            for item in prototypes
+            if _prototype_states_match_persisted_powers(item, state_by_id)
+        ]
     prototypes.sort(key=lambda item: (item["direction"], item["delta_w"], item["id"]))
     normalized = {
         "model_schema_version": 2,
@@ -1398,9 +1509,7 @@ def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, 
         }
     if isinstance(assignment.get("state_dwell_profiles"), Mapping):
         active_state_ids = {
-            str(state.get("id") or "")
-            for state in states
-            if state.get("id") != "off"
+            str(state.get("id") or "") for state in states if state.get("id") != "off"
         }
         profiles = {
             str(state_id): _normalize_assignment_profile(profile)
@@ -1440,6 +1549,21 @@ def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, 
     if not normalized["model_fingerprint"] and state_values:
         normalized["model_fingerprint"] = _model_fingerprint(normalized)
     return normalized
+
+
+def _prototype_states_match_persisted_powers(
+    prototype: Mapping[str, Any], state_by_id: Mapping[str, float]
+) -> bool:
+    for id_key, power_key in (
+        ("from_state_id", "from_state_w"),
+        ("to_state_id", "to_state_w"),
+    ):
+        state_id = str(prototype.get(id_key) or "").strip()
+        if state_id and state_id in state_by_id:
+            power = _model_number(prototype.get(power_key))
+            if power is None or not isclose(power, state_by_id[state_id], abs_tol=1e-6):
+                return False
+    return True
 
 
 def _normalize_assignment_profile(profile: Mapping[str, Any]) -> dict[str, Any]:
@@ -1927,6 +2051,7 @@ class NilmTransitionPrototype:
     from_state_id: str = ""
     to_state_id: str = ""
     prototype_aliases: tuple[str, ...] = ()
+    effective_support: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -2505,6 +2630,12 @@ def reconcile_nilm_edge(
             model.assignment_id in recent_ids
             and model.lifecycle_state.strip().lower() != "retired"
             and prototype.sample_count >= 3
+            and (
+                prototype.effective_support
+                if prototype.effective_support is not None
+                else prototype.sample_count
+            )
+            >= 3.0
             and model.model_confidence >= 0.70
         ):
             previous = per_assignment.get(model.assignment_id)
@@ -2629,7 +2760,7 @@ def _nilm_transition_legal(
         current_id = str(current_state_ids.get(model.assignment_id) or "").strip()
         if not expected_id or current_id != expected_id:
             return False
-    if lifecycle == "retired" and not (prototype.direction == "off" and current):
+    if lifecycle == "retired" and prototype.to_state_id != "off":
         return False
     if prototype.direction != ("on" if prototype.delta_w > 0 else "off"):
         return False

@@ -191,6 +191,33 @@ def test_normalize_assignment_model_preserves_multistate_ids_and_transition_kind
     )
 
 
+def test_normalize_assignment_model_rejects_state_id_power_mismatch() -> None:
+    normalized = nilm_domain.normalize_nilm_assignment_model(
+        {
+            "assignment_id": "pump",
+            "power_states_w": [0.0, 100.0, 300.0],
+            "states": [
+                {"id": "off", "power_w": 0.0},
+                {"id": "active_1", "power_w": 100.0},
+                {"id": "active_2", "power_w": 300.0},
+            ],
+            "transition_prototypes": [
+                {
+                    "direction": "on",
+                    "from_state_id": "active_2",
+                    "to_state_id": "off",
+                    "from_state_w": 100.0,
+                    "to_state_w": 0.0,
+                    "delta_w": -100.0,
+                    "spread_w": 1.0,
+                }
+            ],
+        }
+    )
+
+    assert normalized["transition_prototypes"] == []
+
+
 def test_assignment_model_uses_interval_plateau_for_running_state() -> None:
     model = build_nilm_assignment_model(
         {"assignment_id": "pump", "label_interval_ids": ["one"]},
@@ -259,6 +286,10 @@ def test_assignment_model_builds_supported_state_dwell_profiles_from_completed_p
     assert dwell["active_2"]["median_seconds"] == 1080.0
     assert dwell["active_2"]["effective_support"] == 8.0
     assert dwell["active_2"]["distinct_days"] == 8
+    transitions = {item["kind"]: item for item in model["transition_prototypes"]}
+    assert transitions["state_up"]["from_state_id"] == "active_1"
+    assert transitions["state_up"]["to_state_id"] == "active_2"
+    assert transitions["state_up"]["effective_support"] == 8.0
 
 
 def test_assignment_model_omits_malformed_or_legacy_state_dwell_evidence() -> None:
@@ -281,6 +312,44 @@ def test_assignment_model_omits_malformed_or_legacy_state_dwell_evidence() -> No
     )
 
     assert "state_dwell_profiles" not in model
+
+
+def test_assignment_model_learns_states_from_qualified_energy_mean_evidence() -> None:
+    sessions = [
+        {
+            "session_id": f"energy-{index}",
+            "assignment_id": "pump",
+            "start": f"2026-06-{day:02}T10:00:00+00:00",
+            "end": f"2026-06-{day:02}T10:10:00+00:00",
+            "on_delta_w": power,
+            "off_delta_w": -power,
+            "measured_energy_kwh": power * 600 / 3_600_000,
+            "confidence": 1.0,
+        }
+        for index, (day, power) in enumerate(
+            (
+                (1, 100),
+                (2, 102),
+                (3, 98),
+                (4, 101),
+                (5, 300),
+                (6, 302),
+                (7, 298),
+                (8, 301),
+            ),
+            1,
+        )
+    ]
+    model = build_nilm_assignment_model(
+        {
+            "assignment_id": "pump",
+            "confirmed_session_ids": [item["session_id"] for item in sessions],
+        },
+        sessions,
+    )
+
+    assert model["model_kind"] == "multi_state"
+    assert [state["id"] for state in model["states"]] == ["off", "active_1", "active_2"]
 
 
 def test_assignment_model_builds_energy_profile_without_using_energy_as_edge() -> None:
@@ -2362,7 +2431,7 @@ def test_nilm_candidate_masks_lifecycle_and_illegal_state_but_allows_retired_sto
     None
 ):
     on = transition("a", 100)
-    off = transition("a", -100)
+    off = transition("a", -100, from_state_id="running", to_state_id="off")
     for lifecycle in ("hidden", "rejected", "ignored", "converted"):
         result = reconcile(
             edge(0, 100),
@@ -2481,7 +2550,9 @@ def test_nilm_reconciliation_requires_a_known_finite_current_state() -> None:
 
 def test_nilm_retired_stop_is_single_only_and_never_compound() -> None:
     retired = assignment_model(
-        "retired", transition("retired", -60), lifecycle_state="retired"
+        "retired",
+        transition("retired", -60, from_state_id="running", to_state_id="off"),
+        lifecycle_state="retired",
     )
     active = assignment_model("active", transition("active", 100))
     states = {"retired": 60.0, "active": 0.0}
