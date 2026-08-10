@@ -484,6 +484,272 @@ async def test_label_intervals_validate_and_retain_observed_transition_w() -> No
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("save_path", ("single", "batch"))
+async def test_schema_2_interval_evidence_round_trips_through_save_paths(
+    save_path: str,
+) -> None:
+    """Schema-2 extraction output remains available after controller persistence."""
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        store_data=FeatureStoreData(),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=AsyncMock(),
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    controller = NilmController(
+        coordinator, label_interval_max_items=10, assignment_max_items=10
+    )
+    evidence = {
+        "evidence_schema_version": 2,
+        "evidence_source": "manual_backend",
+        "evidence_generated_at": "2026-06-02T12:00:00+00:00",
+        "start_transition_w": 82.0,
+        "stop_transition_w": -79.0,
+        "median_power_w": 80.0,
+        "average_power_w": 81.0,
+        "measured_energy_kwh": 0.04,
+        "partial_energy_kwh": 0.041,
+        "source_coverage": 0.98,
+        "power_coverage": 0.97,
+        "maximum_source_skew_seconds": 2.0,
+        "longest_power_gap_seconds": 8.0,
+        "start_boundary_uncertainty_seconds": 1.0,
+        "end_boundary_uncertainty_seconds": 1.5,
+        "start_transition_eligible": True,
+        "stop_transition_eligible": True,
+        "plateau_eligible": True,
+        "energy_complete": True,
+        "evidence_confidence": 0.91,
+        "power_confidence": 0.89,
+        "quality_flags": ["complete", "stable_plateau"],
+    }
+    draft = {
+        "interval_id": "schema-2",
+        "start": "2026-06-02T10:00:00+00:00",
+        "end": "2026-06-02T10:30:00+00:00",
+    }
+
+    if save_path == "single":
+        saved = await controller.async_label_nilm_interval(
+            "mixed", label="Pump", evidence=evidence, **draft
+        )
+    else:
+        await controller.async_save_nilm_interval_changes(
+            "mixed", label="Pump", intervals=[{**draft, "evidence": evidence}]
+        )
+        saved = coordinator.store_data.nilm_label_intervals_by_circuit["mixed"][0]
+
+    assert {key: saved[key] for key in evidence} == evidence
+    assert saved["observed_transition_w"] == 82.0
+
+
+@pytest.mark.asyncio
+async def test_schema_2_start_only_evidence_is_the_only_transition_compatibility_value(
+) -> None:
+    """A schema-2 stop or interior value cannot become a legacy ON transition."""
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        store_data=FeatureStoreData(),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=AsyncMock(),
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    controller = NilmController(
+        coordinator, label_interval_max_items=10, assignment_max_items=10
+    )
+
+    saved = await controller.async_label_nilm_interval(
+        "mixed",
+        label="Pump",
+        start="2026-06-02T10:00:00+00:00",
+        end="2026-06-02T10:30:00+00:00",
+        evidence={
+            "evidence_schema_version": 2,
+            "evidence_source": "manual_backend",
+            "evidence_generated_at": "2026-06-02T12:00:00+00:00",
+            "start_transition_w": None,
+            "stop_transition_w": -120.0,
+            "start_transition_eligible": False,
+            "stop_transition_eligible": True,
+            "plateau_eligible": False,
+            "energy_complete": False,
+            "source_coverage": 0.7,
+            "power_coverage": 0.7,
+            "evidence_confidence": 0.5,
+            "power_confidence": 0.5,
+            "quality_flags": ["interior_transition_present"],
+        },
+    )
+
+    assert "observed_transition_w" not in saved
+
+
+@pytest.mark.asyncio
+async def test_schema_2_evidence_replaces_stale_client_electrical_fields() -> None:
+    """Trusted schema-2 evidence replaces prior client-derived electrical data."""
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    stale = {
+        "interval_id": "schema-2",
+        "label": "Pump",
+        "start": "2026-06-02T10:00:00+00:00",
+        "end": "2026-06-02T10:30:00+00:00",
+        "observed_transition_w": 9999.0,
+        "median_power_w": 9999.0,
+        "measured_energy_kwh": 9.999,
+        "partial_energy_kwh": 9.999,
+        "power_coverage": 1.0,
+    }
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        store_data=FeatureStoreData(
+            nilm_label_intervals_by_circuit={"mixed": [stale]}
+        ),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=AsyncMock(),
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    controller = NilmController(
+        coordinator, label_interval_max_items=10, assignment_max_items=10
+    )
+
+    saved = await controller.async_label_nilm_interval(
+        "mixed",
+        label="Pump",
+        start=stale["start"],
+        end=stale["end"],
+        interval_id="schema-2",
+        observed_transition_w=7777.0,
+        median_power_w=7777.0,
+        measured_energy_kwh=7.777,
+        evidence={
+            "evidence_schema_version": 2,
+            "evidence_source": "manual_backend",
+            "evidence_generated_at": "2026-06-02T12:00:00+00:00",
+            "start_transition_w": 75.0,
+            "median_power_w": 72.0,
+            "partial_energy_kwh": 0.035,
+            "source_coverage": 0.8,
+            "power_coverage": 0.8,
+            "start_transition_eligible": True,
+            "stop_transition_eligible": False,
+            "plateau_eligible": True,
+            "energy_complete": False,
+            "evidence_confidence": 0.7,
+            "power_confidence": 0.7,
+            "quality_flags": ["incomplete_energy"],
+        },
+    )
+
+    assert saved["observed_transition_w"] == 75.0
+    assert saved["median_power_w"] == 72.0
+    assert saved["partial_energy_kwh"] == 0.035
+    assert "measured_energy_kwh" not in saved
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "evidence",
+    (
+        {"evidence_schema_version": 3},
+        {"evidence_schema_version": 2, "source_coverage": float("nan")},
+        {"evidence_schema_version": 2, "power_confidence": float("inf")},
+        {"evidence_schema_version": 2, "start_transition_eligible": 1},
+        {"evidence_schema_version": 2, "quality_flags": ["x"] * 33},
+        {"evidence_schema_version": 2, "quality_flags": ["x" * 129]},
+    ),
+)
+async def test_invalid_schema_2_evidence_is_rejected_without_mutating_intervals(
+    evidence: dict[str, object],
+) -> None:
+    """Malformed trusted evidence cannot partially create an interval collection."""
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        store_data=FeatureStoreData(),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=AsyncMock(),
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    controller = NilmController(
+        coordinator, label_interval_max_items=10, assignment_max_items=10
+    )
+
+    with pytest.raises(ValueError, match="evidence"):
+        await controller.async_label_nilm_interval(
+            "mixed",
+            label="Pump",
+            start="2026-06-02T10:00:00+00:00",
+            end="2026-06-02T10:30:00+00:00",
+            evidence=evidence,
+        )
+
+    assert coordinator.store_data.nilm_label_intervals_by_circuit == {}
+
+
+@pytest.mark.asyncio
+async def test_batch_schema_2_validation_rolls_back_and_legacy_is_readable(
+) -> None:
+    """A bad schema-2 item changes neither legacy data nor membership."""
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    legacy = {
+        "interval_id": "legacy",
+        "label": "Pump",
+        "start": "2026-06-02T10:00:00+00:00",
+        "end": "2026-06-02T10:30:00+00:00",
+        "observed_transition_w": 60.0,
+    }
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        store_data=FeatureStoreData(
+            nilm_label_intervals_by_circuit={"mixed": [legacy]}
+        ),
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=AsyncMock(),
+        ),
+        async_set_updated_data=lambda _state: None,
+        state=SimpleNamespace(),
+    )
+    controller = NilmController(
+        coordinator, label_interval_max_items=10, assignment_max_items=10
+    )
+
+    with pytest.raises(ValueError, match="evidence"):
+        await controller.async_save_nilm_interval_changes(
+            "mixed",
+            label="Pump",
+            intervals=[
+                legacy,
+                {
+                    "interval_id": "bad",
+                    "start": "2026-06-02T11:00:00+00:00",
+                    "end": "2026-06-02T11:30:00+00:00",
+                    "evidence": {
+                        "evidence_schema_version": 2,
+                        "quality_flags": ["x"] * 33,
+                    },
+                },
+            ],
+        )
+
+    assert coordinator.store_data.nilm_label_intervals_by_circuit["mixed"] == [legacy]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("save_path", ("label", "bulk", "assign"))
 async def test_primary_interval_saves_establish_matching_signature(
     save_path: str,
