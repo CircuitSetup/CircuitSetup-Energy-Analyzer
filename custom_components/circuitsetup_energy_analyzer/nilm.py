@@ -36,6 +36,11 @@ _SOURCE_TRUST = {"session": 1.0, "interval": 0.85, "legacy_interval": 0.45}
 _CONFIDENCE_CAP = 0.95
 _POWER_ENERGY_DISAGREEMENT_RATIO = 0.35
 _NILM_MAX_SCORE_BREAKDOWNS = 5
+_NILM_MAX_ACTIVE_STATES = 3
+_NILM_STATE_SPLIT_MIN_EFFECTIVE_SUPPORT = 8.0
+_NILM_STATE_MIN_EFFECTIVE_SUPPORT = 3.0
+_NILM_STATE_MIN_DISTINCT_DAYS = 2
+_NILM_STATE_MIN_DISPERSION_REDUCTION = 0.30
 NILM_DURATION_MIN_EFFECTIVE_SUPPORT = 5.0
 NILM_DURATION_MIN_DISTINCT_DAYS = 3
 NILM_DURATION_MAX_CENTRAL_RATIO = 100.0
@@ -181,37 +186,88 @@ def build_nilm_assignment_model(
             )
             power_source = "transition_fallback"
     active_power = round(active_power, 3)
-    model["power_states_w"] = [0.0, active_power]
+    learned_states = _learn_nilm_active_states(weighted_plateau)
+    model_kind = "binary"
+    if learned_states is not None and len(learned_states) > 1:
+        model_kind = "multi_state"
+    elif learned_states is None and plateau:
+        model_kind = "variable_envelope"
+    state_powers = learned_states or [active_power]
+    model["model_kind"] = model_kind
+    model["power_states_w"] = [0.0, *state_powers]
     model["states"] = [
         {"id": "off", "kind": "off", "power_w": 0.0, "spread_w": 0.0},
-        {
-            "id": "running",
-            "kind": "running",
-            "power_w": active_power,
-            "spread_w": round(
-                _weighted_mad(
-                    [record.plateau_w for record in weighted_plateau],
-                    weighted_plateau,
-                ),
-                3,
+        *[
+            {
+                "id": (f"active_{index}" if model_kind == "multi_state" else "running"),
+                "kind": ("active" if model_kind == "multi_state" else "running"),
+                "power_w": power,
+                "spread_w": round(
+                    _weighted_mad([record.plateau_w for record in members], members),
+                    3,
+                )
+                if members
+                else 0.0,
+                "power_source": power_source,
+            }
+            for index, (power, members) in enumerate(
+                _state_members(state_powers, weighted_plateau), 1
             )
-            if plateau
-            else 0.0,
-            "power_source": power_source,
-        },
+        ],
     ]
-    if on:
-        model["transition_prototypes"].append(
-            _rich_transition_prototype(
-                assignment_id, "on", 0.0, active_power, on
-            )
+    if model_kind == "variable_envelope":
+        model["active_power_envelope_w"] = _profile(
+            [record.plateau_w for record in weighted_plateau], weighted_plateau
         )
-    if off:
-        model["transition_prototypes"].append(
-            _rich_transition_prototype(
-                assignment_id, "off", active_power, 0.0, off
+    for index, (power, members) in enumerate(
+        _state_members(state_powers, weighted_plateau), 1
+    ):
+        state_id = f"active_{index}" if model_kind == "multi_state" else "running"
+        member_ids = {record.evidence_id for record in members}
+        state_on = [
+            record
+            for record in on
+            if record.evidence_id in member_ids
+            or (
+                record.plateau_w is None
+                and abs(record.on_delta_w - power) <= max(15.0, power * 0.20)
             )
-        )
+        ]
+        state_off = [
+            record
+            for record in off
+            if record.evidence_id in member_ids
+            or (
+                record.plateau_w is None
+                and abs(abs(record.off_delta_w) - power) <= max(15.0, power * 0.20)
+            )
+        ]
+        if not plateau:
+            state_on, state_off = on, off
+        if state_on:
+            model["transition_prototypes"].append(
+                _rich_transition_prototype(
+                    assignment_id,
+                    "on",
+                    0.0,
+                    power,
+                    state_on,
+                    from_state_id="off",
+                    to_state_id=state_id,
+                )
+            )
+        if state_off:
+            model["transition_prototypes"].append(
+                _rich_transition_prototype(
+                    assignment_id,
+                    "off",
+                    power,
+                    0.0,
+                    state_off,
+                    from_state_id=state_id,
+                    to_state_id="off",
+                )
+            )
     profile_records = [
         record for record in positives if record.duration_s and record.duration_s > 0
     ]
@@ -264,10 +320,12 @@ def _finalize_assignment_model(
     }
     current = {key: model.get(key) for key in previous}
     previous["transition_prototypes"] = sorted(
-        previous["transition_prototypes"], key=lambda item: item["direction"]
+        previous["transition_prototypes"],
+        key=lambda item: (item["direction"], item.get("id", "")),
     )
     current["transition_prototypes"] = sorted(
-        current["transition_prototypes"], key=lambda item: item["direction"]
+        current["transition_prototypes"],
+        key=lambda item: (item["direction"], item.get("id", "")),
     )
     if current != previous:
         model["model_revision"] += 1
@@ -309,7 +367,9 @@ def _normalize_session_evidence(
     )
     energy = measured_energy or estimated_energy
     energy_source = (
-        "measured" if measured_energy is not None else "estimated"
+        "measured"
+        if measured_energy is not None
+        else "estimated"
         if estimated_energy is not None
         else None
     )
@@ -561,12 +621,8 @@ def _profile(
     return {
         "median": round(_weighted_median(list(vals), list(recs)), precision),
         "mad": round(_weighted_mad(list(vals), list(recs)), precision),
-        "p10": round(
-            _weighted_percentile(list(vals), list(recs), 0.1), precision
-        ),
-        "p90": round(
-            _weighted_percentile(list(vals), list(recs), 0.9), precision
-        ),
+        "p10": round(_weighted_percentile(list(vals), list(recs), 0.1), precision),
+        "p90": round(_weighted_percentile(list(vals), list(recs), 0.9), precision),
         "sample_count": len(recs),
         "effective_support": round(_effective_support(list(recs)), 3),
         "distinct_days": _distinct_days(recs),
@@ -601,9 +657,7 @@ def _energy_profile(
             record,
             quality=record.quality
             * (
-                _ESTIMATED_ENERGY_WEIGHT
-                if record.energy_source == "estimated"
-                else 1.0
+                _ESTIMATED_ENERGY_WEIGHT if record.energy_source == "estimated" else 1.0
             ),
         )
         for record in records
@@ -657,6 +711,113 @@ def _weighted_plateau_records(
     ]
 
 
+def _learn_nilm_active_states(
+    records: list[_NormalizedAssignmentEvidence],
+) -> list[float] | None:
+    """Learn up to three compact active plateaus, or an envelope when broad."""
+    if not records:
+        return []
+    one_center = _weighted_median([record.plateau_w for record in records], records)
+    if _effective_support(records) < _NILM_STATE_SPLIT_MIN_EFFECTIVE_SUPPORT:
+        return [round(one_center, 3)]
+    baseline = _weighted_absolute_deviation(records, one_center)
+    best: tuple[float, list[list[_NormalizedAssignmentEvidence]]] | None = None
+    ordered = sorted(
+        records, key=lambda record: (record.plateau_w or 0.0, record.evidence_id)
+    )
+    for count in range(2, _NILM_MAX_ACTIVE_STATES + 1):
+        for groups in _nilm_contiguous_groups(ordered, count):
+            centers = [
+                _weighted_median([item.plateau_w for item in group], group)
+                for group in groups
+            ]
+            if not _nilm_state_groups_valid(groups, centers):
+                continue
+            deviation = sum(
+                _weighted_absolute_deviation(group, center)
+                for group, center in zip(groups, centers, strict=True)
+            )
+            if (
+                baseline <= 0
+                or (baseline - deviation) / baseline
+                < _NILM_STATE_MIN_DISPERSION_REDUCTION
+            ):
+                continue
+            key = (
+                deviation,
+                [[item.evidence_id for item in group] for group in groups],
+            )
+            if best is None or key < (
+                best[0],
+                [[item.evidence_id for item in group] for group in best[1]],
+            ):
+                best = (deviation, groups)
+    if best is None:
+        spread = _weighted_mad([record.plateau_w for record in records], records)
+        return None if spread >= 20.0 and len(records) >= 2 else [round(one_center, 3)]
+    return [
+        round(_weighted_median([item.plateau_w for item in group], group), 3)
+        for group in best[1]
+    ]
+
+
+def _nilm_contiguous_groups(
+    records: list[_NormalizedAssignmentEvidence], count: int
+) -> Iterable[list[list[_NormalizedAssignmentEvidence]]]:
+    for cuts in combinations(range(1, len(records)), count - 1):
+        boundaries = (0, *cuts, len(records))
+        yield [
+            records[boundaries[index] : boundaries[index + 1]] for index in range(count)
+        ]
+
+
+def _weighted_absolute_deviation(
+    records: list[_NormalizedAssignmentEvidence], center: float
+) -> float:
+    return sum(
+        _evidence_weight(record) * abs((record.plateau_w or 0.0) - center)
+        for record in records
+    )
+
+
+def _nilm_state_groups_valid(
+    groups: list[list[_NormalizedAssignmentEvidence]], centers: list[float]
+) -> bool:
+    if any(
+        _effective_support(group) < _NILM_STATE_MIN_EFFECTIVE_SUPPORT
+        or _distinct_days(group) < _NILM_STATE_MIN_DISTINCT_DAYS
+        for group in groups
+    ):
+        return False
+    for left, right, left_group, right_group in zip(
+        centers, centers[1:], groups, groups[1:], strict=False
+    ):
+        left_spread = _weighted_mad([item.plateau_w for item in left_group], left_group)
+        right_spread = _weighted_mad(
+            [item.plateau_w for item in right_group], right_group
+        )
+        pooled = (left_spread + right_spread) / 2
+        if right - left <= max(50.0, 3.0 * pooled, 0.15 * right):
+            return False
+    return True
+
+
+def _state_members(
+    state_powers: list[float], records: list[_NormalizedAssignmentEvidence]
+) -> list[tuple[float, list[_NormalizedAssignmentEvidence]]]:
+    members = [[] for _ in state_powers]
+    for record in records:
+        index = min(
+            range(len(state_powers)),
+            key=lambda item: (
+                abs((record.plateau_w or 0.0) - state_powers[item]),
+                item,
+            ),
+        )
+        members[index].append(record)
+    return list(zip(state_powers, members, strict=True))
+
+
 def _count_values(values: Iterable[str | None]) -> dict[str, int]:
     counts: defaultdict[str, int] = defaultdict(int)
     for value in values:
@@ -699,6 +860,9 @@ def _rich_transition_prototype(
     start: float,
     end: float,
     records: list[_NormalizedAssignmentEvidence],
+    *,
+    from_state_id: str | None = None,
+    to_state_id: str | None = None,
 ) -> dict[str, Any]:
     values = [
         record.on_delta_w if direction == "on" else record.off_delta_w
@@ -706,8 +870,8 @@ def _rich_transition_prototype(
     ]
     center = _weighted_median(values, records)
     inferred = direction == "off" and all(record.inferred_stop for record in records)
-    from_state_id = "off" if direction == "on" else "running"
-    to_state_id = "running" if direction == "on" else "off"
+    from_state_id = from_state_id or ("off" if direction == "on" else "running")
+    to_state_id = to_state_id or ("running" if direction == "on" else "off")
     kind = _semantic_transition_kind(
         direction,
         from_state_id,
@@ -716,9 +880,7 @@ def _rich_transition_prototype(
         end,
     )
     prototype = {
-        "id": _canonical_prototype_id(
-            assignment_id, kind, from_state_id, to_state_id
-        ),
+        "id": _canonical_prototype_id(assignment_id, kind, from_state_id, to_state_id),
         "kind": kind,
         "direction": direction,
         "from_state_id": from_state_id,
@@ -877,13 +1039,7 @@ def _evidence_confidence(
     inferred_only = bool(records) and all(record.inferred_stop for record in records)
     quality = sum(record.quality for record in records) / len(records)
     score = (
-        (
-            0.1
-            + 0.35 * support
-            + 0.15 * days
-            + 0.2 * directional
-            + 0.2 * state_support
-        )
+        (0.1 + 0.35 * support + 0.15 * days + 0.2 * directional + 0.2 * state_support)
         * quality
         * (1 - 0.5 * dispersion)
         * (1 - min(conflicts * 0.1, 0.4))
@@ -929,6 +1085,8 @@ def _model_fingerprint(model: Mapping[str, Any]) -> str:
     parts = repr(
         (
             model.get("power_states_w"),
+            model.get("model_kind"),
+            model.get("states"),
             sorted(
                 (
                     item.get("direction"),
@@ -1066,11 +1224,7 @@ def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, 
         aliases: list[str] = []
         for value in (
             stored_id,
-            *(
-                stored_aliases
-                if isinstance(stored_aliases, list | tuple)
-                else ()
-            ),
+            *(stored_aliases if isinstance(stored_aliases, list | tuple) else ()),
         ):
             alias = str(value or "").strip()
             if alias and alias != prototype_id and alias not in aliases:
@@ -1123,33 +1277,41 @@ def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, 
     if isinstance(assignment.get("states"), list):
         rich_states = []
         for item in assignment["states"]:
-            if not isinstance(item, Mapping) or item.get("id") not in {
-                "off",
-                "running",
-            }:
+            state_id = (
+                str(item.get("id") or "").strip() if isinstance(item, Mapping) else ""
+            )
+            if (
+                not state_id
+                or (state_id != "off" and not state_id.startswith("active_"))
+                and state_id != "running"
+            ):
                 continue
             if (power := _model_number(item.get("power_w"))) is None:
                 continue
             state = {
-                "id": item["id"],
-                "kind": "off" if item["id"] == "off" else "running",
+                "id": state_id,
+                "kind": "off"
+                if state_id == "off"
+                else ("active" if state_id.startswith("active_") else "running"),
                 "power_w": power,
                 "spread_w": max(_model_number(item.get("spread_w")) or 0.0, 0.0),
             }
-            if item["id"] == "running" and isinstance(
-                item.get("power_source"), str
-            ):
+            if state_id != "off" and isinstance(item.get("power_source"), str):
                 state["power_source"] = item["power_source"]
             rich_states.append(state)
-        if {item["id"] for item in rich_states} == {"off", "running"}:
-            states = sorted(rich_states, key=lambda item: item["id"] != "off")
+        if rich_states and sum(item["id"] == "off" for item in rich_states) == 1:
+            states = sorted(
+                rich_states,
+                key=lambda item: (item["id"] != "off", item["power_w"], item["id"]),
+            )
             if not state_values:
-                state_values = [states[0]["power_w"], states[1]["power_w"]]
+                state_values = [item["power_w"] for item in states]
     prototypes.sort(key=lambda item: (item["direction"], item["delta_w"], item["id"]))
     normalized = {
         "model_schema_version": 2,
         "model_kind": str(assignment.get("model_kind") or "binary")
-        if str(assignment.get("model_kind") or "binary") == "binary"
+        if str(assignment.get("model_kind") or "binary")
+        in {"binary", "multi_state", "variable_envelope"}
         else "binary",
         "role": role.strip() if isinstance(role, str) and role.strip() else "component",
         "power_states_w": state_values,
@@ -1177,9 +1339,7 @@ def normalize_nilm_assignment_model(assignment: Mapping[str, Any]) -> dict[str, 
     if isinstance(assignment.get("evidence_summary"), Mapping):
         summary = assignment["evidence_summary"]
         normalized["evidence_summary"] = {
-            "positive_count": _model_nonnegative_int(
-                summary.get("positive_count")
-            ),
+            "positive_count": _model_nonnegative_int(summary.get("positive_count")),
             **{
                 key: number
                 for key in (
@@ -1842,21 +2002,15 @@ def duration_state_score_for_transition(
             return None
         run_profile = assignment.get("run_profile")
         profile = (
-            run_profile.get("duration_s")
-            if isinstance(run_profile, Mapping)
-            else None
+            run_profile.get("duration_s") if isinstance(run_profile, Mapping) else None
         )
         started_at = _nilm_runtime_started_at(runtime)
     if not isinstance(profile, Mapping) or started_at is None:
         return None
     support = _nilm_finite_number(profile.get("effective_support"))
     distinct_days = _nilm_finite_number(profile.get("distinct_days"))
-    p10 = _nilm_positive_finite(
-        profile.get("p10_seconds", profile.get("p10"))
-    )
-    p90 = _nilm_positive_finite(
-        profile.get("p90_seconds", profile.get("p90"))
-    )
+    p10 = _nilm_positive_finite(profile.get("p10_seconds", profile.get("p10")))
+    p90 = _nilm_positive_finite(profile.get("p90_seconds", profile.get("p90")))
     median_seconds = _nilm_positive_finite(
         profile.get("median_seconds", profile.get("median"))
     )
@@ -1943,25 +2097,16 @@ def build_nilm_validation_profile(
     correct_count = sum(outcome for _, _, outcome, _ in deduplicated)
     wrong_count = len(deduplicated) - correct_count
     days = {day for _, _, _, day in deduplicated if day is not None}
-    reliability = (
-        (correct_count + NILM_VALIDATION_PRIOR_CORRECT)
-        / (
-            len(deduplicated)
-            + NILM_VALIDATION_PRIOR_CORRECT
-            + NILM_VALIDATION_PRIOR_WRONG
-        )
+    reliability = (correct_count + NILM_VALIDATION_PRIOR_CORRECT) / (
+        len(deduplicated) + NILM_VALIDATION_PRIOR_CORRECT + NILM_VALIDATION_PRIOR_WRONG
     )
     eligible = (
         len(deduplicated) >= NILM_VALIDATION_MIN_OUTCOMES
         and len(days) >= NILM_VALIDATION_MIN_DISTINCT_DAYS
     )
     source_counts = {
-        source: sum(
-            item_source == source for _, item_source, _, _ in deduplicated
-        )
-        for source in sorted(
-            {item_source for _, item_source, _, _ in deduplicated}
-        )
+        source: sum(item_source == source for _, item_source, _, _ in deduplicated)
+        for source in sorted({item_source for _, item_source, _, _ in deduplicated})
     }
     return {
         "sample_count": len(deduplicated),
@@ -1988,11 +2133,7 @@ def _nilm_trusted_validation_outcome(
     outcome_id = str(
         record.get("outcome_id")
         or record.get("replay_id")
-        or (
-            record.get("session_id")
-            if source != "held_out_replay"
-            else ""
-        )
+        or (record.get("session_id") if source != "held_out_replay" else "")
         or record.get("validation_outcome_id")
         or ""
     ).strip()
@@ -2058,13 +2199,17 @@ def _nilm_valid_held_out_replay(
 
 
 def _nilm_validation_source(record: Mapping[str, Any]) -> str | None:
-    source = str(
-        record.get("source")
-        or record.get("validation_source")
-        or record.get("outcome_source")
-        or record.get("source_type")
-        or ""
-    ).strip().lower()
+    source = (
+        str(
+            record.get("source")
+            or record.get("validation_source")
+            or record.get("outcome_source")
+            or record.get("source_type")
+            or ""
+        )
+        .strip()
+        .lower()
+    )
     if source in {"feedback", "explicit_feedback", "session_feedback", "user_feedback"}:
         return "feedback"
     if source in {"held_out_replay", "heldout_replay", "held-out-replay"}:
@@ -2359,8 +2504,7 @@ def reconcile_nilm_edge(
         )
     )
     if compounds and (
-        len(compounds) == 1
-        or compounds[0][0].total - compounds[1][0].total >= 0.15
+        len(compounds) == 1 or compounds[0][0].total - compounds[1][0].total >= 0.15
     ):
         return _nilm_reconciliation(
             edge,
