@@ -545,6 +545,7 @@ async def test_schema_2_interval_evidence_round_trips_through_save_paths(
 
     assert {key: saved[key] for key in evidence} == evidence
     assert saved["observed_transition_w"] == 82.0
+    assert saved["confidence"] == 0.91
 
 
 @pytest.mark.asyncio

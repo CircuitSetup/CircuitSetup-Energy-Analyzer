@@ -1420,6 +1420,7 @@ export function createNilmWorkspaceMethods({
       };
       this._nilmActiveIntervalIndex = 0;
     });
+    this._scheduleNilmIntervalEvidence();
     return true;
   }
 
@@ -3045,23 +3046,30 @@ export function createNilmWorkspaceMethods({
     const path = this._nilmIntervalEvidenceRequest();
     this._nilmIntervalEvidence = null;
     const token = (this._nilmIntervalEvidenceToken || 0) + 1;
+    const graphIntentToken = this._nilmGraphIntentToken;
     this._nilmIntervalEvidenceToken = token;
     if (this._nilmIntervalEvidenceTimer) clearTimeout(this._nilmIntervalEvidenceTimer);
     this._render();
     if (!path) return;
-    this._nilmIntervalEvidenceTimer = setTimeout(() => this._requestNilmIntervalEvidence(path, token), 180);
+    this._nilmIntervalEvidenceTimer = setTimeout(() => {
+      if (!this._isCurrentNilmGraphIntent(graphIntentToken)) return;
+      this._requestNilmIntervalEvidence(path, token, graphIntentToken);
+    }, 180);
   }
 
-  async _requestNilmIntervalEvidence(path, token) {
+  async _requestNilmIntervalEvidence(path, token, graphIntentToken = this._nilmGraphIntentToken) {
     try {
       const payload = await this._requestJson(path, path);
-      if (token !== this._nilmIntervalEvidenceToken) return;
+      if (token !== this._nilmIntervalEvidenceToken
+          || !this._isCurrentNilmGraphIntent(graphIntentToken)) return;
       this._nilmIntervalEvidence = payload && payload.interval_evidence || null;
     } catch (_error) {
-      if (token !== this._nilmIntervalEvidenceToken) return;
+      if (token !== this._nilmIntervalEvidenceToken
+          || !this._isCurrentNilmGraphIntent(graphIntentToken)) return;
       this._nilmIntervalEvidence = null;
     }
-    if (token === this._nilmIntervalEvidenceToken) this._render();
+    if (token === this._nilmIntervalEvidenceToken
+        && this._isCurrentNilmGraphIntent(graphIntentToken)) this._render();
   }
 
   _renderNilmIntervalEvidence(evidence) {

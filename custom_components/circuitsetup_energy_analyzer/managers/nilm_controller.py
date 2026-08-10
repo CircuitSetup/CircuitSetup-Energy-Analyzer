@@ -884,6 +884,8 @@ class NilmController:
             confidence_value = float(confidence)
         except (TypeError, ValueError):
             confidence_value = 1.0
+        if schema_2_evidence is not None:
+            confidence_value = schema_2_evidence["evidence_confidence"]
         payload: dict[str, Any] = {
             "interval_id": interval_id_text,
             "mains_circuit_id": circuit_id,
@@ -1162,6 +1164,8 @@ class NilmController:
                 raise ValueError("Invalid confidence.") from err
             if not math.isfinite(confidence_value) or confidence_value < 0.0:
                 raise ValueError("Invalid confidence.")
+            if schema_2_evidence is not None:
+                confidence_value = schema_2_evidence["evidence_confidence"]
             payload = {
                 "interval_id": interval_id,
                 "mains_circuit_id": circuit_id,

@@ -6813,6 +6813,53 @@ for (const text of ["Start: 500 W", "Stop: -490 W", "Average: 480 W", "Median: 4
     )
 
 
+def test_nilm_interval_editor_loads_one_backend_evidence_preview() -> None:
+    _run_panel_node_script(
+        """
+(async () => {
+const interval = {
+  interval_id: "saved-interval",
+  assignment_id: "assignment-pump",
+  start: "2026-08-04T08:00:00Z",
+  end: "2026-08-04T08:10:00Z",
+};
+const workspace = makeWorkspace({
+  circuit: { circuit_id: "mains" },
+  label_intervals: [interval],
+  assignments: [{ assignment_id: "assignment-pump", display_name: "Pump" }],
+});
+const panel = makePanel({
+  _nilmWorkspace: workspace,
+  _nilmFocusedInterval: {
+    start: Date.parse(interval.start), end: Date.parse(interval.end),
+  },
+  _loadedRouteKey: "/panel?entry_id=entry-1&circuit_id=mains",
+});
+let rendered = 0;
+panel._render = () => { rendered += 1; };
+const timers = new Map();
+let nextTimer = 0;
+context.setTimeout = (callback) => { const id = ++nextTimer; timers.set(id, callback); return id; };
+context.clearTimeout = (id) => timers.delete(id);
+const requests = [];
+panel._requestJson = async (path) => {
+  requests.push(path);
+  return { interval_evidence: { average_power_w: 480 } };
+};
+panel._nilmIntervalEvidence = { average_power_w: 1 };
+assert.equal(panel._editNilmFocusedInterval(), true);
+assert.equal(panel._nilmIntervalEvidence, null, "loading clears stale evidence");
+assert.equal(timers.size, 1, "loading schedules exactly one preview");
+for (const callback of timers.values()) callback();
+await new Promise((resolve) => setImmediate(resolve));
+assert.equal(requests.length, 1, "loading fetches exactly one preview");
+assert.equal(panel._nilmIntervalEvidence.average_power_w, 480);
+assert.ok(rendered >= 2, "loading renders the draft and preview state");
+})().catch((error) => { console.error(error); process.exit(1); });
+"""
+    )
+
+
 def test_nilm_interval_action_contracts() -> None:
     _run_panel_node_script(
         """

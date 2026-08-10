@@ -118,6 +118,26 @@ def test_missing_span_yields_partial_energy_and_reduced_coverage() -> None:
     assert evidence.longest_power_gap_seconds == 60
 
 
+def test_sparse_valid_endpoints_do_not_count_as_complete_energy_coverage() -> None:
+    """Removing the cadence-bound gap check would falsely mark this span complete."""
+    evidence = derive_manual_interval_evidence(
+        [
+            sample(-30, 200),
+            sample(0, 700),
+            sample(300, 700),
+            sample(330, 200),
+        ],
+        start=BASE,
+        end=BASE + timedelta(seconds=300),
+    )
+
+    assert evidence.measured_energy_kwh is None
+    assert evidence.partial_energy_kwh is None
+    assert evidence.power_coverage == 0.0
+    assert evidence.longest_power_gap_seconds == 300
+    assert "incomplete_power_coverage" in evidence.quality_flags
+
+
 def test_units_and_duplicate_timestamps_normalize_deterministically() -> None:
     normalized = normalize_power_samples(
         [

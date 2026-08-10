@@ -142,13 +142,7 @@ def aggregate_power_samples(
                 continue
             age = (timestamp - sample.timestamp).total_seconds()
             cadence = cadences[source]
-            freshness = min(
-                thresholds.maximum_freshness_seconds,
-                max(
-                    thresholds.minimum_freshness_seconds,
-                    cadence * thresholds.freshness_cadence_multiplier,
-                ),
-            )
+            freshness = _freshness_seconds(cadence, thresholds)
             if age > freshness:
                 flags.add("stale_source")
                 continue
@@ -267,7 +261,12 @@ def derive_manual_interval_evidence(
         flags.add("baseline_unavailable")
     elif pre_power is None or post_power is None:
         flags.add("one_sided_baseline")
-    partial_energy, coverage, longest_gap, average = _integrate(net_points, start, end)
+    partial_energy, coverage, longest_gap, average = _integrate(
+        net_points,
+        start,
+        end,
+        maximum_span_seconds=_freshness_seconds(observed_cadence, thresholds),
+    )
     net_values = [power for _, power in net_points if power is not None]
     if any(power < -thresholds.numerical_noise_w for power in net_values):
         flags.add("material_negative_net_power")
@@ -343,6 +342,18 @@ def _cadence(series: Sequence[NilmPowerSample]) -> float:
         if b.timestamp > a.timestamp
     ]
     return median(deltas) if deltas else 0.0
+
+
+def _freshness_seconds(
+    cadence_seconds: float, thresholds: NilmEvidenceThresholds
+) -> float:
+    return min(
+        thresholds.maximum_freshness_seconds,
+        max(
+            thresholds.minimum_freshness_seconds,
+            cadence_seconds * thresholds.freshness_cadence_multiplier,
+        ),
+    )
 
 
 def _latest_at_or_before(
@@ -570,7 +581,11 @@ def _net_points(
 
 
 def _integrate(
-    points: Sequence[tuple[datetime, float | None]], start: datetime, end: datetime
+    points: Sequence[tuple[datetime, float | None]],
+    start: datetime,
+    end: datetime,
+    *,
+    maximum_span_seconds: float,
 ) -> tuple[float | None, float, float | None, float | None]:
     duration = (end - start).total_seconds()
     covered = 0.0
@@ -583,7 +598,11 @@ def _integrate(
         points, points[1:], strict=False
     ):
         seconds = (right_time - left_time).total_seconds()
-        if left_power is not None and right_power is not None:
+        if (
+            left_power is not None
+            and right_power is not None
+            and seconds <= maximum_span_seconds
+        ):
             covered += seconds
             energy_ws += (left_power + right_power) * seconds / 2
             covered_spans.append((left_time, right_time))
