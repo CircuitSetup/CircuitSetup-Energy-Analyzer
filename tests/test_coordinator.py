@@ -13021,6 +13021,14 @@ async def test_runtime_records_known_load_split_phase_topology_evidence() -> Non
         "selection_method": "global_assignment",
         "known_power_source": "transition_delta_w",
         "match_confidence": 1.0,
+        "selection_status": "matched",
+        "known_selected_power_source": "transition_delta_w",
+        "known_transition_delta_w": 300.0,
+        "known_transition_spread_w": 0.0,
+        "pre_topology_power_match_confidence": 1.0,
+        "synchronized_time_distance_seconds": 0.0,
+        "synchronized_time_offset_seconds": 0.0,
+        "transition_timing_uncertainty_s": 30.0,
     }
 
 
