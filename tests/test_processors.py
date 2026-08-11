@@ -9505,6 +9505,25 @@ def test_nilm_processor_coverage_is_component_and_window_specific() -> None:
             "7_days": "complete",
             "30_days": "complete",
         }
+    spanning_open_exclusion = by_signature(run([
+        row("a-covered", "on-a", 32), row("b-covered", "on-b", 32),
+        {
+            "session_id": "spanning-open-exclusion-a",
+            "signature_id": "on-a",
+            "start": (now - timedelta(days=31)).isoformat(),
+            "end": None,
+        },
+    ]))
+    assert spanning_open_exclusion["on-a"]["estimate_status_by_window"] == {
+        "today": "partial_history",
+        "7_days": "partial_history",
+        "30_days": "partial_history",
+    }
+    assert all(
+        window["excluded_session_count"] == 1
+        for window in spanning_open_exclusion["on-a"]["runtime_windows"].values()
+    )
+    assert spanning_open_exclusion["on-b"]["estimate_status"] == "complete"
     started = by_signature(
         run([row("a-old", "on-a", 31), row("b-new", "on-b", 5)])
     )

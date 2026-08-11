@@ -1610,7 +1610,7 @@ def _session_evidence_relevant(
     if not item.has_trustworthy_interval or item.start is None:
         return True
     if item.end is None:
-        return window_start <= item.start < window_end
+        return item.start < window_end
     return item.start < window_end and item.end > window_start
 
 
