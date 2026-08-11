@@ -469,6 +469,73 @@ def test_session_ownership_rejects_collided_v1_fingerprint() -> None:
         assert load["runtime_windows"]["today"]["included_session_count"] == 0
 
 
+def test_unique_session_survives_raw_edge_component_ambiguity() -> None:
+    """A uniquely owned session remains usable despite a contested raw edge."""
+
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[
+            signature("sig-500", 500.0, 100.0, 510.0),
+            signature("sig-520", 520.0, 100.0, 510.0),
+        ],
+        edges=[edge(0, 510.0, var=100.0, direction="on")],
+        sessions=[
+            {
+                "session_id": "owned-run",
+                "component_id": "sig-500",
+                "signature_fingerprint": "owned-session",
+                "on_edge_id": "owned-edge",
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": "2026-08-09T11:00:00+00:00",
+            }
+        ],
+        now=datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+    )
+
+    loads_by_signature_id = {
+        item["signature_id"]: item for item in inventory["unknown_loads"]
+    }
+    load = loads_by_signature_id["sig-500"]
+    assert load["ambiguous_edge_count"] == 1
+    assert load["separation_status"] == "separable"
+    assert load["runtime_today_minutes"] == 60.0
+    assert load["estimated_energy_today_kwh"] == 0.5
+    assert load["running_state"] == "probably_off"
+    assert load["runtime_windows"]["today"]["included_session_count"] == 1
+
+
+def test_session_evidence_does_not_override_ambiguous_signature_pairing() -> None:
+    """Session ownership cannot make an ambiguously paired signature separable."""
+
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[
+            signature("on-load", 500.0, 100.0, 510.0),
+            signature("off-first", -500.0, -100.0, 510.0),
+            signature("off-second", -500.0, -100.0, 510.0),
+        ],
+        edges=[],
+        sessions=[
+            {
+                "session_id": "owned-run",
+                "component_id": "on-load",
+                "signature_fingerprint": "owned-session",
+                "on_edge_id": "owned-edge",
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": "2026-08-09T11:00:00+00:00",
+            }
+        ],
+        now=datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+    )
+
+    load = inventory["unknown_loads"][0]
+    assert load["signature_pair_status"] == "ambiguous"
+    assert load["separation_status"] == "ambiguous"
+    assert load["runtime_today_minutes"] == 0.0
+    assert load["estimated_energy_today_kwh"] == 0.0
+    assert load["runtime_windows"]["today"]["included_session_count"] == 0
+
+
 def test_multiple_open_sessions_make_current_runtime_ambiguous() -> None:
     """Two distinct active runs cannot be represented as one current runtime."""
 

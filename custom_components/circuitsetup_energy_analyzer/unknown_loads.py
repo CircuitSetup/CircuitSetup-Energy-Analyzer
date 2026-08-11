@@ -1338,7 +1338,7 @@ def _unknown_component_session_payload(
             payload[key] = existing_load[key]
     sessions = evidence.sessions_by_component[component.component_id]
     ambiguous = (
-        payload["separation_status"] == "ambiguous"
+        component.pair_status == "ambiguous"
         or component.component_id in evidence.ambiguous_component_ids
     )
     open_sessions = [item for item in sessions if item.session.is_open]
