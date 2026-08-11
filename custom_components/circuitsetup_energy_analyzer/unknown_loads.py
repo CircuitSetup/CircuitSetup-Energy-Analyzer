@@ -18,7 +18,7 @@ from .nilm import (
 
 MIN_OCCURRENCES = 3
 MIN_CONFIDENCE = 0.5
-UNKNOWN_LOAD_INVENTORY_SCHEMA_VERSION = 3
+UNKNOWN_LOAD_INVENTORY_SCHEMA_VERSION = 4
 MIN_SIGNATURE_PAIR_SCORE = 0.50
 SIGNATURE_PAIR_AMBIGUITY_MARGIN = 0.08
 EDGE_COMPONENT_AMBIGUITY_MARGIN = 0.08
@@ -69,7 +69,22 @@ class _SessionInventoryEvidence:
     sessions_by_component: Mapping[str, tuple[_OwnedUnknownLoadSession, ...]]
     excluded_count_by_component: Mapping[str, int]
     ambiguous_component_ids: frozenset[str]
-    observation_started_at: datetime | None
+    observation_started_at_by_component: Mapping[str, datetime | None]
+    invalid_count: int
+    unowned_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class NilmSessionHistoryCoverage:
+    """Retention facts captured before bounded session-history storage."""
+
+    configured_max_items: int
+    source_count_before_retention: int
+    retained_count: int
+    was_truncated: bool
+    dropped_count: int
+    oldest_retained_at: datetime | None
+    newest_retained_at: datetime | None
 
 
 def estimate_unknown_load(signature: NilmSignature) -> dict[str, Any]:
@@ -123,6 +138,7 @@ def build_unknown_load_inventory(
     now: datetime,
     time_zone: str = "UTC",
     session_history_max_items: int | None = None,
+    session_history_coverage: NilmSessionHistoryCoverage | None = None,
     existing_state: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a consolidated inventory of recurring unknown NILM loads."""
@@ -152,7 +168,7 @@ def build_unknown_load_inventory(
                 windows=windows,
                 now=now_utc,
                 existing_state=existing_state or {},
-                session_history_max_items=session_history_max_items,
+                session_history_coverage=session_history_coverage,
             )
             if session_list
             else _unknown_component_payload(
@@ -202,15 +218,33 @@ def build_unknown_load_inventory(
         inventory.update(
             {
                 "observation_started_at": _observation_started_at(
-                    session_evidence.observation_started_at,
+                    min(
+                        (
+                            value
+                            for value in (
+                                session_evidence.observation_started_at_by_component.values()
+                            )
+                            if value is not None
+                        ),
+                        default=None,
+                    ),
                     existing_state or {},
                 ),
                 "runtime_window_definition": _runtime_window_definition(),
                 "estimate_status": _worst_estimate_status(
                     load.get("estimate_status", "complete") for load in loads
                 ),
+                "session_history_diagnostics": {
+                    "invalid_count": session_evidence.invalid_count,
+                    "unowned_count": session_evidence.unowned_count,
+                },
             }
         )
+        if session_history_coverage is not None:
+            inventory["session_history_coverage"] = _coverage_to_payload(
+                session_history_coverage
+            )
+            inventory["estimate_provenance"] = "retained_session_history"
     else:
         observed = _edge_observation_started_at(loads)
         for load in loads:
@@ -224,6 +258,7 @@ def build_unknown_load_inventory(
                 "estimate_status": _worst_estimate_status(
                     load.get("estimate_status", "partial_history") for load in loads
                 ),
+                "estimate_provenance": "edge_only",
             }
         )
     return inventory
@@ -246,6 +281,17 @@ def unknown_load_inventory_needs_rebuild(
     if not isinstance(loads, list):
         return True
     if not isinstance(existing_state.get("runtime_window_definition"), Mapping):
+        return True
+    provenance = existing_state.get("estimate_provenance")
+    if provenance not in {
+        "retained_session_history",
+        "edge_only",
+        "legacy_unverified",
+    }:
+        return True
+    if provenance == "retained_session_history" and not isinstance(
+        existing_state.get("session_history_coverage"), Mapping
+    ):
         return True
     if str(existing_state.get("estimate_status") or "") not in {
         "complete",
@@ -310,6 +356,7 @@ def migrate_unknown_load_inventory(
     now: datetime | None = None,
     time_zone: str = "UTC",
     session_history_max_items: int | None = None,
+    session_history_coverage: NilmSessionHistoryCoverage | None = None,
 ) -> dict[str, Any]:
     """Upgrade a stale inventory without discarding rows that lack edge evidence."""
 
@@ -329,6 +376,7 @@ def migrate_unknown_load_inventory(
             now=now,
             time_zone=time_zone,
             session_history_max_items=session_history_max_items,
+            session_history_coverage=session_history_coverage,
             existing_state=existing_state,
         )
         existing_loads = [
@@ -507,6 +555,7 @@ def _legacy_unverified_inventory(
             "observation_started_at": observation_started,
             "runtime_window_definition": _runtime_window_definition(),
             "estimate_status": "legacy_unverified",
+            "estimate_provenance": "legacy_unverified",
         }
     )
     return inventory
@@ -1007,14 +1056,14 @@ def _runtime_window_definition() -> dict[str, str]:
 
 def _normalize_unknown_load_sessions(
     sessions: Iterable[Mapping[str, Any]], now: datetime
-) -> tuple[tuple[_NormalizedUnknownLoadSession, ...], int]:
+) -> tuple[tuple[_NormalizedUnknownLoadSession, ...], tuple[frozenset[str], ...]]:
     """Validate persisted sessions without allowing malformed storage to raise."""
 
     normalized: list[_NormalizedUnknownLoadSession] = []
-    excluded = 0
+    invalid_identities: list[frozenset[str]] = []
     for raw in sessions:
         if not isinstance(raw, Mapping):
-            excluded += 1
+            invalid_identities.append(frozenset())
             continue
         try:
             session_id = str(raw.get("session_id") or "").strip()
@@ -1056,8 +1105,21 @@ def _normalize_unknown_load_sessions(
                 )
             )
         except (TypeError, ValueError, OverflowError):
-            excluded += 1
-    return tuple(normalized), excluded
+            invalid_identities.append(
+                frozenset(
+                    str(raw.get(key) or "").strip()
+                    for key in (
+                        "component_id",
+                        "component_fingerprint",
+                        "signature_id",
+                        "signature_fingerprint",
+                        "on_signature_id",
+                        "on_signature_fingerprint",
+                    )
+                    if str(raw.get(key) or "").strip()
+                )
+            )
+    return tuple(normalized), tuple(invalid_identities)
 
 
 def _session_owner_candidates(
@@ -1155,16 +1217,28 @@ def _session_inventory_evidence(
     existing_state: Mapping[str, Any],
 ) -> _SessionInventoryEvidence:
     component_list = tuple(components)
-    normalized, invalid_count = _normalize_unknown_load_sessions(sessions, now)
+    normalized, invalid_identities = _normalize_unknown_load_sessions(sessions, now)
     owned: list[_OwnedUnknownLoadSession] = []
-    excluded = {component.component_id: invalid_count for component in component_list}
+    excluded = {component.component_id: 0 for component in component_list}
     ambiguous_ids: set[str] = set()
+    unowned_count = sum(1 for identities in invalid_identities if not identities)
+    for identities in invalid_identities:
+        for component in component_list:
+            component_identities = {
+                component.component_id,
+                component.component_fingerprint,
+                component.on_signature.signature_id,
+                nilm_signature_fingerprint(component.on_signature),
+                nilm_signature_fingerprint_v1(component.on_signature),
+            }
+            if identities & component_identities:
+                excluded[component.component_id] += 1
     for session in normalized:
         candidates = _session_owner_candidates(session, component_list, existing_state)
         if len(candidates) != 1:
-            targets = candidates or tuple(
-                component.component_id for component in component_list
-            )
+            targets = candidates
+            if not candidates:
+                unowned_count += 1
             for component_id in targets:
                 excluded[component_id] += 1
                 if len(candidates) > 1:
@@ -1184,7 +1258,19 @@ def _session_inventory_evidence(
         },
         excluded_count_by_component=excluded,
         ambiguous_component_ids=frozenset(ambiguous_ids),
-        observation_started_at=min((item.start for item in normalized), default=None),
+        observation_started_at_by_component={
+            component.component_id: min(
+                (
+                    item.session.start
+                    for item in retained
+                    if item.component_id == component.component_id
+                ),
+                default=None,
+            )
+            for component in component_list
+        },
+        invalid_count=len(invalid_identities),
+        unowned_count=unowned_count,
     )
 
 
@@ -1230,7 +1316,7 @@ def _estimate_status(
     excluded_count: int,
     observation_started_at: datetime | None,
     window_start: datetime,
-    session_history_max_items: int | None,
+    session_history_coverage: NilmSessionHistoryCoverage | None,
 ) -> str:
     if ambiguous:
         return "ambiguous"
@@ -1238,7 +1324,14 @@ def _estimate_status(
         excluded_count
         or observation_started_at is None
         or observation_started_at > window_start
-        or session_history_max_items is not None
+        or (
+            session_history_coverage is not None
+            and session_history_coverage.was_truncated
+            and (
+                session_history_coverage.oldest_retained_at is None
+                or session_history_coverage.oldest_retained_at > window_start
+            )
+        )
     ):
         return "partial_history"
     return "complete"
@@ -1265,6 +1358,26 @@ def _observation_started_at(
     except (TypeError, ValueError, OverflowError):
         pass
     return min(values).isoformat() if values else None
+
+
+def _coverage_to_payload(coverage: NilmSessionHistoryCoverage) -> dict[str, Any]:
+    return {
+        "configured_max_items": coverage.configured_max_items,
+        "source_count_before_retention": coverage.source_count_before_retention,
+        "retained_count": coverage.retained_count,
+        "was_truncated": coverage.was_truncated,
+        "dropped_count": coverage.dropped_count,
+        "oldest_retained_at": (
+            coverage.oldest_retained_at.isoformat()
+            if coverage.oldest_retained_at is not None
+            else None
+        ),
+        "newest_retained_at": (
+            coverage.newest_retained_at.isoformat()
+            if coverage.newest_retained_at is not None
+            else None
+        ),
+    }
 
 
 def _edge_observation_started_at(loads: Iterable[Mapping[str, Any]]) -> datetime | None:
@@ -1325,7 +1438,7 @@ def _unknown_component_session_payload(
     windows: Mapping[str, tuple[datetime, datetime, float]],
     now: datetime,
     existing_state: Mapping[str, Any],
-    session_history_max_items: int | None,
+    session_history_coverage: NilmSessionHistoryCoverage | None,
 ) -> dict[str, Any]:
     """Assemble one component payload from reconstructed persisted runs."""
 
@@ -1371,26 +1484,39 @@ def _unknown_component_session_payload(
         status = _estimate_status(
             ambiguous=ambiguous,
             excluded_count=evidence.excluded_count_by_component[component.component_id],
-            observation_started_at=evidence.observation_started_at,
+            observation_started_at=evidence.observation_started_at_by_component[
+                component.component_id
+            ],
             window_start=start,
-            session_history_max_items=session_history_max_items,
+            session_history_coverage=session_history_coverage,
         )
         estimate_statuses[name] = status
         runtime_windows[name] = {
-            "coverage_start": max(start, evidence.observation_started_at)
+            "coverage_start": max(
+                start,
+                evidence.observation_started_at_by_component[component.component_id],
+            )
             .isoformat()
-            if evidence.observation_started_at is not None
+            if evidence.observation_started_at_by_component[component.component_id]
+            is not None
             else start.isoformat(),
             "coverage_end": end.isoformat(),
             "coverage_days": round(
                 max(
                     0.0,
                     (
-                        end - max(start, evidence.observation_started_at)
+                        end
+                        - max(
+                            start,
+                            evidence.observation_started_at_by_component[
+                                component.component_id
+                            ],
+                        )
                     ).total_seconds()
                     / 86_400,
                 )
-                if evidence.observation_started_at is not None
+                if evidence.observation_started_at_by_component[component.component_id]
+                is not None
                 else 0.0,
                 3,
             ),
@@ -1414,7 +1540,8 @@ def _unknown_component_session_payload(
     payload["estimate_status_by_window"] = estimate_statuses
     payload["estimate_status"] = _worst_estimate_status(estimate_statuses.values())
     payload["observation_started_at"] = _observation_started_at(
-        evidence.observation_started_at, existing_state
+        evidence.observation_started_at_by_component[component.component_id],
+        existing_state,
     )
     payload["runtime_window_definition"] = _runtime_window_definition()
     payload["separation_status"] = "ambiguous" if ambiguous else "separable"

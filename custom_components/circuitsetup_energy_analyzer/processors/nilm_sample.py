@@ -47,6 +47,7 @@ from ..nilm import (
 )
 from ..normalize import NormalizedCircuitSample
 from ..unknown_loads import (
+    NilmSessionHistoryCoverage,
     build_unknown_load_inventory,
     migrate_unknown_load_inventory,
     unknown_load_inventory_needs_rebuild,
@@ -250,6 +251,9 @@ class NilmSampleProcessor:
         self._hydrated_unmatched_edge_circuits: set[str] = set()
         self._evaluated_signature_circuits: set[str] = set()
         self._session_history_context_by_circuit: dict[str, object] = {}
+        self._session_history_coverage_by_circuit: dict[
+            str, NilmSessionHistoryCoverage
+        ] = {}
         self._inventory_context_by_circuit: dict[str, object] = {}
         self._residual_power_trace_by_circuit: dict[
             str, deque[tuple[datetime, float]]
@@ -583,6 +587,9 @@ class NilmSampleProcessor:
         sessions = context.store_data.nilm_session_history_by_circuit.get(
             circuit_id, ()
         )
+        session_history_coverage = self._session_history_coverage_by_circuit.get(
+            circuit_id
+        )
         current_inventory = existing_inventory
         inventory_context = self._inventory_context(
             circuit_id,
@@ -609,6 +616,7 @@ class NilmSampleProcessor:
                     now=sample.timestamp,
                     time_zone=context.time_zone or "UTC",
                     session_history_max_items=self._session_history_max_items,
+                    session_history_coverage=session_history_coverage,
                     existing_state=existing_inventory,
                 )
             else:
@@ -620,6 +628,7 @@ class NilmSampleProcessor:
                     now=sample.timestamp,
                     time_zone=context.time_zone or "UTC",
                     session_history_max_items=self._session_history_max_items,
+                    session_history_coverage=session_history_coverage,
                 )
             current_inventory = inventory
             inventory_evidence_changed = (
@@ -697,7 +706,12 @@ class NilmSampleProcessor:
                 session_payloads,
                 assignments=assignments,
             )
+        coverage = _nilm_session_history_coverage(
+            next_sessions,
+            configured_max_items=self._session_history_max_items,
+        )
         next_sessions = next_sessions[: self._session_history_max_items]
+        self._session_history_coverage_by_circuit[circuit_id] = coverage
         if next_sessions == existing_sessions:
             self._session_history_context_by_circuit[circuit_id] = (
                 self._session_history_context(circuit_id, store_data)
@@ -3795,6 +3809,64 @@ def _merge_nilm_session_history(
         merged.values(),
         key=lambda session: str(session.get("end") or session.get("start") or ""),
         reverse=True,
+    )
+
+
+def _nilm_session_history_coverage(
+    sessions: Iterable[Mapping[str, Any]], *, configured_max_items: int
+) -> NilmSessionHistoryCoverage:
+    """Capture sorted, deduplicated evidence facts before retention slicing."""
+
+    session_list = tuple(sessions)
+    timestamps: list[datetime] = []
+    for session in session_list:
+        for key in ("start", "end"):
+            value = session.get(key)
+            if value is None:
+                continue
+            try:
+                parsed = (
+                    value
+                    if isinstance(value, datetime)
+                    else datetime.fromisoformat(str(value))
+                )
+                timestamps.append(
+                    parsed.replace(tzinfo=UTC)
+                    if parsed.tzinfo is None
+                    else parsed.astimezone(UTC)
+                )
+            except (TypeError, ValueError, OverflowError):
+                continue
+    retained = session_list[:configured_max_items]
+    retained_timestamps: list[datetime] = []
+    for session in retained:
+        for key in ("start", "end"):
+            value = session.get(key)
+            if value is None:
+                continue
+            try:
+                parsed = (
+                    value
+                    if isinstance(value, datetime)
+                    else datetime.fromisoformat(str(value))
+                )
+                retained_timestamps.append(
+                    parsed.replace(tzinfo=UTC)
+                    if parsed.tzinfo is None
+                    else parsed.astimezone(UTC)
+                )
+            except (TypeError, ValueError, OverflowError):
+                continue
+    source_count = len(session_list)
+    retained_count = len(retained)
+    return NilmSessionHistoryCoverage(
+        configured_max_items=configured_max_items,
+        source_count_before_retention=source_count,
+        retained_count=retained_count,
+        was_truncated=retained_count < source_count,
+        dropped_count=source_count - retained_count,
+        oldest_retained_at=min(retained_timestamps, default=None),
+        newest_retained_at=max(retained_timestamps, default=None),
     )
 
 

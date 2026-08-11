@@ -793,7 +793,7 @@ def test_edge_compatible_inventory_includes_window_metadata() -> None:
         now=BASE_TIME + timedelta(minutes=30),
     )
 
-    assert inventory["schema_version"] == 3
+    assert inventory["schema_version"] == 4
     assert inventory["runtime_window_definition"]["7_days"] == (
         "trailing_168_elapsed_hours_to_now"
     )
@@ -1058,7 +1058,7 @@ def test_metadata_migration_deduplicates_proven_off_row_without_edges() -> None:
         signature_payloads=signature_payloads,
     )
 
-    assert migrated["schema_version"] == 3
+    assert migrated["schema_version"] == 4
     assert migrated["unknown_load_count"] == 1
     assert migrated["unknown_estimated_energy_today_kwh"] == 0.5
     load = migrated["unknown_loads"][0]
@@ -1088,7 +1088,7 @@ def test_metadata_migration_preserves_unclassifiable_legacy_row_once() -> None:
         signature_payloads=[],
     )
 
-    assert migrated["schema_version"] == 3
+    assert migrated["schema_version"] == 4
     assert migrated["unknown_load_count"] == 1
     assert migrated["unknown_estimated_energy_today_kwh"] == 0.0
     assert migrated["largest_unknown_load"] is None
@@ -1160,7 +1160,7 @@ def test_migration_recomputes_windowed_values_when_sessions_are_available() -> N
     )
 
     load = migrated["unknown_loads"][0]
-    assert migrated["schema_version"] == 3
+    assert migrated["schema_version"] == 4
     assert load["review_state"] == "assigned"
     assert load["user_label"] == "Basement load"
     assert load["runtime_today_minutes"] == 60.0

@@ -9131,7 +9131,7 @@ def test_nilm_processor_builds_inventory_after_refreshing_current_sessions(
 
     inventory = store_data.nilm_unknown_loads_by_circuit["mains"]
     assert result.store_dirty
-    assert inventory["schema_version"] == 3
+    assert inventory["schema_version"] == 4
     assert inventory["unknown_load_count"] == 1
     assert inventory["unknown_loads"][0]["matched_on_edge_count"] == 3
     assert inventory["unknown_loads"][0]["matched_off_edge_count"] == 3
@@ -9303,6 +9303,56 @@ def test_nilm_inventory_cache_tracks_open_sessions_and_window_boundaries() -> No
         time_zone="UTC",
     )
     assert before_midnight != after_midnight
+
+
+def test_nilm_processor_records_actual_session_retention_coverage() -> None:
+    """Configured capacity alone is not evidence that history was truncated."""
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.unknown_loads import (
+        NilmSessionHistoryCoverage,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData(
+        nilm_session_history_by_circuit={
+            "mains": [
+                {
+                    "session_id": f"retained-{day}",
+                    "signature_fingerprint": "load-a",
+                    "start": (now - timedelta(days=31 - day)).isoformat(),
+                    "end": (now - timedelta(days=31 - day, minutes=-5)).isoformat(),
+                }
+                for day in range(31)
+            ]
+        }
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda _config, _now: None,
+        min_delta_w_for_circuit=lambda _circuit_id: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda _circuit_id, _events: (),
+        observe_topology=lambda _config, _match, _context: [],
+        session_history_max_items=2_000,
+    )
+
+    processor.refresh_session_history("mains", store_data)
+    assert processor._session_history_coverage_by_circuit["mains"] == (
+        NilmSessionHistoryCoverage(
+            configured_max_items=2_000,
+            source_count_before_retention=31,
+            retained_count=31,
+            was_truncated=False,
+            dropped_count=0,
+            oldest_retained_at=now - timedelta(days=31),
+            newest_retained_at=now - timedelta(days=1, minutes=-5),
+        )
+    )
 
 
 def test_nilm_sample_processor_caps_runtime_unmatched_edges() -> None:
