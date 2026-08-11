@@ -7623,6 +7623,12 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   await expect(openCard).toContainText("Provisional confidence");
   await expect(openCard.locator("[data-nilm-session-action]")).toHaveCount(0);
   await expect(openCard.locator("[data-nilm-session-interval-index]")).toHaveCount(0);
+  const closedCards = panel.locator('[data-nilm-session-validation-card][data-nilm-open="false"]');
+  await expect(closedCards).toHaveCount(4);
+  const closedCard = closedCards.first();
+  await closedCard.locator("[data-nilm-session-interval-index]").click();
+  await expect(panel.locator("[data-nilm-interval-editor]")).toBeVisible();
+  await panel.locator("[data-nilm-cancel-interval-editor]").click();
   await expect(panel.getByText("Confidence is lower because the session match is ambiguous.")).toBeVisible();
   await expect(panel.getByText("Confidence is lower because other edge matches were plausible.")).toBeVisible();
   await expect(panel.getByText("Confidence is lower because a competing session overlapped this run.")).toBeVisible();
@@ -7851,6 +7857,41 @@ test("NILM identified interval review cards focus the graph", async ({ page }) =
   await expect(panel.locator('.nilm-session-band[data-nilm-band-kind="label"][data-nilm-selected="true"]')).toHaveCount(1);
   expect(Date.parse(historyWindows.at(-1).start)).toBeLessThanOrEqual(Date.parse("2026-07-13T17:55:00Z"));
   expect(Date.parse(historyWindows.at(-1).end)).toBeGreaterThanOrEqual(Date.parse("2026-07-13T18:50:00Z"));
+});
+
+test("non-ambiguous NILM review intervals select without opening the editor", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: nilmGraphFocusHistoryFixture() });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.lanes.needs_review = {
+      ...payload.lanes.needs_review,
+      signature_ids: [],
+      session_ids: ["nilm-session-0"],
+    };
+    payload.lane_counts.needs_review = 1;
+    payload.history = {
+      ...payload.history,
+      api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+      fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  const reviewCard = panel.locator('[data-nilm-review-item="session:nilm-session-0"]');
+
+  await reviewCard.click();
+
+  await expect(reviewCard).toHaveAttribute("aria-pressed", "true");
+  await expect(panel.locator("[data-nilm-interval-editor]")).toHaveCount(0);
+  await expect(panel.locator('[data-nilm-decision][value="identify"]')).toBeVisible();
+  await expect(
+    panel.locator('.nilm-session-band[data-nilm-session-start="2026-07-13T16:00:00Z"][data-nilm-selected="true"]'),
+  ).toHaveCount(1);
 });
 
 function nilmGraphFocusHistoryFixture() {

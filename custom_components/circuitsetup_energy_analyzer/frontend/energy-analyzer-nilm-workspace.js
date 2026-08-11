@@ -1377,19 +1377,21 @@ export function createNilmWorkspaceMethods({
     const sessions = Array.isArray(this._nilmWorkspace && this._nilmWorkspace.sessions)
       ? this._nilmWorkspace.sessions
       : [];
-    return this._loadNilmSessionInterval(sessions[index]);
+    return this._loadNilmSessionInterval(sessions[index], { edit: true });
   }
 
-  async _loadNilmSessionInterval(session) {
+  async _loadNilmSessionInterval(session, options = {}) {
     const start = Date.parse(session && session.start || "");
     const end = Date.parse(session && session.end || "");
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return false;
     const assignment = ((this._nilmWorkspace && this._nilmWorkspace.assignments) || [])
       .find((item) => item.assignment_id === session.assignment_id);
+    const edit = options.edit === true;
     const loaded = await this._loadNilmIntervalOnGraph(session, {
-      edit: true,
+      edit,
       assignment,
       clearSignature: true,
+      scroll: options.scroll !== false,
     });
     if (loaded !== true) return false;
     this._lastActionMessage = this._panelText("messages.loaded_nilm_session_interval");
@@ -2548,7 +2550,10 @@ export function createNilmWorkspaceMethods({
       )) === true;
     }
     if (reviewItem.kind === "session") {
-      return this._loadNilmSessionInterval(reviewItem.item);
+      return this._loadNilmSessionInterval(
+        reviewItem.item,
+        { scroll: options.scroll !== false },
+      );
     }
     const interval = reviewItem.kind === "assignment"
       ? this._nilmAssignmentFocusInterval(reviewItem.item)
