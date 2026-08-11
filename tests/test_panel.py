@@ -456,7 +456,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260810-5"
+    assert PANEL_MODULE_VERSION == "20260811-1"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -2652,6 +2652,74 @@ def test_nilm_workspace_placeholder_session_is_evidence_only() -> None:
     assert "assignment_id" not in payload
 
 
+def test_nilm_workspace_ambiguous_session_is_not_assignable() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_session_payload_with_actions,
+    )
+
+    payload = _nilm_session_payload_with_actions(
+        {
+            "session_id": "session-ambiguous",
+            "mains_circuit_id": "mains",
+            "signature_fingerprint": "direction=on|watts=800-900",
+            "start": "2026-08-11T12:00:00+00:00",
+            "end": "2026-08-11T12:30:00+00:00",
+            "ambiguous": True,
+        }
+    )
+
+    assert "assign" not in payload.get("actions", {})
+
+
+def test_nilm_workspace_lanes_review_only_assignable_unassigned_sessions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_workspace_lanes,
+    )
+
+    lanes = _nilm_workspace_lanes(
+        assignments=[],
+        signatures=[],
+        label_intervals=[],
+        sessions=[
+            {"session_id": "clean", "actions": {"assign": {}}},
+            {
+                "session_id": "ambiguous",
+                "ambiguous": True,
+                "actions": {"assign": {}},
+            },
+        ],
+    )
+
+    assert lanes["needs_review"]["session_ids"] == ["clean"]
+
+
+def test_nilm_workspace_visible_sessions_exclude_ambiguous_evidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_workspace_visible_sessions,
+    )
+
+    sessions = _nilm_workspace_visible_sessions(
+        [
+            {"session_id": "clean", "signature_fingerprint": "signature-clean"},
+            {
+                "session_id": "ambiguous-generated",
+                "signature_fingerprint": "signature-generated",
+                "ambiguous": True,
+            },
+            {
+                "session_id": "ambiguous-stored",
+                "signature_fingerprint": "signature-stored",
+                "assignment_id": "dishwasher",
+                "ambiguous": True,
+            },
+        ],
+        signatures=[],
+        assignments=[],
+    )
+
+    assert [session["session_id"] for session in sessions] == ["clean"]
+
+
 def test_recurring_placeholder_sessions_promote_three_reviewable_components() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
@@ -2774,7 +2842,7 @@ def test_nilm_workspace_hides_retired_and_reviews_unassigned_intervals() -> None
     assert lanes["hidden"]["assignment_ids"] == ["assignment-retired"]
 
 
-def test_nilm_workspace_lanes_review_only_assignable_unassigned_sessions() -> None:
+def test_nilm_workspace_lanes_include_actionable_unassigned_sessions() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         _nilm_workspace_lanes,
     )
@@ -2792,7 +2860,6 @@ def test_nilm_workspace_lanes_review_only_assignable_unassigned_sessions() -> No
             {
                 "session_id": "ambiguous",
                 "ambiguous": True,
-                "actions": {"assign": {}},
             },
             {
                 "session_id": "assigned",
@@ -2803,11 +2870,11 @@ def test_nilm_workspace_lanes_review_only_assignable_unassigned_sessions() -> No
         ],
     )
 
-    assert lanes["needs_review"]["session_ids"] == ["open", "closed", "ambiguous"]
+    assert lanes["needs_review"]["session_ids"] == ["open", "closed"]
     assert sum(
         len(lanes["needs_review"][key])
         for key in ("assignment_ids", "signature_ids", "interval_ids", "session_ids")
-    ) == 3
+    ) == 2
 
 
 def test_nilm_workspace_lanes_sessions_replace_parent_signatures() -> None:

@@ -2145,6 +2145,7 @@ def _nilm_workspace_lanes(
         if (
             session_id
             and not str(session.get(ATTR_ASSIGNMENT_ID) or "").strip()
+            and not bool(session.get("ambiguous"))
             and isinstance(actions, Mapping)
             and isinstance(actions.get("assign"), Mapping)
         ):
@@ -3074,7 +3075,8 @@ def _nilm_workspace_visible_sessions(
     return [
         dict(session)
         for session in sessions
-        if str(session.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        if not bool(session.get("ambiguous"))
+        and str(session.get(ATTR_ASSIGNMENT_ID) or "").strip()
         not in hidden_assignment_ids
         and str(session.get("signature_fingerprint") or "").strip()
         not in hidden_fingerprints
@@ -3248,7 +3250,11 @@ def _nilm_session_payload_with_actions(
         }
         assignment_id = str(payload.get(ATTR_ASSIGNMENT_ID) or "").strip()
         actions: dict[str, Any] = {}
-        if nilm_signature_is_assignable(signature_fingerprint) and not assignment_id:
+        if (
+            nilm_signature_is_assignable(signature_fingerprint)
+            and not assignment_id
+            and not bool(payload.get("ambiguous"))
+        ):
             data[ATTR_SIGNATURE_FINGERPRINT] = signature_fingerprint
             actions["assign"] = {
                 "domain": DOMAIN,
