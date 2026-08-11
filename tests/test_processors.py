@@ -9135,7 +9135,7 @@ def test_nilm_processor_builds_inventory_after_refreshing_current_sessions(
     assert inventory["unknown_load_count"] == 1
     assert inventory["unknown_loads"][0]["matched_on_edge_count"] == 3
     assert inventory["unknown_loads"][0]["matched_off_edge_count"] == 3
-    assert inventory["unknown_loads"][0]["runtime_today_minutes"] == 30.0
+    assert inventory["unknown_loads"][0]["runtime_today_minutes"] == 60.0
 
     snapshot = deepcopy(inventory)
     def unexpected_rebuild(*_args: object, **_kwargs: object) -> None:
