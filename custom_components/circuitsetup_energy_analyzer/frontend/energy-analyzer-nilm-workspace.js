@@ -1430,10 +1430,9 @@ export function createNilmWorkspaceMethods({
     const intervals = this._nilmWorkspace?.label_intervals || [];
     const intervalId = String(focused.interval_id || "").trim();
     if (intervalId) {
-      const matchingId = intervals.find((interval) => (
+      return intervals.find((interval) => (
         String(interval.interval_id || "").trim() === intervalId
-      ));
-      if (matchingId) return matchingId;
+      )) || null;
     }
     return intervals.find((interval) => (
       Date.parse(interval.start || "") === focused.start

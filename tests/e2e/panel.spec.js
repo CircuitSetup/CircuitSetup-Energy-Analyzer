@@ -7715,8 +7715,10 @@ test("assigned NILM intervals can be labeled, inspected, and removed", async ({ 
     });
     payload.assignments[0].label_interval_ids.push("interval-2");
     if (workspaceLoads > 1) {
-      payload.label_intervals = [];
-      payload.assignments[0].label_interval_ids = [];
+      payload.label_intervals = payload.label_intervals.filter(
+        (interval) => interval.interval_id === "interval-1",
+      );
+      payload.assignments[0].label_interval_ids = ["interval-1"];
     }
     await route.fulfill({ json: payload });
     return true;
@@ -7789,6 +7791,9 @@ test("assigned NILM intervals can be labeled, inspected, and removed", async ({ 
   await panel.locator('[data-nilm-label-interval-input="end"]').fill(
     await datetimeLocalValue(page, "2026-07-13T18:45:00Z", homeAssistantTimeZone),
   );
+  await panel.locator('[data-nilm-label-interval-input="start"]').fill(
+    await datetimeLocalValue(page, "2026-07-13T18:00:00Z", homeAssistantTimeZone),
+  );
   await page.evaluate(() => {
     window.__panel._nilmWorkspace.actions.label_interval.service = "save_nilm_interval_changes";
   });
@@ -7797,7 +7802,15 @@ test("assigned NILM intervals can be labeled, inspected, and removed", async ({ 
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.length)).toBe(callsBeforeRemoval);
   await panel.locator('[data-nilm-label-interval-action="save"]').click();
   await expect(panel.locator("[data-nilm-interval-editor]")).toHaveCount(0);
-  await expect(panel.locator("[data-nilm-assigned-intervals]")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (
+    window.__panel._nilmWorkspace.label_intervals.map((interval) => interval.interval_id)
+  ))).toEqual(["interval-1"]);
+  await expect.poll(() => page.evaluate(() => (
+    window.__panel._nilmFocusedLabelInterval()?.interval_id || null
+  ))).toBeNull();
+  await expect(panel.locator('.nilm-session-band[data-nilm-band-kind="label"][data-nilm-selected="true"]')).toHaveCount(0);
+  await expect(panel.locator("[data-nilm-edit-focused-interval]")).toHaveCount(0);
+  await expect(panel.locator("[data-nilm-open-interval-editor]")).toBeVisible();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
     service: "save_nilm_interval_changes",
     data: { intervals: [], removed_interval_ids: ["interval-2"] },
