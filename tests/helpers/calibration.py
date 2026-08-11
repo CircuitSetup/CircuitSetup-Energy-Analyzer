@@ -4,6 +4,7 @@ from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from math import isfinite
 from pathlib import Path
 from statistics import median
 from types import SimpleNamespace
@@ -69,6 +70,9 @@ CALIBRATION_CONFIDENCE_BINS = (
     "0.6-0.8",
     "0.8-1.0",
 )
+_REPLAY_RUNTIME_EVIDENCE_MAX_ITEMS = 12
+_REPLAY_RUNTIME_TEXT_MAX_CHARS = 256
+_REPLAY_RUNTIME_TIMESTAMP_MAX_CHARS = 64
 
 _ROLE_BY_SOURCE_KEY = {
     "power": SensorRole.REAL_POWER,
@@ -1358,21 +1362,24 @@ def _component_metrics(
     fixture: CalibrationFixture, result: ReplayResult
 ) -> dict[str, ComponentReplayMetrics]:
     sessions = [
-        item
-        for history in result.store_data.nilm_session_history_by_circuit.values()
+        (circuit_id, item)
+        for circuit_id, history in (
+            result.store_data.nilm_session_history_by_circuit.items()
+        )
         for item in history
         if isinstance(item, Mapping)
     ]
     metrics: dict[str, ComponentReplayMetrics] = {}
     for component_id, truth in fixture.labels.component_truth.items():
-        predicted = [
-            item
-            for item in sessions
+        predicted_items = [
+            (circuit_id, item)
+            for circuit_id, item in sessions
             if str(item.get("assignment_id") or item.get("appliance_id") or "")
             == component_id
             and item.get("start")
             and item.get("end")
         ]
+        predicted = [item for _circuit_id, item in predicted_items]
         matched = [
             (expected, actual)
             for expected, actual in _optimal_session_pairs(
@@ -1428,8 +1435,16 @@ def _component_metrics(
         ]
         predicted_state_segments = [
             segment
-            for actual in predicted
-            for segment in _predicted_state_segments(fixture, actual)
+            for circuit_id, actual in predicted_items
+            for state_path, _predictions, _helper_evidence in (
+                _replay_session_runtime_evidence(
+                    result,
+                    circuit_id,
+                    component_id,
+                    actual,
+                ),
+            )
+            for segment in _predicted_state_segments(fixture, actual, state_path)
         ]
         state_accuracy = _state_accuracy(
             truth.state_segments,
@@ -1476,7 +1491,16 @@ def _component_metrics(
                     matched_edges += 1
                     unmatched_edges.remove(actual)
                     break
-        actual_energy = sum(float(item.get("energy_kwh", 0.0)) for item in predicted)
+        actual_energy = sum(
+            float(
+                item.get(
+                    "estimated_energy_kwh",
+                    item.get("energy_kwh", 0.0),
+                )
+                or 0.0
+            )
+            for item in predicted
+        )
         absolute_error = (
             abs(actual_energy - truth.energy_kwh)
             if truth.energy_kwh is not None
@@ -1786,12 +1810,14 @@ def _maximum_weight_assignment(weights: list[list[float]]) -> list[int]:
 
 
 def _predicted_state_segments(
-    fixture: CalibrationFixture, session: Mapping[str, Any]
+    fixture: CalibrationFixture,
+    session: Mapping[str, Any],
+    state_path: tuple[Mapping[str, Any], ...],
 ) -> list[tuple[str, float, float]]:
     path = sorted(
         (
             item
-            for item in _optional_list(session, "state_path")
+            for item in state_path
             if isinstance(item, Mapping)
             and item.get("state_id")
             and item.get("started_at")
@@ -1877,7 +1903,18 @@ def _merged_overlap_duration(
 def _completed_nilm_sessions(result: ReplayResult) -> list[Mapping[str, Any]]:
     return [
         session
-        for history in result.store_data.nilm_session_history_by_circuit.values()
+        for _circuit_id, session in _completed_nilm_session_items(result)
+    ]
+
+
+def _completed_nilm_session_items(
+    result: ReplayResult,
+) -> list[tuple[str, Mapping[str, Any]]]:
+    return [
+        (circuit_id, session)
+        for circuit_id, history in (
+            result.store_data.nilm_session_history_by_circuit.items()
+        )
         for session in history
         if isinstance(session, Mapping) and session.get("start") and session.get("end")
     ]
@@ -1969,13 +2006,19 @@ def _nilm_confidence_calibration(
         for label in CALIBRATION_CONFIDENCE_BINS
     }
     scored: list[tuple[float, float]] = []
-    for session in _completed_nilm_sessions(result):
+    for circuit_id, session in _completed_nilm_session_items(result):
         component_id = str(
             session.get("assignment_id") or session.get("appliance_id") or ""
         )
-        for prediction in _optional_list(session, "accepted_predictions"):
-            if not isinstance(prediction, Mapping):
-                continue
+        _state_path, predictions, _helper_evidence = (
+            _replay_session_runtime_evidence(
+                result,
+                circuit_id,
+                component_id,
+                session,
+            )
+        )
+        for prediction in predictions:
             outcome = _prediction_matches_truth(fixture, component_id, prediction)
             score = _optional_float(prediction.get("candidate_score"))
             if outcome is None or score is None:
@@ -2187,7 +2230,9 @@ def _false_helper_association_rate(
         component_id: list(truth.sessions)
         for component_id, truth in fixture.labels.component_truth.items()
     }
-    for sessions in result.store_data.nilm_session_history_by_circuit.values():
+    for circuit_id, sessions in (
+        result.store_data.nilm_session_history_by_circuit.items()
+    ):
         for session in sessions:
             component_id = str(
                 session.get("assignment_id") or session.get("appliance_id") or ""
@@ -2220,7 +2265,12 @@ def _false_helper_association_rate(
             session_matches = matching_truth is not None
             if matching_truth is not None:
                 unused_truth[component_id].remove(matching_truth)
-            for evidence in session.get("helper_evidence", ()):
+            for evidence in _session_helper_evidence(
+                result,
+                circuit_id,
+                component_id,
+                session,
+            ):
                 if evidence.get("relationship") != "corroborates":
                     continue
                 records.append(
@@ -2229,6 +2279,199 @@ def _false_helper_association_rate(
                     in truth.corroborating_helper_circuit_ids
                 )
     return _ratio_or_none(records.count(False), len(records))
+
+
+def _session_helper_evidence(
+    result: ReplayResult,
+    circuit_id: str,
+    component_id: str,
+    session: Mapping[str, Any],
+) -> tuple[Mapping[str, Any], ...]:
+    """Return fixed scalar replay evidence without persisting nested history."""
+
+    _state_path, _predictions, helper_evidence = _replay_session_runtime_evidence(
+        result,
+        circuit_id,
+        component_id,
+        session,
+    )
+    return helper_evidence
+
+
+def _replay_session_runtime_evidence(
+    result: ReplayResult,
+    circuit_id: str,
+    component_id: str,
+    session: Mapping[str, Any],
+) -> tuple[
+    tuple[Mapping[str, Any], ...],
+    tuple[Mapping[str, Any], ...],
+    tuple[Mapping[str, Any], ...],
+]:
+    """Project matching replay runtime evidence into fixed, bounded scalars.
+
+    This is test-only calibration provenance. Production history deliberately
+    excludes nested runtime payloads, so the replay reader examines only the
+    last active snapshot for the matching session and projects at most twelve
+    known scalar items from each runtime list.
+    """
+
+    state_path_from_session = "state_path" in session
+    predictions_from_session = "accepted_predictions" in session
+    helper_evidence_from_session = "helper_evidence" in session
+    state_path = (
+        _replay_state_path(session.get("state_path"))
+        if state_path_from_session
+        else None
+    )
+    predictions = (
+        _replay_predictions(session.get("accepted_predictions"))
+        if predictions_from_session
+        else None
+    )
+    helper_evidence = (
+        _replay_helper_evidence(session.get("helper_evidence"))
+        if helper_evidence_from_session
+        else None
+    )
+    session_start = _replay_timestamp(session.get("start"))
+    session_end = _replay_timestamp(session.get("end"))
+    terminal_prediction: Mapping[str, Any] | None = None
+    if session_start is None:
+        return state_path or (), predictions or (), helper_evidence or ()
+
+    for snapshot in result.state_snapshots:
+        runtimes = snapshot.get("nilm_component_runtime_by_circuit")
+        if not isinstance(runtimes, Mapping):
+            continue
+        circuit_runtime = runtimes.get(circuit_id)
+        if not isinstance(circuit_runtime, Mapping):
+            continue
+        runtime = circuit_runtime.get(component_id)
+        if not isinstance(runtime, Mapping):
+            continue
+        if _replay_timestamp(runtime.get("session_start")) == session_start:
+            if not state_path_from_session:
+                state_path = _replay_state_path(runtime.get("state_path"))
+            if not predictions_from_session:
+                predictions = _replay_predictions(runtime.get("accepted_predictions"))
+            if not helper_evidence_from_session:
+                helper_evidence = _replay_helper_evidence(
+                    runtime.get("helper_evidence")
+                )
+        if not predictions_from_session and session_end is not None:
+            candidate = _replay_predictions((runtime.get("last_prediction"),))
+            if (
+                candidate
+                and candidate[0].get("prediction_timestamp") == session_end
+            ):
+                terminal_prediction = candidate[0]
+    base_predictions = predictions or ()
+    if terminal_prediction is not None and not any(
+        item.get("prediction_timestamp")
+        == terminal_prediction.get("prediction_timestamp")
+        for item in base_predictions
+    ):
+        predictions = tuple(
+            [*base_predictions, terminal_prediction][
+                -_REPLAY_RUNTIME_EVIDENCE_MAX_ITEMS:
+            ]
+        )
+    return state_path or (), predictions or (), helper_evidence or ()
+
+
+def _replay_state_path(value: Any) -> tuple[Mapping[str, Any], ...]:
+    """Retain only the bounded scalar state fields used by calibration."""
+
+    if not isinstance(value, (list, tuple)):
+        return ()
+    projected: list[Mapping[str, Any]] = []
+    for item in value[-_REPLAY_RUNTIME_EVIDENCE_MAX_ITEMS:]:
+        if not isinstance(item, Mapping):
+            continue
+        state_id = _replay_text(item.get("state_id"))
+        started_at = _replay_timestamp(item.get("started_at"))
+        if state_id is not None and started_at is not None:
+            projected.append({"state_id": state_id, "started_at": started_at})
+    return tuple(projected)
+
+
+def _replay_predictions(value: Any) -> tuple[Mapping[str, Any], ...]:
+    """Retain only the bounded scalar prediction fields used by calibration."""
+
+    if not isinstance(value, (list, tuple)):
+        return ()
+    projected: list[Mapping[str, Any]] = []
+    for item in value[-_REPLAY_RUNTIME_EVIDENCE_MAX_ITEMS:]:
+        if not isinstance(item, Mapping):
+            continue
+        timestamp = _replay_timestamp(item.get("prediction_timestamp"))
+        score = _replay_number(item.get("candidate_score"))
+        if timestamp is None or score is None:
+            continue
+        prediction: dict[str, Any] = {
+            "prediction_timestamp": timestamp,
+            "candidate_score": score,
+        }
+        for key in ("transition_kind", "state_id"):
+            if (text := _replay_text(item.get(key))) is not None:
+                prediction[key] = text
+        projected.append(prediction)
+    return tuple(projected)
+
+
+def _replay_helper_evidence(value: Any) -> tuple[Mapping[str, Any], ...]:
+    """Retain only fixed scalar helper fields used by calibration."""
+
+    if not isinstance(value, (list, tuple)):
+        return ()
+    projected: list[Mapping[str, Any]] = []
+    for item in value[-_REPLAY_RUNTIME_EVIDENCE_MAX_ITEMS:]:
+        if not isinstance(item, Mapping):
+            continue
+        relationship = _replay_text(item.get("relationship"))
+        helper_id = _replay_text(item.get("helper_circuit_id"))
+        if relationship is not None and helper_id is not None:
+            projected.append(
+                {
+                    "relationship": relationship,
+                    "helper_circuit_id": helper_id,
+                }
+            )
+    return tuple(projected)
+
+
+def _replay_timestamp(value: Any) -> str | None:
+    text = _replay_text(value, maximum=_REPLAY_RUNTIME_TIMESTAMP_MAX_CHARS)
+    if text is None:
+        return None
+    try:
+        return _parse_datetime(text).isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
+def _replay_text(
+    value: Any,
+    *,
+    maximum: int = _REPLAY_RUNTIME_TEXT_MAX_CHARS,
+) -> str | None:
+    if not isinstance(value, str) or not value or len(value) > maximum:
+        return None
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeError:
+        return None
+    if len(encoded) > maximum:
+        return None
+    return value
+
+
+def _replay_number(value: Any) -> float | None:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    normalized = float(value)
+    return normalized if isfinite(normalized) else None
 
 
 def _f1(precision: float | None, recall: float | None) -> float | None:

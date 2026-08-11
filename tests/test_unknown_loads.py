@@ -11,6 +11,7 @@ from custom_components.circuitsetup_energy_analyzer.nilm import (
     nilm_signature_fingerprint_v1,
 )
 from custom_components.circuitsetup_energy_analyzer.unknown_loads import (
+    NilmSessionHistoryCoverage,
     build_unknown_load_inventory,
     estimate_unknown_load,
 )
@@ -228,8 +229,214 @@ def test_session_evidence_excludes_malformed_and_ambiguous_rows() -> None:
     assert window["estimate_status"] == "partial_history"
 
 
-def test_session_metadata_keeps_the_earliest_observation_start() -> None:
-    """Rebuilds cannot move an established observation boundary forward."""
+def test_session_exclusions_are_component_and_window_specific() -> None:
+    """Rejected evidence affects only its owners and intersecting windows."""
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+
+    def owned_row(name: str, owner: str, age_days: int) -> dict[str, object]:
+        start = now - timedelta(days=age_days)
+        return {
+            "session_id": name,
+            "signature_id": owner,
+            "signature_fingerprint": owner,
+            "start": start.isoformat(),
+            "end": (start + timedelta(minutes=30)).isoformat(),
+        }
+
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[
+            signature("on-a", 500.0, 100.0, 510.0),
+            signature("on-b", 900.0, 100.0, 910.0),
+            signature("on-c", 1_400.0, 100.0, 1_410.0),
+        ],
+        edges=[],
+        sessions=[
+            owned_row("a-covered", "on-a", 32),
+            owned_row("b-covered", "on-b", 32),
+            owned_row("c-covered", "on-c", 32),
+            {
+                **owned_row("ab-ambiguous", "on-a", 8),
+                "on_signature_id": "on-b",
+            },
+            {
+                "session_id": "expired-malformed-a",
+                "signature_id": "on-a",
+                "start": (now - timedelta(days=31)).isoformat(),
+                "end": (now - timedelta(days=31, minutes=-30)).isoformat(),
+            },
+            {
+                "session_id": "untimed-malformed-c",
+                "signature_id": "on-c",
+                "signature_fingerprint": "on-c",
+                "start": "bad",
+                "end": "bad",
+            },
+            {"session_id": "ownerless-malformed", "start": "bad", "end": "bad"},
+        ],
+        now=now,
+    )
+
+    loads = {load["on_signature_id"]: load for load in inventory["unknown_loads"]}
+    for owner in ("on-a", "on-b"):
+        assert loads[owner]["estimate_status_by_window"] == {
+            "today": "complete",
+            "7_days": "complete",
+            "30_days": "ambiguous",
+        }
+        assert {
+            name: window["excluded_session_count"]
+            for name, window in loads[owner]["runtime_windows"].items()
+        } == {"today": 0, "7_days": 0, "30_days": 1}
+    assert loads["on-c"]["estimate_status_by_window"] == {
+        "today": "partial_history",
+        "7_days": "partial_history",
+        "30_days": "partial_history",
+    }
+    assert inventory["session_history_diagnostics"] == {
+        "invalid_count": 3,
+        "unowned_count": 1,
+    }
+
+
+def test_duplicate_exclusions_are_order_stable() -> None:
+    """Repeated rejected rows have one deterministic evidence identity."""
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    baseline = {
+        "session_id": "covered",
+        "signature_id": "on-a",
+        "signature_fingerprint": "on-a",
+        "start": (now - timedelta(days=31)).isoformat(),
+        "end": (now - timedelta(days=31, minutes=-30)).isoformat(),
+    }
+    duplicate = {
+        "session_id": "recent-malformed",
+        "signature_id": "on-a",
+        "start": (now - timedelta(hours=1)).isoformat(),
+        "end": (now - timedelta(minutes=30)).isoformat(),
+    }
+    ownerless = {
+        "session_id": "ownerless-malformed",
+        "start": "bad",
+        "end": "bad",
+    }
+
+    def build(rows: list[dict[str, object]]) -> dict[str, object]:
+        return build_unknown_load_inventory(
+            circuit_id="mains",
+            signatures=[signature("on-a", 500.0, 100.0, 510.0)],
+            edges=[],
+            sessions=rows,
+            now=now,
+        )
+
+    single = build([baseline, duplicate, ownerless])
+    forward = build(
+        [baseline, duplicate, dict(duplicate), ownerless, dict(ownerless)]
+    )
+    reverse = build(
+        [dict(ownerless), ownerless, dict(duplicate), duplicate, baseline]
+    )
+
+    assert single == forward == reverse
+    windows = forward["unknown_loads"][0]["runtime_windows"]
+    assert all(window["excluded_session_count"] == 1 for window in windows.values())
+    assert forward["session_history_diagnostics"] == {
+        "invalid_count": 2,
+        "unowned_count": 1,
+    }
+
+
+def test_inconsistent_exclusion_intervals_remain_conservative() -> None:
+    """A recent closed copy cannot disappear behind an expired open copy."""
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[signature("on-a", 500.0, 100.0, 510.0)],
+        edges=[],
+        sessions=[
+            {
+                "session_id": "covered",
+                "signature_id": "on-a",
+                "signature_fingerprint": "on-a",
+                "start": (now - timedelta(days=32)).isoformat(),
+                "end": (now - timedelta(days=32, minutes=-30)).isoformat(),
+            },
+            {
+                "session_id": "conflicting-exclusion",
+                "signature_id": "on-a",
+                "start": (now - timedelta(days=31)).isoformat(),
+                "end": None,
+            },
+            {
+                "session_id": "conflicting-exclusion",
+                "signature_id": "on-a",
+                "start": (now - timedelta(days=31)).isoformat(),
+                "end": (now - timedelta(minutes=30)).isoformat(),
+            },
+        ],
+        now=now,
+    )
+
+    load = inventory["unknown_loads"][0]
+    assert load["estimate_status_by_window"] == {
+        "today": "partial_history",
+        "7_days": "partial_history",
+        "30_days": "partial_history",
+    }
+    assert all(
+        window["excluded_session_count"] == 1
+        for window in load["runtime_windows"].values()
+    )
+
+
+def test_cross_owner_duplicate_uses_one_conservative_interval() -> None:
+    """Every candidate sees conflicting timing for a shared stable identity."""
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+
+    def row(name: str, owner: str, start: datetime) -> dict[str, object]:
+        return {
+            "session_id": name,
+            "signature_id": owner,
+            "signature_fingerprint": owner,
+            "start": start.isoformat(),
+            "end": (start + timedelta(minutes=30)).isoformat(),
+        }
+
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[
+            signature("on-a", 500.0, 100.0, 510.0),
+            signature("on-b", 900.0, 100.0, 910.0),
+        ],
+        edges=[],
+        sessions=[
+            row("a-covered", "on-a", now - timedelta(days=32)),
+            row("b-covered", "on-b", now - timedelta(days=32)),
+            row("shared-conflict", "on-a", now - timedelta(days=31)),
+            row("shared-conflict", "on-b", now - timedelta(hours=1)),
+        ],
+        now=now,
+    )
+
+    for load in inventory["unknown_loads"]:
+        assert load["estimate_status_by_window"] == {
+            "today": "ambiguous",
+            "7_days": "ambiguous",
+            "30_days": "ambiguous",
+        }
+        assert all(
+            window["excluded_session_count"] == 1
+            for window in load["runtime_windows"].values()
+        )
+
+
+def test_session_metadata_keeps_observation_starts_component_local() -> None:
+    """A top-level boundary cannot become component history on rebuild."""
 
     inventory = build_unknown_load_inventory(
         circuit_id="mains",
@@ -251,12 +458,294 @@ def test_session_metadata_keeps_the_earliest_observation_start() -> None:
 
     load = inventory["unknown_loads"][0]
     assert inventory["observation_started_at"] == "2026-07-01T00:00:00+00:00"
-    assert load["observation_started_at"] == "2026-07-01T00:00:00+00:00"
+    assert load["observation_started_at"] == "2026-08-09T10:00:00+00:00"
     assert load["estimate_status"] == "partial_history"
 
 
-def test_duplicate_open_and_closed_session_prefers_the_closed_run() -> None:
-    """A reconstructed close replaces its stale open predecessor for one edge."""
+def test_oversized_retention_identity_metadata_is_rejected_deterministically() -> None:
+    """Persisted identity components cannot exceed their fixed storage contract."""
+
+    limit = unknown_loads.NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS
+    components = [
+        [["session", f"session-{index:05d}"]] for index in range(limit + 1)
+    ]
+    payload = {
+        "configured_max_items": 2,
+        "source_count_before_retention": 5,
+        "retained_count": 2,
+        "was_truncated": True,
+        "dropped_count": 3,
+        "oldest_retained_at": "2026-08-08T00:00:00+00:00",
+        "newest_retained_at": "2026-08-10T00:00:00+00:00",
+        "_retention_identity_components": components,
+        "_retention_identity_components_complete": True,
+    }
+
+    forward = unknown_loads.nilm_session_history_coverage_from_payload(payload)
+    reverse = unknown_loads.nilm_session_history_coverage_from_payload(
+        {**payload, "_retention_identity_components": list(reversed(components))}
+    )
+
+    assert forward is not None
+    assert reverse is not None
+    assert getattr(forward, "retention_identity_components", ()) == ()
+    assert getattr(reverse, "retention_identity_components", ()) == ()
+    assert getattr(forward, "retention_identity_components_complete", None) is False
+    assert getattr(reverse, "retention_identity_components_complete", None) is False
+
+
+def test_retention_identity_metadata_accepts_only_strict_string_aliases() -> None:
+    """Malformed alias members cannot become asserted historical identities."""
+
+    payload = {
+        "configured_max_items": 2,
+        "source_count_before_retention": 5,
+        "retained_count": 2,
+        "was_truncated": True,
+        "dropped_count": 3,
+        "oldest_retained_at": "2026-08-08T00:00:00+00:00",
+        "newest_retained_at": "2026-08-10T00:00:00+00:00",
+        "_retention_identity_components": [
+            [["session", None]],
+            [["session", 7]],
+            [["session", True]],
+            [["session", {"not": "valid"}]],
+            [[None, "value"]],
+            [[7, "value"]],
+            [[True, "value"]],
+            [[{"not": "valid"}, "value"]],
+            [["invalid_kind", "value"]],
+            [["session", "   "]],
+            [["session", " valid-session "], ["on_edge", "valid-edge"]],
+        ],
+        "_retention_identity_components_complete": True,
+    }
+
+    coverage = unknown_loads.nilm_session_history_coverage_from_payload(payload)
+
+    assert coverage is not None
+    components = getattr(coverage, "retention_identity_components", ())
+    assert tuple(component.aliases for component in components) == (
+        (("on_edge", "valid-edge"), ("session", "valid-session")),
+    )
+    assert getattr(coverage, "retention_identity_components_complete", None) is False
+    roundtrip = unknown_loads._coverage_to_payload(coverage)
+    assert roundtrip["_retention_identity_components"] == [
+        [["on_edge", "valid-edge"], ["session", "valid-session"]],
+    ]
+    assert roundtrip["_retention_identity_components_complete"] is False
+    alias_repr = repr(roundtrip["_retention_identity_components"])
+    assert "None" not in alias_repr
+    assert "True" not in alias_repr
+    assert "{'not': 'valid'}" not in alias_repr
+
+
+def test_complete_retention_identity_metadata_round_trips_canonically() -> None:
+    """A complete component ledger remains complete, sorted, and deduplicated."""
+
+    payload = {
+        "configured_max_items": 2,
+        "source_count_before_retention": 4,
+        "retained_count": 2,
+        "was_truncated": True,
+        "dropped_count": 2,
+        "oldest_retained_at": "2026-08-08T00:00:00+00:00",
+        "newest_retained_at": "2026-08-10T00:00:00+00:00",
+        "_retention_identity_components": [
+            [["session", "z-session"], ["on_edge", "z-edge"]],
+            [["on_edge", "a-edge"], ["on_edge", "a-edge"]],
+        ],
+        "_retention_identity_components_complete": True,
+    }
+
+    coverage = unknown_loads.nilm_session_history_coverage_from_payload(payload)
+
+    assert coverage is not None
+    components = getattr(coverage, "retention_identity_components", ())
+    assert tuple(component.aliases for component in components) == (
+        (("on_edge", "a-edge"),),
+        (("on_edge", "z-edge"), ("session", "z-session")),
+    )
+    assert getattr(coverage, "retention_identity_components_complete", None) is True
+    assert unknown_loads._coverage_to_payload(coverage) == {
+        **{key: value for key, value in payload.items() if not key.startswith("_")},
+        "_retention_identity_components": [
+            [["on_edge", "a-edge"]],
+            [["on_edge", "z-edge"], ["session", "z-session"]],
+        ],
+        "_retention_identity_components_complete": True,
+    }
+
+
+def test_complete_retention_identity_metadata_requires_component_per_drop() -> None:
+    """Two aliases for one identity cannot prove two historical drops."""
+
+    coverage = unknown_loads.nilm_session_history_coverage_from_payload(
+        {
+            "configured_max_items": 2,
+            "source_count_before_retention": 4,
+            "retained_count": 2,
+            "was_truncated": True,
+            "dropped_count": 2,
+            "oldest_retained_at": "2026-08-08T00:00:00+00:00",
+            "newest_retained_at": "2026-08-10T00:00:00+00:00",
+            "_retention_identity_components": [
+                [["session", "one-session"], ["on_edge", "one-edge"]],
+            ],
+            "_retention_identity_components_complete": True,
+        }
+    )
+
+    assert coverage is not None
+    assert getattr(coverage, "retention_identity_components_complete", None) is False
+
+
+def test_retention_coverage_scalar_contract_stays_conservative() -> None:
+    """Coercible flags and impossible numeric relationships prove no novelty."""
+
+    payload = {
+        "configured_max_items": 2,
+        "source_count_before_retention": 3,
+        "retained_count": 2,
+        "was_truncated": True,
+        "dropped_count": 1,
+        "oldest_retained_at": "2026-08-08T00:00:00+00:00",
+        "newest_retained_at": "2026-08-10T00:00:00+00:00",
+        "_retention_identity_components": [
+            [["session", "dropped-session"], ["on_edge", "dropped-edge"]],
+        ],
+        "_retention_identity_components_complete": True,
+    }
+
+    for malformed_flag in (0, 1, 2, "false", None, [], {}):
+        coverage = unknown_loads.nilm_session_history_coverage_from_payload(
+            {**payload, "was_truncated": malformed_flag}
+        )
+        assert coverage is not None
+        assert coverage.was_truncated is True
+        assert coverage.retention_identity_components_complete is False
+
+    for field, malformed_value in (
+        ("configured_max_items", True),
+        ("configured_max_items", 2_001),
+        ("source_count_before_retention", "3"),
+        ("retained_count", -1),
+        ("retained_count", 3),
+        ("dropped_count", 0),
+    ):
+        assert unknown_loads.nilm_session_history_coverage_from_payload(
+            {**payload, field: malformed_value}
+        ) is None
+
+
+def test_retention_coverage_serializer_emits_only_parser_valid_scalars() -> None:
+    """An impossible in-memory coverage record cannot serialize a false claim."""
+
+    payload = unknown_loads._coverage_to_payload(
+        NilmSessionHistoryCoverage(
+            configured_max_items=2_001,
+            source_count_before_retention=3,
+            retained_count=2,
+            was_truncated=False,
+            dropped_count=1,
+            oldest_retained_at=datetime(2026, 8, 10, tzinfo=UTC),
+            newest_retained_at=datetime(2026, 8, 9, tzinfo=UTC),
+        )
+    )
+    parsed = unknown_loads.nilm_session_history_coverage_from_payload(payload)
+
+    assert parsed is not None
+    assert type(payload["configured_max_items"]) is int
+    assert payload["configured_max_items"] <= 2_000
+    assert payload["source_count_before_retention"] == (
+        payload["retained_count"] + payload["dropped_count"]
+    )
+    assert payload["was_truncated"] is (payload["dropped_count"] > 0)
+    assert payload["_retention_identity_components_complete"] is False
+
+
+def test_session_coverage_payload_bounds_identity_metadata_deterministically() -> None:
+    """Inventory serialization enforces the identity metadata output bound."""
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    limit = unknown_loads.NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS
+    component_type = getattr(
+        unknown_loads, "_NilmSessionHistoryIdentityComponent", None
+    )
+    assert component_type is not None
+    components = tuple(
+        component_type((("session", f"session-{index:05d}"),))
+        for index in range(limit + 1)
+    )
+    sessions = [
+        {
+            "session_id": "retained",
+            "component_id": "on-a",
+            "signature_fingerprint": "on-a",
+            "start": (now - timedelta(hours=1)).isoformat(),
+            "end": now.isoformat(),
+        }
+    ]
+
+    def build(identity_components: tuple[object, ...]) -> list[object]:
+        inventory = build_unknown_load_inventory(
+            circuit_id="mains",
+            signatures=[signature("on-a", 500.0, 100.0, 510.0)],
+            edges=[],
+            sessions=sessions,
+            now=now,
+            session_history_coverage=NilmSessionHistoryCoverage(
+                configured_max_items=1,
+                source_count_before_retention=2,
+                retained_count=1,
+                was_truncated=True,
+                dropped_count=1,
+                oldest_retained_at=now - timedelta(hours=1),
+                newest_retained_at=now,
+                retention_identity_components=identity_components,
+            ),
+        )
+        return inventory["session_history_coverage"].get(  # type: ignore[return-value]
+            "_retention_identity_components", []
+        )
+
+    forward = build(components)
+    reverse = build(tuple(reversed(components)))
+
+    assert forward == reverse == []
+
+
+def test_retention_identity_aliases_reject_oversized_text_without_truncation() -> None:
+    """ASCII and multibyte over-limit aliases never collide as stored evidence."""
+
+    max_chars = getattr(unknown_loads, "NILM_SESSION_HISTORY_IDENTITY_MAX_CHARS", 256)
+    max_bytes = getattr(
+        unknown_loads, "NILM_SESSION_HISTORY_IDENTITY_MAX_UTF8_BYTES", 256
+    )
+
+    class EncodeBomb(str):
+        def encode(self, *_args: object, **_kwargs: object) -> bytes:
+            raise AssertionError("character-length rejection must precede encoding")
+
+    oversized_ascii = EncodeBomb("a" * (max_chars + 1))
+    oversized_multibyte = "é" * min(max_chars, max_bytes)
+    assert len(oversized_multibyte) <= max_chars
+    assert len(oversized_multibyte.encode()) > max_bytes
+
+    assert unknown_loads._nilm_session_history_identity_alias(
+        "session", oversized_ascii
+    ) is None
+    assert unknown_loads._nilm_session_history_identity_alias(
+        "session", oversized_multibyte
+    ) is None
+    exact = "a" * max_chars
+    assert unknown_loads._nilm_session_history_identity_alias(
+        "session", exact
+    ) == ("session", exact)
+
+
+def test_duplicate_open_and_closed_session_id_is_ambiguous() -> None:
+    """A stable ID with conflicting open/closed intervals is unusable evidence."""
 
     inventory = build_unknown_load_inventory(
         circuit_id="mains",
@@ -264,18 +753,18 @@ def test_duplicate_open_and_closed_session_prefers_the_closed_run() -> None:
         edges=[],
         sessions=[
             {
-                "session_id": "open-copy",
+                "session_id": "shared-copy",
                 "component_id": "sig-dedup",
                 "signature_fingerprint": "dedup",
-                "on_edge_id": "edge-1",
+                "on_edge_id": "open-edge",
                 "start": "2026-08-09T10:00:00+00:00",
                 "end": None,
             },
             {
-                "session_id": "closed-copy",
+                "session_id": "shared-copy",
                 "component_id": "sig-dedup",
                 "signature_fingerprint": "dedup",
-                "on_edge_id": "edge-1",
+                "on_edge_id": "closed-edge",
                 "start": "2026-08-09T10:00:00+00:00",
                 "end": "2026-08-09T11:00:00+00:00",
             },
@@ -284,9 +773,108 @@ def test_duplicate_open_and_closed_session_prefers_the_closed_run() -> None:
     )
 
     load = inventory["unknown_loads"][0]
-    assert load["runtime_today_minutes"] == 60.0
+    assert load["runtime_today_minutes"] == 0.0
     assert load["current_runtime_minutes"] == 0.0
-    assert load["running_state"] == "probably_off"
+    assert load["running_state"] == "unknown"
+    assert load["estimate_status_by_window"]["today"] == "ambiguous"
+    assert load["runtime_windows"]["today"]["excluded_session_count"] == 1
+
+
+def test_duplicate_open_and_closed_on_edge_id_is_ambiguous() -> None:
+    """A shared ON edge with conflicting intervals is also unusable evidence."""
+
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[signature("sig-on-edge-dedup", 500.0, 100.0, 510.0)],
+        edges=[],
+        sessions=[
+            {
+                "session_id": "open-copy",
+                "component_id": "sig-on-edge-dedup",
+                "signature_fingerprint": "on-edge-dedup",
+                "on_edge_id": "shared-edge",
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": None,
+            },
+            {
+                "session_id": "closed-copy",
+                "component_id": "sig-on-edge-dedup",
+                "signature_fingerprint": "on-edge-dedup",
+                "on_edge_id": "shared-edge",
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": "2026-08-09T11:00:00+00:00",
+            },
+        ],
+        now=datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+    )
+
+    load = inventory["unknown_loads"][0]
+    assert load["runtime_today_minutes"] == 0.0
+    assert load["running_state"] == "unknown"
+    assert load["estimate_status_by_window"]["today"] == "ambiguous"
+    assert load["runtime_windows"]["today"]["excluded_session_count"] == 1
+
+
+def test_rebuild_keeps_component_observation_starts_separate() -> None:
+    """One component's established history cannot extend another's coverage."""
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    a_start = now - timedelta(days=31)
+    b_start = now - timedelta(days=5)
+    sessions = [
+        {
+            "session_id": "a-old",
+            "component_id": "on-a",
+            "signature_fingerprint": "on-a",
+            "start": a_start.isoformat(),
+            "end": (a_start + timedelta(minutes=30)).isoformat(),
+        },
+        {
+            "session_id": "b-new",
+            "component_id": "on-b",
+            "signature_fingerprint": "on-b",
+            "start": b_start.isoformat(),
+            "end": (b_start + timedelta(minutes=30)).isoformat(),
+        },
+    ]
+    coverage = NilmSessionHistoryCoverage(
+        configured_max_items=2_000,
+        source_count_before_retention=2,
+        retained_count=2,
+        was_truncated=False,
+        dropped_count=0,
+        oldest_retained_at=a_start,
+        newest_retained_at=b_start + timedelta(minutes=30),
+    )
+    first = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[
+            signature("on-a", 500.0, 100.0, 510.0),
+            signature("on-b", 900.0, 100.0, 910.0),
+        ],
+        edges=[],
+        sessions=sessions,
+        now=now,
+        session_history_coverage=coverage,
+    )
+    second = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[
+            signature("on-a", 500.0, 100.0, 510.0),
+            signature("on-b", 900.0, 100.0, 910.0),
+        ],
+        edges=[],
+        sessions=sessions,
+        now=now,
+        session_history_coverage=coverage,
+        existing_state=first,
+    )
+
+    by_signature = {
+        load["on_signature_id"]: load for load in second["unknown_loads"]
+    }
+    assert by_signature["on-a"]["observation_started_at"] == a_start.isoformat()
+    assert by_signature["on-b"]["observation_started_at"] == b_start.isoformat()
 
 
 def test_partially_overlapping_closed_sessions_count_union_runtime_once() -> None:
@@ -793,7 +1381,7 @@ def test_edge_compatible_inventory_includes_window_metadata() -> None:
         now=BASE_TIME + timedelta(minutes=30),
     )
 
-    assert inventory["schema_version"] == 3
+    assert inventory["schema_version"] == 4
     assert inventory["runtime_window_definition"]["7_days"] == (
         "trailing_168_elapsed_hours_to_now"
     )
@@ -801,6 +1389,51 @@ def test_edge_compatible_inventory_includes_window_metadata() -> None:
         "estimate_status"
     ] == "partial_history"
     assert not unknown_loads.unknown_load_inventory_needs_rebuild(inventory)
+
+
+def test_session_backed_builder_without_coverage_is_stable_and_current() -> None:
+    """Direct public builders provide accepted retained-history provenance."""
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    component = signature("sig-direct-session", 500.0, 100.0, 510.0)
+    sessions = [
+        {
+            "session_id": "direct-run",
+            "component_id": "sig-direct-session",
+            "signature_fingerprint": "direct-session",
+            "start": (now - timedelta(days=31)).isoformat(),
+            "end": (now - timedelta(days=31, minutes=-30)).isoformat(),
+        }
+    ]
+    first = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[component],
+        edges=[],
+        sessions=sessions,
+        now=now,
+    )
+    migrated = unknown_loads.migrate_unknown_load_inventory(
+        circuit_id="mains",
+        existing_state=first,
+        signature_payloads=[
+            {
+                "signature_id": component.signature_id,
+                "median_delta_w": component.median_delta_w,
+                "median_delta_var": component.median_delta_var,
+                "median_delta_va": component.median_delta_va,
+                "occurrence_count": component.occurrence_count,
+                "confidence": component.confidence,
+            }
+        ],
+        sessions=sessions,
+        now=now,
+    )
+
+    assert first["estimate_provenance"] == "retained_session_history"
+    assert first["session_history_coverage"]["source_count_before_retention"] == 1
+    assert not unknown_loads.unknown_load_inventory_needs_rebuild(first)
+    assert not unknown_loads.unknown_load_inventory_needs_rebuild(migrated)
+    assert migrated["estimate_provenance"] == "retained_session_history"
 
 
 def test_build_unknown_load_inventory_marks_overlapping_events_ambiguous() -> None:
@@ -1058,7 +1691,7 @@ def test_metadata_migration_deduplicates_proven_off_row_without_edges() -> None:
         signature_payloads=signature_payloads,
     )
 
-    assert migrated["schema_version"] == 3
+    assert migrated["schema_version"] == 4
     assert migrated["unknown_load_count"] == 1
     assert migrated["unknown_estimated_energy_today_kwh"] == 0.5
     load = migrated["unknown_loads"][0]
@@ -1088,7 +1721,7 @@ def test_metadata_migration_preserves_unclassifiable_legacy_row_once() -> None:
         signature_payloads=[],
     )
 
-    assert migrated["schema_version"] == 3
+    assert migrated["schema_version"] == 4
     assert migrated["unknown_load_count"] == 1
     assert migrated["unknown_estimated_energy_today_kwh"] == 0.0
     assert migrated["largest_unknown_load"] is None
@@ -1160,7 +1793,7 @@ def test_migration_recomputes_windowed_values_when_sessions_are_available() -> N
     )
 
     load = migrated["unknown_loads"][0]
-    assert migrated["schema_version"] == 3
+    assert migrated["schema_version"] == 4
     assert load["review_state"] == "assigned"
     assert load["user_label"] == "Basement load"
     assert load["runtime_today_minutes"] == 60.0

@@ -27,6 +27,10 @@ from .settings_advisor import (
     recommendation_from_dict,
     recommendation_to_dict,
 )
+from .unknown_loads import (
+    NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT,
+    _sanitize_nilm_session_history_ingress,
+)
 from .ux import normalize_sensitivity
 
 if TYPE_CHECKING:
@@ -73,6 +77,9 @@ class FeatureStoreData:
     nilm_session_history_by_circuit: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
     )
+    nilm_session_history_ingress_by_circuit: dict[
+        str, dict[str, int | bool]
+    ] = field(default_factory=dict, repr=False)
     nilm_label_intervals_by_circuit: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
     )
@@ -464,6 +471,11 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
     """Deserialize the full feature store payload from Home Assistant storage."""
     if raw is None:
         return FeatureStoreData()
+    nilm_session_history, nilm_session_history_ingress = (
+        _nilm_session_history_from_raw(
+            raw.get("nilm_session_history_by_circuit", {})
+        )
+    )
     return FeatureStoreData(
         events=_events_from_raw(raw.get("events", [])),
         baselines=_baselines_from_raw(raw.get("baselines", {})),
@@ -481,9 +493,8 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         nilm_unmatched_edges_by_circuit=_dict_of_list_dicts_including_empty(
             raw.get("nilm_unmatched_edges_by_circuit", {})
         ),
-        nilm_session_history_by_circuit=_dict_of_list_dicts(
-            raw.get("nilm_session_history_by_circuit", {})
-        ),
+        nilm_session_history_by_circuit=nilm_session_history,
+        nilm_session_history_ingress_by_circuit=nilm_session_history_ingress,
         nilm_label_intervals_by_circuit=_dict_of_list_dicts(
             raw.get("nilm_label_intervals_by_circuit", {})
         ),
@@ -916,6 +927,29 @@ def _dict_of_list_dicts(values: Any) -> dict[str, list[dict[str, Any]]]:
         if items:
             sanitized[str(key)] = items
     return sanitized
+
+
+def _nilm_session_history_from_raw(
+    values: Any,
+) -> tuple[
+    dict[str, list[dict[str, Any]]],
+    dict[str, dict[str, int | bool]],
+]:
+    """Bound NILM history before generic storage materialization."""
+
+    histories: dict[str, list[dict[str, Any]]] = {}
+    ingress_by_circuit: dict[str, dict[str, int | bool]] = {}
+    for key, value in _mapping_items(values):
+        rows, ingress = _sanitize_nilm_session_history_ingress(
+            value,
+            max_source_rows=NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT,
+        )
+        circuit_id = str(key)
+        if rows:
+            histories[circuit_id] = rows
+        if ingress["was_truncated"] or not ingress["identity_aliases_complete"]:
+            ingress_by_circuit[circuit_id] = ingress
+    return histories, ingress_by_circuit
 
 
 def _dict_of_list_dicts_including_empty(

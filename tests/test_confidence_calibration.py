@@ -482,8 +482,8 @@ def test_mixed_helper_replay_scenarios() -> None:
             sessions = result.store_data.nilm_session_history_by_circuit["mixed"]
             assert len(sessions) == 2
             unavailable, recovered = sorted(sessions, key=lambda item: item["start"])
-            assert unavailable["helper_evidence"] == []
-            assert recovered["helper_evidence"][0]["helper_circuit_id"] == "ac2"
+            assert "helper_evidence" not in unavailable
+            assert "helper_evidence" not in recovered
             component = metrics.component_metrics["blower"]
             assert component.session_f1 == 1.0
             assert component.edge_precision == component.edge_recall == 1.0
@@ -499,7 +499,7 @@ def test_mixed_helper_replay_scenarios() -> None:
     direct = replay_fixture_processors(scenarios[-1])
     sessions = direct.store_data.nilm_session_history_by_circuit["mixed"]
     assert len(sessions) == 1
-    assert sessions[0]["helper_evidence"][0]["relationship"] == "direct_component"
+    assert "helper_evidence" not in sessions[0]
     assert direct.metrics is not None
     assert direct.metrics.component_metrics["pump"].session_f1 == 1.0
     assert direct.metrics.component_metrics["pump"].energy_absolute_error_kwh == 0.0
@@ -677,6 +677,13 @@ def test_nilm_replay_gate_scores_chronological_multistate_evidence() -> None:
     result = replay_fixture_processors(fixture)
     metrics = assert_fixture_expectations(fixture, result)
 
+    assert all(
+        not {"state_path", "accepted_predictions", "helper_evidence"}.intersection(
+            session
+        )
+        for sessions in result.store_data.nilm_session_history_by_circuit.values()
+        for session in sessions
+    )
     assert fixture.labels.replay_split is not None
     assert (
         fixture.labels.replay_split.training_end_t

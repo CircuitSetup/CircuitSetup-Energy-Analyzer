@@ -4,7 +4,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from math import isfinite
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .nilm import (
@@ -18,11 +18,741 @@ from .nilm import (
 
 MIN_OCCURRENCES = 3
 MIN_CONFIDENCE = 0.5
-UNKNOWN_LOAD_INVENTORY_SCHEMA_VERSION = 3
+UNKNOWN_LOAD_INVENTORY_SCHEMA_VERSION = 4
 MIN_SIGNATURE_PAIR_SCORE = 0.50
 SIGNATURE_PAIR_AMBIGUITY_MARGIN = 0.08
 EDGE_COMPONENT_AMBIGUITY_MARGIN = 0.08
 LEGACY_IDENTITY_UNRESOLVED_KEY = "legacy_identity_unresolved"
+NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS = 8_192
+NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT = 2_000
+NILM_SESSION_HISTORY_IDENTITY_MAX_COMPONENTS = (
+    NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS
+)
+NILM_SESSION_HISTORY_IDENTITY_MAX_ALIASES_PER_COMPONENT = 2
+NILM_SESSION_HISTORY_IDENTITY_MAX_CHARS = 256
+NILM_SESSION_HISTORY_IDENTITY_MAX_UTF8_BYTES = 256
+NILM_SESSION_HISTORY_TIMESTAMP_MAX_CHARS = 64
+NILM_SESSION_HISTORY_TIMESTAMP_MAX_UTF8_BYTES = 64
+NILM_SESSION_HISTORY_SCALAR_ABS_MAX = 1_000_000_000
+NILM_SESSION_HISTORY_COUNT_MAX = 1_000_000
+_NILM_SESSION_HISTORY_TIMESTAMP_LATEST = (
+    datetime.max - timedelta(days=30)
+).replace(tzinfo=UTC)
+_NILM_SESSION_HISTORY_MAX_ROW_FIELDS = 26
+_NILM_SESSION_HISTORY_MAX_UNKNOWN_FIELDS = (
+    NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT * 64
+)
+_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX = NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT
+_NILM_SESSION_HISTORY_MISSING = object()
+_NILM_SESSION_HISTORY_ROW_TEXT_FIELDS = (
+    "session_id",
+    "mains_circuit_id",
+    "signature_fingerprint",
+    "on_edge_id",
+    "off_edge_id",
+    "assignment_id",
+)
+_NILM_SESSION_HISTORY_ROW_TIMESTAMP_FIELDS = ("start", "end")
+_NILM_SESSION_HISTORY_ROW_NUMBER_FIELDS = (
+    "duration_seconds",
+    "median_power_w",
+    "estimated_energy_kwh",
+    "confidence",
+    "known_load_confidence",
+    "on_delta_w",
+    "off_delta_w",
+    "on_delta_var",
+    "off_delta_var",
+    "plateau_power_w",
+    "measured_energy_kwh",
+    "power_coverage",
+)
+_NILM_SESSION_HISTORY_ROW_COUNT_FIELDS = (
+    "overlap_count",
+    "alternate_match_count",
+    "intermediate_transition_count",
+)
+_NILM_SESSION_HISTORY_ROW_BOOLEAN_FIELDS = (
+    "ambiguous",
+    "known_load_masked",
+)
+_NILM_SESSION_HISTORY_LEGACY_ENERGY_FIELD = "energy_kwh"
+_NILM_SESSION_HISTORY_ROW_OUTPUT_FIELDS = (
+    "session_id",
+    "mains_circuit_id",
+    "signature_fingerprint",
+    "on_edge_id",
+    "off_edge_id",
+    "start",
+    "end",
+    "duration_seconds",
+    "median_power_w",
+    "estimated_energy_kwh",
+    "confidence",
+    "overlap_count",
+    "ambiguous",
+    "alternate_match_count",
+    "known_load_masked",
+    "known_load_confidence",
+    "assignment_id",
+    "on_delta_w",
+    "off_delta_w",
+    "on_delta_var",
+    "off_delta_var",
+    "plateau_power_w",
+    "measured_energy_kwh",
+    "power_coverage",
+    "intermediate_transition_count",
+)
+_NILM_SESSION_HISTORY_DURATION_CLOSE_FIELDS = (
+    "session_id",
+    "off_edge_id",
+    "end",
+    "duration_seconds",
+    "estimated_energy_kwh",
+    "confidence",
+    "ambiguous",
+    "alternate_match_count",
+)
+
+
+def _nilm_session_history_utf8_length(value: str) -> int | None:
+    """Return a safe UTF-8 length without letting malformed text escape ingress."""
+
+    try:
+        return len(value.encode("utf-8"))
+    except UnicodeError:
+        return None
+
+
+def _nilm_session_history_identity_alias(
+    kind: Any, value: Any
+) -> tuple[str, str] | None:
+    """Return one strict stable alias without coercing untrusted values."""
+
+    if not isinstance(kind, str) or kind not in {"session", "on_edge"}:
+        return None
+    if (
+        not isinstance(value, str)
+        or len(value) > NILM_SESSION_HISTORY_IDENTITY_MAX_CHARS
+    ):
+        return None
+    if not (normalized := value.strip()):
+        return None
+    if len(normalized) > NILM_SESSION_HISTORY_IDENTITY_MAX_CHARS:
+        return None
+    utf8_length = _nilm_session_history_utf8_length(normalized)
+    if (
+        utf8_length is None
+        or utf8_length > NILM_SESSION_HISTORY_IDENTITY_MAX_UTF8_BYTES
+    ):
+        return None
+    return kind, normalized
+
+
+def _nilm_session_history_text(value: Any) -> str | None:
+    """Normalize one bounded non-empty session scalar without coercion."""
+
+    if (
+        not isinstance(value, str)
+        or len(value) > NILM_SESSION_HISTORY_IDENTITY_MAX_CHARS
+    ):
+        return None
+    if not (normalized := value.strip()):
+        return None
+    if len(normalized) > NILM_SESSION_HISTORY_IDENTITY_MAX_CHARS:
+        return None
+    utf8_length = _nilm_session_history_utf8_length(normalized)
+    if (
+        utf8_length is None
+        or utf8_length > NILM_SESSION_HISTORY_IDENTITY_MAX_UTF8_BYTES
+    ):
+        return None
+    return normalized
+
+
+def _canonical_nilm_session_history_timestamp(value: Any) -> datetime | None:
+    """Return one bounded UTC timestamp suitable for session history."""
+
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and (
+        len(value) <= NILM_SESSION_HISTORY_TIMESTAMP_MAX_CHARS
+        and (
+            utf8_length := _nilm_session_history_utf8_length(value)
+        ) is not None
+        and utf8_length <= NILM_SESSION_HISTORY_TIMESTAMP_MAX_UTF8_BYTES
+    ):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except (TypeError, ValueError, OverflowError):
+            return None
+    else:
+        return None
+    try:
+        normalized = (
+            parsed.replace(tzinfo=UTC)
+            if parsed.tzinfo is None
+            else parsed.astimezone(UTC)
+        )
+        return (
+            normalized
+            if normalized <= _NILM_SESSION_HISTORY_TIMESTAMP_LATEST
+            else None
+        )
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _nilm_session_history_number(
+    value: Any,
+    *,
+    unit_interval: bool = False,
+) -> float | None:
+    """Read one finite bounded session scalar without bool or coercion."""
+
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if (
+        not isfinite(normalized)
+        or abs(normalized) > NILM_SESSION_HISTORY_SCALAR_ABS_MAX
+    ):
+        return None
+    if unit_interval and not 0.0 <= normalized <= 1.0:
+        return None
+    return normalized
+
+
+def _nilm_session_history_count(value: Any) -> int | None:
+    """Read one fixed-range session count without numeric coercion."""
+
+    if not isinstance(value, int) or isinstance(value, bool):
+        return None
+    if not 0 <= value <= NILM_SESSION_HISTORY_COUNT_MAX:
+        return None
+    return value
+
+
+def _nilm_session_history_mapping_value(
+    raw: Mapping[str, Any],
+    key: str,
+) -> Any:
+    """Read a fixed known mapping member without traversing unknown keys."""
+
+    try:
+        return raw.get(key, _NILM_SESSION_HISTORY_MISSING)
+    except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
+        return _NILM_SESSION_HISTORY_MISSING
+
+
+def _saturated_nilm_session_history_count(
+    current: int,
+    increment: int,
+    *,
+    maximum: int,
+) -> int:
+    """Accumulate compact ingress diagnostics without unbounded counters."""
+
+    return min(maximum, max(current, 0) + max(increment, 0))
+
+
+@dataclass(frozen=True, slots=True)
+class _NilmSessionHistoryIdentityComponent:
+    """One canonical bounded transitive stable-identity component."""
+
+    aliases: tuple[tuple[str, str], ...]
+
+
+def _nilm_session_history_identity_component_closure(
+    alias_groups: Iterable[Iterable[tuple[str, str]]],
+) -> tuple[_NilmSessionHistoryIdentityComponent, ...]:
+    """Close caller-bounded alias groups in O(A alpha(A) + A log A)."""
+
+    parents: dict[tuple[str, str], tuple[str, str]] = {}
+    ranks: dict[tuple[str, str], int] = {}
+
+    def find(alias: tuple[str, str]) -> tuple[str, str]:
+        root = alias
+        while parents[root] != root:
+            root = parents[root]
+        while parents[alias] != alias:
+            parent = parents[alias]
+            parents[alias] = root
+            alias = parent
+        return root
+
+    def union(first: tuple[str, str], second: tuple[str, str]) -> None:
+        first_root = find(first)
+        second_root = find(second)
+        if first_root == second_root:
+            return
+        first_rank = ranks[first_root]
+        second_rank = ranks[second_root]
+        if first_rank < second_rank or (
+            first_rank == second_rank and second_root < first_root
+        ):
+            first_root, second_root = second_root, first_root
+            first_rank, second_rank = second_rank, first_rank
+        parents[second_root] = first_root
+        if first_rank == second_rank:
+            ranks[first_root] += 1
+
+    for raw_group in alias_groups:
+        group = tuple(dict.fromkeys(raw_group))
+        if not group:
+            continue
+        for alias in group:
+            parents.setdefault(alias, alias)
+            ranks.setdefault(alias, 0)
+        for alias in group[1:]:
+            union(group[0], alias)
+
+    components_by_root: dict[
+        tuple[str, str], list[tuple[str, str]]
+    ] = {}
+    for alias in parents:
+        components_by_root.setdefault(find(alias), []).append(alias)
+    return tuple(
+        sorted(
+            (
+                _NilmSessionHistoryIdentityComponent(tuple(sorted(aliases)))
+                for aliases in components_by_root.values()
+            ),
+            key=lambda component: component.aliases,
+        )
+    )
+
+
+def _canonical_nilm_session_history_identity_components(
+    raw_components: Any,
+) -> tuple[tuple[_NilmSessionHistoryIdentityComponent, ...], bool]:
+    """Normalize a bounded component ledger without fabricating grouping evidence."""
+
+    if not isinstance(raw_components, (list, tuple)) or len(raw_components) > (
+        NILM_SESSION_HISTORY_IDENTITY_MAX_COMPONENTS
+    ):
+        return (), False
+    groups: list[tuple[tuple[str, str], ...]] = []
+    valid = True
+    for raw_component in raw_components:
+        raw_aliases = (
+            raw_component.aliases
+            if isinstance(raw_component, _NilmSessionHistoryIdentityComponent)
+            else raw_component
+        )
+        if (
+            not isinstance(raw_aliases, (list, tuple))
+            or not raw_aliases
+            or len(raw_aliases)
+            > NILM_SESSION_HISTORY_IDENTITY_MAX_ALIASES_PER_COMPONENT
+        ):
+            valid = False
+            continue
+        aliases: set[tuple[str, str]] = set()
+        component_valid = True
+        for raw_alias in raw_aliases:
+            if not isinstance(raw_alias, (list, tuple)) or len(raw_alias) != 2:
+                component_valid = False
+                break
+            alias = _nilm_session_history_identity_alias(
+                raw_alias[0], raw_alias[1]
+            )
+            if alias is None:
+                component_valid = False
+                break
+            aliases.add(alias)
+        if not component_valid or not aliases:
+            valid = False
+            continue
+        groups.append(tuple(aliases))
+    closed_components = _nilm_session_history_identity_component_closure(
+        groups
+    )
+    valid = valid and all(
+        len(component.aliases)
+        <= NILM_SESSION_HISTORY_IDENTITY_MAX_ALIASES_PER_COMPONENT
+        for component in closed_components
+    )
+    components = tuple(
+        component
+        for component in closed_components
+        if len(component.aliases)
+        <= NILM_SESSION_HISTORY_IDENTITY_MAX_ALIASES_PER_COMPONENT
+    )
+    if len(components) > NILM_SESSION_HISTORY_IDENTITY_MAX_COMPONENTS:
+        return (), False
+    return components, valid
+
+
+def _canonical_nilm_session_history_duration_close(
+    raw_close: Any,
+) -> tuple[dict[str, Any] | None, bool]:
+    """Project an all-or-nothing scalar duration-close record."""
+
+    if not isinstance(raw_close, Mapping):
+        return None, False
+    try:
+        field_count = len(raw_close)
+    except (TypeError, ValueError, OverflowError):
+        return None, False
+    if field_count != len(_NILM_SESSION_HISTORY_DURATION_CLOSE_FIELDS):
+        return None, False
+    values = {
+        key: _nilm_session_history_mapping_value(raw_close, key)
+        for key in _NILM_SESSION_HISTORY_DURATION_CLOSE_FIELDS
+    }
+    if any(
+        value is _NILM_SESSION_HISTORY_MISSING for value in values.values()
+    ):
+        return None, False
+
+    close: dict[str, Any] = {}
+    for key in ("session_id", "off_edge_id"):
+        value = values[key]
+        if value is None and key == "off_edge_id":
+            close[key] = None
+            continue
+        normalized = _nilm_session_history_text(value)
+        if normalized is None:
+            return None, False
+        close[key] = normalized
+
+    value = values["end"]
+    parsed = _canonical_nilm_session_history_timestamp(value)
+    if parsed is None:
+        return None, False
+    close["end"] = parsed.isoformat()
+
+    for key in ("duration_seconds", "estimated_energy_kwh", "confidence"):
+        value = values[key]
+        if value is None:
+            close[key] = None
+            continue
+        normalized = _nilm_session_history_number(
+            value,
+            unit_interval=key == "confidence",
+        )
+        if normalized is None:
+            return None, False
+        close[key] = normalized
+
+    value = values["ambiguous"]
+    if not isinstance(value, bool):
+        return None, False
+    close["ambiguous"] = value
+
+    value = values["alternate_match_count"]
+    normalized = _nilm_session_history_count(value)
+    if normalized is None:
+        return None, False
+    close["alternate_match_count"] = normalized
+    return close, True
+
+
+def _canonical_nilm_session_history_row(
+    raw_row: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, int | bool]]:
+    """Project one row to the fixed scalar NILM session schema.
+
+    The caller visits at most 2,000 rows. This function reads only the 26 known
+    fields, never iterates unknown keys or nested values, and emits scalars or
+    canonical <=64-byte timestamp text only.
+    """
+
+    facts: dict[str, int | bool] = {
+        "identity_aliases_complete": True,
+        "invalid_alias_count": 0,
+        "unknown_field_count": 0,
+        "invalid_scalar_count": 0,
+        "invalid_timestamp_count": 0,
+        "duration_bound_close_incomplete": False,
+    }
+    try:
+        field_count = len(raw_row)
+    except (TypeError, ValueError, OverflowError):
+        facts["identity_aliases_complete"] = False
+        facts["invalid_scalar_count"] = 1
+        return {}, facts
+
+    known_fields = (
+        *_NILM_SESSION_HISTORY_ROW_TEXT_FIELDS,
+        *_NILM_SESSION_HISTORY_ROW_TIMESTAMP_FIELDS,
+        *_NILM_SESSION_HISTORY_ROW_NUMBER_FIELDS,
+        *_NILM_SESSION_HISTORY_ROW_COUNT_FIELDS,
+        *_NILM_SESSION_HISTORY_ROW_BOOLEAN_FIELDS,
+        _NILM_SESSION_HISTORY_LEGACY_ENERGY_FIELD,
+        "_duration_bound_close",
+    )
+    values = {
+        key: _nilm_session_history_mapping_value(raw_row, key)
+        for key in known_fields
+    }
+    known_count = sum(
+        value is not _NILM_SESSION_HISTORY_MISSING for value in values.values()
+    )
+    if field_count != known_count:
+        facts["unknown_field_count"] = min(
+            _NILM_SESSION_HISTORY_MAX_UNKNOWN_FIELDS,
+            max(field_count - known_count, 0),
+        )
+        facts["identity_aliases_complete"] = False
+
+    row: dict[str, Any] = {}
+    for key, identity_kind, allows_none in (
+        ("session_id", "session", False),
+        ("mains_circuit_id", None, False),
+        ("signature_fingerprint", None, False),
+        ("on_edge_id", "on_edge", False),
+        ("off_edge_id", None, True),
+        ("assignment_id", None, True),
+    ):
+        value = values[key]
+        if value is _NILM_SESSION_HISTORY_MISSING:
+            continue
+        if value is None and allows_none:
+            row[key] = None
+            continue
+        normalized = (
+            _nilm_session_history_identity_alias(identity_kind, value)
+            if identity_kind is not None
+            else _nilm_session_history_text(value)
+        )
+        if normalized is None:
+            facts["identity_aliases_complete"] = False
+            count_key = (
+                "invalid_alias_count"
+                if identity_kind is not None
+                else "invalid_scalar_count"
+            )
+            facts[count_key] = _saturated_nilm_session_history_count(
+                int(facts[count_key]),
+                1,
+                maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+            )
+            continue
+        row[key] = normalized[1] if identity_kind is not None else normalized
+
+    invalid_closed_interval = False
+    for key, allows_none in (("start", False), ("end", True)):
+        value = values[key]
+        if value is _NILM_SESSION_HISTORY_MISSING:
+            continue
+        if value is None and allows_none:
+            row[key] = None
+            continue
+        parsed = _canonical_nilm_session_history_timestamp(value)
+        if parsed is None:
+            facts["identity_aliases_complete"] = False
+            facts["invalid_timestamp_count"] = _saturated_nilm_session_history_count(
+                int(facts["invalid_timestamp_count"]),
+                1,
+                maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+            )
+            invalid_closed_interval = invalid_closed_interval or key == "end"
+            continue
+        row[key] = parsed.isoformat()
+    if invalid_closed_interval:
+        # An invalid persisted close must not silently become a valid open row.
+        # Dropping its interval keeps the bounded identity available only as
+        # conservative rejected evidence for its owning component.
+        row.pop("start", None)
+
+    nullable_number_fields = {
+        "duration_seconds",
+        "known_load_confidence",
+        "on_delta_w",
+        "off_delta_w",
+        "on_delta_var",
+        "off_delta_var",
+        "plateau_power_w",
+        "measured_energy_kwh",
+        "power_coverage",
+    }
+    legacy_energy = values[_NILM_SESSION_HISTORY_LEGACY_ENERGY_FIELD]
+    if legacy_energy is not _NILM_SESSION_HISTORY_MISSING:
+        legacy_energy = _nilm_session_history_number(legacy_energy)
+        if legacy_energy is None:
+            facts["identity_aliases_complete"] = False
+            facts["invalid_scalar_count"] = _saturated_nilm_session_history_count(
+                int(facts["invalid_scalar_count"]),
+                1,
+                maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+            )
+    for key in _NILM_SESSION_HISTORY_ROW_NUMBER_FIELDS:
+        value = values[key]
+        if (
+            key == "estimated_energy_kwh"
+            and value is _NILM_SESSION_HISTORY_MISSING
+            and legacy_energy is not _NILM_SESSION_HISTORY_MISSING
+        ):
+            value = legacy_energy
+        if value is _NILM_SESSION_HISTORY_MISSING:
+            continue
+        if value is None and key in nullable_number_fields:
+            row[key] = None
+            continue
+        normalized = _nilm_session_history_number(
+            value,
+            unit_interval=key in {
+                "confidence",
+                "known_load_confidence",
+                "power_coverage",
+            },
+        )
+        if normalized is None:
+            facts["identity_aliases_complete"] = False
+            facts["invalid_scalar_count"] = _saturated_nilm_session_history_count(
+                int(facts["invalid_scalar_count"]),
+                1,
+                maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+            )
+            continue
+        row[key] = normalized
+
+    for key in _NILM_SESSION_HISTORY_ROW_COUNT_FIELDS:
+        value = values[key]
+        if value is _NILM_SESSION_HISTORY_MISSING:
+            continue
+        normalized = _nilm_session_history_count(value)
+        if normalized is None:
+            facts["identity_aliases_complete"] = False
+            facts["invalid_scalar_count"] = _saturated_nilm_session_history_count(
+                int(facts["invalid_scalar_count"]),
+                1,
+                maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+            )
+            continue
+        row[key] = normalized
+
+    for key in _NILM_SESSION_HISTORY_ROW_BOOLEAN_FIELDS:
+        value = values[key]
+        if value is _NILM_SESSION_HISTORY_MISSING:
+            continue
+        if not isinstance(value, bool):
+            facts["identity_aliases_complete"] = False
+            facts["invalid_scalar_count"] = _saturated_nilm_session_history_count(
+                int(facts["invalid_scalar_count"]),
+                1,
+                maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+            )
+            continue
+        row[key] = value
+
+    row = {
+        key: row[key] for key in _NILM_SESSION_HISTORY_ROW_OUTPUT_FIELDS if key in row
+    }
+    close = values["_duration_bound_close"]
+    if close is not _NILM_SESSION_HISTORY_MISSING:
+        projected_close, close_complete = (
+            _canonical_nilm_session_history_duration_close(close)
+        )
+        if not close_complete:
+            facts["identity_aliases_complete"] = False
+            facts["duration_bound_close_incomplete"] = True
+        elif projected_close is not None:
+            row["_duration_bound_close"] = projected_close
+    return row, facts
+
+
+def _sanitize_nilm_session_history_ingress(
+    raw_rows: Any,
+    *,
+    max_source_rows: int,
+) -> tuple[list[dict[str, Any]], dict[str, int | bool]]:
+    """Project a fixed history prefix using O(R * 26) scalar-only CPU work.
+
+    R is capped by ``max_source_rows`` (at most 2,000 in production). Each row
+    reads a fixed 26-key schema and at most three bounded timestamp values. The
+    helper is synchronous and pure: it performs no I/O, await, sleep, executor,
+    replay, calibration, sorting, recursive traversal, or raw nested copying.
+    """
+
+    cap = (
+        min(
+            max(max_source_rows, 0),
+            NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT,
+        )
+        if isinstance(max_source_rows, int) and not isinstance(max_source_rows, bool)
+        else 0
+    )
+    if not isinstance(raw_rows, (list, tuple)):
+        return [], {
+            "source_count_before_ingress": 0,
+            "retained_count": 0,
+            "was_truncated": raw_rows is not None,
+            "identity_aliases_complete": False,
+            "invalid_alias_count": 0,
+            "unknown_field_count": 0,
+            "invalid_scalar_count": 0,
+            "invalid_timestamp_count": 0,
+            "duration_bound_close_incomplete": False,
+        }
+    raw_source_count = len(raw_rows)
+    rows: list[dict[str, Any]] = []
+    identity_aliases_complete = raw_source_count <= cap
+    invalid_alias_count = 0
+    unknown_field_count = 0
+    invalid_scalar_count = 0
+    invalid_timestamp_count = 0
+    duration_bound_close_incomplete = False
+    for raw_row in raw_rows[:cap]:
+        if not isinstance(raw_row, Mapping):
+            identity_aliases_complete = False
+            invalid_scalar_count = _saturated_nilm_session_history_count(
+                invalid_scalar_count,
+                1,
+                maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+            )
+            continue
+        row, facts = _canonical_nilm_session_history_row(raw_row)
+        rows.append(row)
+        identity_aliases_complete = (
+            identity_aliases_complete
+            and facts["identity_aliases_complete"] is True
+        )
+        invalid_alias_count = _saturated_nilm_session_history_count(
+            invalid_alias_count,
+            int(facts["invalid_alias_count"]),
+            maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+        )
+        unknown_field_count = _saturated_nilm_session_history_count(
+            unknown_field_count,
+            int(facts["unknown_field_count"]),
+            maximum=_NILM_SESSION_HISTORY_MAX_UNKNOWN_FIELDS,
+        )
+        invalid_scalar_count = _saturated_nilm_session_history_count(
+            invalid_scalar_count,
+            int(facts["invalid_scalar_count"]),
+            maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+        )
+        invalid_timestamp_count = _saturated_nilm_session_history_count(
+            invalid_timestamp_count,
+            int(facts["invalid_timestamp_count"]),
+            maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+        )
+        duration_bound_close_incomplete = (
+            duration_bound_close_incomplete
+            or facts["duration_bound_close_incomplete"] is True
+        )
+    was_truncated = raw_source_count > len(rows)
+    return rows, {
+        # A fixed-prefix ingress cannot establish whether its unvisited tail
+        # repeats a retained identity. Only copied rows are an exact bounded
+        # count; the identity-completeness fact preserves that uncertainty.
+        "source_count_before_ingress": len(rows),
+        "retained_count": len(rows),
+        "was_truncated": was_truncated,
+        "identity_aliases_complete": identity_aliases_complete,
+        "invalid_alias_count": invalid_alias_count,
+        "unknown_field_count": unknown_field_count,
+        "invalid_scalar_count": invalid_scalar_count,
+        "invalid_timestamp_count": invalid_timestamp_count,
+        "duration_bound_close_incomplete": duration_bound_close_incomplete,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,12 +794,134 @@ class _OwnedUnknownLoadSession:
     component_id: str
 
 
+_ExcludedSessionReason = Literal[
+    "ambiguous",
+    "malformed",
+    "known_load_masked",
+    "deduplicated",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class _RejectedUnknownLoadSession:
+    session_id: str
+    on_edge_id: str
+    identities: frozenset[str]
+    start: datetime | None
+    end: datetime | None
+    has_trustworthy_interval: bool
+    reason: _ExcludedSessionReason
+
+
+@dataclass(frozen=True, slots=True)
+class _ExcludedUnknownLoadSession:
+    component_id: str
+    session_id: str
+    on_edge_id: str
+    start: datetime | None
+    end: datetime | None
+    has_trustworthy_interval: bool
+    reason: _ExcludedSessionReason
+
+
 @dataclass(frozen=True, slots=True)
 class _SessionInventoryEvidence:
     sessions_by_component: Mapping[str, tuple[_OwnedUnknownLoadSession, ...]]
-    excluded_count_by_component: Mapping[str, int]
-    ambiguous_component_ids: frozenset[str]
-    observation_started_at: datetime | None
+    excluded_sessions_by_component: Mapping[
+        str, tuple[_ExcludedUnknownLoadSession, ...]
+    ]
+    ambiguous_sessions_by_component: Mapping[
+        str, tuple[_ExcludedUnknownLoadSession, ...]
+    ]
+    observation_started_at_by_component: Mapping[str, datetime | None]
+    invalid_count: int
+    unowned_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class NilmSessionHistoryCoverage:
+    """Retention facts captured before bounded session-history storage."""
+
+    configured_max_items: int
+    source_count_before_retention: int
+    retained_count: int
+    was_truncated: bool
+    dropped_count: int
+    oldest_retained_at: datetime | None
+    newest_retained_at: datetime | None
+    retention_identity_components: tuple[
+        _NilmSessionHistoryIdentityComponent, ...
+    ] = ()
+    retention_identity_components_complete: bool = False
+    ingress_history_incomplete: bool = False
+
+
+def _coverage_for_supplied_sessions(
+    sessions: Iterable[Mapping[str, Any]],
+    *,
+    configured_max_items: int | None,
+) -> NilmSessionHistoryCoverage:
+    """Describe directly supplied sessions when no retention facts are available."""
+
+    session_list = tuple(sessions)
+    timestamps: list[datetime] = []
+    stable_identity_groups: list[set[tuple[str, str]]] = []
+    anonymous_count = 0
+    for session in session_list:
+        if not isinstance(session, Mapping):
+            anonymous_count += 1
+            continue
+        aliases = {
+            alias
+            for alias in (
+                _nilm_session_history_identity_alias(
+                    "session", session.get("session_id")
+                ),
+                _nilm_session_history_identity_alias(
+                    "on_edge", session.get("on_edge_id")
+                ),
+            )
+            if alias is not None
+        }
+        if aliases:
+            matching_groups = [
+                group for group in stable_identity_groups if group & aliases
+            ]
+            if matching_groups:
+                merged = set(aliases)
+                for group in matching_groups:
+                    merged.update(group)
+                    stable_identity_groups.remove(group)
+                stable_identity_groups.append(merged)
+            else:
+                stable_identity_groups.append(set(aliases))
+        else:
+            anonymous_count += 1
+        for key in ("start", "end"):
+            value = session.get(key)
+            if value is None:
+                continue
+            try:
+                timestamps.append(_as_utc_datetime(value))
+            except (TypeError, ValueError, OverflowError):
+                continue
+    try:
+        configured = (
+            int(configured_max_items) if configured_max_items is not None else 0
+        )
+    except (TypeError, ValueError, OverflowError):
+        configured = 0
+    retained_count = len(stable_identity_groups) + anonymous_count
+    return NilmSessionHistoryCoverage(
+        configured_max_items=max(configured, retained_count),
+        source_count_before_retention=retained_count,
+        retained_count=retained_count,
+        was_truncated=False,
+        dropped_count=0,
+        oldest_retained_at=min(timestamps, default=None),
+        newest_retained_at=max(timestamps, default=None),
+        retention_identity_components_complete=True,
+    )
 
 
 def estimate_unknown_load(signature: NilmSignature) -> dict[str, Any]:
@@ -123,6 +975,7 @@ def build_unknown_load_inventory(
     now: datetime,
     time_zone: str = "UTC",
     session_history_max_items: int | None = None,
+    session_history_coverage: NilmSessionHistoryCoverage | None = None,
     existing_state: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build a consolidated inventory of recurring unknown NILM loads."""
@@ -136,6 +989,11 @@ def build_unknown_load_inventory(
     allocation = _allocate_unknown_edges(components, edge_list)
     now_utc = _as_utc_datetime(now)
     session_list = tuple(sessions)
+    if session_list and session_history_coverage is None:
+        session_history_coverage = _coverage_for_supplied_sessions(
+            session_list,
+            configured_max_items=session_history_max_items,
+        )
     session_evidence = _session_inventory_evidence(
         session_list,
         components=components,
@@ -152,7 +1010,7 @@ def build_unknown_load_inventory(
                 windows=windows,
                 now=now_utc,
                 existing_state=existing_state or {},
-                session_history_max_items=session_history_max_items,
+                session_history_coverage=session_history_coverage,
             )
             if session_list
             else _unknown_component_payload(
@@ -202,15 +1060,33 @@ def build_unknown_load_inventory(
         inventory.update(
             {
                 "observation_started_at": _observation_started_at(
-                    session_evidence.observation_started_at,
+                    min(
+                        (
+                            value
+                            for value in (
+                                session_evidence.observation_started_at_by_component.values()
+                            )
+                            if value is not None
+                        ),
+                        default=None,
+                    ),
                     existing_state or {},
                 ),
                 "runtime_window_definition": _runtime_window_definition(),
                 "estimate_status": _worst_estimate_status(
                     load.get("estimate_status", "complete") for load in loads
                 ),
+                "session_history_diagnostics": {
+                    "invalid_count": session_evidence.invalid_count,
+                    "unowned_count": session_evidence.unowned_count,
+                },
             }
         )
+        if session_history_coverage is not None:
+            inventory["session_history_coverage"] = _coverage_to_payload(
+                session_history_coverage
+            )
+            inventory["estimate_provenance"] = "retained_session_history"
     else:
         observed = _edge_observation_started_at(loads)
         for load in loads:
@@ -224,6 +1100,7 @@ def build_unknown_load_inventory(
                 "estimate_status": _worst_estimate_status(
                     load.get("estimate_status", "partial_history") for load in loads
                 ),
+                "estimate_provenance": "edge_only",
             }
         )
     return inventory
@@ -247,6 +1124,19 @@ def unknown_load_inventory_needs_rebuild(
         return True
     if not isinstance(existing_state.get("runtime_window_definition"), Mapping):
         return True
+    provenance = existing_state.get("estimate_provenance")
+    if provenance not in {
+        "retained_session_history",
+        "edge_only",
+        "legacy_unverified",
+    }:
+        return True
+    if provenance == "retained_session_history":
+        coverage_payload = existing_state.get("session_history_coverage")
+        if not isinstance(coverage_payload, Mapping) or not isinstance(
+            coverage_payload.get("_retention_identity_components_complete"), bool
+        ):
+            return True
     if str(existing_state.get("estimate_status") or "") not in {
         "complete",
         "partial_history",
@@ -310,6 +1200,7 @@ def migrate_unknown_load_inventory(
     now: datetime | None = None,
     time_zone: str = "UTC",
     session_history_max_items: int | None = None,
+    session_history_coverage: NilmSessionHistoryCoverage | None = None,
 ) -> dict[str, Any]:
     """Upgrade a stale inventory without discarding rows that lack edge evidence."""
 
@@ -329,6 +1220,7 @@ def migrate_unknown_load_inventory(
             now=now,
             time_zone=time_zone,
             session_history_max_items=session_history_max_items,
+            session_history_coverage=session_history_coverage,
             existing_state=existing_state,
         )
         existing_loads = [
@@ -507,6 +1399,7 @@ def _legacy_unverified_inventory(
             "observation_started_at": observation_started,
             "runtime_window_definition": _runtime_window_definition(),
             "estimate_status": "legacy_unverified",
+            "estimate_provenance": "legacy_unverified",
         }
     )
     return inventory
@@ -1005,45 +1898,98 @@ def _runtime_window_definition() -> dict[str, str]:
     }
 
 
+def _session_identities(raw: Mapping[str, Any]) -> frozenset[str]:
+    return frozenset(
+        str(raw.get(key) or "").strip()
+        for key in (
+            "component_id",
+            "component_fingerprint",
+            "signature_id",
+            "signature_fingerprint",
+            "on_signature_id",
+            "on_signature_fingerprint",
+        )
+        if str(raw.get(key) or "").strip()
+    )
+
+
+def _session_evidence_interval(
+    raw: Mapping[str, Any], now: datetime
+) -> tuple[datetime | None, datetime | None, bool]:
+    """Parse an interval without fabricating an end for rejected open evidence."""
+
+    start: datetime | None = None
+    end: datetime | None = None
+    try:
+        start = _as_utc_datetime(raw.get("start"))
+    except (TypeError, ValueError, OverflowError):
+        pass
+    end_value = raw.get("end")
+    if end_value is not None:
+        try:
+            end = _as_utc_datetime(end_value)
+        except (TypeError, ValueError, OverflowError):
+            pass
+    trustworthy = (
+        start is not None
+        and start <= now
+        and (end_value is None or (end is not None and end >= start))
+    )
+    return start, end, trustworthy
+
+
 def _normalize_unknown_load_sessions(
     sessions: Iterable[Mapping[str, Any]], now: datetime
-) -> tuple[tuple[_NormalizedUnknownLoadSession, ...], int]:
+) -> tuple[
+    tuple[_NormalizedUnknownLoadSession, ...],
+    tuple[_RejectedUnknownLoadSession, ...],
+]:
     """Validate persisted sessions without allowing malformed storage to raise."""
 
     normalized: list[_NormalizedUnknownLoadSession] = []
-    excluded = 0
+    rejected: list[_RejectedUnknownLoadSession] = []
     for raw in sessions:
         if not isinstance(raw, Mapping):
-            excluded += 1
+            rejected.append(
+                _RejectedUnknownLoadSession(
+                    session_id="",
+                    on_edge_id="",
+                    identities=frozenset(),
+                    start=None,
+                    end=None,
+                    has_trustworthy_interval=False,
+                    reason="malformed",
+                )
+            )
             continue
+        session_alias = _nilm_session_history_identity_alias(
+            "session", raw.get("session_id")
+        )
+        on_edge_alias = _nilm_session_history_identity_alias(
+            "on_edge", raw.get("on_edge_id")
+        )
+        session_id = session_alias[1] if session_alias is not None else ""
+        on_edge_id = on_edge_alias[1] if on_edge_alias is not None else ""
+        identities = _session_identities(raw)
+        start, evidence_end, has_trustworthy_interval = _session_evidence_interval(
+            raw, now
+        )
+        reason: _ExcludedSessionReason | None = None
+        if bool(raw.get("ambiguous")):
+            reason = "ambiguous"
+        elif bool(raw.get("known_load_masked")):
+            reason = "known_load_masked"
         try:
-            session_id = str(raw.get("session_id") or "").strip()
             fingerprint = str(raw.get("signature_fingerprint") or "").strip()
-            if not session_id or not fingerprint:
+            if reason is not None or not session_id or not fingerprint:
                 raise ValueError("missing session identity")
-            if bool(raw.get("ambiguous")) or bool(raw.get("known_load_masked")):
-                raise ValueError("excluded session evidence")
-            start = _as_utc_datetime(raw.get("start"))
+            if not has_trustworthy_interval or start is None:
+                raise ValueError("invalid session interval")
             end_value = raw.get("end")
             is_open = end_value is None
-            end = now if is_open else _as_utc_datetime(end_value)
-            if start > now or end < start or not all(
-                isfinite(value)
-                for value in ((end - start).total_seconds(),)
-            ):
+            end = now if is_open else evidence_end
+            if end is None:
                 raise ValueError("invalid session interval")
-            identities = frozenset(
-                value
-                for value in (
-                    str(raw.get("component_id") or "").strip(),
-                    str(raw.get("component_fingerprint") or "").strip(),
-                    str(raw.get("signature_id") or "").strip(),
-                    fingerprint,
-                    str(raw.get("on_signature_id") or "").strip(),
-                    str(raw.get("on_signature_fingerprint") or "").strip(),
-                )
-                if value
-            )
             normalized.append(
                 _NormalizedUnknownLoadSession(
                     session_id=session_id,
@@ -1051,17 +1997,27 @@ def _normalize_unknown_load_sessions(
                     start=start,
                     end=end,
                     is_open=is_open,
-                    on_edge_id=str(raw.get("on_edge_id") or "").strip(),
+                    on_edge_id=on_edge_id,
                     identities=identities,
                 )
             )
         except (TypeError, ValueError, OverflowError):
-            excluded += 1
-    return tuple(normalized), excluded
+            rejected.append(
+                _RejectedUnknownLoadSession(
+                    session_id=session_id,
+                    on_edge_id=on_edge_id,
+                    identities=identities,
+                    start=start,
+                    end=evidence_end,
+                    has_trustworthy_interval=has_trustworthy_interval,
+                    reason=reason or "malformed",
+                )
+            )
+    return tuple(normalized), tuple(rejected)
 
 
 def _session_owner_candidates(
-    session: _NormalizedUnknownLoadSession,
+    session_identities: frozenset[str],
     components: Iterable[_UnknownLoadComponent],
     existing_state: Mapping[str, Any],
 ) -> tuple[str, ...]:
@@ -1069,14 +2025,14 @@ def _session_owner_candidates(
 
     candidates: list[str] = []
     for component in components:
-        identities = {
+        component_identities = {
             component.component_id,
             component.component_fingerprint,
             component.on_signature.signature_id,
             nilm_signature_fingerprint(component.on_signature),
             nilm_signature_fingerprint_v1(component.on_signature),
         }
-        if session.identities & identities:
+        if session_identities & component_identities:
             candidates.append(component.component_id)
             continue
         loads = existing_state.get("unknown_loads")
@@ -1099,7 +2055,7 @@ def _session_owner_candidates(
                     "fingerprint",
                 )
             }
-            if session.identities & (legacy_identities - {""}):
+            if session_identities & (legacy_identities - {""}):
                 candidates.append(component.component_id)
                 break
     return tuple(sorted(set(candidates)))
@@ -1107,44 +2063,235 @@ def _session_owner_candidates(
 
 def _deduplicate_owned_sessions(
     sessions: Iterable[_OwnedUnknownLoadSession],
-) -> tuple[tuple[_OwnedUnknownLoadSession, ...], set[str]]:
-    """Apply stable session/on-edge/interval deduplication conservatively."""
+) -> tuple[
+    tuple[_OwnedUnknownLoadSession, ...],
+    tuple[_ExcludedUnknownLoadSession, ...],
+]:
+    """Resolve transitive stable-identity components before interval deduplication."""
 
-    retained = list(sessions)
-    excluded_components: set[str] = set()
-    for key_fn in (
-        lambda item: ("session", item.session.session_id),
-        lambda item: ("on_edge", item.session.on_edge_id)
-        if item.session.on_edge_id
-        else (
-            "interval",
+    items = tuple(sessions)
+    parents = list(range(len(items)))
+
+    def find(index: int) -> int:
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left_root = find(left)
+        right_root = find(right)
+        if left_root != right_root:
+            parents[max(left_root, right_root)] = min(left_root, right_root)
+
+    alias_owner: dict[tuple[str, str], int] = {}
+    for index, item in enumerate(items):
+        aliases = [("session", item.session.session_id)]
+        if item.session.on_edge_id:
+            aliases.append(("on_edge", item.session.on_edge_id))
+        for alias in aliases:
+            owner = alias_owner.setdefault(alias, index)
+            union(index, owner)
+
+    identity_components: dict[int, list[_OwnedUnknownLoadSession]] = {}
+    for index, item in enumerate(items):
+        identity_components.setdefault(find(index), []).append(item)
+
+    def sort_key(item: _OwnedUnknownLoadSession) -> tuple[Any, ...]:
+        return (
             item.component_id,
+            item.session.session_id,
+            item.session.on_edge_id,
             item.session.start,
             item.session.end,
-        ),
-        lambda item: (
-            "interval", item.component_id, item.session.start, item.session.end
-        ),
-    ):
-        grouped: dict[tuple[Any, ...], list[_OwnedUnknownLoadSession]] = {}
-        for item in retained:
-            grouped.setdefault(key_fn(item), []).append(item)
-        next_retained: list[_OwnedUnknownLoadSession] = []
-        for group in grouped.values():
-            if len(group) == 1:
-                next_retained.extend(group)
-                continue
-            components = {item.component_id for item in group}
-            closed = [item for item in group if not item.session.is_open]
-            if len(components) != 1 or (
-                len(closed) > 1
-                and len({(item.session.start, item.session.end) for item in closed}) > 1
-            ):
-                excluded_components.update(components)
-                continue
-            next_retained.append(closed[0] if closed else group[0])
-        retained = next_retained
-    return tuple(retained), excluded_components
+            item.session.is_open,
+            item.session.signature_fingerprint,
+        )
+
+    retained: list[_OwnedUnknownLoadSession] = []
+    excluded: list[_ExcludedUnknownLoadSession] = []
+    groups = sorted(
+        identity_components.values(),
+        key=lambda group: min(sort_key(item) for item in group),
+    )
+    for group in groups:
+        components = {item.component_id for item in group}
+        intervals = {
+            (
+                item.session.start,
+                None if item.session.is_open else item.session.end,
+            )
+            for item in group
+        }
+        if len(components) != 1 or len(intervals) != 1:
+            trustworthy = len(intervals) == 1
+            concrete_ends = [
+                item.session.end for item in group if not item.session.is_open
+            ]
+            for component_id in sorted(components):
+                excluded.append(
+                    _ExcludedUnknownLoadSession(
+                        component_id=component_id,
+                        session_id=min(item.session.session_id for item in group),
+                        on_edge_id=min(item.session.on_edge_id for item in group),
+                        start=min(item.session.start for item in group),
+                        end=(
+                            next(iter(intervals))[1]
+                            if trustworthy
+                            else (max(concrete_ends) if concrete_ends else None)
+                        ),
+                        has_trustworthy_interval=trustworthy,
+                        reason="deduplicated",
+                    )
+                )
+            continue
+        closed = sorted(
+            (item for item in group if not item.session.is_open),
+            key=sort_key,
+        )
+        retained.append(closed[0] if closed else min(group, key=sort_key))
+
+    interval_groups: dict[
+        tuple[str, datetime, datetime], list[_OwnedUnknownLoadSession]
+    ] = {}
+    for item in retained:
+        interval_groups.setdefault(
+            (item.component_id, item.session.start, item.session.end), []
+        ).append(item)
+    retained = []
+    for key in sorted(interval_groups):
+        group = interval_groups[key]
+        closed = sorted(
+            (item for item in group if not item.session.is_open),
+            key=sort_key,
+        )
+        retained.append(closed[0] if closed else min(group, key=sort_key))
+    return tuple(retained), tuple(excluded)
+
+
+def _excluded_session(
+    component_id: str,
+    item: _RejectedUnknownLoadSession | _NormalizedUnknownLoadSession,
+    *,
+    reason: _ExcludedSessionReason,
+) -> _ExcludedUnknownLoadSession:
+    if isinstance(item, _NormalizedUnknownLoadSession):
+        start = item.start
+        end = None if item.is_open else item.end
+        trustworthy = True
+    else:
+        start = item.start
+        end = item.end
+        trustworthy = item.has_trustworthy_interval
+    return _ExcludedUnknownLoadSession(
+        component_id=component_id,
+        session_id=item.session_id,
+        on_edge_id=item.on_edge_id,
+        start=start,
+        end=end,
+        has_trustworthy_interval=trustworthy,
+        reason=reason,
+    )
+
+
+def _excluded_session_identity(
+    item: _ExcludedUnknownLoadSession,
+) -> tuple[Any, ...]:
+    if item.session_id:
+        return ("session", item.component_id, item.session_id)
+    if item.on_edge_id:
+        return ("on_edge", item.component_id, item.on_edge_id)
+    return (
+        "interval",
+        item.component_id,
+        item.start,
+        item.end,
+        item.reason,
+    )
+
+
+def _rejected_session_identity(
+    item: _RejectedUnknownLoadSession,
+) -> tuple[Any, ...]:
+    if item.session_id:
+        return ("session", item.session_id)
+    if item.on_edge_id:
+        return ("on_edge", item.on_edge_id)
+    return (
+        "interval",
+        tuple(sorted(item.identities)),
+        item.start,
+        item.end,
+        item.reason,
+    )
+
+
+def _deduplicate_rejected_sessions(
+    sessions: Iterable[_RejectedUnknownLoadSession],
+) -> tuple[_RejectedUnknownLoadSession, ...]:
+    """Deduplicate raw rejected diagnostics before ownership and counting."""
+
+    grouped: dict[tuple[Any, ...], list[_RejectedUnknownLoadSession]] = {}
+    for item in sessions:
+        grouped.setdefault(_rejected_session_identity(item), []).append(item)
+    deduplicated: list[_RejectedUnknownLoadSession] = []
+    for key in sorted(grouped, key=repr):
+        group = grouped[key]
+        intervals = {
+            (item.start, item.end, item.has_trustworthy_interval) for item in group
+        }
+        trustworthy = len(intervals) == 1 and group[0].has_trustworthy_interval
+        starts = [item.start for item in group if item.start is not None]
+        ends = [item.end for item in group if item.end is not None]
+        deduplicated.append(
+            _RejectedUnknownLoadSession(
+                session_id=min(item.session_id for item in group),
+                on_edge_id=min(item.on_edge_id for item in group),
+                identities=frozenset().union(
+                    *(item.identities for item in group)
+                ),
+                start=min(starts) if starts else None,
+                end=(group[0].end if trustworthy else (max(ends) if ends else None)),
+                has_trustworthy_interval=trustworthy,
+                reason=min(item.reason for item in group),
+            )
+        )
+    return tuple(deduplicated)
+
+
+def _deduplicate_excluded_sessions(
+    sessions: Iterable[_ExcludedUnknownLoadSession],
+) -> tuple[_ExcludedUnknownLoadSession, ...]:
+    """Collapse repeated rejected evidence into deterministic stable records."""
+
+    grouped: dict[tuple[Any, ...], list[_ExcludedUnknownLoadSession]] = {}
+    for item in sessions:
+        grouped.setdefault(_excluded_session_identity(item), []).append(item)
+    deduplicated: list[_ExcludedUnknownLoadSession] = []
+    for key in sorted(grouped, key=repr):
+        group = grouped[key]
+        intervals = {
+            (item.start, item.end, item.has_trustworthy_interval) for item in group
+        }
+        trustworthy = len(intervals) == 1 and group[0].has_trustworthy_interval
+        starts = [item.start for item in group if item.start is not None]
+        ends = [item.end for item in group if item.end is not None]
+        deduplicated.append(
+            _ExcludedUnknownLoadSession(
+                component_id=group[0].component_id,
+                session_id=min(item.session_id for item in group),
+                on_edge_id=min(item.on_edge_id for item in group),
+                start=min(starts) if starts else None,
+                end=(
+                    group[0].end
+                    if trustworthy
+                    else (max(ends) if ends else None)
+                ),
+                has_trustworthy_interval=trustworthy,
+                reason=min(item.reason for item in group),
+            )
+        )
+    return tuple(deduplicated)
 
 
 def _session_inventory_evidence(
@@ -1155,26 +2302,49 @@ def _session_inventory_evidence(
     existing_state: Mapping[str, Any],
 ) -> _SessionInventoryEvidence:
     component_list = tuple(components)
-    normalized, invalid_count = _normalize_unknown_load_sessions(sessions, now)
+    normalized, rejected = _normalize_unknown_load_sessions(sessions, now)
+    rejected = _deduplicate_rejected_sessions(rejected)
     owned: list[_OwnedUnknownLoadSession] = []
-    excluded = {component.component_id: invalid_count for component in component_list}
-    ambiguous_ids: set[str] = set()
-    for session in normalized:
-        candidates = _session_owner_candidates(session, component_list, existing_state)
-        if len(candidates) != 1:
-            targets = candidates or tuple(
-                component.component_id for component in component_list
+    excluded: dict[str, list[_ExcludedUnknownLoadSession]] = {
+        component.component_id: [] for component in component_list
+    }
+    ambiguous: dict[str, list[_ExcludedUnknownLoadSession]] = {
+        component.component_id: [] for component in component_list
+    }
+    unowned_evidence: set[tuple[Any, ...]] = set()
+    for item in rejected:
+        candidates = _session_owner_candidates(
+            item.identities, component_list, existing_state
+        )
+        if not candidates:
+            unowned_evidence.add(("rejected", *_rejected_session_identity(item)))
+            continue
+        if len(candidates) == 1:
+            component_id = candidates[0]
+            excluded[component_id].append(
+                _excluded_session(component_id, item, reason=item.reason)
             )
-            for component_id in targets:
-                excluded[component_id] += 1
-                if len(candidates) > 1:
-                    ambiguous_ids.add(component_id)
+            continue
+        for component_id in candidates:
+            ambiguous[component_id].append(
+                _excluded_session(component_id, item, reason="ambiguous")
+            )
+    for session in normalized:
+        candidates = _session_owner_candidates(
+            session.identities, component_list, existing_state
+        )
+        if len(candidates) != 1:
+            if not candidates:
+                unowned_evidence.add(("session", session.session_id))
+            for component_id in candidates:
+                ambiguous[component_id].append(
+                    _excluded_session(component_id, session, reason="ambiguous")
+                )
             continue
         owned.append(_OwnedUnknownLoadSession(session, candidates[0]))
     retained, dedup_excluded = _deduplicate_owned_sessions(owned)
-    for component_id in dedup_excluded:
-        excluded[component_id] += 1
-        ambiguous_ids.add(component_id)
+    for item in dedup_excluded:
+        ambiguous[item.component_id].append(item)
     return _SessionInventoryEvidence(
         sessions_by_component={
             component.component_id: tuple(
@@ -1182,9 +2352,31 @@ def _session_inventory_evidence(
             )
             for component in component_list
         },
-        excluded_count_by_component=excluded,
-        ambiguous_component_ids=frozenset(ambiguous_ids),
-        observation_started_at=min((item.start for item in normalized), default=None),
+        excluded_sessions_by_component={
+            component.component_id: _deduplicate_excluded_sessions(
+                excluded[component.component_id]
+            )
+            for component in component_list
+        },
+        ambiguous_sessions_by_component={
+            component.component_id: _deduplicate_excluded_sessions(
+                ambiguous[component.component_id]
+            )
+            for component in component_list
+        },
+        observation_started_at_by_component={
+            component.component_id: min(
+                (
+                    item.session.start
+                    for item in retained
+                    if item.component_id == component.component_id
+                ),
+                default=None,
+            )
+            for component in component_list
+        },
+        invalid_count=len(rejected),
+        unowned_count=len(unowned_evidence),
     )
 
 
@@ -1226,22 +2418,52 @@ def _union_session_seconds(
 
 def _estimate_status(
     *,
-    ambiguous: bool,
-    excluded_count: int,
+    intrinsic_ambiguous: bool,
+    ambiguous_evidence: Iterable[_ExcludedUnknownLoadSession],
+    excluded_evidence: Iterable[_ExcludedUnknownLoadSession],
     observation_started_at: datetime | None,
     window_start: datetime,
-    session_history_max_items: int | None,
+    window_end: datetime,
+    session_history_coverage: NilmSessionHistoryCoverage | None,
 ) -> str:
-    if ambiguous:
+    if intrinsic_ambiguous or any(
+        _session_evidence_relevant(item, window_start, window_end)
+        for item in ambiguous_evidence
+    ):
         return "ambiguous"
     if (
-        excluded_count
+        any(
+            _session_evidence_relevant(item, window_start, window_end)
+            for item in excluded_evidence
+        )
         or observation_started_at is None
         or observation_started_at > window_start
-        or session_history_max_items is not None
+        or _session_history_may_hide_open_session(session_history_coverage)
     ):
         return "partial_history"
     return "complete"
+
+
+def _session_history_may_hide_open_session(
+    coverage: NilmSessionHistoryCoverage | None,
+) -> bool:
+    """Return whether bounded history cannot rule out an omitted open session."""
+
+    return coverage is not None and (
+        coverage.was_truncated or coverage.ingress_history_incomplete
+    )
+
+
+def _session_evidence_relevant(
+    item: _ExcludedUnknownLoadSession,
+    window_start: datetime,
+    window_end: datetime,
+) -> bool:
+    if not item.has_trustworthy_interval or item.start is None:
+        return True
+    if item.end is None:
+        return item.start < window_end
+    return item.start < window_end and item.end > window_start
 
 
 def _worst_estimate_status(statuses: Iterable[str]) -> str:
@@ -1265,6 +2487,169 @@ def _observation_started_at(
     except (TypeError, ValueError, OverflowError):
         pass
     return min(values).isoformat() if values else None
+
+
+def _nilm_session_history_coverage_counts(
+    configured_max_items: Any,
+    source_count: Any,
+    retained_count: Any,
+    dropped_count: Any,
+) -> tuple[int, int, int, int] | None:
+    """Validate bounded numeric coverage facts without coercing payload scalars."""
+
+    configured = _nilm_session_history_count(configured_max_items)
+    source = _nilm_session_history_count(source_count)
+    retained = _nilm_session_history_count(retained_count)
+    dropped = _nilm_session_history_count(dropped_count)
+    if (
+        configured is None
+        or source is None
+        or retained is None
+        or dropped is None
+        or configured > NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT
+        or retained > configured
+        or source != retained + dropped
+    ):
+        return None
+    return configured, source, retained, dropped
+
+
+def _nilm_session_history_coverage_bounds(
+    oldest_value: Any,
+    newest_value: Any,
+    *,
+    retained_count: int,
+) -> tuple[datetime | None, datetime | None, bool]:
+    """Return ordered bounded coverage bounds or conservative unknown bounds."""
+
+    if retained_count == 0:
+        return None, None, oldest_value is None and newest_value is None
+    if oldest_value is None or newest_value is None:
+        return None, None, False
+    oldest = _canonical_nilm_session_history_timestamp(oldest_value)
+    newest = _canonical_nilm_session_history_timestamp(newest_value)
+    if oldest is None or newest is None or oldest > newest:
+        return None, None, False
+    return oldest, newest, True
+
+
+def _coverage_to_payload(coverage: NilmSessionHistoryCoverage) -> dict[str, Any]:
+    counts = _nilm_session_history_coverage_counts(
+        coverage.configured_max_items,
+        coverage.source_count_before_retention,
+        coverage.retained_count,
+        coverage.dropped_count,
+    )
+    if counts is None:
+        configured_max_items = source_count = retained_count = dropped_count = 0
+        oldest = newest = None
+        bounds_valid = False
+        identity_components: tuple[_NilmSessionHistoryIdentityComponent, ...] = ()
+        components_valid = False
+    else:
+        (
+            configured_max_items,
+            source_count,
+            retained_count,
+            dropped_count,
+        ) = counts
+        oldest, newest, bounds_valid = _nilm_session_history_coverage_bounds(
+            coverage.oldest_retained_at,
+            coverage.newest_retained_at,
+            retained_count=retained_count,
+        )
+        identity_components, components_valid = (
+            _canonical_nilm_session_history_identity_components(
+                coverage.retention_identity_components
+            )
+        )
+    payload: dict[str, Any] = {
+        "configured_max_items": configured_max_items,
+        "source_count_before_retention": source_count,
+        "retained_count": retained_count,
+        "was_truncated": dropped_count > 0,
+        "dropped_count": dropped_count,
+        "oldest_retained_at": oldest.isoformat() if oldest is not None else None,
+        "newest_retained_at": newest.isoformat() if newest is not None else None,
+        "_retention_identity_components_complete": (
+            coverage.retention_identity_components_complete is True
+            and components_valid
+            and bounds_valid
+            and dropped_count == len(identity_components)
+        ),
+    }
+    if identity_components:
+        payload["_retention_identity_components"] = [
+            [[kind, value] for kind, value in component.aliases]
+            for component in identity_components
+        ]
+    if coverage.ingress_history_incomplete is True:
+        payload["_ingress_history_incomplete"] = True
+    return payload
+
+
+def nilm_session_history_coverage_from_payload(
+    payload: Any,
+) -> NilmSessionHistoryCoverage | None:
+    """Read persisted coverage facts without treating malformed data as evidence."""
+
+    if not isinstance(payload, Mapping):
+        return None
+    try:
+        counts = _nilm_session_history_coverage_counts(
+            payload["configured_max_items"],
+            payload["source_count_before_retention"],
+            payload["retained_count"],
+            payload["dropped_count"],
+        )
+    except KeyError:
+        return None
+    if counts is None:
+        return None
+    configured_max_items, source_count, retained_count, dropped_count = counts
+    oldest, newest, bounds_valid = _nilm_session_history_coverage_bounds(
+        payload.get("oldest_retained_at"),
+        payload.get("newest_retained_at"),
+        retained_count=retained_count,
+    )
+    raw_components = payload.get("_retention_identity_components", ())
+    components, components_valid = _canonical_nilm_session_history_identity_components(
+        raw_components
+    )
+    raw_was_truncated = payload.get("was_truncated", _NILM_SESSION_HISTORY_MISSING)
+    expected_was_truncated = dropped_count > 0
+    truncation_valid = (
+        isinstance(raw_was_truncated, bool)
+        and raw_was_truncated is expected_was_truncated
+    )
+    raw_ingress_history_incomplete = payload.get(
+        "_ingress_history_incomplete", False
+    )
+    ingress_history_incomplete = (
+        raw_ingress_history_incomplete is True
+        or (
+            "_ingress_history_incomplete" in payload
+            and not isinstance(raw_ingress_history_incomplete, bool)
+        )
+    )
+    return NilmSessionHistoryCoverage(
+        configured_max_items=configured_max_items,
+        source_count_before_retention=source_count,
+        retained_count=retained_count,
+        was_truncated=expected_was_truncated,
+        dropped_count=dropped_count,
+        oldest_retained_at=oldest,
+        newest_retained_at=newest,
+        retention_identity_components=components,
+        retention_identity_components_complete=(
+            payload.get("_retention_identity_components_complete") is True
+            and components_valid
+            and truncation_valid
+            and bounds_valid
+            and dropped_count == len(components)
+        ),
+        ingress_history_incomplete=ingress_history_incomplete,
+    )
 
 
 def _edge_observation_started_at(loads: Iterable[Mapping[str, Any]]) -> datetime | None:
@@ -1325,7 +2710,7 @@ def _unknown_component_session_payload(
     windows: Mapping[str, tuple[datetime, datetime, float]],
     now: datetime,
     existing_state: Mapping[str, Any],
-    session_history_max_items: int | None,
+    session_history_coverage: NilmSessionHistoryCoverage | None,
 ) -> dict[str, Any]:
     """Assemble one component payload from reconstructed persisted runs."""
 
@@ -1337,19 +2722,28 @@ def _unknown_component_session_payload(
         if key in existing_load:
             payload[key] = existing_load[key]
     sessions = evidence.sessions_by_component[component.component_id]
-    ambiguous = (
+    ambiguous_sessions = evidence.ambiguous_sessions_by_component[
+        component.component_id
+    ]
+    excluded_sessions = evidence.excluded_sessions_by_component[
+        component.component_id
+    ]
+    intrinsic_ambiguous = (
         component.pair_status == "ambiguous"
-        or component.component_id in evidence.ambiguous_component_ids
         or (
             component.component_id in allocation.ambiguous_component_ids
             and not sessions
         )
     )
     open_sessions = [item for item in sessions if item.session.is_open]
-    if ambiguous or len(open_sessions) > 1:
+    running_ambiguous = (
+        intrinsic_ambiguous or bool(ambiguous_sessions) or len(open_sessions) > 1
+    )
+    if running_ambiguous or _session_history_may_hide_open_session(
+        session_history_coverage
+    ):
         payload["running_state"] = "unknown"
         payload["current_runtime_minutes"] = 0.0
-        ambiguous = True
     elif open_sessions:
         payload["running_state"] = "probably_on"
         payload["current_runtime_minutes"] = round(
@@ -1364,33 +2758,61 @@ def _unknown_component_session_payload(
     estimate_statuses: dict[str, str] = {}
     runtime_windows: dict[str, dict[str, Any]] = {}
     for name, (start, end, nominal_days) in windows.items():
+        relevant_ambiguous = tuple(
+            item
+            for item in ambiguous_sessions
+            if _session_evidence_relevant(item, start, end)
+        )
+        relevant_excluded = tuple(
+            item
+            for item in excluded_sessions
+            if _session_evidence_relevant(item, start, end)
+        )
+        window_ambiguous = (
+            intrinsic_ambiguous or len(open_sessions) > 1 or bool(relevant_ambiguous)
+        )
         seconds = (
-            0.0 if ambiguous else _union_session_seconds(sessions, start, end)
+            0.0 if window_ambiguous else _union_session_seconds(sessions, start, end)
         )
         runtime_minutes = round(seconds / 60.0, 3)
         status = _estimate_status(
-            ambiguous=ambiguous,
-            excluded_count=evidence.excluded_count_by_component[component.component_id],
-            observation_started_at=evidence.observation_started_at,
+            intrinsic_ambiguous=intrinsic_ambiguous or len(open_sessions) > 1,
+            ambiguous_evidence=ambiguous_sessions,
+            excluded_evidence=excluded_sessions,
+            observation_started_at=evidence.observation_started_at_by_component[
+                component.component_id
+            ],
             window_start=start,
-            session_history_max_items=session_history_max_items,
+            window_end=end,
+            session_history_coverage=session_history_coverage,
         )
         estimate_statuses[name] = status
         runtime_windows[name] = {
-            "coverage_start": max(start, evidence.observation_started_at)
+            "coverage_start": max(
+                start,
+                evidence.observation_started_at_by_component[component.component_id],
+            )
             .isoformat()
-            if evidence.observation_started_at is not None
+            if evidence.observation_started_at_by_component[component.component_id]
+            is not None
             else start.isoformat(),
             "coverage_end": end.isoformat(),
             "coverage_days": round(
                 max(
                     0.0,
                     (
-                        end - max(start, evidence.observation_started_at)
+                        end
+                        - max(
+                            start,
+                            evidence.observation_started_at_by_component[
+                                component.component_id
+                            ],
+                        )
                     ).total_seconds()
                     / 86_400,
                 )
-                if evidence.observation_started_at is not None
+                if evidence.observation_started_at_by_component[component.component_id]
+                is not None
                 else 0.0,
                 3,
             ),
@@ -1399,11 +2821,10 @@ def _unknown_component_session_payload(
             "included_session_count": sum(
                 1 for item in sessions if _clip_session_seconds(item, start, end) > 0.0
             )
-            if not ambiguous
+            if not window_ambiguous
             else 0,
-            "excluded_session_count": evidence.excluded_count_by_component[
-                component.component_id
-            ],
+            "excluded_session_count": len(relevant_excluded)
+            + len(relevant_ambiguous),
         }
         suffix = {"today": "today", "7_days": "7_days", "30_days": "30_days"}[name]
         payload[f"runtime_{suffix}_minutes"] = runtime_minutes
@@ -1414,12 +2835,15 @@ def _unknown_component_session_payload(
     payload["estimate_status_by_window"] = estimate_statuses
     payload["estimate_status"] = _worst_estimate_status(estimate_statuses.values())
     payload["observation_started_at"] = _observation_started_at(
-        evidence.observation_started_at, existing_state
+        evidence.observation_started_at_by_component[component.component_id],
+        existing_load,
     )
     payload["runtime_window_definition"] = _runtime_window_definition()
-    payload["separation_status"] = "ambiguous" if ambiguous else "separable"
+    payload["separation_status"] = (
+        "ambiguous" if running_ambiguous else "separable"
+    )
     payload["energy_estimate_confidence"] = (
-        0.0 if ambiguous else float(payload["confidence"])
+        0.0 if running_ambiguous else float(payload["confidence"])
     )
     return payload
 
