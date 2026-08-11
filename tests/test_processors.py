@@ -9355,6 +9355,96 @@ def test_nilm_processor_records_actual_session_retention_coverage() -> None:
     )
 
 
+def test_nilm_processor_coverage_is_component_and_window_specific() -> None:
+    """Processor-captured coverage never spreads a bad session to other loads."""
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmSignature
+    from custom_components.circuitsetup_energy_analyzer.unknown_loads import (
+        build_unknown_load_inventory,
+        migrate_unknown_load_inventory,
+    )
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    signatures = [
+        NilmSignature("on-a", 500.0, 100.0, occurrence_count=3),
+        NilmSignature("on-b", 700.0, 100.0, occurrence_count=3),
+    ]
+
+    def run(rows: list[dict[str, object]], cap: int = 2_000) -> dict[str, object]:
+        store = FeatureStoreData(nilm_session_history_by_circuit={"mains": rows})
+        processor = processors.NilmSampleProcessor(
+            nilm_enabled=lambda _: True, seed_demo_nilm_state=lambda *_: None,
+            min_delta_w_for_circuit=lambda _: 100.0, detectors={},
+            total_events_by_circuit=defaultdict(int),
+            unmatched_edges_by_circuit=defaultdict(list), ignored_signatures=set(),
+            known_load_events=lambda *_: (), observe_topology=lambda *_: [],
+            session_history_max_items=cap,
+        )
+        processor.refresh_session_history("mains", store)
+        return build_unknown_load_inventory(
+            circuit_id="mains", signatures=signatures, edges=(),
+            sessions=store.nilm_session_history_by_circuit["mains"], now=now,
+            session_history_coverage=processor._session_history_coverage_by_circuit["mains"],
+        )
+
+    def row(name: str, owner: str, age: int, **extra: object) -> dict[str, object]:
+        start = now - timedelta(days=age, hours=1)
+        return {"session_id": name, "signature_id": owner,
+                "signature_fingerprint": owner, "start": start.isoformat(),
+                "end": (start + timedelta(minutes=30)).isoformat(), **extra}
+
+    def by_signature(value: dict[str, object]) -> dict[str, dict[str, object]]:
+        return {str(item["on_signature_id"]): item for item in value["unknown_loads"]}  # type: ignore[index]
+
+    complete = by_signature(
+        run([row("a-old", "on-a", 31), row("b-old", "on-b", 31)])
+    )
+    assert complete["on-a"]["estimate_status_by_window"]["30_days"] == "complete"  # type: ignore[index]
+    truncated = by_signature(run([row(f"a-{i}", "on-a", i + 1) for i in range(5)], 2))
+    assert (
+        truncated["on-a"]["estimate_status_by_window"]["30_days"]
+        == "partial_history"
+    )  # type: ignore[index]
+    assert truncated["on-a"]["estimate_status_by_window"]["today"] == "complete"  # type: ignore[index]
+    isolated = by_signature(run([
+        row("a-old", "on-a", 31), row("b-old", "on-b", 31),
+        {
+            "session_id": "bad-a", "signature_id": "on-a",
+            "signature_fingerprint": "on-a", "start": "bad", "end": "bad",
+        },
+        {
+            "session_id": "unowned", "signature_fingerprint": "x",
+            "start": (now - timedelta(days=31)).isoformat(),
+            "end": (now - timedelta(days=30)).isoformat(),
+        },
+    ]))
+    assert isolated["on-a"]["estimate_status"] == "partial_history"
+    assert isolated["on-b"]["estimate_status"] == "complete"
+    ambiguous = by_signature(run([
+        row("a-old", "on-a", 31), row("b-old", "on-b", 31),
+        row("both", "on-a", 1, on_signature_id="on-b"),
+    ]))
+    assert ambiguous["on-a"]["estimate_status"] == "ambiguous"
+    assert ambiguous["on-b"]["estimate_status"] == "ambiguous"
+    started = by_signature(
+        run([row("a-old", "on-a", 31), row("b-new", "on-b", 5)])
+    )
+    assert started["on-a"]["estimate_status_by_window"]["30_days"] == "complete"  # type: ignore[index]
+    assert (
+        started["on-b"]["estimate_status_by_window"]["30_days"]
+        == "partial_history"
+    )  # type: ignore[index]
+    legacy = migrate_unknown_load_inventory(
+        circuit_id="mains", signature_payloads=[],
+        existing_state={
+            "schema_version": 3, "unknown_loads": [{"signature_id": "on-a"}]
+        },
+    )
+    assert legacy["estimate_status"] == "legacy_unverified"
+
+
 def test_nilm_sample_processor_caps_runtime_unmatched_edges() -> None:
     from collections import defaultdict
 
