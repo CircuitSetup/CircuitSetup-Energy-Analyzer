@@ -2652,6 +2652,25 @@ def test_nilm_workspace_placeholder_session_is_evidence_only() -> None:
     assert "assignment_id" not in payload
 
 
+def test_nilm_workspace_ambiguous_session_is_not_assignable() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_session_payload_with_actions,
+    )
+
+    payload = _nilm_session_payload_with_actions(
+        {
+            "session_id": "session-ambiguous",
+            "mains_circuit_id": "mains",
+            "signature_fingerprint": "direction=on|watts=800-900",
+            "start": "2026-08-11T12:00:00+00:00",
+            "end": "2026-08-11T12:30:00+00:00",
+            "ambiguous": True,
+        }
+    )
+
+    assert "assign" not in payload.get("actions", {})
+
+
 def test_recurring_placeholder_sessions_promote_three_reviewable_components() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,

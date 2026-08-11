@@ -3248,7 +3248,11 @@ def _nilm_session_payload_with_actions(
         }
         assignment_id = str(payload.get(ATTR_ASSIGNMENT_ID) or "").strip()
         actions: dict[str, Any] = {}
-        if nilm_signature_is_assignable(signature_fingerprint) and not assignment_id:
+        if (
+            nilm_signature_is_assignable(signature_fingerprint)
+            and not assignment_id
+            and not bool(payload.get("ambiguous"))
+        ):
             data[ATTR_SIGNATURE_FINGERPRINT] = signature_fingerprint
             actions["assign"] = {
                 "domain": DOMAIN,
