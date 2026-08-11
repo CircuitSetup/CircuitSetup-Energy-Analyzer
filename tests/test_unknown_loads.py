@@ -8,6 +8,7 @@ from custom_components.circuitsetup_energy_analyzer.nilm import (
     NilmSignature,
     cluster_recurring_signatures,
     nilm_signature_fingerprint,
+    nilm_signature_fingerprint_v1,
 )
 from custom_components.circuitsetup_energy_analyzer.unknown_loads import (
     build_unknown_load_inventory,
@@ -28,6 +29,9 @@ def signature(
     confidence: float = 0.7,
     split_phase_type: str = "unknown",
     dominant_leg: str = "unknown",
+    median_leg_a_delta_w: float | None = None,
+    median_leg_b_delta_w: float | None = None,
+    leg_balance_ratio: float | None = None,
 ) -> NilmSignature:
     return NilmSignature(
         signature_id=signature_id,
@@ -39,6 +43,9 @@ def signature(
         confidence=confidence,
         split_phase_type=split_phase_type,
         dominant_leg=dominant_leg,
+        median_leg_a_delta_w=median_leg_a_delta_w,
+        median_leg_b_delta_w=median_leg_b_delta_w,
+        leg_balance_ratio=leg_balance_ratio,
     )
 
 
@@ -373,6 +380,93 @@ def test_session_ownership_accepts_a_matching_legacy_fingerprint() -> None:
     )
 
     assert inventory["unknown_loads"][0]["runtime_today_minutes"] == 60.0
+
+
+def test_session_ownership_accepts_unique_computed_v1_fingerprint() -> None:
+    """A unique retired v1 identity restores the matching component's history."""
+
+    component = signature(
+        "sig-computed-v1",
+        500.0,
+        100.0,
+        510.0,
+        split_phase_type="single_leg_a",
+        dominant_leg="a",
+        median_leg_a_delta_w=480.0,
+        median_leg_b_delta_w=20.0,
+        leg_balance_ratio=0.04,
+    )
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[component],
+        edges=[],
+        sessions=[
+            {
+                "session_id": "computed-v1-run",
+                "component_id": "retired-component-id",
+                "signature_fingerprint": nilm_signature_fingerprint_v1(component),
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": "2026-08-09T11:00:00+00:00",
+            }
+        ],
+        now=datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+    )
+
+    load = inventory["unknown_loads"][0]
+    assert load["runtime_today_minutes"] == 60.0
+    assert load["estimated_energy_today_kwh"] == 0.5
+    assert load["separation_status"] == "separable"
+
+
+def test_session_ownership_rejects_collided_v1_fingerprint() -> None:
+    """A shared retired v1 fingerprint remains excluded as ambiguous evidence."""
+
+    first = signature(
+        "sig-v1-collision-a",
+        500.0,
+        100.0,
+        510.0,
+        split_phase_type="single_leg_a",
+        dominant_leg="a",
+        median_leg_a_delta_w=480.0,
+        median_leg_b_delta_w=20.0,
+        leg_balance_ratio=0.04,
+    )
+    second = signature(
+        "sig-v1-collision-b",
+        500.0,
+        100.0,
+        510.0,
+        split_phase_type="single_leg_a",
+        dominant_leg="a",
+        median_leg_a_delta_w=430.0,
+        median_leg_b_delta_w=70.0,
+        leg_balance_ratio=0.04,
+    )
+    assert nilm_signature_fingerprint_v1(first) == nilm_signature_fingerprint_v1(second)
+    assert nilm_signature_fingerprint(first) != nilm_signature_fingerprint(second)
+
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[first, second],
+        edges=[],
+        sessions=[
+            {
+                "session_id": "collided-v1-run",
+                "component_id": "retired-component-id",
+                "signature_fingerprint": nilm_signature_fingerprint_v1(first),
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": "2026-08-09T11:00:00+00:00",
+            }
+        ],
+        now=datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+    )
+
+    for load in inventory["unknown_loads"]:
+        assert load["separation_status"] == "ambiguous"
+        assert load["runtime_today_minutes"] == 0.0
+        assert load["estimated_energy_today_kwh"] == 0.0
+        assert load["runtime_windows"]["today"]["included_session_count"] == 0
 
 
 def test_multiple_open_sessions_make_current_runtime_ambiguous() -> None:

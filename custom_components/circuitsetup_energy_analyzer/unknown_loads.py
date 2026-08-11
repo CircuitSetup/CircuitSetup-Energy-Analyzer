@@ -11,6 +11,7 @@ from .nilm import (
     NilmEdge,
     NilmSignature,
     nilm_signature_fingerprint,
+    nilm_signature_fingerprint_v1,
     nilm_signature_is_assignable,
     nilm_signature_is_off_direction,
 )
@@ -1073,6 +1074,7 @@ def _session_owner_candidates(
             component.component_fingerprint,
             component.on_signature.signature_id,
             nilm_signature_fingerprint(component.on_signature),
+            nilm_signature_fingerprint_v1(component.on_signature),
         }
         if session.identities & identities:
             candidates.append(component.component_id)
