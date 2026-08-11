@@ -3464,7 +3464,7 @@ class NilmClusteringPolicy:
     va_ratio: float = 0.20
     va_floor: float = 40.0
     pf_ratio: float = 0.25
-    pf_floor: float = 0.03
+    pf_floor: float = 0.05
     leg_watts_ratio: float = 0.20
     leg_watts_floor: float = 25.0
     balance_ratio: float = 0.25
@@ -6124,6 +6124,10 @@ def pair_nilm_sessions_for_signatures(
             best_pair_scores.items(),
             key=lambda item: (
                 -item[1],
+                (
+                    off_edges[item[0][1]].timestamp
+                    - on_edges[item[0][0]].timestamp
+                ).total_seconds(),
                 on_edges[item[0][0]].timestamp,
                 off_edges[item[0][1]].timestamp,
                 item[0],
@@ -6192,6 +6196,8 @@ def pair_nilm_sessions_for_signatures(
                         trace_evidence=trace_evidence,
                     )
                 )
+
+    candidates = _nilm_cycle_local_session_candidates(candidates)
 
     ambiguous_pairs: set[tuple[int, int]] = set()
     preferred_candidates: dict[tuple[int, int], _NilmSessionCandidate] = {}
@@ -6412,6 +6418,35 @@ def pair_nilm_sessions_for_signatures(
         _with_nilm_session_overlap(session, ordered_sessions)
         for session in ordered_sessions
     ]
+
+
+def _nilm_cycle_local_session_candidates(
+    candidates: Iterable[_NilmSessionCandidate],
+) -> list[_NilmSessionCandidate]:
+    """Prefer a complete cycle before the next matching ON transition."""
+
+    grouped: dict[str, dict[int, list[_NilmSessionCandidate]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for candidate in candidates:
+        grouped[candidate.signature_fingerprint][candidate.on_index].append(candidate)
+
+    retained: list[_NilmSessionCandidate] = []
+    for by_on in grouped.values():
+        ordered_on_indices = sorted(by_on)
+        for position, on_index in enumerate(ordered_on_indices):
+            on_candidates = by_on[on_index]
+            if position + 1 >= len(ordered_on_indices):
+                retained.extend(on_candidates)
+                continue
+            next_on_time = by_on[ordered_on_indices[position + 1]][0].on_edge.timestamp
+            cycle_candidates = [
+                candidate
+                for candidate in on_candidates
+                if candidate.off_edge.timestamp < next_on_time
+            ]
+            retained.extend(cycle_candidates or on_candidates)
+    return retained
 
 
 def _nilm_session_spec_fingerprint(spec: Mapping[str, Any]) -> str:

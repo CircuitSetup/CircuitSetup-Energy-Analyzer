@@ -260,23 +260,26 @@ def nilm_workspace_payload(
         session_display_labels,
     )
     _add_nilm_component_occurrences(signatures, all_sessions)
-    sessions = _add_nilm_session_display_labels(
-        _nilm_workspace_visible_sessions(
-            _merge_nilm_session_payloads(
-                _nilm_workspace_sessions(
-                    recent_edges,
-                    config.circuit_id,
-                    signatures=signatures,
-                    assignments=assignments,
-                    reviewed_session_ids=reviewed_session_ids,
+    sessions = _nilm_workspace_session_page(
+        _add_nilm_session_display_labels(
+            _nilm_workspace_visible_sessions(
+                _merge_nilm_session_payloads(
+                    _nilm_workspace_sessions(
+                        recent_edges,
+                        config.circuit_id,
+                        signatures=signatures,
+                        assignments=assignments,
+                        reviewed_session_ids=reviewed_session_ids,
+                    ),
+                    stored_sessions,
                 ),
-                stored_sessions,
+                signatures,
+                assignments,
             ),
-            signatures,
-            assignments,
+            session_display_labels,
         ),
-        session_display_labels,
-    )[:MAX_NILM_WORKSPACE_SESSIONS]
+        limit=MAX_NILM_WORKSPACE_SESSIONS,
+    )
     _add_nilm_assignment_options(signatures, assignment_options)
     _add_nilm_assignment_options(label_intervals, assignment_options)
     _add_nilm_assignment_options(sessions, assignment_options)
@@ -2144,6 +2147,7 @@ def _nilm_workspace_lanes(
         actions = session.get("actions")
         if (
             session_id
+            and bool(session.get("end"))
             and not str(session.get(ATTR_ASSIGNMENT_ID) or "").strip()
             and not bool(session.get("ambiguous"))
             and isinstance(actions, Mapping)
@@ -2427,6 +2431,25 @@ def _nilm_session_seen_datetime(session: Mapping[str, Any]) -> datetime | None:
     return _datetime_from_iso(session.get("end")) or _datetime_from_iso(
         session.get("start")
     )
+
+
+def _nilm_workspace_session_page(
+    sessions: Iterable[Mapping[str, Any]],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """Return completed sessions first, newest first within each state."""
+
+    def sort_key(session: Mapping[str, Any]) -> tuple[bool, float]:
+        seen = _nilm_session_seen_datetime(session)
+        return bool(session.get("end")), seen.timestamp() if seen else float("-inf")
+
+    ordered = sorted(
+        (dict(session) for session in sessions),
+        key=sort_key,
+        reverse=True,
+    )
+    return ordered[: max(int(limit), 0)]
 
 
 def _nilm_session_last_seen(session: Mapping[str, Any] | None) -> str | None:
@@ -3254,6 +3277,7 @@ def _nilm_session_payload_with_actions(
             nilm_signature_is_assignable(signature_fingerprint)
             and not assignment_id
             and not bool(payload.get("ambiguous"))
+            and bool(payload.get("end"))
         ):
             data[ATTR_SIGNATURE_FINGERPRINT] = signature_fingerprint
             actions["assign"] = {

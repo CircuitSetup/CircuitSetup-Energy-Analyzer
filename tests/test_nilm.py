@@ -4781,6 +4781,25 @@ def test_w_only_signatures_keep_missing_features_and_still_pair() -> None:
     assert sessions[0].off_edge_id is not None
 
 
+def test_low_power_pf_noise_does_not_fragment_one_signature() -> None:
+    signatures = cluster_recurring_signatures(
+        [
+            edge(
+                index * 60,
+                78.0,
+                delta_var=-4.0,
+                delta_va=120.0,
+                delta_pf=power_factor,
+            )
+            for index, power_factor in enumerate([0.13] * 6 + [0.175] * 6)
+        ]
+    )
+
+    assert len(signatures) == 1
+    assert signatures[0].occurrence_count == 12
+    assert signatures[0].median_delta_pf == pytest.approx(0.152)
+
+
 def test_expected_assignments_are_modeled_but_ignored_assignments_are_not() -> None:
     signatures = [
         {"signature_id": "expected", "median_delta_w": 300.0},
@@ -5538,6 +5557,30 @@ def test_session_pair_budget_does_not_turn_observed_off_edges_into_opens() -> No
     )
 
     assert not any(session.end is None for session in sessions)
+
+
+def test_session_pairing_closes_repeated_non_overlapping_cycles() -> None:
+    edges = [
+        transition
+        for index in range(20)
+        for transition in (
+            edge(index * 900, 78.0),
+            edge(index * 900 + 300, -82.0),
+        )
+    ]
+
+    sessions = pair_nilm_sessions_for_signatures(
+        edges,
+        mains_circuit_id="hvac_2",
+        signature_specs=[
+            {"signature_fingerprint": "fan", "typical_watts": 78.0}
+        ],
+    )
+
+    assert len(sessions) == 20
+    assert all(session.end is not None for session in sessions)
+    assert all(session.ambiguous is False for session in sessions)
+    assert all(session.duration_seconds == 300.0 for session in sessions)
 
 
 def test_global_session_pairing_records_close_signature_match_as_ambiguous() -> None:

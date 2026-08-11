@@ -2332,8 +2332,8 @@ def test_nilm_workspace_reviews_closed_components_and_maps_stale_assignment() ->
     payload = nilm_workspace_payload([coordinator], circuit_id="hvac_2")
 
     assert payload["lanes"]["needs_review"]["signature_ids"] == []
-    assert len(payload["lanes"]["needs_review"]["session_ids"]) == 3
-    assert payload["lane_counts"]["needs_review"] == 3
+    assert len(payload["lanes"]["needs_review"]["session_ids"]) == 1
+    assert payload["lane_counts"]["needs_review"] == 1
     pump = next(
         item for item in payload["signatures"] if item["signature_id"] == "on-pump"
     )
@@ -2671,6 +2671,25 @@ def test_nilm_workspace_ambiguous_session_is_not_assignable() -> None:
     assert "assign" not in payload.get("actions", {})
 
 
+def test_nilm_workspace_open_session_is_not_assignable() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_session_payload_with_actions,
+    )
+
+    payload = _nilm_session_payload_with_actions(
+        {
+            "session_id": "session-open",
+            "mains_circuit_id": "mains",
+            "signature_fingerprint": "direction=on|watts=800-900",
+            "start": "2026-08-11T12:00:00+00:00",
+            "end": None,
+            "ambiguous": False,
+        }
+    )
+
+    assert "assign" not in payload.get("actions", {})
+
+
 def test_nilm_workspace_lanes_review_only_assignable_unassigned_sessions() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         _nilm_workspace_lanes,
@@ -2681,7 +2700,16 @@ def test_nilm_workspace_lanes_review_only_assignable_unassigned_sessions() -> No
         signatures=[],
         label_intervals=[],
         sessions=[
-            {"session_id": "clean", "actions": {"assign": {}}},
+            {
+                "session_id": "clean",
+                "end": "2026-08-11T12:30:00+00:00",
+                "actions": {"assign": {}},
+            },
+            {
+                "session_id": "open",
+                "end": None,
+                "actions": {"assign": {}},
+            },
             {
                 "session_id": "ambiguous",
                 "ambiguous": True,
@@ -2842,7 +2870,7 @@ def test_nilm_workspace_hides_retired_and_reviews_unassigned_intervals() -> None
     assert lanes["hidden"]["assignment_ids"] == ["assignment-retired"]
 
 
-def test_nilm_workspace_lanes_include_actionable_unassigned_sessions() -> None:
+def test_nilm_workspace_lanes_include_only_completed_actionable_sessions() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         _nilm_workspace_lanes,
     )
@@ -2870,11 +2898,11 @@ def test_nilm_workspace_lanes_include_actionable_unassigned_sessions() -> None:
         ],
     )
 
-    assert lanes["needs_review"]["session_ids"] == ["open", "closed"]
+    assert lanes["needs_review"]["session_ids"] == ["closed"]
     assert sum(
         len(lanes["needs_review"][key])
         for key in ("assignment_ids", "signature_ids", "interval_ids", "session_ids")
-    ) == 2
+    ) == 1
 
 
 def test_nilm_workspace_lanes_sessions_replace_parent_signatures() -> None:
@@ -2895,6 +2923,7 @@ def test_nilm_workspace_lanes_sessions_replace_parent_signatures() -> None:
             {
                 "session_id": "session-pump",
                 "signature_fingerprint": "signature-pump",
+                "end": "2026-08-11T12:30:00+00:00",
                 "actions": {"assign": {}},
             }
         ],
@@ -2906,6 +2935,32 @@ def test_nilm_workspace_lanes_sessions_replace_parent_signatures() -> None:
         len(lanes["needs_review"][key])
         for key in ("assignment_ids", "signature_ids", "interval_ids", "session_ids")
     ) == 1
+
+
+def test_nilm_workspace_session_page_prioritizes_completed_sessions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_workspace_session_page,
+    )
+
+    open_sessions = [
+        {
+            "session_id": f"open-{index}",
+            "start": f"2026-08-11T{index:02d}:00:00+00:00",
+            "end": None,
+        }
+        for index in range(20)
+    ]
+    completed = {
+        "session_id": "completed",
+        "start": "2026-08-10T12:00:00+00:00",
+        "end": "2026-08-10T12:30:00+00:00",
+    }
+
+    page = _nilm_workspace_session_page([*open_sessions, completed], limit=20)
+
+    assert page[0]["session_id"] == "completed"
+    assert len(page) == 20
+    assert "open-0" not in {session["session_id"] for session in page}
 
 
 def test_nilm_workspace_exposes_configured_primary_lifecycle() -> None:
@@ -5861,10 +5916,9 @@ def test_nilm_workspace_payload_pairs_only_recent_bounded_edges() -> None:
         payload["edges"][-1]["timestamp"]
         == (recent_start + timedelta(minutes=30)).isoformat()
     )
-    assert (
-        payload["sessions"][-1]["end"]
-        == (recent_start + timedelta(minutes=30)).isoformat()
-    )
+    assert payload["sessions"][0]["end"] == (
+        recent_start + timedelta(minutes=30)
+    ).isoformat()
 
 
 def test_nilm_workspace_history_rows_are_capped() -> None:
