@@ -9440,9 +9440,13 @@ def test_nilm_processor_coverage_is_component_and_window_specific() -> None:
 
     def row(name: str, owner: str, age: int, **extra: object) -> dict[str, object]:
         start = now - timedelta(days=age, hours=1)
-        return {"session_id": name, "signature_id": owner,
-                "signature_fingerprint": owner, "start": start.isoformat(),
-                "end": (start + timedelta(minutes=30)).isoformat(), **extra}
+        return {
+            "session_id": name,
+            "signature_fingerprint": owner,
+            "start": start.isoformat(),
+            "end": (start + timedelta(minutes=30)).isoformat(),
+            **extra,
+        }
 
     def by_signature(value: dict[str, object]) -> dict[str, dict[str, object]]:
         return {str(item["on_signature_id"]): item for item in value["unknown_loads"]}  # type: ignore[index]
@@ -9460,7 +9464,7 @@ def test_nilm_processor_coverage_is_component_and_window_specific() -> None:
     isolated = by_signature(run([
         row("a-old", "on-a", 31), row("b-old", "on-b", 31),
         {
-            "session_id": "bad-a", "signature_id": "on-a",
+            "session_id": "bad-a",
             "signature_fingerprint": "on-a", "start": "bad", "end": "bad",
         },
         {
@@ -9475,9 +9479,9 @@ def test_nilm_processor_coverage_is_component_and_window_specific() -> None:
         row("a-old", "on-a", 31), row("b-old", "on-b", 31),
         {
             "session_id": "recent-malformed-a",
-            "signature_id": "on-a",
+            "signature_fingerprint": "on-a",
             "start": (now - timedelta(hours=1)).isoformat(),
-            "end": (now - timedelta(minutes=30)).isoformat(),
+            "end": "bad",
         },
     ]))
     assert recent_exclusion["on-a"]["estimate_status_by_window"] == {
@@ -9488,7 +9492,8 @@ def test_nilm_processor_coverage_is_component_and_window_specific() -> None:
     assert recent_exclusion["on-b"]["estimate_status"] == "complete"
     ambiguous = by_signature(run([
         row("a-old", "on-a", 31), row("b-old", "on-b", 31),
-        row("both", "on-a", 1, on_signature_id="on-b"),
+        row("both-a", "on-a", 1, on_edge_id="shared-edge"),
+        row("both-b", "on-b", 1, on_edge_id="shared-edge"),
     ]))
     for signature_id in ("on-a", "on-b"):
         assert ambiguous[signature_id]["estimate_status_by_window"] == {
@@ -9498,7 +9503,8 @@ def test_nilm_processor_coverage_is_component_and_window_specific() -> None:
         }
     expired_ambiguity = by_signature(run([
         row("a-old", "on-a", 32), row("b-old", "on-b", 32),
-        row("both-expired", "on-a", 31, on_signature_id="on-b"),
+        row("both-expired-a", "on-a", 31, on_edge_id="shared-edge"),
+        row("both-expired-b", "on-b", 31, on_edge_id="shared-edge"),
     ]))
     for signature_id in ("on-a", "on-b"):
         assert expired_ambiguity[signature_id]["estimate_status_by_window"] == {
@@ -9510,9 +9516,10 @@ def test_nilm_processor_coverage_is_component_and_window_specific() -> None:
         row("a-covered", "on-a", 32), row("b-covered", "on-b", 32),
         {
             "session_id": "spanning-open-exclusion-a",
-            "signature_id": "on-a",
+            "signature_fingerprint": "on-a",
             "start": (now - timedelta(days=31)).isoformat(),
             "end": None,
+            "known_load_masked": True,
         },
     ]))
     assert spanning_open_exclusion["on-a"]["estimate_status_by_window"] == {
@@ -9652,7 +9659,10 @@ def test_nilm_processor_process_ignores_expired_component_exclusions() -> None:
     assert store.nilm_unknown_loads_by_circuit["mains"] == snapshot
 
 
-def test_nilm_processor_retains_persisted_truncation_coverage_after_restart() -> None:
+@pytest.mark.parametrize("was_truncated", (True, "true"))
+def test_nilm_processor_retains_persisted_truncation_coverage_after_restart(
+    was_truncated: object,
+) -> None:
     """A restarted processor must not recast a capped store as complete history."""
     from collections import defaultdict
 
@@ -9673,7 +9683,7 @@ def test_nilm_processor_retains_persisted_truncation_coverage_after_restart() ->
                     "configured_max_items": 2,
                     "source_count_before_retention": 5,
                     "retained_count": 2,
-                    "was_truncated": True,
+                    "was_truncated": was_truncated,
                     "dropped_count": 3,
                     "oldest_retained_at": "2026-08-08T00:00:00+00:00",
                     "newest_retained_at": "2026-08-10T00:00:00+00:00",
@@ -9709,7 +9719,7 @@ def test_nilm_processor_retains_persisted_truncation_coverage_after_restart() ->
         circuit_id="mains", name="Mains", appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
     )
-    restarted.process(
+    first = restarted.process(
         NormalizedCircuitSample(
             timestamp=context.now, circuit_id="mains", real_power=0.0,
             current=None, voltage=None, reactive_power=None, apparent_power=None,
@@ -9729,6 +9739,34 @@ def test_nilm_processor_retains_persisted_truncation_coverage_after_restart() ->
             newest_retained_at=datetime(2026, 8, 10, 0, 30, tzinfo=UTC),
         )
     )
+    normalized = store.nilm_unknown_loads_by_circuit["mains"][
+        "session_history_coverage"
+    ]
+    assert normalized["source_count_before_retention"] == (
+        normalized["retained_count"] + normalized["dropped_count"]
+    )
+    assert normalized["was_truncated"] is True
+    assert normalized["_retention_identity_components_complete"] is False
+    assert first.store_dirty
+
+    second = restarted.process(
+        NormalizedCircuitSample(
+            timestamp=context.now,
+            circuit_id="mains",
+            real_power=0.0,
+            current=None,
+            voltage=None,
+            reactive_power=None,
+            apparent_power=None,
+            power_factor=None,
+            frequency=None,
+            energy=None,
+        ),
+        config,
+        context,
+        events=(),
+    )
+    assert not second.store_dirty
 
 
 @pytest.mark.parametrize(
@@ -10390,6 +10428,303 @@ def test_nilm_processor_bounds_direct_history_before_all_consumers(
     assert coverage["_retention_identity_components_complete"] is False
 
 
+def test_nilm_processor_projects_direct_history_before_snapshot() -> None:
+    """A direct retained row cannot carry nested input into inventory snapshots."""
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+
+    class ForbiddenNestedValue:
+        def __repr__(self) -> str:
+            raise AssertionError("raw nested value reached the snapshot")
+
+    nested: object = ForbiddenNestedValue()
+    for _ in range(65):
+        nested = {"next": nested}
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    store = FeatureStoreData(
+        nilm_session_history_by_circuit={
+            "mains": [
+                {
+                    "session_id": "session-a",
+                    "mains_circuit_id": "mains",
+                    "signature_fingerprint": "revision=2|load-a",
+                    "on_edge_id": "on-a",
+                    "off_edge_id": None,
+                    "start": now.isoformat(),
+                    "end": None,
+                    "duration_seconds": None,
+                    "median_power_w": 400.0,
+                    "estimated_energy_kwh": 0.0,
+                    "confidence": 0.7,
+                    "overlap_count": 0,
+                    "ambiguous": False,
+                    "alternate_match_count": 0,
+                    "known_load_masked": False,
+                    "known_load_confidence": None,
+                    "assignment_id": None,
+                    "on_delta_w": 400.0,
+                    "off_delta_w": None,
+                    "on_delta_var": 20.0,
+                    "off_delta_var": None,
+                    "plateau_power_w": None,
+                    "measured_energy_kwh": None,
+                    "power_coverage": None,
+                    "intermediate_transition_count": 0,
+                    "raw_nested": {
+                        "deep": nested,
+                        "huge": [ForbiddenNestedValue()] * 20_000,
+                    },
+                }
+            ]
+        }
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _: True,
+        seed_demo_nilm_state=lambda *_: None,
+        min_delta_w_for_circuit=lambda _: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda *_: (),
+        observe_topology=lambda *_: [],
+    )
+
+    processor._bound_session_history_ingress("mains", store)
+    snapshot = processor._inventory_context(
+        "mains",
+        store,
+        existing_inventory={},
+        now=now,
+        time_zone="UTC",
+    )
+
+    assert snapshot
+    row = store.nilm_session_history_by_circuit["mains"][0]
+    assert "raw_nested" not in row
+    assert set(row) == {
+        "session_id",
+        "mains_circuit_id",
+        "signature_fingerprint",
+        "on_edge_id",
+        "off_edge_id",
+        "start",
+        "end",
+        "duration_seconds",
+        "median_power_w",
+        "estimated_energy_kwh",
+        "confidence",
+        "overlap_count",
+        "ambiguous",
+        "alternate_match_count",
+        "known_load_masked",
+        "known_load_confidence",
+        "assignment_id",
+        "on_delta_w",
+        "off_delta_w",
+        "on_delta_var",
+        "off_delta_var",
+        "plateau_power_w",
+        "measured_energy_kwh",
+        "power_coverage",
+        "intermediate_transition_count",
+    }
+
+
+def test_nilm_processor_rejects_out_of_range_timestamp_before_inventory_math() -> None:
+    """A persisted max datetime cannot overflow bounded window calculations."""
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    store = FeatureStoreData(
+        nilm_session_history_by_circuit={
+            "mains": [
+                {
+                    "session_id": "out-of-range",
+                    "signature_fingerprint": "signature-a",
+                    "start": now.isoformat(),
+                    "end": datetime.max.replace(tzinfo=UTC),
+                }
+            ]
+        }
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _: True,
+        seed_demo_nilm_state=lambda *_: None,
+        min_delta_w_for_circuit=lambda _: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda *_: (),
+        observe_topology=lambda *_: [],
+    )
+
+    processor._bound_session_history_ingress("mains", store)
+    context = processor._inventory_context(
+        "mains",
+        store,
+        existing_inventory={},
+        now=now,
+        time_zone="UTC",
+    )
+
+    assert context
+    assert "end" not in store.nilm_session_history_by_circuit["mains"][0]
+    assert (
+        processor._session_history_ingress_by_circuit["mains"].invalid_timestamp_count
+        == 1
+    )
+
+
+def test_nilm_processor_enforces_the_global_2000_row_history_cap() -> None:
+    """A caller cannot raise the fixed ingress bound above the public cap."""
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+
+    store = FeatureStoreData(
+        nilm_session_history_by_circuit={
+            "mains": [
+                {"session_id": f"session-{index}"}
+                for index in range(2_001)
+            ]
+        }
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _: True,
+        seed_demo_nilm_state=lambda *_: None,
+        min_delta_w_for_circuit=lambda _: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda *_: (),
+        observe_topology=lambda *_: [],
+        session_history_max_items=20_000,
+    )
+
+    facts = processor._bound_session_history_ingress("mains", store)
+
+    assert len(store.nilm_session_history_by_circuit["mains"]) == 2_000
+    assert facts.source_count_before_ingress == 2_001
+    assert facts.was_truncated is True
+
+
+def test_nilm_processor_saturates_untrusted_ingress_counts_before_coverage() -> None:
+    """Persisted ingress counters cannot exceed the scalar coverage contract."""
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.unknown_loads import (
+        NILM_SESSION_HISTORY_COUNT_MAX,
+    )
+
+    store = FeatureStoreData(
+        nilm_session_history_by_circuit={"mains": [{"session_id": "session-a"}]},
+        nilm_session_history_ingress_by_circuit={
+            "mains": {
+                "source_count_before_ingress": NILM_SESSION_HISTORY_COUNT_MAX + 1,
+                "was_truncated": True,
+                "identity_aliases_complete": False,
+                "invalid_alias_count": 0,
+            }
+        },
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _: True,
+        seed_demo_nilm_state=lambda *_: None,
+        min_delta_w_for_circuit=lambda _: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda *_: (),
+        observe_topology=lambda *_: [],
+    )
+
+    facts = processor._bound_session_history_ingress("mains", store)
+
+    assert facts.source_count_before_ingress == NILM_SESSION_HISTORY_COUNT_MAX
+
+
+def test_nilm_duration_reopen_uses_bounded_shared_id_and_restores_alias() -> None:
+    """Duration reopening shares the ID contract and retains its legacy close ID."""
+    from custom_components.circuitsetup_energy_analyzer import nilm as nilm_domain
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _reconcile_nilm_session_duration_bounds,
+    )
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    fingerprint = "revision=2|" + ("fingerprint-segment|" * 12)
+    on_edge_id = "on|" + ("edge-segment|" * 12)
+    legacy_closed_id = "legacy|closed|session"
+    assignment = {
+        "assignment_id": "dryer",
+        "max_duration_seconds": 60.0,
+        "rejected_session_ids": [legacy_closed_id],
+    }
+    closed = {
+        "session_id": legacy_closed_id,
+        "mains_circuit_id": "mains",
+        "signature_fingerprint": fingerprint,
+        "assignment_id": "dryer",
+        "on_edge_id": on_edge_id,
+        "off_edge_id": "off-edge",
+        "start": now.isoformat(),
+        "end": (now + timedelta(minutes=5)).isoformat(),
+        "duration_seconds": 300.0,
+        "estimated_energy_kwh": 0.5,
+        "confidence": 0.8,
+        "ambiguous": False,
+        "alternate_match_count": 0,
+    }
+
+    reopened = _reconcile_nilm_session_duration_bounds(
+        "mains", [closed], [assignment]
+    )
+    expected_open_id = nilm_domain._nilm_session_id(
+        "mains", fingerprint, on_edge_id, None
+    )
+
+    assert reopened[0]["session_id"] == expected_open_id
+    assert len(expected_open_id) <= 256
+    assert len(expected_open_id.encode("utf-8")) <= 256
+    assert assignment["rejected_session_ids"] == [expected_open_id]
+    assert reopened[0]["_duration_bound_close"]["session_id"] == legacy_closed_id
+
+    assignment["max_duration_seconds"] = 600.0
+    restored = _reconcile_nilm_session_duration_bounds(
+        "mains", reopened, [assignment]
+    )
+    assert restored[0]["session_id"] == legacy_closed_id
+    assert assignment["rejected_session_ids"] == [legacy_closed_id]
+
+
+def test_nilm_duration_reopen_rejects_malformed_identity_inputs() -> None:
+    """Malformed persisted identity fields cannot create a generated session ID."""
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _reconcile_nilm_session_duration_bounds,
+    )
+
+    session = {
+        "session_id": "legacy-closed",
+        "signature_fingerprint": {"not": "a string"},
+        "on_edge_id": "on-edge",
+        "end": "2026-08-10T12:05:00+00:00",
+        "duration_seconds": 300.0,
+    }
+    reconciled = _reconcile_nilm_session_duration_bounds(
+        "mains", [session], [{"max_duration_seconds": 60.0}]
+    )
+
+    assert reconciled == [session]
+
+
 def test_nilm_processor_component_bridges_and_disjoint_novelty_are_stable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -10878,7 +11213,7 @@ def test_nilm_runtime_reconciles_overlapping_components_and_conserves_power() ->
     assert completed[0]["assignment_id"] == "blower"
     assert completed[0]["on_delta_w"] == 100.0
     assert completed[0]["off_delta_w"] == -100.0
-    assert completed[0]["energy_kwh"] == pytest.approx(
+    assert completed[0]["estimated_energy_kwh"] == pytest.approx(
         (200.0 * 100.0 / 180.0) * 10 / 3_600_000
     )
     assert second["allocated_power_w"] == 80.0
@@ -10968,7 +11303,8 @@ def test_nilm_runtime_attributes_pump_blower_and_combined_states() -> None:
     assert blower_sessions[0]["on_delta_var"] == 120.0
     assert blower_sessions[0]["off_delta_var"] == -120.0
     attributed = sum(
-        item["energy_kwh"] for item in (*pump_sessions, *blower_sessions)
+        item["estimated_energy_kwh"]
+        for item in (*pump_sessions, *blower_sessions)
     )
     assert attributed == pytest.approx(reconciliation["component_energy_kwh"])
     assert attributed <= reconciliation["source_energy_kwh"]
@@ -11533,10 +11869,10 @@ def test_nilm_runtime_duration_breaks_equal_stop_tie_from_session_age() -> None:
     assert reconciliation["ambiguous_event_count"] == 0
     assert reconciliation["duration_channel_available_count"] == 1
     assert reconciliation["duration_rank_impact_count"] == 1
-    assert completed[0]["accepted_predictions"][-1].get(
+    assert runtime["on-time"]["last_prediction"].get(
         "duration_changed_winner"
     ) is True
-    assert completed[0]["accepted_predictions"][-1].get(
+    assert runtime["on-time"]["last_prediction"].get(
         "duration_counterfactual_prototype_ids"
     ) == []
     assert reconciliation["score_decisions"] == [{
@@ -12024,7 +12360,7 @@ def test_nilm_runtime_diagnostics_distinguish_validation_unavailability(
     assert reconciliation["evidence_unavailable_reason_counts"][expected_reason] == 1
 
 
-def test_nilm_runtime_persists_bounded_prediction_provenance_on_completion() -> None:
+def test_nilm_runtime_projects_completion_to_public_scalars() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
         reconcile_component_runtime,
@@ -12121,20 +12457,25 @@ def test_nilm_runtime_persists_bounded_prediction_provenance_on_completion() -> 
     )
 
     session = completed[0]
-    assert session["start_prototype_id"] == "dryer:start:off->running"
-    assert session["stop_prototype_id"] == "dryer:stop:running->off"
-    assert session["start_model_revision"] == session["stop_model_revision"] == 7
-    assert [item["state_id"] for item in session["state_path"]] == ["running"]
-    assert [item["prototype_id"] for item in session["accepted_predictions"]] == [
-        "dryer:start:off->running",
-        "dryer:stop:running->off",
-    ]
+    assert session["median_power_w"] == 100.0
+    assert session["intermediate_transition_count"] == 0
+    assert not {
+        "start_prototype_id",
+        "stop_prototype_id",
+        "start_model_revision",
+        "stop_model_revision",
+        "state_path",
+        "accepted_predictions",
+    }.intersection(session)
     assert runtime["dryer"]["last_stop"] == stopped_at.isoformat()
+    assert runtime["dryer"]["last_prediction"]["prototype_id"] == (
+        "dryer:stop:running->off"
+    )
     assert runtime["dryer"]["state_path"] == []
     assert runtime["dryer"]["accepted_predictions"] == []
 
 
-def test_nilm_runtime_stop_then_start_keeps_each_session_provenance() -> None:
+def test_nilm_runtime_stop_then_start_keeps_provenance_out_of_completion() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
         reconcile_component_runtime,
@@ -12203,8 +12544,12 @@ def test_nilm_runtime_stop_then_start_keeps_each_session_provenance() -> None:
     assert len(accepted) == 2
     assert completed[0]["session_id"] == "old-session"
     assert completed[0]["start"] == old_start.isoformat()
-    assert completed[0]["start_prototype_id"] == "dryer-start-v6"
-    assert completed[0]["stop_prototype_id"] == "dryer:stop:running->off"
+    assert not {
+        "start_prototype_id",
+        "stop_prototype_id",
+        "accepted_predictions",
+        "state_path",
+    }.intersection(completed[0])
     assert runtime["dryer"]["status"] == "on"
     assert runtime["dryer"]["session_start"] == restart_at.isoformat()
     assert runtime["dryer"]["start_prediction"]["prototype_id"] == (
@@ -12282,21 +12627,15 @@ def test_nilm_runtime_keeps_one_session_through_active_state_changes() -> None:
     session = completed[0]
     assert session["on_delta_w"] == 100.0
     assert session["off_delta_w"] == -100.0
-    assert [item["state_id"] for item in session["state_path"]] == [
-        "active_1", "active_2", "active_1",
-    ]
-    assert [item["started_at"] for item in session["state_path"]] == [
-        started_at.isoformat(), raised_at.isoformat(), lowered_at.isoformat(),
-    ]
-    assert [item["power_w"] for item in session["state_path"]] == [
-        100.0, 200.0, 100.0,
-    ]
-    assert session["state_dwell_seconds"] == {
-        "active_1": 120.0,
-        "active_2": 60.0,
-    }
-    assert session["time_weighted_mean_power_w"] == pytest.approx(133.333)
-    assert session["time_weighted_median_power_w"] == 100.0
+    assert session["duration_seconds"] == 180.0
+    assert session["median_power_w"] == 100.0
+    assert session["intermediate_transition_count"] == 2
+    assert not {
+        "state_path",
+        "state_dwell_seconds",
+        "time_weighted_mean_power_w",
+        "time_weighted_median_power_w",
+    }.intersection(session)
 
 
 def test_nilm_runtime_rejects_transition_from_a_different_active_state_id() -> None:
@@ -12486,9 +12825,9 @@ def test_nilm_runtime_bootstraps_reviewable_active_state_path_from_observed_edge
     )
 
     assert accepted
-    assert [item["state_id"] for item in completed[0]["state_path"]] == [
-        "active_1", "active_2"
-    ]
+    assert completed[0]["median_power_w"] == 100.0
+    assert completed[0]["intermediate_transition_count"] == 1
+    assert "state_path" not in completed[0]
 
 
 def test_nilm_runtime_keeps_full_dwell_summary_when_state_path_is_bounded() -> None:
@@ -12567,12 +12906,13 @@ def test_nilm_runtime_keeps_full_dwell_summary_when_state_path_is_bounded() -> N
 
     assert accepted
     assert len(completed) == 1
-    assert len(completed[0]["state_path"]) == 12
-    assert completed[0]["state_dwell_seconds"] == {
-        "active_1": 420.0,
-        "active_2": 420.0,
-    }
-    assert completed[0]["time_weighted_mean_power_w"] == 150.0
+    assert completed[0]["median_power_w"] == 100.0
+    assert completed[0]["intermediate_transition_count"] == 11
+    assert not {
+        "state_path",
+        "state_dwell_seconds",
+        "time_weighted_mean_power_w",
+    }.intersection(completed[0])
 
 
 def test_nilm_source_unavailable_preserves_metrics_and_counts_input_edge() -> None:
@@ -13730,8 +14070,8 @@ def test_direct_component_uses_prior_power_and_closes_once() -> None:
     assert runtime["pump"]["status"] == "off"
     assert completed[0]["on_delta_w"] == 60.0
     assert completed[0]["off_delta_w"] == -60.0
-    assert completed[0]["energy_kwh"] == 0.0
-    assert completed[0]["helper_evidence"][0]["relationship"] == "direct_component"
+    assert completed[0]["estimated_energy_kwh"] == 0.0
+    assert "helper_evidence" not in completed[0]
     assert runtime["pump"]["session_id"] is None
     assert runtime["pump"]["session_start"] is None
 
@@ -13789,10 +14129,12 @@ def test_direct_component_clears_stale_nilm_prediction_provenance() -> None:
         direct_helper_powers={"meter": 0.0},
     )
 
-    assert completed[0]["start_prototype_id"] is None
-    assert completed[0]["stop_prototype_id"] is None
-    assert completed[0]["accepted_predictions"] == []
-    assert completed[0]["state_path"] == []
+    assert not {
+        "start_prototype_id",
+        "stop_prototype_id",
+        "accepted_predictions",
+        "state_path",
+    }.intersection(completed[0])
 
 
 def test_direct_component_takeover_clears_open_nilm_session_provenance() -> None:
@@ -13845,9 +14187,11 @@ def test_direct_component_takeover_clears_open_nilm_session_provenance() -> None
     )
 
     assert completed[0]["session_id"] == "legacy-nilm-session"
-    assert completed[0]["start_prototype_id"] is None
-    assert completed[0]["stop_prototype_id"] is None
-    assert completed[0]["accepted_predictions"] == []
+    assert not {
+        "start_prototype_id",
+        "stop_prototype_id",
+        "accepted_predictions",
+    }.intersection(completed[0])
 
 
 def test_completed_session_records_only_matched_corroborating_helper() -> None:
@@ -13884,6 +14228,7 @@ def test_completed_session_records_only_matched_corroborating_helper() -> None:
         available_helper_ids={"helper"},
     )
     assert runtime["load"]["status"] == "on"
+    assert runtime["load"]["helper_evidence"] == [assignment["helper_links"][0]]
     runtime, _, completed, _ = reconcile_component_runtime(
         source_power_w=100.0, timestamp=now + timedelta(seconds=60),
         assignments=(assignment,), runtime=runtime,
@@ -13896,7 +14241,7 @@ def test_completed_session_records_only_matched_corroborating_helper() -> None:
         available_helper_ids={"helper"},
     )
 
-    assert completed[0]["helper_evidence"] == [assignment["helper_links"][0]]
+    assert "helper_evidence" not in completed[0]
 
 
 def test_energy_interval_is_atomic_and_capped_to_source() -> None:

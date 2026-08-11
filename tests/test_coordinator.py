@@ -8339,6 +8339,7 @@ async def test_nilm_validation_reopens_stale_history_without_live_edges() -> Non
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
     )
+    from custom_components.circuitsetup_energy_analyzer.nilm import _nilm_session_id
 
     coordinator = EnergyAnalyzerCoordinator(
         SimpleNamespace(data={}),
@@ -8388,7 +8389,9 @@ async def test_nilm_validation_reopens_stale_history_without_live_edges() -> Non
         for session in coordinator.store_data.nilm_session_history_by_circuit["mains"]
         if session.get("on_edge_id") == "on-edge"
     )
-    assert reopened["session_id"] == "mains|signature_1|on-edge|open"
+    assert reopened["session_id"] == _nilm_session_id(
+        "mains", "signature_1", "on-edge", None
+    )
     assert reopened["end"] is None
     assert reopened["off_edge_id"] is None
     assert reopened["duration_seconds"] is None

@@ -24,6 +24,7 @@ from ..nilm import (
     NilmScoreBreakdown,
     NilmSignature,
     NilmTransitionPrototype,
+    _nilm_session_identity_id,
     _nilm_signature_edge_score,
     attribute_known_loads,
     build_nilm_validation_profile,
@@ -47,11 +48,16 @@ from ..nilm import (
 )
 from ..normalize import NormalizedCircuitSample
 from ..unknown_loads import (
+    _NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+    _NILM_SESSION_HISTORY_MAX_UNKNOWN_FIELDS,
+    NILM_SESSION_HISTORY_COUNT_MAX,
     NILM_SESSION_HISTORY_IDENTITY_MAX_ALIASES_PER_COMPONENT,
     NILM_SESSION_HISTORY_IDENTITY_MAX_COMPONENTS,
+    NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT,
     NilmSessionHistoryCoverage,
     _nilm_session_history_identity_alias,
     _nilm_session_history_identity_component_closure,
+    _nilm_session_history_text,
     _NilmSessionHistoryIdentityComponent,
     _sanitize_nilm_session_history_ingress,
     build_unknown_load_inventory,
@@ -84,6 +90,10 @@ class _NilmSessionHistoryIngressFacts:
     was_truncated: bool
     identity_aliases_complete: bool
     invalid_alias_count: int
+    unknown_field_count: int
+    invalid_scalar_count: int
+    invalid_timestamp_count: int
+    duration_bound_close_incomplete: bool
 
 
 def _nilm_stable_snapshot(value: Any) -> object:
@@ -263,7 +273,18 @@ class NilmSampleProcessor:
         self._helper_links_dirty = False
         self._observe_topology = observe_topology
         self._unmatched_edges_max_items = max(int(unmatched_edges_max_items), 0)
-        self._session_history_max_items = max(int(session_history_max_items), 0)
+        self._session_history_max_items = min(
+            max(
+                (
+                    session_history_max_items
+                    if isinstance(session_history_max_items, int)
+                    and not isinstance(session_history_max_items, bool)
+                    else 0
+                ),
+                0,
+            ),
+            NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT,
+        )
         self._helper_events_max_items = min(self._unmatched_edges_max_items, 512)
         self._hydrated_unmatched_edge_circuits: set[str] = set()
         self._evaluated_signature_circuits: set[str] = set()
@@ -771,21 +792,37 @@ class NilmSampleProcessor:
             histories.get(circuit_id, ()),
             max_source_rows=self._session_history_max_items,
         )
-        persisted_facts = getattr(
+        ingress_by_circuit = getattr(
             store_data, "nilm_session_history_ingress_by_circuit", {}
-        ).get(circuit_id, {})
+        )
+        persisted_facts = (
+            ingress_by_circuit.get(circuit_id, {})
+            if isinstance(ingress_by_circuit, Mapping)
+            else {}
+        )
+        if not isinstance(persisted_facts, Mapping):
+            persisted_facts = {}
         prior = self._session_history_ingress_by_circuit.get(circuit_id)
         source_count = max(
             len(rows),
-            _nonnegative_int(raw_facts.get("source_count_before_ingress")),
-            _nonnegative_int(persisted_facts.get("source_count_before_ingress")),
-            prior.source_count_before_ingress if prior is not None else 0,
+            _bounded_ingress_count(
+                raw_facts.get("source_count_before_ingress"),
+                maximum=NILM_SESSION_HISTORY_COUNT_MAX,
+            ),
+            _bounded_ingress_count(
+                persisted_facts.get("source_count_before_ingress"),
+                maximum=NILM_SESSION_HISTORY_COUNT_MAX,
+            ),
+            _bounded_ingress_count(
+                prior.source_count_before_ingress if prior is not None else 0,
+                maximum=NILM_SESSION_HISTORY_COUNT_MAX,
+            ),
         )
         facts = _NilmSessionHistoryIngressFacts(
             source_count_before_ingress=source_count,
             was_truncated=(
-                bool(raw_facts.get("was_truncated"))
-                or bool(persisted_facts.get("was_truncated"))
+                raw_facts.get("was_truncated") is True
+                or persisted_facts.get("was_truncated") is True
                 or (prior.was_truncated if prior is not None else False)
                 or source_count > len(rows)
             ),
@@ -798,9 +835,57 @@ class NilmSampleProcessor:
                 and (prior is None or prior.identity_aliases_complete)
             ),
             invalid_alias_count=max(
-                _nonnegative_int(raw_facts.get("invalid_alias_count")),
-                _nonnegative_int(persisted_facts.get("invalid_alias_count")),
+                _bounded_ingress_count(
+                    raw_facts.get("invalid_alias_count"),
+                    maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+                ),
+                _bounded_ingress_count(
+                    persisted_facts.get("invalid_alias_count"),
+                    maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+                ),
                 prior.invalid_alias_count if prior is not None else 0,
+            ),
+            unknown_field_count=max(
+                _bounded_ingress_count(
+                    raw_facts.get("unknown_field_count"),
+                    maximum=_NILM_SESSION_HISTORY_MAX_UNKNOWN_FIELDS,
+                ),
+                _bounded_ingress_count(
+                    persisted_facts.get("unknown_field_count"),
+                    maximum=_NILM_SESSION_HISTORY_MAX_UNKNOWN_FIELDS,
+                ),
+                prior.unknown_field_count if prior is not None else 0,
+            ),
+            invalid_scalar_count=max(
+                _bounded_ingress_count(
+                    raw_facts.get("invalid_scalar_count"),
+                    maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+                ),
+                _bounded_ingress_count(
+                    persisted_facts.get("invalid_scalar_count"),
+                    maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+                ),
+                prior.invalid_scalar_count if prior is not None else 0,
+            ),
+            invalid_timestamp_count=max(
+                _bounded_ingress_count(
+                    raw_facts.get("invalid_timestamp_count"),
+                    maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+                ),
+                _bounded_ingress_count(
+                    persisted_facts.get("invalid_timestamp_count"),
+                    maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+                ),
+                prior.invalid_timestamp_count if prior is not None else 0,
+            ),
+            duration_bound_close_incomplete=(
+                raw_facts.get("duration_bound_close_incomplete") is True
+                or persisted_facts.get("duration_bound_close_incomplete") is True
+                or (
+                    prior.duration_bound_close_incomplete
+                    if prior is not None
+                    else False
+                )
             ),
         )
         histories[circuit_id] = rows
@@ -814,6 +899,12 @@ class NilmSampleProcessor:
                 "was_truncated": facts.was_truncated,
                 "identity_aliases_complete": facts.identity_aliases_complete,
                 "invalid_alias_count": facts.invalid_alias_count,
+                "unknown_field_count": facts.unknown_field_count,
+                "invalid_scalar_count": facts.invalid_scalar_count,
+                "invalid_timestamp_count": facts.invalid_timestamp_count,
+                "duration_bound_close_incomplete": (
+                    facts.duration_bound_close_incomplete
+                ),
             }
         self._session_history_ingress_by_circuit[circuit_id] = facts
         return facts
@@ -2965,89 +3056,53 @@ def _completed_runtime_session(
     assignment = next(
         item for item in assignments if item.get("assignment_id") == assignment_id
     )
-    predictions = [
-        dict(item)
-        for item in _list_items(runtime.get("accepted_predictions"))
-        if isinstance(item, Mapping)
-    ][-_NILM_RUNTIME_PREDICTION_LIMIT:]
     state_path = [
         dict(item)
         for item in _list_items(runtime.get("state_path"))
         if isinstance(item, Mapping)
     ][-_NILM_RUNTIME_STATE_PATH_LIMIT:]
-    start_prediction = (
-        dict(runtime["start_prediction"])
-        if isinstance(runtime.get("start_prediction"), Mapping)
-        else None
-    )
-    stop_prediction = predictions[-1] if predictions else None
-    dwell_seconds, mean_power_w, median_power_w = _runtime_state_path_summary(
+    _, mean_power_w, median_power_w = _runtime_state_path_summary(
         state_path,
         runtime.get("session_start"),
         edge.timestamp,
         runtime.get("state_dwell_seconds"),
         runtime.get("state_dwell_power_w"),
     )
+    started_at = _runtime_datetime(runtime.get("session_start"))
+    duration_seconds = (
+        max((edge.timestamp - started_at).total_seconds(), 0.0)
+        if started_at is not None
+        else None
+    )
+    canonical_power_w = (
+        median_power_w
+        if median_power_w is not None
+        else mean_power_w
+        if mean_power_w is not None
+        else abs(_finite_float(runtime.get("on_delta_w")) or transition.delta_w)
+    )
     return {
         "session_id": runtime.get("session_id"),
         "assignment_id": assignment_id,
         "start": runtime.get("session_start"),
         "end": edge.timestamp.isoformat(),
+        "duration_seconds": duration_seconds,
+        "median_power_w": canonical_power_w,
+        "estimated_energy_kwh": _finite_float(runtime.get("energy_kwh")) or 0.0,
+        "overlap_count": 0,
+        "ambiguous": False,
+        "alternate_match_count": 0,
+        "known_load_masked": False,
+        "known_load_confidence": None,
         "on_delta_w": runtime.get("on_delta_w"),
         "off_delta_w": transition.delta_w,
         "on_delta_var": runtime.get("on_delta_var"),
         "off_delta_var": edge.delta_var,
-        "energy_kwh": _finite_float(runtime.get("energy_kwh")) or 0.0,
         "confidence": min(
             _finite_float(runtime.get("confidence")) or 0.0,
             _finite_float(assignment.get("model_confidence")) or 0.0,
         ),
-        "helper_evidence": [
-            *(
-                dict(link)
-                for link in _list_items(assignment.get("helper_links"))
-                if isinstance(link, Mapping)
-                and link.get("status") == "confirmed"
-                and link.get("relationship") == "direct_component"
-            ),
-            *(
-                dict(link)
-                for link in _list_items(runtime.get("helper_evidence"))
-                if isinstance(link, Mapping)
-            ),
-        ],
-        "start_prototype_id": (
-            start_prediction.get("prototype_id") if start_prediction else None
-        ),
-        "stop_prototype_id": (
-            stop_prediction.get("prototype_id") if stop_prediction else None
-        ),
-        "start_model_revision": (
-            start_prediction.get("model_revision") if start_prediction else None
-        ),
-        "stop_model_revision": (
-            stop_prediction.get("model_revision") if stop_prediction else None
-        ),
-        "start_model_schema_version": (
-            start_prediction.get("model_schema_version")
-            if start_prediction
-            else None
-        ),
-        "stop_model_schema_version": (
-            stop_prediction.get("model_schema_version") if stop_prediction else None
-        ),
-        "start_model_fingerprint": (
-            start_prediction.get("model_fingerprint") if start_prediction else None
-        ),
-        "stop_model_fingerprint": (
-            stop_prediction.get("model_fingerprint") if stop_prediction else None
-        ),
-        "accepted_predictions": predictions,
-        "state_path": state_path,
-        "state_dwell_seconds": dwell_seconds,
-        "time_weighted_mean_power_w": mean_power_w,
-        "time_weighted_median_power_w": median_power_w,
-        "consistent": True,
+        "intermediate_transition_count": max(len(state_path) - 1, 0),
     }
 
 
@@ -3460,6 +3515,14 @@ def _refresh_confirmed_helper_links(
 def _nonnegative_int(value: Any) -> int:
     parsed = _optional_float(value)
     return int(parsed) if parsed is not None and isfinite(parsed) and parsed > 0 else 0
+
+
+def _bounded_ingress_count(value: Any, *, maximum: int) -> int:
+    """Read only internally shaped, capped ingress diagnostics."""
+
+    if not isinstance(value, int) or isinstance(value, bool):
+        return 0
+    return min(max(value, 0), maximum)
 
 
 def _clamped_confidence(value: Any) -> float:
@@ -3958,9 +4021,12 @@ def _nilm_session_history_coverage(
                 )
             except (TypeError, ValueError, OverflowError):
                 continue
-    source_count = max(
-        len(session_list),
-        ingress.source_count_before_ingress if ingress is not None else 0,
+    source_count = min(
+        NILM_SESSION_HISTORY_COUNT_MAX,
+        max(
+            len(session_list),
+            ingress.source_count_before_ingress if ingress is not None else 0,
+        ),
     )
     retained_count = len(retained)
     retained_identities = {
@@ -4110,9 +4176,12 @@ def _merge_nilm_session_history_coverage(
         persisted.retained_count,
         len(prior_list),
     )
-    source_count = max(
-        current.source_count_before_retention,
-        historical_source_count + new_identity_count,
+    source_count = min(
+        NILM_SESSION_HISTORY_COUNT_MAX,
+        max(
+            current.source_count_before_retention,
+            historical_source_count + new_identity_count,
+        ),
     )
     retained_count = current.retained_count
     ledger_components: list[_NilmSessionHistoryIdentityComponent] = [
@@ -4187,7 +4256,9 @@ def _reconcile_nilm_session_duration_bounds(
             (minimum is not None and duration < minimum)
             or (maximum is not None and duration > maximum)
         )
-        fingerprint = str(payload.get("signature_fingerprint") or "").strip()
+        fingerprint = _nilm_session_history_text(
+            payload.get("signature_fingerprint")
+        )
         on_edge_alias = _nilm_session_history_identity_alias(
             "on_edge", payload.get("on_edge_id")
         )
@@ -4196,7 +4267,7 @@ def _reconcile_nilm_session_duration_bounds(
         if (
             payload.get("end") is not None
             and outside_bounds
-            and fingerprint
+            and fingerprint is not None
             and on_edge_id
         ):
             closed_session_alias = _nilm_session_history_identity_alias(
@@ -4207,9 +4278,22 @@ def _reconcile_nilm_session_duration_bounds(
                 if closed_session_alias is not None
                 else ""
             )
-            open_session_id = "|".join(
-                (circuit_id, fingerprint, on_edge_id, "open")
+            open_session_id = _nilm_session_identity_id(
+                circuit_id,
+                fingerprint,
+                on_edge_id,
+                None,
             )
+            if open_session_id is None:
+                reconciled.append(payload)
+                continue
+            alternate_match_count = payload.get("alternate_match_count")
+            if (
+                not isinstance(alternate_match_count, int)
+                or isinstance(alternate_match_count, bool)
+                or not 0 <= alternate_match_count <= NILM_SESSION_HISTORY_COUNT_MAX
+            ):
+                alternate_match_count = 0
             payload["_duration_bound_close"] = {
                 key: payload.get(key)
                 for key in (
@@ -4219,10 +4303,14 @@ def _reconcile_nilm_session_duration_bounds(
                     "duration_seconds",
                     "estimated_energy_kwh",
                     "confidence",
-                    "ambiguous",
-                    "alternate_match_count",
                 )
             }
+            payload["_duration_bound_close"].update(
+                {
+                    "ambiguous": payload.get("ambiguous") is True,
+                    "alternate_match_count": alternate_match_count,
+                }
+            )
             _replace_nilm_assignment_rejection(
                 assignment,
                 old_session_id=closed_session_id,

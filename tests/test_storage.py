@@ -1244,6 +1244,182 @@ def test_feature_store_bounds_nilm_session_history_during_deserialization() -> N
     assert ingress["identity_aliases_complete"] is False
 
 
+def test_feature_store_rejects_non_utf8_session_scalars_without_raising() -> None:
+    """A direct caller cannot make the ingress encoder throw on a surrogate."""
+
+    restored = feature_store_data_from_dict(
+        {
+            "nilm_session_history_by_circuit": {
+                "mains": [
+                    {
+                        "session_id": "\ud800",
+                        "mains_circuit_id": "\ud800",
+                        "signature_fingerprint": "\ud800",
+                        "on_edge_id": "\ud800",
+                        "start": "\ud800",
+                    }
+                ]
+            }
+        }
+    )
+
+    assert restored.nilm_session_history_by_circuit["mains"] == [{}]
+    assert restored.nilm_session_history_ingress_by_circuit["mains"][
+        "identity_aliases_complete"
+    ] is False
+
+
+def test_feature_store_projects_nilm_session_rows_to_canonical_scalars() -> None:
+    """Hydration keeps the supported serializer payload but drops raw nesting."""
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        NilmSession,
+        nilm_session_to_dict,
+    )
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    canonical = nilm_session_to_dict(
+        NilmSession(
+            session_id="session-a",
+            mains_circuit_id="mains",
+            signature_fingerprint="revision=2|load-a",
+            on_edge_id="on-a",
+            off_edge_id="off-a",
+            start=now,
+            end=now + timedelta(minutes=30),
+            duration_seconds=1800.0,
+            median_power_w=820.0,
+            estimated_energy_kwh=0.41,
+            confidence=0.8,
+            overlap_count=1,
+            ambiguous=False,
+            alternate_match_count=0,
+            known_load_masked=False,
+            known_load_confidence=0.9,
+            assignment_id="assignment-a",
+            on_delta_w=820.0,
+            off_delta_w=-820.0,
+            on_delta_var=20.0,
+            off_delta_var=-20.0,
+            plateau_power_w=800.0,
+            measured_energy_kwh=0.4,
+            power_coverage=0.95,
+            intermediate_transition_count=2,
+        )
+    )
+    forward = {
+        **canonical,
+        "raw_nested": {"items": ["unbounded", {"still": "raw"}]},
+        "raw_order_a": [1, 2, 3],
+    }
+    reverse = {
+        "raw_order_a": [1, 2, 3],
+        "raw_nested": {"items": ["unbounded", {"still": "raw"}]},
+        **canonical,
+    }
+
+    restored_forward = feature_store_data_from_dict(
+        {"nilm_session_history_by_circuit": {"mains": [forward]}}
+    )
+    restored_reverse = feature_store_data_from_dict(
+        {"nilm_session_history_by_circuit": {"mains": [reverse]}}
+    )
+
+    assert restored_forward.nilm_session_history_by_circuit["mains"] == [canonical]
+    assert restored_reverse.nilm_session_history_by_circuit["mains"] == [canonical]
+    assert list(restored_forward.nilm_session_history_by_circuit["mains"][0]) == list(
+        canonical
+    )
+    assert list(restored_reverse.nilm_session_history_by_circuit["mains"][0]) == list(
+        canonical
+    )
+    assert (
+        restored_forward.nilm_session_history_ingress_by_circuit["mains"][
+            "unknown_field_count"
+        ]
+        == 2
+    )
+
+
+def test_feature_store_migrates_legacy_session_energy_to_public_scalar() -> None:
+    """Legacy runtime rows retain energy through the canonical public field."""
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    legacy = {
+        "session_id": "legacy-session-a",
+        "mains_circuit_id": "mains",
+        "signature_fingerprint": "signature-a",
+        "on_edge_id": "on-a",
+        "off_edge_id": "off-a",
+        "start": now.isoformat(),
+        "end": (now + timedelta(minutes=5)).isoformat(),
+        "energy_kwh": 0.125,
+        "confidence": 0.8,
+    }
+
+    restored = feature_store_data_from_dict(
+        {"nilm_session_history_by_circuit": {"mains": [legacy]}}
+    )
+
+    row = restored.nilm_session_history_by_circuit["mains"][0]
+    assert row["estimated_energy_kwh"] == pytest.approx(0.125)
+    assert "energy_kwh" not in row
+    assert "mains" not in restored.nilm_session_history_ingress_by_circuit
+
+
+def test_feature_store_keeps_only_complete_scalar_duration_close_records() -> None:
+    """Private duration restoration data is all-or-nothing at hydration."""
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    valid_close = {
+        "session_id": "closed-a",
+        "off_edge_id": "off-a",
+        "end": (now + timedelta(minutes=5)).isoformat(),
+        "duration_seconds": 300.0,
+        "estimated_energy_kwh": 0.5,
+        "confidence": 0.8,
+        "ambiguous": False,
+        "alternate_match_count": 0,
+    }
+    base = {
+        "mains_circuit_id": "mains",
+        "signature_fingerprint": "signature-a",
+        "start": now.isoformat(),
+    }
+    restored = feature_store_data_from_dict(
+        {
+            "nilm_session_history_by_circuit": {
+                "mains": [
+                    {
+                        **base,
+                        "session_id": "open-a",
+                        "_duration_bound_close": valid_close,
+                    },
+                    {
+                        **base,
+                        "session_id": "open-partial",
+                        "_duration_bound_close": {"session_id": "closed-partial"},
+                    },
+                    {
+                        **base,
+                        "session_id": "open-nested",
+                        "_duration_bound_close": {
+                            **valid_close,
+                            "end": {"not": "a scalar"},
+                        },
+                    },
+                ]
+            }
+        }
+    )
+
+    rows = restored.nilm_session_history_by_circuit["mains"]
+    assert rows[0]["_duration_bound_close"] == valid_close
+    assert "_duration_bound_close" not in rows[1]
+    assert "_duration_bound_close" not in rows[2]
+    assert restored.nilm_session_history_ingress_by_circuit["mains"][
+        "duration_bound_close_incomplete"
+    ] is True
+
+
 def test_feature_store_round_trips_nilm_appliance_assignments() -> None:
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     assignment = {
@@ -1277,7 +1453,7 @@ def test_feature_store_round_trips_nilm_appliance_assignments() -> None:
 
 
 def test_feature_store_round_trips_multistate_nilm_assignment_and_session() -> None:
-    """Generic NILM persistence retains bounded multi-state model/session fields."""
+    """Assignments retain models while session history keeps its public schema."""
     assignment = {
         "assignment_id": "assignment-dryer",
         "model_schema_version": 2,
@@ -1323,7 +1499,14 @@ def test_feature_store_round_trips_multistate_nilm_assignment_and_session() -> N
     restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
 
     assert restored.nilm_appliance_assignments_by_circuit == {"mains": [assignment]}
-    assert restored.nilm_session_history_by_circuit == {"mains": [session]}
+    assert restored.nilm_session_history_by_circuit == {
+        "mains": [
+            {
+                "session_id": "dryer-session",
+                "assignment_id": "assignment-dryer",
+            }
+        ]
+    }
 
 
 def test_feature_store_persists_canonical_nilm_identity_with_session_history() -> None:

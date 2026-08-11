@@ -3930,6 +3930,44 @@ def test_nilm_session_id_bounds_long_generated_identities_deterministically() ->
     assert len(first.encode("utf-8")) <= 256
 
 
+def test_nilm_session_id_uses_framed_identity_and_rejects_malformed_inputs() -> None:
+    """Session identity framing prevents delimiter collisions at every ID length."""
+
+    first = nilm_domain._nilm_session_id(
+        "mains", "signature|on-edge", "edge", "off-edge"
+    )
+    second = nilm_domain._nilm_session_id(
+        "mains", "signature", "on-edge|edge", "off-edge"
+    )
+    long_ascii = nilm_domain._nilm_session_id(
+        "mains", "a" * 256, "edge-a", None
+    )
+    long_multibyte = nilm_domain._nilm_session_id(
+        "mains", "é" * 128, "edge-b", None
+    )
+
+    assert first != second
+    assert first.startswith("nilm-session:v1:")
+    assert long_ascii.startswith("nilm-session:v1:sha256:")
+    assert long_multibyte.startswith("nilm-session:v1:sha256:")
+    assert len(long_ascii) <= 256
+    assert len(long_ascii.encode("utf-8")) <= 256
+    assert len(long_multibyte) <= 256
+    assert len(long_multibyte.encode("utf-8")) <= 256
+    assert (
+        nilm_domain._nilm_session_identity_id(  # type: ignore[attr-defined]
+            "mains", {"not": "a string"}, "edge", None
+        )
+        is None
+    )
+    assert (
+        nilm_domain._nilm_session_identity_id(  # type: ignore[attr-defined]
+            "mains", "\ud800", "edge", None
+        )
+        is None
+    )
+
+
 def test_session_pairing_handles_residual_edges_without_a_dominant_leg() -> None:
     sessions = pair_nilm_sessions_for_signatures(
         [

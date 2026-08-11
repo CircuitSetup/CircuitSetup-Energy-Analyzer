@@ -600,6 +600,70 @@ def test_complete_retention_identity_metadata_requires_component_per_drop() -> N
     assert getattr(coverage, "retention_identity_components_complete", None) is False
 
 
+def test_retention_coverage_scalar_contract_stays_conservative() -> None:
+    """Coercible flags and impossible numeric relationships prove no novelty."""
+
+    payload = {
+        "configured_max_items": 2,
+        "source_count_before_retention": 3,
+        "retained_count": 2,
+        "was_truncated": True,
+        "dropped_count": 1,
+        "oldest_retained_at": "2026-08-08T00:00:00+00:00",
+        "newest_retained_at": "2026-08-10T00:00:00+00:00",
+        "_retention_identity_components": [
+            [["session", "dropped-session"], ["on_edge", "dropped-edge"]],
+        ],
+        "_retention_identity_components_complete": True,
+    }
+
+    for malformed_flag in (0, 1, 2, "false", None, [], {}):
+        coverage = unknown_loads.nilm_session_history_coverage_from_payload(
+            {**payload, "was_truncated": malformed_flag}
+        )
+        assert coverage is not None
+        assert coverage.was_truncated is True
+        assert coverage.retention_identity_components_complete is False
+
+    for field, malformed_value in (
+        ("configured_max_items", True),
+        ("configured_max_items", 2_001),
+        ("source_count_before_retention", "3"),
+        ("retained_count", -1),
+        ("retained_count", 3),
+        ("dropped_count", 0),
+    ):
+        assert unknown_loads.nilm_session_history_coverage_from_payload(
+            {**payload, field: malformed_value}
+        ) is None
+
+
+def test_retention_coverage_serializer_emits_only_parser_valid_scalars() -> None:
+    """An impossible in-memory coverage record cannot serialize a false claim."""
+
+    payload = unknown_loads._coverage_to_payload(
+        NilmSessionHistoryCoverage(
+            configured_max_items=2_001,
+            source_count_before_retention=3,
+            retained_count=2,
+            was_truncated=False,
+            dropped_count=1,
+            oldest_retained_at=datetime(2026, 8, 10, tzinfo=UTC),
+            newest_retained_at=datetime(2026, 8, 9, tzinfo=UTC),
+        )
+    )
+    parsed = unknown_loads.nilm_session_history_coverage_from_payload(payload)
+
+    assert parsed is not None
+    assert type(payload["configured_max_items"]) is int
+    assert payload["configured_max_items"] <= 2_000
+    assert payload["source_count_before_retention"] == (
+        payload["retained_count"] + payload["dropped_count"]
+    )
+    assert payload["was_truncated"] is (payload["dropped_count"] > 0)
+    assert payload["_retention_identity_components_complete"] is False
+
+
 def test_session_coverage_payload_bounds_identity_metadata_deterministically() -> None:
     """Inventory serialization enforces the identity metadata output bound."""
 

@@ -7355,23 +7355,114 @@ def _optional_number_text(value: float | None) -> str:
     return "unknown" if value is None else f"{value:.3f}"
 
 
+NILM_SESSION_ID_MAX_CHARS = 256
+NILM_SESSION_ID_MAX_UTF8_BYTES = 256
+_NILM_SESSION_ID_INPUT_MAX_CHARS = 4_096
+_NILM_SESSION_ID_INPUT_MAX_UTF8_BYTES = 4_096
+_NILM_SESSION_ID_VERSION = "nilm-session:v1"
+
+
+def _nilm_session_identity_text(value: Any) -> str | None:
+    """Normalize one bounded ID part without coercing persisted values."""
+
+    if (
+        not isinstance(value, str)
+        or len(value) > _NILM_SESSION_ID_INPUT_MAX_CHARS
+    ):
+        return None
+    if not (normalized := value.strip()):
+        return None
+    if len(normalized) > _NILM_SESSION_ID_INPUT_MAX_CHARS:
+        return None
+    try:
+        encoded = normalized.encode("utf-8")
+    except UnicodeError:
+        return None
+    if len(encoded) > _NILM_SESSION_ID_INPUT_MAX_UTF8_BYTES:
+        return None
+    return normalized
+
+
+def _nilm_session_identity_frame(value: str) -> bytes:
+    """Frame one already-bounded UTF-8 field without delimiter ambiguity."""
+
+    encoded = value.encode("utf-8")
+    return len(encoded).to_bytes(2, "big") + encoded
+
+
+def _nilm_session_identity_id(
+    mains_circuit_id: Any,
+    signature_fingerprint: Any,
+    on_edge_id: Any,
+    off_edge_id: Any,
+) -> str | None:
+    """Return one framed, bounded NILM session ID or no identity on bad input.
+
+    The normal path emits a readable, length-framed v1 ID. The fixed-size v1
+    SHA-256 form protects the Home Assistant source-update path when otherwise
+    valid inputs would exceed either output cap.
+    """
+
+    mains = _nilm_session_identity_text(mains_circuit_id)
+    fingerprint = _nilm_session_identity_text(signature_fingerprint)
+    on_edge = _nilm_session_identity_text(on_edge_id)
+    if mains is None or fingerprint is None or on_edge is None:
+        return None
+    if off_edge_id is None:
+        off_edge = None
+    else:
+        off_edge = _nilm_session_identity_text(off_edge_id)
+        if off_edge is None:
+            return None
+
+    readable_fields = (
+        f"{len(mains.encode('utf-8'))}:{mains}",
+        f"{len(fingerprint.encode('utf-8'))}:{fingerprint}",
+        f"{len(on_edge.encode('utf-8'))}:{on_edge}",
+        (
+            "open"
+            if off_edge is None
+            else f"closed:{len(off_edge.encode('utf-8'))}:{off_edge}"
+        ),
+    )
+    readable = f"{_NILM_SESSION_ID_VERSION}:" + "|".join(readable_fields)
+    framed = b"nilm-session-id:v1\x00" + b"".join(
+        (
+            _nilm_session_identity_frame(mains),
+            _nilm_session_identity_frame(fingerprint),
+            _nilm_session_identity_frame(on_edge),
+            (
+                b"\x00"
+                if off_edge is None
+                else b"\x01" + _nilm_session_identity_frame(off_edge)
+            ),
+        )
+    )
+    if (
+        len(readable) <= NILM_SESSION_ID_MAX_CHARS
+        and len(readable.encode("utf-8")) <= NILM_SESSION_ID_MAX_UTF8_BYTES
+    ):
+        return readable
+    return f"{_NILM_SESSION_ID_VERSION}:sha256:{sha256(framed).hexdigest()}"
+
+
 def _nilm_session_id(
     mains_circuit_id: str,
     signature_fingerprint: str,
     on_edge_id: str,
     off_edge_id: str | None,
 ) -> str:
-    identity = "|".join(
-        (
-            str(mains_circuit_id),
-            str(signature_fingerprint),
-            on_edge_id,
-            off_edge_id or "open",
-        )
+    """Compatibility wrapper for trusted new-session construction."""
+
+    session_id = _nilm_session_identity_id(
+        mains_circuit_id,
+        signature_fingerprint,
+        on_edge_id,
+        off_edge_id,
     )
-    if len(identity) <= 256 and len(identity.encode("utf-8")) <= 256:
-        return identity
-    return f"nilm-session|{sha256(identity.encode('utf-8')).hexdigest()}"
+    if session_id is None:
+        raise ValueError("NILM session identity inputs must be strict strings")
+    return session_id
 
 
 def _clamp(value: float) -> float:

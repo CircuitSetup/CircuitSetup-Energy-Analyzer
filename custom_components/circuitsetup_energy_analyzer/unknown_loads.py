@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from itertools import islice
 from math import isfinite
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -32,7 +31,98 @@ NILM_SESSION_HISTORY_IDENTITY_MAX_COMPONENTS = (
 NILM_SESSION_HISTORY_IDENTITY_MAX_ALIASES_PER_COMPONENT = 2
 NILM_SESSION_HISTORY_IDENTITY_MAX_CHARS = 256
 NILM_SESSION_HISTORY_IDENTITY_MAX_UTF8_BYTES = 256
-_NILM_SESSION_HISTORY_MAX_FIELDS_PER_ROW = 64
+NILM_SESSION_HISTORY_TIMESTAMP_MAX_CHARS = 64
+NILM_SESSION_HISTORY_TIMESTAMP_MAX_UTF8_BYTES = 64
+NILM_SESSION_HISTORY_SCALAR_ABS_MAX = 1_000_000_000
+NILM_SESSION_HISTORY_COUNT_MAX = 1_000_000
+_NILM_SESSION_HISTORY_TIMESTAMP_LATEST = (
+    datetime.max - timedelta(days=30)
+).replace(tzinfo=UTC)
+_NILM_SESSION_HISTORY_MAX_ROW_FIELDS = 26
+_NILM_SESSION_HISTORY_MAX_UNKNOWN_FIELDS = (
+    NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT * 64
+)
+_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX = NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT
+_NILM_SESSION_HISTORY_MISSING = object()
+_NILM_SESSION_HISTORY_ROW_TEXT_FIELDS = (
+    "session_id",
+    "mains_circuit_id",
+    "signature_fingerprint",
+    "on_edge_id",
+    "off_edge_id",
+    "assignment_id",
+)
+_NILM_SESSION_HISTORY_ROW_TIMESTAMP_FIELDS = ("start", "end")
+_NILM_SESSION_HISTORY_ROW_NUMBER_FIELDS = (
+    "duration_seconds",
+    "median_power_w",
+    "estimated_energy_kwh",
+    "confidence",
+    "known_load_confidence",
+    "on_delta_w",
+    "off_delta_w",
+    "on_delta_var",
+    "off_delta_var",
+    "plateau_power_w",
+    "measured_energy_kwh",
+    "power_coverage",
+)
+_NILM_SESSION_HISTORY_ROW_COUNT_FIELDS = (
+    "overlap_count",
+    "alternate_match_count",
+    "intermediate_transition_count",
+)
+_NILM_SESSION_HISTORY_ROW_BOOLEAN_FIELDS = (
+    "ambiguous",
+    "known_load_masked",
+)
+_NILM_SESSION_HISTORY_LEGACY_ENERGY_FIELD = "energy_kwh"
+_NILM_SESSION_HISTORY_ROW_OUTPUT_FIELDS = (
+    "session_id",
+    "mains_circuit_id",
+    "signature_fingerprint",
+    "on_edge_id",
+    "off_edge_id",
+    "start",
+    "end",
+    "duration_seconds",
+    "median_power_w",
+    "estimated_energy_kwh",
+    "confidence",
+    "overlap_count",
+    "ambiguous",
+    "alternate_match_count",
+    "known_load_masked",
+    "known_load_confidence",
+    "assignment_id",
+    "on_delta_w",
+    "off_delta_w",
+    "on_delta_var",
+    "off_delta_var",
+    "plateau_power_w",
+    "measured_energy_kwh",
+    "power_coverage",
+    "intermediate_transition_count",
+)
+_NILM_SESSION_HISTORY_DURATION_CLOSE_FIELDS = (
+    "session_id",
+    "off_edge_id",
+    "end",
+    "duration_seconds",
+    "estimated_energy_kwh",
+    "confidence",
+    "ambiguous",
+    "alternate_match_count",
+)
+
+
+def _nilm_session_history_utf8_length(value: str) -> int | None:
+    """Return a safe UTF-8 length without letting malformed text escape ingress."""
+
+    try:
+        return len(value.encode("utf-8"))
+    except UnicodeError:
+        return None
 
 
 def _nilm_session_history_identity_alias(
@@ -51,12 +141,123 @@ def _nilm_session_history_identity_alias(
         return None
     if len(normalized) > NILM_SESSION_HISTORY_IDENTITY_MAX_CHARS:
         return None
+    utf8_length = _nilm_session_history_utf8_length(normalized)
     if (
-        len(normalized.encode("utf-8"))
-        > NILM_SESSION_HISTORY_IDENTITY_MAX_UTF8_BYTES
+        utf8_length is None
+        or utf8_length > NILM_SESSION_HISTORY_IDENTITY_MAX_UTF8_BYTES
     ):
         return None
     return kind, normalized
+
+
+def _nilm_session_history_text(value: Any) -> str | None:
+    """Normalize one bounded non-empty session scalar without coercion."""
+
+    if (
+        not isinstance(value, str)
+        or len(value) > NILM_SESSION_HISTORY_IDENTITY_MAX_CHARS
+    ):
+        return None
+    if not (normalized := value.strip()):
+        return None
+    if len(normalized) > NILM_SESSION_HISTORY_IDENTITY_MAX_CHARS:
+        return None
+    utf8_length = _nilm_session_history_utf8_length(normalized)
+    if (
+        utf8_length is None
+        or utf8_length > NILM_SESSION_HISTORY_IDENTITY_MAX_UTF8_BYTES
+    ):
+        return None
+    return normalized
+
+
+def _canonical_nilm_session_history_timestamp(value: Any) -> datetime | None:
+    """Return one bounded UTC timestamp suitable for session history."""
+
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str) and (
+        len(value) <= NILM_SESSION_HISTORY_TIMESTAMP_MAX_CHARS
+        and (
+            utf8_length := _nilm_session_history_utf8_length(value)
+        ) is not None
+        and utf8_length <= NILM_SESSION_HISTORY_TIMESTAMP_MAX_UTF8_BYTES
+    ):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except (TypeError, ValueError, OverflowError):
+            return None
+    else:
+        return None
+    try:
+        normalized = (
+            parsed.replace(tzinfo=UTC)
+            if parsed.tzinfo is None
+            else parsed.astimezone(UTC)
+        )
+        return (
+            normalized
+            if normalized <= _NILM_SESSION_HISTORY_TIMESTAMP_LATEST
+            else None
+        )
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _nilm_session_history_number(
+    value: Any,
+    *,
+    unit_interval: bool = False,
+) -> float | None:
+    """Read one finite bounded session scalar without bool or coercion."""
+
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if (
+        not isfinite(normalized)
+        or abs(normalized) > NILM_SESSION_HISTORY_SCALAR_ABS_MAX
+    ):
+        return None
+    if unit_interval and not 0.0 <= normalized <= 1.0:
+        return None
+    return normalized
+
+
+def _nilm_session_history_count(value: Any) -> int | None:
+    """Read one fixed-range session count without numeric coercion."""
+
+    if not isinstance(value, int) or isinstance(value, bool):
+        return None
+    if not 0 <= value <= NILM_SESSION_HISTORY_COUNT_MAX:
+        return None
+    return value
+
+
+def _nilm_session_history_mapping_value(
+    raw: Mapping[str, Any],
+    key: str,
+) -> Any:
+    """Read a fixed known mapping member without traversing unknown keys."""
+
+    try:
+        return raw.get(key, _NILM_SESSION_HISTORY_MISSING)
+    except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
+        return _NILM_SESSION_HISTORY_MISSING
+
+
+def _saturated_nilm_session_history_count(
+    current: int,
+    increment: int,
+    *,
+    maximum: int,
+) -> int:
+    """Accumulate compact ingress diagnostics without unbounded counters."""
+
+    return min(maximum, max(current, 0) + max(increment, 0))
 
 
 @dataclass(frozen=True, slots=True)
@@ -187,64 +388,368 @@ def _canonical_nilm_session_history_identity_components(
     return components, valid
 
 
+def _canonical_nilm_session_history_duration_close(
+    raw_close: Any,
+) -> tuple[dict[str, Any] | None, bool]:
+    """Project an all-or-nothing scalar duration-close record."""
+
+    if not isinstance(raw_close, Mapping):
+        return None, False
+    try:
+        field_count = len(raw_close)
+    except (TypeError, ValueError, OverflowError):
+        return None, False
+    if field_count != len(_NILM_SESSION_HISTORY_DURATION_CLOSE_FIELDS):
+        return None, False
+    values = {
+        key: _nilm_session_history_mapping_value(raw_close, key)
+        for key in _NILM_SESSION_HISTORY_DURATION_CLOSE_FIELDS
+    }
+    if any(
+        value is _NILM_SESSION_HISTORY_MISSING for value in values.values()
+    ):
+        return None, False
+
+    close: dict[str, Any] = {}
+    for key in ("session_id", "off_edge_id"):
+        value = values[key]
+        if value is None and key == "off_edge_id":
+            close[key] = None
+            continue
+        normalized = _nilm_session_history_text(value)
+        if normalized is None:
+            return None, False
+        close[key] = normalized
+
+    value = values["end"]
+    parsed = _canonical_nilm_session_history_timestamp(value)
+    if parsed is None:
+        return None, False
+    close["end"] = parsed.isoformat()
+
+    for key in ("duration_seconds", "estimated_energy_kwh", "confidence"):
+        value = values[key]
+        if value is None:
+            close[key] = None
+            continue
+        normalized = _nilm_session_history_number(
+            value,
+            unit_interval=key == "confidence",
+        )
+        if normalized is None:
+            return None, False
+        close[key] = normalized
+
+    value = values["ambiguous"]
+    if not isinstance(value, bool):
+        return None, False
+    close["ambiguous"] = value
+
+    value = values["alternate_match_count"]
+    normalized = _nilm_session_history_count(value)
+    if normalized is None:
+        return None, False
+    close["alternate_match_count"] = normalized
+    return close, True
+
+
+def _canonical_nilm_session_history_row(
+    raw_row: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, int | bool]]:
+    """Project one row to the fixed scalar NILM session schema.
+
+    The caller visits at most 2,000 rows. This function reads only the 26 known
+    fields, never iterates unknown keys or nested values, and emits scalars or
+    canonical <=64-byte timestamp text only.
+    """
+
+    facts: dict[str, int | bool] = {
+        "identity_aliases_complete": True,
+        "invalid_alias_count": 0,
+        "unknown_field_count": 0,
+        "invalid_scalar_count": 0,
+        "invalid_timestamp_count": 0,
+        "duration_bound_close_incomplete": False,
+    }
+    try:
+        field_count = len(raw_row)
+    except (TypeError, ValueError, OverflowError):
+        facts["identity_aliases_complete"] = False
+        facts["invalid_scalar_count"] = 1
+        return {}, facts
+
+    known_fields = (
+        *_NILM_SESSION_HISTORY_ROW_TEXT_FIELDS,
+        *_NILM_SESSION_HISTORY_ROW_TIMESTAMP_FIELDS,
+        *_NILM_SESSION_HISTORY_ROW_NUMBER_FIELDS,
+        *_NILM_SESSION_HISTORY_ROW_COUNT_FIELDS,
+        *_NILM_SESSION_HISTORY_ROW_BOOLEAN_FIELDS,
+        _NILM_SESSION_HISTORY_LEGACY_ENERGY_FIELD,
+        "_duration_bound_close",
+    )
+    values = {
+        key: _nilm_session_history_mapping_value(raw_row, key)
+        for key in known_fields
+    }
+    known_count = sum(
+        value is not _NILM_SESSION_HISTORY_MISSING for value in values.values()
+    )
+    if field_count != known_count:
+        facts["unknown_field_count"] = min(
+            _NILM_SESSION_HISTORY_MAX_UNKNOWN_FIELDS,
+            max(field_count - known_count, 0),
+        )
+        facts["identity_aliases_complete"] = False
+
+    row: dict[str, Any] = {}
+    for key, identity_kind, allows_none in (
+        ("session_id", "session", False),
+        ("mains_circuit_id", None, False),
+        ("signature_fingerprint", None, False),
+        ("on_edge_id", "on_edge", False),
+        ("off_edge_id", None, True),
+        ("assignment_id", None, True),
+    ):
+        value = values[key]
+        if value is _NILM_SESSION_HISTORY_MISSING:
+            continue
+        if value is None and allows_none:
+            row[key] = None
+            continue
+        normalized = (
+            _nilm_session_history_identity_alias(identity_kind, value)
+            if identity_kind is not None
+            else _nilm_session_history_text(value)
+        )
+        if normalized is None:
+            facts["identity_aliases_complete"] = False
+            count_key = (
+                "invalid_alias_count"
+                if identity_kind is not None
+                else "invalid_scalar_count"
+            )
+            facts[count_key] = _saturated_nilm_session_history_count(
+                int(facts[count_key]),
+                1,
+                maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+            )
+            continue
+        row[key] = normalized[1] if identity_kind is not None else normalized
+
+    invalid_closed_interval = False
+    for key, allows_none in (("start", False), ("end", True)):
+        value = values[key]
+        if value is _NILM_SESSION_HISTORY_MISSING:
+            continue
+        if value is None and allows_none:
+            row[key] = None
+            continue
+        parsed = _canonical_nilm_session_history_timestamp(value)
+        if parsed is None:
+            facts["identity_aliases_complete"] = False
+            facts["invalid_timestamp_count"] = _saturated_nilm_session_history_count(
+                int(facts["invalid_timestamp_count"]),
+                1,
+                maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+            )
+            invalid_closed_interval = invalid_closed_interval or key == "end"
+            continue
+        row[key] = parsed.isoformat()
+    if invalid_closed_interval:
+        # An invalid persisted close must not silently become a valid open row.
+        # Dropping its interval keeps the bounded identity available only as
+        # conservative rejected evidence for its owning component.
+        row.pop("start", None)
+
+    nullable_number_fields = {
+        "duration_seconds",
+        "known_load_confidence",
+        "on_delta_w",
+        "off_delta_w",
+        "on_delta_var",
+        "off_delta_var",
+        "plateau_power_w",
+        "measured_energy_kwh",
+        "power_coverage",
+    }
+    legacy_energy = values[_NILM_SESSION_HISTORY_LEGACY_ENERGY_FIELD]
+    if legacy_energy is not _NILM_SESSION_HISTORY_MISSING:
+        legacy_energy = _nilm_session_history_number(legacy_energy)
+        if legacy_energy is None:
+            facts["identity_aliases_complete"] = False
+            facts["invalid_scalar_count"] = _saturated_nilm_session_history_count(
+                int(facts["invalid_scalar_count"]),
+                1,
+                maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+            )
+    for key in _NILM_SESSION_HISTORY_ROW_NUMBER_FIELDS:
+        value = values[key]
+        if (
+            key == "estimated_energy_kwh"
+            and value is _NILM_SESSION_HISTORY_MISSING
+            and legacy_energy is not _NILM_SESSION_HISTORY_MISSING
+        ):
+            value = legacy_energy
+        if value is _NILM_SESSION_HISTORY_MISSING:
+            continue
+        if value is None and key in nullable_number_fields:
+            row[key] = None
+            continue
+        normalized = _nilm_session_history_number(
+            value,
+            unit_interval=key in {
+                "confidence",
+                "known_load_confidence",
+                "power_coverage",
+            },
+        )
+        if normalized is None:
+            facts["identity_aliases_complete"] = False
+            facts["invalid_scalar_count"] = _saturated_nilm_session_history_count(
+                int(facts["invalid_scalar_count"]),
+                1,
+                maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+            )
+            continue
+        row[key] = normalized
+
+    for key in _NILM_SESSION_HISTORY_ROW_COUNT_FIELDS:
+        value = values[key]
+        if value is _NILM_SESSION_HISTORY_MISSING:
+            continue
+        normalized = _nilm_session_history_count(value)
+        if normalized is None:
+            facts["identity_aliases_complete"] = False
+            facts["invalid_scalar_count"] = _saturated_nilm_session_history_count(
+                int(facts["invalid_scalar_count"]),
+                1,
+                maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+            )
+            continue
+        row[key] = normalized
+
+    for key in _NILM_SESSION_HISTORY_ROW_BOOLEAN_FIELDS:
+        value = values[key]
+        if value is _NILM_SESSION_HISTORY_MISSING:
+            continue
+        if not isinstance(value, bool):
+            facts["identity_aliases_complete"] = False
+            facts["invalid_scalar_count"] = _saturated_nilm_session_history_count(
+                int(facts["invalid_scalar_count"]),
+                1,
+                maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+            )
+            continue
+        row[key] = value
+
+    row = {
+        key: row[key] for key in _NILM_SESSION_HISTORY_ROW_OUTPUT_FIELDS if key in row
+    }
+    close = values["_duration_bound_close"]
+    if close is not _NILM_SESSION_HISTORY_MISSING:
+        projected_close, close_complete = (
+            _canonical_nilm_session_history_duration_close(close)
+        )
+        if not close_complete:
+            facts["identity_aliases_complete"] = False
+            facts["duration_bound_close_incomplete"] = True
+        elif projected_close is not None:
+            row["_duration_bound_close"] = projected_close
+    return row, facts
+
+
 def _sanitize_nilm_session_history_ingress(
     raw_rows: Any,
     *,
     max_source_rows: int,
 ) -> tuple[list[dict[str, Any]], dict[str, int | bool]]:
-    """Copy a fixed prefix using bounded CPU and strict stable aliases only.
+    """Project a fixed history prefix using O(R * 26) scalar-only CPU work.
 
-    Complexity is O(R * F + R * A), where R is capped by ``max_source_rows``,
-    F is capped at 64 copied mapping fields, and A is the two stable alias keys.
-    The helper is synchronous and pure: it performs no I/O, replay, calibration,
-    sorting, timestamp parsing, sleeps, awaits, or executor work.
+    R is capped by ``max_source_rows`` (at most 2,000 in production). Each row
+    reads a fixed 26-key schema and at most three bounded timestamp values. The
+    helper is synchronous and pure: it performs no I/O, await, sleep, executor,
+    replay, calibration, sorting, recursive traversal, or raw nested copying.
     """
 
-    cap = max(int(max_source_rows), 0)
+    cap = (
+        min(
+            max(max_source_rows, 0),
+            NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT,
+        )
+        if isinstance(max_source_rows, int) and not isinstance(max_source_rows, bool)
+        else 0
+    )
     if not isinstance(raw_rows, (list, tuple)):
         return [], {
             "source_count_before_ingress": 0,
             "retained_count": 0,
-            "was_truncated": bool(raw_rows),
+            "was_truncated": raw_rows is not None,
             "identity_aliases_complete": False,
             "invalid_alias_count": 0,
+            "unknown_field_count": 0,
+            "invalid_scalar_count": 0,
+            "invalid_timestamp_count": 0,
+            "duration_bound_close_incomplete": False,
         }
-    source_count = len(raw_rows)
+    raw_source_count = len(raw_rows)
+    source_count = min(raw_source_count, NILM_SESSION_HISTORY_COUNT_MAX)
     rows: list[dict[str, Any]] = []
-    identity_aliases_complete = source_count <= cap
+    identity_aliases_complete = raw_source_count <= cap
     invalid_alias_count = 0
+    unknown_field_count = 0
+    invalid_scalar_count = 0
+    invalid_timestamp_count = 0
+    duration_bound_close_incomplete = False
     for raw_row in raw_rows[:cap]:
         if not isinstance(raw_row, Mapping):
             identity_aliases_complete = False
+            invalid_scalar_count = _saturated_nilm_session_history_count(
+                invalid_scalar_count,
+                1,
+                maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+            )
             continue
-        try:
-            field_count = len(raw_row)
-        except (TypeError, ValueError, OverflowError):
-            identity_aliases_complete = False
-            continue
-        if field_count > _NILM_SESSION_HISTORY_MAX_FIELDS_PER_ROW:
-            identity_aliases_complete = False
-        row = dict(
-            islice(raw_row.items(), _NILM_SESSION_HISTORY_MAX_FIELDS_PER_ROW)
-        )
-        for key, kind in (("session_id", "session"), ("on_edge_id", "on_edge")):
-            if key not in row:
-                continue
-            alias = _nilm_session_history_identity_alias(kind, row[key])
-            if alias is None:
-                row.pop(key, None)
-                invalid_alias_count += 1
-                identity_aliases_complete = False
-            else:
-                row[key] = alias[1]
+        row, facts = _canonical_nilm_session_history_row(raw_row)
         rows.append(row)
-    was_truncated = source_count > len(rows)
+        identity_aliases_complete = (
+            identity_aliases_complete
+            and facts["identity_aliases_complete"] is True
+        )
+        invalid_alias_count = _saturated_nilm_session_history_count(
+            invalid_alias_count,
+            int(facts["invalid_alias_count"]),
+            maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+        )
+        unknown_field_count = _saturated_nilm_session_history_count(
+            unknown_field_count,
+            int(facts["unknown_field_count"]),
+            maximum=_NILM_SESSION_HISTORY_MAX_UNKNOWN_FIELDS,
+        )
+        invalid_scalar_count = _saturated_nilm_session_history_count(
+            invalid_scalar_count,
+            int(facts["invalid_scalar_count"]),
+            maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+        )
+        invalid_timestamp_count = _saturated_nilm_session_history_count(
+            invalid_timestamp_count,
+            int(facts["invalid_timestamp_count"]),
+            maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+        )
+        duration_bound_close_incomplete = (
+            duration_bound_close_incomplete
+            or facts["duration_bound_close_incomplete"] is True
+        )
+    was_truncated = raw_source_count > len(rows)
     return rows, {
         "source_count_before_ingress": source_count,
         "retained_count": len(rows),
         "was_truncated": was_truncated,
         "identity_aliases_complete": identity_aliases_complete,
         "invalid_alias_count": invalid_alias_count,
+        "unknown_field_count": unknown_field_count,
+        "invalid_scalar_count": invalid_scalar_count,
+        "invalid_timestamp_count": invalid_timestamp_count,
+        "duration_bound_close_incomplete": duration_bound_close_incomplete,
     }
 
 
@@ -1978,39 +2483,93 @@ def _observation_started_at(
     return min(values).isoformat() if values else None
 
 
+def _nilm_session_history_coverage_counts(
+    configured_max_items: Any,
+    source_count: Any,
+    retained_count: Any,
+    dropped_count: Any,
+) -> tuple[int, int, int, int] | None:
+    """Validate bounded numeric coverage facts without coercing payload scalars."""
+
+    configured = _nilm_session_history_count(configured_max_items)
+    source = _nilm_session_history_count(source_count)
+    retained = _nilm_session_history_count(retained_count)
+    dropped = _nilm_session_history_count(dropped_count)
+    if (
+        configured is None
+        or source is None
+        or retained is None
+        or dropped is None
+        or configured > NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT
+        or retained > configured
+        or source != retained + dropped
+    ):
+        return None
+    return configured, source, retained, dropped
+
+
+def _nilm_session_history_coverage_bounds(
+    oldest_value: Any,
+    newest_value: Any,
+    *,
+    retained_count: int,
+) -> tuple[datetime | None, datetime | None, bool]:
+    """Return ordered bounded coverage bounds or conservative unknown bounds."""
+
+    if retained_count == 0:
+        return None, None, oldest_value is None and newest_value is None
+    if oldest_value is None or newest_value is None:
+        return None, None, False
+    oldest = _canonical_nilm_session_history_timestamp(oldest_value)
+    newest = _canonical_nilm_session_history_timestamp(newest_value)
+    if oldest is None or newest is None or oldest > newest:
+        return None, None, False
+    return oldest, newest, True
+
+
 def _coverage_to_payload(coverage: NilmSessionHistoryCoverage) -> dict[str, Any]:
-    identity_components, components_valid = (
-        _canonical_nilm_session_history_identity_components(
-            coverage.retention_identity_components
+    counts = _nilm_session_history_coverage_counts(
+        coverage.configured_max_items,
+        coverage.source_count_before_retention,
+        coverage.retained_count,
+        coverage.dropped_count,
+    )
+    if counts is None:
+        configured_max_items = source_count = retained_count = dropped_count = 0
+        oldest = newest = None
+        bounds_valid = False
+        identity_components: tuple[_NilmSessionHistoryIdentityComponent, ...] = ()
+        components_valid = False
+    else:
+        (
+            configured_max_items,
+            source_count,
+            retained_count,
+            dropped_count,
+        ) = counts
+        oldest, newest, bounds_valid = _nilm_session_history_coverage_bounds(
+            coverage.oldest_retained_at,
+            coverage.newest_retained_at,
+            retained_count=retained_count,
         )
-    )
-    counts_valid = (
-        coverage.source_count_before_retention
-        == coverage.retained_count + coverage.dropped_count
-        and coverage.retained_count >= 0
-        and coverage.dropped_count >= 0
-    )
+        identity_components, components_valid = (
+            _canonical_nilm_session_history_identity_components(
+                coverage.retention_identity_components
+            )
+        )
     payload: dict[str, Any] = {
-        "configured_max_items": coverage.configured_max_items,
-        "source_count_before_retention": coverage.source_count_before_retention,
-        "retained_count": coverage.retained_count,
-        "was_truncated": coverage.was_truncated,
-        "dropped_count": coverage.dropped_count,
-        "oldest_retained_at": (
-            coverage.oldest_retained_at.isoformat()
-            if coverage.oldest_retained_at is not None
-            else None
-        ),
-        "newest_retained_at": (
-            coverage.newest_retained_at.isoformat()
-            if coverage.newest_retained_at is not None
-            else None
-        ),
-        "_retention_identity_components_complete": bool(
-            coverage.retention_identity_components_complete
+        "configured_max_items": configured_max_items,
+        "source_count_before_retention": source_count,
+        "retained_count": retained_count,
+        "was_truncated": dropped_count > 0,
+        "dropped_count": dropped_count,
+        "oldest_retained_at": oldest.isoformat() if oldest is not None else None,
+        "newest_retained_at": newest.isoformat() if newest is not None else None,
+        "_retention_identity_components_complete": (
+            coverage.retention_identity_components_complete is True
             and components_valid
-            and counts_valid
-            and coverage.dropped_count == len(identity_components)
+            and bounds_valid
+            and dropped_count == len(identity_components)
         ),
     }
     if identity_components:
@@ -2029,38 +2588,49 @@ def nilm_session_history_coverage_from_payload(
     if not isinstance(payload, Mapping):
         return None
     try:
-        oldest = payload.get("oldest_retained_at")
-        newest = payload.get("newest_retained_at")
-        raw_components = payload.get("_retention_identity_components", ())
-        components, components_valid = (
-            _canonical_nilm_session_history_identity_components(raw_components)
+        counts = _nilm_session_history_coverage_counts(
+            payload["configured_max_items"],
+            payload["source_count_before_retention"],
+            payload["retained_count"],
+            payload["dropped_count"],
         )
-        source_count = int(payload["source_count_before_retention"])
-        retained_count = int(payload["retained_count"])
-        dropped_count = int(payload["dropped_count"])
-        counts_valid = (
-            source_count == retained_count + dropped_count
-            and retained_count >= 0
-            and dropped_count >= 0
-        )
-        return NilmSessionHistoryCoverage(
-            configured_max_items=int(payload["configured_max_items"]),
-            source_count_before_retention=source_count,
-            retained_count=retained_count,
-            was_truncated=bool(payload["was_truncated"]),
-            dropped_count=dropped_count,
-            oldest_retained_at=_as_utc_datetime(oldest) if oldest else None,
-            newest_retained_at=_as_utc_datetime(newest) if newest else None,
-            retention_identity_components=components,
-            retention_identity_components_complete=(
-                payload.get("_retention_identity_components_complete") is True
-                and components_valid
-                and counts_valid
-                and dropped_count == len(components)
-            ),
-        )
-    except (KeyError, TypeError, ValueError, OverflowError):
+    except KeyError:
         return None
+    if counts is None:
+        return None
+    configured_max_items, source_count, retained_count, dropped_count = counts
+    oldest, newest, bounds_valid = _nilm_session_history_coverage_bounds(
+        payload.get("oldest_retained_at"),
+        payload.get("newest_retained_at"),
+        retained_count=retained_count,
+    )
+    raw_components = payload.get("_retention_identity_components", ())
+    components, components_valid = _canonical_nilm_session_history_identity_components(
+        raw_components
+    )
+    raw_was_truncated = payload.get("was_truncated", _NILM_SESSION_HISTORY_MISSING)
+    expected_was_truncated = dropped_count > 0
+    truncation_valid = (
+        isinstance(raw_was_truncated, bool)
+        and raw_was_truncated is expected_was_truncated
+    )
+    return NilmSessionHistoryCoverage(
+        configured_max_items=configured_max_items,
+        source_count_before_retention=source_count,
+        retained_count=retained_count,
+        was_truncated=expected_was_truncated,
+        dropped_count=dropped_count,
+        oldest_retained_at=oldest,
+        newest_retained_at=newest,
+        retention_identity_components=components,
+        retention_identity_components_complete=(
+            payload.get("_retention_identity_components_complete") is True
+            and components_valid
+            and truncation_valid
+            and bounds_valid
+            and dropped_count == len(components)
+        ),
+    )
 
 
 def _edge_observation_started_at(loads: Iterable[Mapping[str, Any]]) -> datetime | None:
