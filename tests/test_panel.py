@@ -2842,7 +2842,7 @@ def test_nilm_workspace_hides_retired_and_reviews_unassigned_intervals() -> None
     assert lanes["hidden"]["assignment_ids"] == ["assignment-retired"]
 
 
-def test_nilm_workspace_lanes_include_ambiguous_unassigned_sessions() -> None:
+def test_nilm_workspace_lanes_include_actionable_unassigned_sessions() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         _nilm_workspace_lanes,
     )
@@ -2870,11 +2870,11 @@ def test_nilm_workspace_lanes_include_ambiguous_unassigned_sessions() -> None:
         ],
     )
 
-    assert lanes["needs_review"]["session_ids"] == ["open", "closed", "ambiguous"]
+    assert lanes["needs_review"]["session_ids"] == ["open", "closed"]
     assert sum(
         len(lanes["needs_review"][key])
         for key in ("assignment_ids", "signature_ids", "interval_ids", "session_ids")
-    ) == 3
+    ) == 2
 
 
 def test_nilm_workspace_lanes_sessions_replace_parent_signatures() -> None:
