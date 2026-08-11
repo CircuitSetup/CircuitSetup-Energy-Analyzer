@@ -9351,6 +9351,7 @@ def test_nilm_processor_records_actual_session_retention_coverage() -> None:
             dropped_count=0,
             oldest_retained_at=now - timedelta(days=31),
             newest_retained_at=now - timedelta(days=1, minutes=-5),
+            retention_identity_aliases_complete=True,
         )
     )
 
@@ -9788,10 +9789,10 @@ def test_nilm_processor_restart_merges_persisted_truncation_coverage(
         updates = [row("run-new", new_start, now, on_edge_id="edge-new")]
         expected = NilmSessionHistoryCoverage(
             configured_max_items=2,
-            source_count_before_retention=6,
+            source_count_before_retention=5,
             retained_count=2,
             was_truncated=True,
-            dropped_count=4,
+            dropped_count=3,
             oldest_retained_at=newer_start,
             newest_retained_at=now,
             retention_identity_aliases=(
@@ -9883,12 +9884,17 @@ def test_nilm_processor_restart_merges_persisted_truncation_coverage(
     assert processor._session_history_coverage_by_circuit["mains"] == expected
 
 
-def test_nilm_processor_dropped_stable_session_is_counted_once_after_restart(
+@pytest.mark.parametrize(
+    "case",
+    ("incomplete_historical", "incomplete_new", "complete_new"),
+)
+def test_nilm_processor_dropped_stable_session_is_conservative_after_restart(
     monkeypatch: pytest.MonkeyPatch,
+    case: str,
 ) -> None:
-    """A stable overflow session cannot inflate persisted coverage every pass."""
+    """Overflow identities count exactly only when the historical ledger is complete."""
+    import json
     from collections import defaultdict
-    from copy import deepcopy
 
     from custom_components.circuitsetup_energy_analyzer import processors
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
@@ -9905,7 +9911,7 @@ def test_nilm_processor_dropped_stable_session_is_counted_once_after_restart(
         session_id: str,
         start: datetime,
         *,
-        on_edge_id: str,
+        on_edge_id: str = "",
     ) -> dict[str, object]:
         return {
             "session_id": session_id,
@@ -9919,23 +9925,42 @@ def test_nilm_processor_dropped_stable_session_is_counted_once_after_restart(
         row("retained-newer", now - timedelta(days=1), on_edge_id="edge-newer"),
         row("retained-older", now - timedelta(days=2), on_edge_id="edge-older"),
     ]
-    stable_overflow = row(
-        "stable-overflow",
-        now - timedelta(days=3),
-        on_edge_id="edge-overflow",
+    identity_limit = 8_192
+    complete = case == "complete_new"
+    persisted_aliases = (
+        [["session", f"session-{index:05d}"] for index in range(identity_limit)]
+        if not complete
+        else [
+            ["session", "historical-dropped-1"],
+            ["session", "historical-dropped-2"],
+            ["session", "historical-dropped-3"],
+        ]
     )
+    overflow_session_id = {
+        "incomplete_historical": "zzzz-historical-overflow",
+        "incomplete_new": "zzzz-different-overflow",
+        "complete_new": "truly-new-overflow",
+    }[case]
+    stable_overflow = row(
+        overflow_session_id,
+        now - timedelta(days=3),
+    )
+    historical_source_count = 5 if complete else 9_000
+    expected_source_count = 6 if complete else historical_source_count
     store = FeatureStoreData(
         nilm_session_history_by_circuit={"mains": retained},
         nilm_unknown_loads_by_circuit={
             "mains": {
                 "session_history_coverage": {
                     "configured_max_items": 2,
-                    "source_count_before_retention": 5,
+                    "source_count_before_retention": historical_source_count,
                     "retained_count": 2,
                     "was_truncated": True,
-                    "dropped_count": 3,
+                    "dropped_count": historical_source_count - 2,
                     "oldest_retained_at": retained[1]["start"],
                     "newest_retained_at": retained[0]["end"],
+                    "_retention_identity_aliases": persisted_aliases,
+                    "_retention_identity_aliases_complete": complete,
                 }
             }
         },
@@ -9990,9 +10015,29 @@ def test_nilm_processor_dropped_stable_session_is_counted_once_after_restart(
         return processor.process(sample, config, context, events=())
 
     first = process_after_restart()
-    first_inventory = deepcopy(store.nilm_unknown_loads_by_circuit["mains"])
+    if not complete:
+        del store.nilm_unknown_loads_by_circuit["mains"][
+            "session_history_coverage"
+        ]["_retention_identity_aliases_complete"]
+        migration = process_after_restart()
+        assert migration.store_dirty
+    first_inventory_bytes = json.dumps(
+        store.nilm_unknown_loads_by_circuit["mains"],
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     second = process_after_restart()
+    second_inventory_bytes = json.dumps(
+        store.nilm_unknown_loads_by_circuit["mains"],
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     third = process_after_restart()
+    third_inventory_bytes = json.dumps(
+        store.nilm_unknown_loads_by_circuit["mains"],
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
     coverage = store.nilm_unknown_loads_by_circuit["mains"][
         "session_history_coverage"
@@ -10000,14 +10045,183 @@ def test_nilm_processor_dropped_stable_session_is_counted_once_after_restart(
     assert first.store_dirty
     assert not second.store_dirty
     assert not third.store_dirty
-    assert store.nilm_unknown_loads_by_circuit["mains"] == first_inventory
-    assert coverage["source_count_before_retention"] == 6
+    assert first_inventory_bytes == second_inventory_bytes == third_inventory_bytes
+    assert coverage["source_count_before_retention"] == expected_source_count
     assert coverage["retained_count"] == 2
-    assert coverage["dropped_count"] == 4
+    assert coverage["dropped_count"] == expected_source_count - 2
     assert coverage["source_count_before_retention"] == (
         coverage["retained_count"] + coverage["dropped_count"]
     )
+    assert coverage["_retention_identity_aliases_complete"] is complete
+    assert len(coverage.get("_retention_identity_aliases", ())) <= identity_limit
     assert store.nilm_session_history_by_circuit["mains"] == retained
+
+
+@pytest.mark.parametrize("configured_max_items", (1, 4))
+def test_nilm_processor_incomplete_coverage_survives_capacity_changes(
+    configured_max_items: int,
+) -> None:
+    """Capacity changes refresh retained facts without completing unknown history."""
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    older_start = now - timedelta(days=2)
+    newer_start = now - timedelta(days=1)
+    sessions = [
+        {
+            "session_id": "newer",
+            "signature_fingerprint": "on-a",
+            "start": newer_start.isoformat(),
+            "end": (newer_start + timedelta(minutes=30)).isoformat(),
+        },
+        {
+            "session_id": "older",
+            "signature_fingerprint": "on-a",
+            "start": older_start.isoformat(),
+            "end": (older_start + timedelta(minutes=30)).isoformat(),
+        },
+    ]
+    store = FeatureStoreData(
+        nilm_session_history_by_circuit={"mains": sessions},
+        nilm_unknown_loads_by_circuit={
+            "mains": {
+                "session_history_coverage": {
+                    "configured_max_items": 2,
+                    "source_count_before_retention": 5,
+                    "retained_count": 2,
+                    "was_truncated": True,
+                    "dropped_count": 3,
+                    "oldest_retained_at": older_start.isoformat(),
+                    "newest_retained_at": (
+                        newer_start + timedelta(minutes=30)
+                    ).isoformat(),
+                    "_retention_identity_aliases": [
+                        ["session", "one-known-historical-alias"]
+                    ],
+                    "_retention_identity_aliases_complete": False,
+                }
+            }
+        },
+    )
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    sample = NormalizedCircuitSample(
+        timestamp=now,
+        circuit_id="mains",
+        real_power=0.0,
+        current=None,
+        voltage=None,
+        reactive_power=None,
+        apparent_power=None,
+        power_factor=None,
+        frequency=None,
+        energy=None,
+    )
+
+    def process_after_restart() -> object:
+        processor = processors.NilmSampleProcessor(
+            nilm_enabled=lambda _: True,
+            seed_demo_nilm_state=lambda *_: None,
+            min_delta_w_for_circuit=lambda _: 100.0,
+            detectors={},
+            total_events_by_circuit=defaultdict(int),
+            unmatched_edges_by_circuit=defaultdict(list),
+            ignored_signatures=set(),
+            known_load_events=lambda *_: (),
+            observe_topology=lambda *_: [],
+            session_history_max_items=configured_max_items,
+        )
+        context = ProcessingContext(
+            now=now,
+            hass=SimpleNamespace(data={DOMAIN: {}}),
+            state=AnalyzerState(),
+            store_data=store,
+            options={},
+            entry_data={},
+            known_load_circuit_ids=frozenset(),
+            sensitivity="standard",
+        )
+        return processor.process(sample, config, context, events=())
+
+    first = process_after_restart()
+    second = process_after_restart()
+
+    coverage = store.nilm_unknown_loads_by_circuit["mains"][
+        "session_history_coverage"
+    ]
+    expected_retained = min(configured_max_items, 2)
+    assert first.store_dirty
+    assert not second.store_dirty
+    assert coverage["configured_max_items"] == configured_max_items
+    assert coverage["source_count_before_retention"] == 5
+    assert coverage["retained_count"] == expected_retained
+    assert coverage["dropped_count"] == 5 - expected_retained
+    assert coverage["was_truncated"]
+    assert coverage["_retention_identity_aliases_complete"] is False
+    assert coverage["oldest_retained_at"] == (
+        newer_start if configured_max_items == 1 else older_start
+    ).isoformat()
+    assert coverage["newest_retained_at"] == (
+        newer_start + timedelta(minutes=30)
+    ).isoformat()
+
+
+def test_nilm_processor_invalid_dropped_identities_do_not_become_aliases() -> None:
+    """Non-string dropped identities make coverage incomplete without fabrication."""
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    store = FeatureStoreData(
+        nilm_session_history_by_circuit={
+            "mains": [
+                {
+                    "session_id": "retained",
+                    "signature_fingerprint": "on-a",
+                    "start": (now - timedelta(hours=1)).isoformat(),
+                    "end": now.isoformat(),
+                },
+                {
+                    "session_id": None,
+                    "on_edge_id": {"not": "an identity"},
+                    "signature_fingerprint": "on-a",
+                    "start": (now - timedelta(days=1)).isoformat(),
+                    "end": (now - timedelta(days=1, minutes=-30)).isoformat(),
+                },
+            ]
+        }
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _: True,
+        seed_demo_nilm_state=lambda *_: None,
+        min_delta_w_for_circuit=lambda _: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda *_: (),
+        observe_topology=lambda *_: [],
+        session_history_max_items=1,
+    )
+
+    processor.refresh_session_history("mains", store)
+
+    coverage = processor._session_history_coverage_by_circuit["mains"]
+    assert coverage.retention_identity_aliases == ()
+    assert coverage.retention_identity_aliases_complete is False
 
 
 def test_nilm_processor_transitive_session_edge_conflicts_are_order_stable() -> None:

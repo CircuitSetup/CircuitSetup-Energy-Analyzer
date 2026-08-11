@@ -476,6 +476,7 @@ def test_oversized_retention_identity_metadata_is_rejected_deterministically() -
         "oldest_retained_at": "2026-08-08T00:00:00+00:00",
         "newest_retained_at": "2026-08-10T00:00:00+00:00",
         "_retention_identity_aliases": aliases,
+        "_retention_identity_aliases_complete": True,
     }
 
     forward = unknown_loads.nilm_session_history_coverage_from_payload(payload)
@@ -487,6 +488,117 @@ def test_oversized_retention_identity_metadata_is_rejected_deterministically() -
     assert reverse is not None
     assert forward.retention_identity_aliases == ()
     assert reverse.retention_identity_aliases == ()
+    assert forward.retention_identity_aliases_complete is False
+    assert reverse.retention_identity_aliases_complete is False
+
+
+def test_retention_identity_metadata_accepts_only_strict_string_aliases() -> None:
+    """Malformed alias members cannot become asserted historical identities."""
+
+    payload = {
+        "configured_max_items": 2,
+        "source_count_before_retention": 5,
+        "retained_count": 2,
+        "was_truncated": True,
+        "dropped_count": 3,
+        "oldest_retained_at": "2026-08-08T00:00:00+00:00",
+        "newest_retained_at": "2026-08-10T00:00:00+00:00",
+        "_retention_identity_aliases": [
+            ["session", None],
+            ["session", 7],
+            ["session", True],
+            ["session", {"not": "valid"}],
+            [None, "value"],
+            [7, "value"],
+            [True, "value"],
+            [{"not": "valid"}, "value"],
+            ["invalid_kind", "value"],
+            ["session", "   "],
+            ["session", " valid-session "],
+            ["on_edge", "valid-edge"],
+        ],
+        "_retention_identity_aliases_complete": True,
+    }
+
+    coverage = unknown_loads.nilm_session_history_coverage_from_payload(payload)
+
+    assert coverage is not None
+    assert coverage.retention_identity_aliases == (
+        ("on_edge", "valid-edge"),
+        ("session", "valid-session"),
+    )
+    assert coverage.retention_identity_aliases_complete is False
+    roundtrip = unknown_loads._coverage_to_payload(coverage)
+    assert roundtrip["_retention_identity_aliases"] == [
+        ["on_edge", "valid-edge"],
+        ["session", "valid-session"],
+    ]
+    assert roundtrip["_retention_identity_aliases_complete"] is False
+    alias_repr = repr(roundtrip["_retention_identity_aliases"])
+    assert "None" not in alias_repr
+    assert "True" not in alias_repr
+    assert "{'not': 'valid'}" not in alias_repr
+
+
+def test_complete_retention_identity_metadata_round_trips_canonically() -> None:
+    """A complete valid alias ledger remains complete, sorted, and deduplicated."""
+
+    payload = {
+        "configured_max_items": 2,
+        "source_count_before_retention": 4,
+        "retained_count": 2,
+        "was_truncated": True,
+        "dropped_count": 2,
+        "oldest_retained_at": "2026-08-08T00:00:00+00:00",
+        "newest_retained_at": "2026-08-10T00:00:00+00:00",
+        "_retention_identity_aliases": [
+            ["session", "z-session"],
+            ["on_edge", "a-edge"],
+            ["session", "z-session"],
+        ],
+        "_retention_identity_aliases_complete": True,
+    }
+
+    coverage = unknown_loads.nilm_session_history_coverage_from_payload(payload)
+
+    assert coverage is not None
+    assert coverage.retention_identity_aliases == (
+        ("on_edge", "a-edge"),
+        ("session", "z-session"),
+    )
+    assert coverage.retention_identity_aliases_complete is True
+    assert unknown_loads._coverage_to_payload(coverage) == {
+        **{key: value for key, value in payload.items() if not key.startswith("_")},
+        "_retention_identity_aliases": [
+            ["on_edge", "a-edge"],
+            ["session", "z-session"],
+        ],
+        "_retention_identity_aliases_complete": True,
+    }
+
+
+def test_complete_retention_identity_metadata_requires_alias_per_drop() -> None:
+    """A complete claim cannot contradict its own historical dropped count."""
+
+    coverage = unknown_loads.nilm_session_history_coverage_from_payload(
+        {
+            "configured_max_items": 2,
+            "source_count_before_retention": 5,
+            "retained_count": 2,
+            "was_truncated": True,
+            "dropped_count": 3,
+            "oldest_retained_at": "2026-08-08T00:00:00+00:00",
+            "newest_retained_at": "2026-08-10T00:00:00+00:00",
+            "_retention_identity_aliases": [
+                ["session", "only-one"],
+                ["session", "only-two"],
+            ],
+            "_retention_identity_aliases_complete": True,
+        }
+    )
+
+    assert coverage is not None
+    assert coverage.retention_identity_aliases_complete is False
 
 
 def test_session_coverage_payload_bounds_identity_metadata_deterministically() -> None:
@@ -525,15 +637,14 @@ def test_session_coverage_payload_bounds_identity_metadata_deterministically() -
                 retention_identity_aliases=identity_aliases,
             ),
         )
-        return inventory["session_history_coverage"][  # type: ignore[return-value]
-            "_retention_identity_aliases"
-        ]
+        return inventory["session_history_coverage"].get(  # type: ignore[return-value]
+            "_retention_identity_aliases", []
+        )
 
     forward = build(aliases)
     reverse = build(tuple(reversed(aliases)))
 
-    assert forward == reverse
-    assert len(forward) == limit
+    assert forward == reverse == []
 
 
 def test_duplicate_open_and_closed_session_id_is_ambiguous() -> None:

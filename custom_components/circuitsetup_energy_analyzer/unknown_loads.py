@@ -26,6 +26,18 @@ LEGACY_IDENTITY_UNRESOLVED_KEY = "legacy_identity_unresolved"
 NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS = 8_192
 
 
+def _nilm_session_history_identity_alias(
+    kind: Any, value: Any
+) -> tuple[str, str] | None:
+    """Return one strict stable alias without coercing untrusted values."""
+
+    if not isinstance(kind, str) or kind not in {"session", "on_edge"}:
+        return None
+    if not isinstance(value, str) or not (normalized := value.strip()):
+        return None
+    return kind, normalized
+
+
 @dataclass(frozen=True, slots=True)
 class _UnknownLoadComponent:
     component_id: str
@@ -121,6 +133,7 @@ class NilmSessionHistoryCoverage:
     oldest_retained_at: datetime | None
     newest_retained_at: datetime | None
     retention_identity_aliases: tuple[tuple[str, str], ...] = ()
+    retention_identity_aliases_complete: bool = False
 
 
 def _coverage_for_supplied_sessions(
@@ -139,12 +152,16 @@ def _coverage_for_supplied_sessions(
             anonymous_count += 1
             continue
         aliases = {
-            (kind, value)
-            for kind, value in (
-                ("session", str(session.get("session_id") or "").strip()),
-                ("on_edge", str(session.get("on_edge_id") or "").strip()),
+            alias
+            for alias in (
+                _nilm_session_history_identity_alias(
+                    "session", session.get("session_id")
+                ),
+                _nilm_session_history_identity_alias(
+                    "on_edge", session.get("on_edge_id")
+                ),
             )
-            if value
+            if alias is not None
         }
         if aliases:
             matching_groups = [
@@ -183,6 +200,7 @@ def _coverage_for_supplied_sessions(
         dropped_count=0,
         oldest_retained_at=min(timestamps, default=None),
         newest_retained_at=max(timestamps, default=None),
+        retention_identity_aliases_complete=True,
     )
 
 
@@ -393,10 +411,12 @@ def unknown_load_inventory_needs_rebuild(
         "legacy_unverified",
     }:
         return True
-    if provenance == "retained_session_history" and not isinstance(
-        existing_state.get("session_history_coverage"), Mapping
-    ):
-        return True
+    if provenance == "retained_session_history":
+        coverage_payload = existing_state.get("session_history_coverage")
+        if not isinstance(coverage_payload, Mapping) or not isinstance(
+            coverage_payload.get("_retention_identity_aliases_complete"), bool
+        ):
+            return True
     if str(existing_state.get("estimate_status") or "") not in {
         "complete",
         "partial_history",
@@ -1741,15 +1761,30 @@ def _observation_started_at(
 
 
 def _coverage_to_payload(coverage: NilmSessionHistoryCoverage) -> dict[str, Any]:
-    identity_aliases = sorted(
-        {
-            (kind, value.strip())
-            for kind, value in coverage.retention_identity_aliases
-            if kind in {"session", "on_edge"}
-            and isinstance(value, str)
-            and value.strip()
-        }
-    )[:NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS]
+    identity_aliases: set[tuple[str, str]] = set()
+    aliases_valid = (
+        len(coverage.retention_identity_aliases)
+        <= NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS
+    )
+    if aliases_valid:
+        for raw_alias in coverage.retention_identity_aliases:
+            if not isinstance(raw_alias, (list, tuple)) or len(raw_alias) != 2:
+                aliases_valid = False
+                continue
+            alias = _nilm_session_history_identity_alias(
+                raw_alias[0], raw_alias[1]
+            )
+            if alias is None:
+                aliases_valid = False
+                continue
+            identity_aliases.add(alias)
+    sorted_identity_aliases = sorted(identity_aliases)
+    counts_valid = (
+        coverage.source_count_before_retention
+        == coverage.retained_count + coverage.dropped_count
+        and coverage.retained_count >= 0
+        and coverage.dropped_count >= 0
+    )
     payload: dict[str, Any] = {
         "configured_max_items": coverage.configured_max_items,
         "source_count_before_retention": coverage.source_count_before_retention,
@@ -1766,10 +1801,16 @@ def _coverage_to_payload(coverage: NilmSessionHistoryCoverage) -> dict[str, Any]
             if coverage.newest_retained_at is not None
             else None
         ),
+        "_retention_identity_aliases_complete": bool(
+            coverage.retention_identity_aliases_complete
+            and aliases_valid
+            and counts_valid
+            and coverage.dropped_count <= len(sorted_identity_aliases)
+        ),
     }
-    if identity_aliases:
+    if sorted_identity_aliases:
         payload["_retention_identity_aliases"] = [
-            [kind, value] for kind, value in identity_aliases
+            [kind, value] for kind, value in sorted_identity_aliases
         ]
     return payload
 
@@ -1786,29 +1827,48 @@ def nilm_session_history_coverage_from_payload(
         newest = payload.get("newest_retained_at")
         raw_aliases = payload.get("_retention_identity_aliases", ())
         aliases: set[tuple[str, str]] = set()
-        if (
+        aliases_valid = (
             isinstance(raw_aliases, (list, tuple))
             and len(raw_aliases)
             <= NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS
-        ):
+        )
+        if aliases_valid:
             for raw_alias in raw_aliases:
                 if not isinstance(raw_alias, (list, tuple)) or len(raw_alias) != 2:
+                    aliases_valid = False
                     continue
-                kind = str(raw_alias[0]).strip()
-                value = str(raw_alias[1]).strip()
-                if kind in {"session", "on_edge"} and value:
-                    aliases.add((kind, value))
+                alias = _nilm_session_history_identity_alias(
+                    raw_alias[0], raw_alias[1]
+                )
+                if alias is None:
+                    aliases_valid = False
+                    continue
+                aliases.add(alias)
+        source_count = int(payload["source_count_before_retention"])
+        retained_count = int(payload["retained_count"])
+        dropped_count = int(payload["dropped_count"])
+        counts_valid = (
+            source_count == retained_count + dropped_count
+            and retained_count >= 0
+            and dropped_count >= 0
+        )
         return NilmSessionHistoryCoverage(
             configured_max_items=int(payload["configured_max_items"]),
-            source_count_before_retention=int(payload["source_count_before_retention"]),
-            retained_count=int(payload["retained_count"]),
+            source_count_before_retention=source_count,
+            retained_count=retained_count,
             was_truncated=bool(payload["was_truncated"]),
-            dropped_count=int(payload["dropped_count"]),
+            dropped_count=dropped_count,
             oldest_retained_at=_as_utc_datetime(oldest) if oldest else None,
             newest_retained_at=_as_utc_datetime(newest) if newest else None,
             retention_identity_aliases=tuple(sorted(aliases))[
                 :NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS
             ],
+            retention_identity_aliases_complete=(
+                payload.get("_retention_identity_aliases_complete") is True
+                and aliases_valid
+                and counts_valid
+                and dropped_count <= len(aliases)
+            ),
         )
     except (KeyError, TypeError, ValueError, OverflowError):
         return None
