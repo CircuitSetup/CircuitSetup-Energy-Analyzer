@@ -2145,8 +2145,13 @@ def _nilm_workspace_lanes(
         if (
             session_id
             and not str(session.get(ATTR_ASSIGNMENT_ID) or "").strip()
-            and isinstance(actions, Mapping)
-            and isinstance(actions.get("assign"), Mapping)
+            and (
+                bool(session.get("ambiguous"))
+                or (
+                    isinstance(actions, Mapping)
+                    and isinstance(actions.get("assign"), Mapping)
+                )
+            )
         ):
             lanes["needs_review"]["session_ids"].append(session_id)
     return lanes

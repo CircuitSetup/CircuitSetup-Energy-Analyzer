@@ -7889,6 +7889,47 @@ test("non-ambiguous NILM review intervals select without opening the editor", as
   await expect(reviewCard).toHaveAttribute("aria-pressed", "true");
   await expect(panel.locator("[data-nilm-interval-editor]")).toHaveCount(0);
   await expect(panel.locator('[data-nilm-decision][value="identify"]')).toBeVisible();
+  await expect(panel.locator('[data-nilm-decision][value="ignore"]')).toBeVisible();
+  await expect(
+    panel.locator('.nilm-session-band[data-nilm-session-start="2026-07-13T16:00:00Z"][data-nilm-selected="true"]'),
+  ).toHaveCount(1);
+});
+
+test("ambiguous NILM review intervals remain selectable without approval", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: nilmGraphFocusHistoryFixture() });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    const session = payload.sessions.find((item) => item.session_id === "nilm-session-0");
+    session.ambiguous = true;
+    delete session.signature_review;
+    payload.lanes.needs_review = {
+      ...payload.lanes.needs_review,
+      signature_ids: [],
+      session_ids: ["nilm-session-0"],
+    };
+    payload.lane_counts.needs_review = 1;
+    payload.history = {
+      ...payload.history,
+      api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+      fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  const reviewCard = panel.locator('[data-nilm-review-item="session:nilm-session-0"]');
+
+  await expect(reviewCard).toBeVisible();
+  await reviewCard.click();
+
+  await expect(reviewCard).toHaveAttribute("aria-pressed", "true");
+  await expect(panel.locator("[data-nilm-interval-editor]")).toHaveCount(0);
+  await expect(panel.locator('[data-nilm-decision][value="identify"]')).toHaveCount(0);
+  await expect(panel.locator('[data-nilm-session-action="assign"]')).toHaveCount(0);
   await expect(
     panel.locator('.nilm-session-band[data-nilm-session-start="2026-07-13T16:00:00Z"][data-nilm-selected="true"]'),
   ).toHaveCount(1);
@@ -8165,7 +8206,7 @@ test("NILM targeted routes focus identified intervals on initial load", async ({
     start: Date.parse("2026-07-13T16:00:00Z"),
     end: Date.parse("2026-07-13T16:30:00Z"),
   });
-  await expect(sessionPanel.locator("[data-nilm-interval-editor]")).toBeVisible();
+  await expect(sessionPanel.locator("[data-nilm-interval-editor]")).toHaveCount(0);
 
   const precedencePanel = await openPanel(
     page,

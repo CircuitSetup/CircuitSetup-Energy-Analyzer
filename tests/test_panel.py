@@ -2793,7 +2793,7 @@ def test_nilm_workspace_hides_retired_and_reviews_unassigned_intervals() -> None
     assert lanes["hidden"]["assignment_ids"] == ["assignment-retired"]
 
 
-def test_nilm_workspace_lanes_review_only_assignable_unassigned_sessions() -> None:
+def test_nilm_workspace_lanes_include_ambiguous_unassigned_sessions() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         _nilm_workspace_lanes,
     )
@@ -2811,7 +2811,6 @@ def test_nilm_workspace_lanes_review_only_assignable_unassigned_sessions() -> No
             {
                 "session_id": "ambiguous",
                 "ambiguous": True,
-                "actions": {"assign": {}},
             },
             {
                 "session_id": "assigned",
