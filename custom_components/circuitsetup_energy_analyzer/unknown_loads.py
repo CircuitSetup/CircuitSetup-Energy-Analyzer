@@ -23,6 +23,7 @@ MIN_SIGNATURE_PAIR_SCORE = 0.50
 SIGNATURE_PAIR_AMBIGUITY_MARGIN = 0.08
 EDGE_COMPONENT_AMBIGUITY_MARGIN = 0.08
 LEGACY_IDENTITY_UNRESOLVED_KEY = "legacy_identity_unresolved"
+NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS = 8_192
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +120,7 @@ class NilmSessionHistoryCoverage:
     dropped_count: int
     oldest_retained_at: datetime | None
     newest_retained_at: datetime | None
+    retention_identity_aliases: tuple[tuple[str, str], ...] = ()
 
 
 def _coverage_for_supplied_sessions(
@@ -1319,69 +1321,105 @@ def _deduplicate_owned_sessions(
     tuple[_OwnedUnknownLoadSession, ...],
     tuple[_ExcludedUnknownLoadSession, ...],
 ]:
-    """Apply stable session/on-edge/interval deduplication conservatively."""
+    """Resolve transitive stable-identity components before interval deduplication."""
 
-    retained = list(sessions)
-    excluded: list[_ExcludedUnknownLoadSession] = []
-    for key_fn in (
-        lambda item: ("session", item.session.session_id),
-        lambda item: ("on_edge", item.session.on_edge_id)
-        if item.session.on_edge_id
-        else (
-            "interval",
+    items = tuple(sessions)
+    parents = list(range(len(items)))
+
+    def find(index: int) -> int:
+        while parents[index] != index:
+            parents[index] = parents[parents[index]]
+            index = parents[index]
+        return index
+
+    def union(left: int, right: int) -> None:
+        left_root = find(left)
+        right_root = find(right)
+        if left_root != right_root:
+            parents[max(left_root, right_root)] = min(left_root, right_root)
+
+    alias_owner: dict[tuple[str, str], int] = {}
+    for index, item in enumerate(items):
+        aliases = [("session", item.session.session_id)]
+        if item.session.on_edge_id:
+            aliases.append(("on_edge", item.session.on_edge_id))
+        for alias in aliases:
+            owner = alias_owner.setdefault(alias, index)
+            union(index, owner)
+
+    identity_components: dict[int, list[_OwnedUnknownLoadSession]] = {}
+    for index, item in enumerate(items):
+        identity_components.setdefault(find(index), []).append(item)
+
+    def sort_key(item: _OwnedUnknownLoadSession) -> tuple[Any, ...]:
+        return (
             item.component_id,
+            item.session.session_id,
+            item.session.on_edge_id,
             item.session.start,
             item.session.end,
-        ),
-        lambda item: (
-            "interval", item.component_id, item.session.start, item.session.end
-        ),
-    ):
-        grouped: dict[tuple[Any, ...], list[_OwnedUnknownLoadSession]] = {}
-        for item in retained:
-            grouped.setdefault(key_fn(item), []).append(item)
-        next_retained: list[_OwnedUnknownLoadSession] = []
-        for group in grouped.values():
-            if len(group) == 1:
-                next_retained.extend(group)
-                continue
-            components = {item.component_id for item in group}
-            closed = [item for item in group if not item.session.is_open]
-            intervals = {
-                (
-                    item.session.start,
-                    None if item.session.is_open else item.session.end,
-                )
-                for item in group
-            }
-            if len(components) != 1 or len(intervals) != 1:
-                trustworthy = len(intervals) == 1
-                concrete_ends = [
-                    item.session.end for item in group if not item.session.is_open
-                ]
-                for component_id in sorted(components):
-                    excluded.append(
-                        _ExcludedUnknownLoadSession(
-                            component_id=component_id,
-                            session_id=min(
-                                item.session.session_id for item in group
-                            ),
-                            on_edge_id=min(
-                                item.session.on_edge_id for item in group
-                            ),
-                            start=min(item.session.start for item in group),
-                            end=(
-                                next(iter(intervals))[1]
-                                if trustworthy
-                                else (max(concrete_ends) if concrete_ends else None)
-                            ),
-                            has_trustworthy_interval=trustworthy,
-                            reason="deduplicated",
-                        )
+            item.session.is_open,
+            item.session.signature_fingerprint,
+        )
+
+    retained: list[_OwnedUnknownLoadSession] = []
+    excluded: list[_ExcludedUnknownLoadSession] = []
+    groups = sorted(
+        identity_components.values(),
+        key=lambda group: min(sort_key(item) for item in group),
+    )
+    for group in groups:
+        components = {item.component_id for item in group}
+        intervals = {
+            (
+                item.session.start,
+                None if item.session.is_open else item.session.end,
+            )
+            for item in group
+        }
+        if len(components) != 1 or len(intervals) != 1:
+            trustworthy = len(intervals) == 1
+            concrete_ends = [
+                item.session.end for item in group if not item.session.is_open
+            ]
+            for component_id in sorted(components):
+                excluded.append(
+                    _ExcludedUnknownLoadSession(
+                        component_id=component_id,
+                        session_id=min(item.session.session_id for item in group),
+                        on_edge_id=min(item.session.on_edge_id for item in group),
+                        start=min(item.session.start for item in group),
+                        end=(
+                            next(iter(intervals))[1]
+                            if trustworthy
+                            else (max(concrete_ends) if concrete_ends else None)
+                        ),
+                        has_trustworthy_interval=trustworthy,
+                        reason="deduplicated",
                     )
-                continue
-            next_retained.append(closed[0] if closed else group[0])
-        retained = next_retained
+                )
+            continue
+        closed = sorted(
+            (item for item in group if not item.session.is_open),
+            key=sort_key,
+        )
+        retained.append(closed[0] if closed else min(group, key=sort_key))
+
+    interval_groups: dict[
+        tuple[str, datetime, datetime], list[_OwnedUnknownLoadSession]
+    ] = {}
+    for item in retained:
+        interval_groups.setdefault(
+            (item.component_id, item.session.start, item.session.end), []
+        ).append(item)
+    retained = []
+    for key in sorted(interval_groups):
+        group = interval_groups[key]
+        closed = sorted(
+            (item for item in group if not item.session.is_open),
+            key=sort_key,
+        )
+        retained.append(closed[0] if closed else min(group, key=sort_key))
     return tuple(retained), tuple(excluded)
 
 
@@ -1703,7 +1741,16 @@ def _observation_started_at(
 
 
 def _coverage_to_payload(coverage: NilmSessionHistoryCoverage) -> dict[str, Any]:
-    return {
+    identity_aliases = sorted(
+        {
+            (kind, value.strip())
+            for kind, value in coverage.retention_identity_aliases
+            if kind in {"session", "on_edge"}
+            and isinstance(value, str)
+            and value.strip()
+        }
+    )[:NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS]
+    payload: dict[str, Any] = {
         "configured_max_items": coverage.configured_max_items,
         "source_count_before_retention": coverage.source_count_before_retention,
         "retained_count": coverage.retained_count,
@@ -1720,6 +1767,11 @@ def _coverage_to_payload(coverage: NilmSessionHistoryCoverage) -> dict[str, Any]
             else None
         ),
     }
+    if identity_aliases:
+        payload["_retention_identity_aliases"] = [
+            [kind, value] for kind, value in identity_aliases
+        ]
+    return payload
 
 
 def nilm_session_history_coverage_from_payload(
@@ -1732,6 +1784,20 @@ def nilm_session_history_coverage_from_payload(
     try:
         oldest = payload.get("oldest_retained_at")
         newest = payload.get("newest_retained_at")
+        raw_aliases = payload.get("_retention_identity_aliases", ())
+        aliases: set[tuple[str, str]] = set()
+        if (
+            isinstance(raw_aliases, (list, tuple))
+            and len(raw_aliases)
+            <= NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS
+        ):
+            for raw_alias in raw_aliases:
+                if not isinstance(raw_alias, (list, tuple)) or len(raw_alias) != 2:
+                    continue
+                kind = str(raw_alias[0]).strip()
+                value = str(raw_alias[1]).strip()
+                if kind in {"session", "on_edge"} and value:
+                    aliases.add((kind, value))
         return NilmSessionHistoryCoverage(
             configured_max_items=int(payload["configured_max_items"]),
             source_count_before_retention=int(payload["source_count_before_retention"]),
@@ -1740,6 +1806,9 @@ def nilm_session_history_coverage_from_payload(
             dropped_count=int(payload["dropped_count"]),
             oldest_retained_at=_as_utc_datetime(oldest) if oldest else None,
             newest_retained_at=_as_utc_datetime(newest) if newest else None,
+            retention_identity_aliases=tuple(sorted(aliases))[
+                :NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS
+            ],
         )
     except (KeyError, TypeError, ValueError, OverflowError):
         return None

@@ -462,6 +462,80 @@ def test_session_metadata_keeps_observation_starts_component_local() -> None:
     assert load["estimate_status"] == "partial_history"
 
 
+def test_oversized_retention_identity_metadata_is_rejected_deterministically() -> None:
+    """Persisted identity metadata cannot exceed its fixed storage contract."""
+
+    limit = unknown_loads.NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS
+    aliases = [["session", f"session-{index:05d}"] for index in range(limit + 1)]
+    payload = {
+        "configured_max_items": 2,
+        "source_count_before_retention": 5,
+        "retained_count": 2,
+        "was_truncated": True,
+        "dropped_count": 3,
+        "oldest_retained_at": "2026-08-08T00:00:00+00:00",
+        "newest_retained_at": "2026-08-10T00:00:00+00:00",
+        "_retention_identity_aliases": aliases,
+    }
+
+    forward = unknown_loads.nilm_session_history_coverage_from_payload(payload)
+    reverse = unknown_loads.nilm_session_history_coverage_from_payload(
+        {**payload, "_retention_identity_aliases": list(reversed(aliases))}
+    )
+
+    assert forward is not None
+    assert reverse is not None
+    assert forward.retention_identity_aliases == ()
+    assert reverse.retention_identity_aliases == ()
+
+
+def test_session_coverage_payload_bounds_identity_metadata_deterministically() -> None:
+    """Inventory serialization enforces the identity metadata output bound."""
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    limit = unknown_loads.NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS
+    aliases = tuple(
+        ("session", f"session-{index:05d}") for index in range(limit + 1)
+    )
+    sessions = [
+        {
+            "session_id": "retained",
+            "component_id": "on-a",
+            "signature_fingerprint": "on-a",
+            "start": (now - timedelta(hours=1)).isoformat(),
+            "end": now.isoformat(),
+        }
+    ]
+
+    def build(identity_aliases: tuple[tuple[str, str], ...]) -> list[list[str]]:
+        inventory = build_unknown_load_inventory(
+            circuit_id="mains",
+            signatures=[signature("on-a", 500.0, 100.0, 510.0)],
+            edges=[],
+            sessions=sessions,
+            now=now,
+            session_history_coverage=NilmSessionHistoryCoverage(
+                configured_max_items=1,
+                source_count_before_retention=2,
+                retained_count=1,
+                was_truncated=True,
+                dropped_count=1,
+                oldest_retained_at=now - timedelta(hours=1),
+                newest_retained_at=now,
+                retention_identity_aliases=identity_aliases,
+            ),
+        )
+        return inventory["session_history_coverage"][  # type: ignore[return-value]
+            "_retention_identity_aliases"
+        ]
+
+    forward = build(aliases)
+    reverse = build(tuple(reversed(aliases)))
+
+    assert forward == reverse
+    assert len(forward) == limit
+
+
 def test_duplicate_open_and_closed_session_id_is_ambiguous() -> None:
     """A stable ID with conflicting open/closed intervals is unusable evidence."""
 

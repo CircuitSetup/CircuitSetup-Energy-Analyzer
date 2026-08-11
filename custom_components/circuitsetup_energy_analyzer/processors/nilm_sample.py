@@ -47,6 +47,7 @@ from ..nilm import (
 )
 from ..normalize import NormalizedCircuitSample
 from ..unknown_loads import (
+    NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS,
     NilmSessionHistoryCoverage,
     build_unknown_load_inventory,
     migrate_unknown_load_inventory,
@@ -3872,6 +3873,19 @@ def _nilm_session_history_coverage(
                 continue
     source_count = len(session_list)
     retained_count = len(retained)
+    retained_identities = {
+        identity
+        for session in retained
+        for identity in _nilm_session_history_identity_aliases(session)
+    }
+    dropped_identity_aliases = sorted(
+        {
+            identity
+            for session in session_list[configured_max_items:]
+            for identity in _nilm_session_history_identity_aliases(session)
+            if identity not in retained_identities
+        }
+    )[:NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS]
     return NilmSessionHistoryCoverage(
         configured_max_items=configured_max_items,
         source_count_before_retention=source_count,
@@ -3880,6 +3894,7 @@ def _nilm_session_history_coverage(
         dropped_count=source_count - retained_count,
         oldest_retained_at=min(retained_timestamps, default=None),
         newest_retained_at=max(retained_timestamps, default=None),
+        retention_identity_aliases=tuple(dropped_identity_aliases),
     )
 
 
@@ -3917,8 +3932,9 @@ def _merge_nilm_session_history_coverage(
         for item in prior_list
         for identity in _nilm_session_history_identity_aliases(item)
     }
+    persisted_identities = set(persisted.retention_identity_aliases)
     final_list = tuple(final_sessions)
-    seen_identities = set(prior_identities)
+    seen_identities = prior_identities | persisted_identities
     new_identity_count = 0
     for session in final_list:
         identities = _nilm_session_history_identity_aliases(session)
@@ -3937,6 +3953,25 @@ def _merge_nilm_session_history_coverage(
         historical_source_count + new_identity_count,
     )
     retained_count = current.retained_count
+    retained_identities = {
+        identity
+        for item in final_list[: current.configured_max_items]
+        for identity in _nilm_session_history_identity_aliases(item)
+    }
+    current_dropped_identities = sorted(
+        {
+            identity
+            for item in final_list[current.configured_max_items :]
+            for identity in _nilm_session_history_identity_aliases(item)
+            if identity not in retained_identities
+        }
+    )
+    retention_identity_aliases = tuple(
+        sorted(
+            (persisted_identities | set(current_dropped_identities))
+            - retained_identities
+        )[:NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS]
+    )
     return NilmSessionHistoryCoverage(
         configured_max_items=current.configured_max_items,
         source_count_before_retention=source_count,
@@ -3945,6 +3980,7 @@ def _merge_nilm_session_history_coverage(
         dropped_count=max(0, source_count - retained_count),
         oldest_retained_at=current.oldest_retained_at,
         newest_retained_at=current.newest_retained_at,
+        retention_identity_aliases=retention_identity_aliases,
     )
 
 

@@ -9794,6 +9794,10 @@ def test_nilm_processor_restart_merges_persisted_truncation_coverage(
             dropped_count=4,
             oldest_retained_at=newer_start,
             newest_retained_at=now,
+            retention_identity_aliases=(
+                ("on_edge", "edge-older"),
+                ("session", "run-older"),
+            ),
         )
     elif case == "interval_update":
         updated_end = now - timedelta(hours=1)
@@ -9835,6 +9839,10 @@ def test_nilm_processor_restart_merges_persisted_truncation_coverage(
             dropped_count=4,
             oldest_retained_at=newer_start,
             newest_retained_at=newer_end,
+            retention_identity_aliases=(
+                ("on_edge", "edge-older"),
+                ("session", "run-older"),
+            ),
         )
     store = FeatureStoreData(
         nilm_session_history_by_circuit={"mains": sessions},
@@ -9873,6 +9881,253 @@ def test_nilm_processor_restart_merges_persisted_truncation_coverage(
     processor.refresh_session_history("mains", store)
 
     assert processor._session_history_coverage_by_circuit["mains"] == expected
+
+
+def test_nilm_processor_dropped_stable_session_is_counted_once_after_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stable overflow session cannot inflate persisted coverage every pass."""
+    from collections import defaultdict
+    from copy import deepcopy
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import nilm_sample
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+
+    def row(
+        session_id: str,
+        start: datetime,
+        *,
+        on_edge_id: str,
+    ) -> dict[str, object]:
+        return {
+            "session_id": session_id,
+            "signature_fingerprint": "on-a",
+            "on_edge_id": on_edge_id,
+            "start": start.isoformat(),
+            "end": (start + timedelta(minutes=30)).isoformat(),
+        }
+
+    retained = [
+        row("retained-newer", now - timedelta(days=1), on_edge_id="edge-newer"),
+        row("retained-older", now - timedelta(days=2), on_edge_id="edge-older"),
+    ]
+    stable_overflow = row(
+        "stable-overflow",
+        now - timedelta(days=3),
+        on_edge_id="edge-overflow",
+    )
+    store = FeatureStoreData(
+        nilm_session_history_by_circuit={"mains": retained},
+        nilm_unknown_loads_by_circuit={
+            "mains": {
+                "session_history_coverage": {
+                    "configured_max_items": 2,
+                    "source_count_before_retention": 5,
+                    "retained_count": 2,
+                    "was_truncated": True,
+                    "dropped_count": 3,
+                    "oldest_retained_at": retained[1]["start"],
+                    "newest_retained_at": retained[0]["end"],
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(
+        nilm_sample,
+        "_nilm_session_history_payloads",
+        lambda *_args, **_kwargs: [stable_overflow],
+    )
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    sample = NormalizedCircuitSample(
+        timestamp=now,
+        circuit_id="mains",
+        real_power=0.0,
+        current=None,
+        voltage=None,
+        reactive_power=None,
+        apparent_power=None,
+        power_factor=None,
+        frequency=None,
+        energy=None,
+    )
+
+    def process_after_restart() -> object:
+        processor = processors.NilmSampleProcessor(
+            nilm_enabled=lambda _: True,
+            seed_demo_nilm_state=lambda *_: None,
+            min_delta_w_for_circuit=lambda _: 100.0,
+            detectors={},
+            total_events_by_circuit=defaultdict(int),
+            unmatched_edges_by_circuit=defaultdict(list),
+            ignored_signatures=set(),
+            known_load_events=lambda *_: (),
+            observe_topology=lambda *_: [],
+            session_history_max_items=2,
+        )
+        context = ProcessingContext(
+            now=now,
+            hass=SimpleNamespace(data={DOMAIN: {}}),
+            state=AnalyzerState(),
+            store_data=store,
+            options={},
+            entry_data={},
+            known_load_circuit_ids=frozenset(),
+            sensitivity="standard",
+        )
+        return processor.process(sample, config, context, events=())
+
+    first = process_after_restart()
+    first_inventory = deepcopy(store.nilm_unknown_loads_by_circuit["mains"])
+    second = process_after_restart()
+    third = process_after_restart()
+
+    coverage = store.nilm_unknown_loads_by_circuit["mains"][
+        "session_history_coverage"
+    ]
+    assert first.store_dirty
+    assert not second.store_dirty
+    assert not third.store_dirty
+    assert store.nilm_unknown_loads_by_circuit["mains"] == first_inventory
+    assert coverage["source_count_before_retention"] == 6
+    assert coverage["retained_count"] == 2
+    assert coverage["dropped_count"] == 4
+    assert coverage["source_count_before_retention"] == (
+        coverage["retained_count"] + coverage["dropped_count"]
+    )
+    assert store.nilm_session_history_by_circuit["mains"] == retained
+
+
+def test_nilm_processor_transitive_session_edge_conflicts_are_order_stable() -> None:
+    """One alias-connected conflict component cannot retain an active interval."""
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    start = now - timedelta(hours=2)
+    closed_end = now - timedelta(hours=1)
+    rows = [
+        {
+            "session_id": "shared-session",
+            "component_id": "on-a",
+            "signature_fingerprint": "on-a",
+            "on_edge_id": "edge-a",
+            "start": start.isoformat(),
+            "end": closed_end.isoformat(),
+        },
+        {
+            "session_id": "shared-session",
+            "component_id": "on-a",
+            "signature_fingerprint": "on-a",
+            "on_edge_id": "edge-b",
+            "start": start.isoformat(),
+            "end": closed_end.isoformat(),
+        },
+        {
+            "session_id": "active-alias",
+            "component_id": "on-a",
+            "signature_fingerprint": "on-a",
+            "on_edge_id": "edge-b",
+            "start": start.isoformat(),
+            "end": None,
+        },
+    ]
+
+    def run(order: tuple[int, int, int]) -> dict[str, object]:
+        store = FeatureStoreData(
+            nilm_unmatched_edges_by_circuit={"mains": []},
+            nilm_signatures={
+                "mains": [
+                    {
+                        "signature_id": "on-a",
+                        "median_delta_w": 500.0,
+                        "median_delta_var": 100.0,
+                        "occurrence_count": 3,
+                        "confidence": 0.8,
+                        "review_state": "new",
+                    }
+                ]
+            },
+            nilm_session_history_by_circuit={
+                "mains": [dict(rows[index]) for index in order]
+            },
+        )
+        context = ProcessingContext(
+            now=now,
+            hass=SimpleNamespace(data={DOMAIN: {}}),
+            state=AnalyzerState(),
+            store_data=store,
+            options={},
+            entry_data={},
+            known_load_circuit_ids=frozenset(),
+            sensitivity="standard",
+        )
+        config = CircuitConfig(
+            circuit_id="mains",
+            name="Mains",
+            appliance_profile=ApplianceProfile.MAINS_NILM,
+            mode=CircuitMode.MAINS_NILM,
+        )
+        processor = processors.NilmSampleProcessor(
+            nilm_enabled=lambda _: True,
+            seed_demo_nilm_state=lambda *_: None,
+            min_delta_w_for_circuit=lambda _: 100.0,
+            detectors={},
+            total_events_by_circuit=defaultdict(int),
+            unmatched_edges_by_circuit=defaultdict(list),
+            ignored_signatures=set(),
+            known_load_events=lambda *_: (),
+            observe_topology=lambda *_: [],
+        )
+        result = processor.process(
+            NormalizedCircuitSample(
+                timestamp=now,
+                circuit_id="mains",
+                real_power=0.0,
+                current=None,
+                voltage=None,
+                reactive_power=None,
+                apparent_power=None,
+                power_factor=None,
+                frequency=None,
+                energy=None,
+            ),
+            config,
+            context,
+            events=(),
+        )
+        assert result.store_dirty
+        return store.nilm_unknown_loads_by_circuit["mains"]
+
+    payloads = [run(order) for order in ((0, 1, 2), (1, 0, 2), (2, 0, 1))]
+
+    assert payloads[0] == payloads[1] == payloads[2]
+    load = payloads[0]["unknown_loads"][0]  # type: ignore[index]
+    assert load["runtime_today_minutes"] == 0.0
+    assert load["current_runtime_minutes"] == 0.0
+    assert load["running_state"] == "unknown"
+    assert load["estimate_status_by_window"]["today"] == "ambiguous"
+    assert load["runtime_windows"]["today"]["included_session_count"] == 0
+    assert load["runtime_windows"]["today"]["excluded_session_count"] == 1
 
 
 def test_nilm_sample_processor_caps_runtime_unmatched_edges() -> None:
