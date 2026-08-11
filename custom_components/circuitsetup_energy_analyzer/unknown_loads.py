@@ -1340,6 +1340,10 @@ def _unknown_component_session_payload(
     ambiguous = (
         component.pair_status == "ambiguous"
         or component.component_id in evidence.ambiguous_component_ids
+        or (
+            component.component_id in allocation.ambiguous_component_ids
+            and not sessions
+        )
     )
     open_sessions = [item for item in sessions if item.session.is_open]
     if ambiguous or len(open_sessions) > 1:

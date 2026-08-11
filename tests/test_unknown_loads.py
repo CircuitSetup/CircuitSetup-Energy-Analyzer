@@ -503,6 +503,13 @@ def test_unique_session_survives_raw_edge_component_ambiguity() -> None:
     assert load["running_state"] == "probably_off"
     assert load["runtime_windows"]["today"]["included_session_count"] == 1
 
+    sessionless_load = loads_by_signature_id["sig-520"]
+    assert sessionless_load["ambiguous_edge_count"] == 1
+    assert sessionless_load["separation_status"] == "ambiguous"
+    assert sessionless_load["runtime_today_minutes"] == 0.0
+    assert sessionless_load["estimated_energy_today_kwh"] == 0.0
+    assert sessionless_load["runtime_windows"]["today"]["included_session_count"] == 0
+
 
 def test_session_evidence_does_not_override_ambiguous_signature_pairing() -> None:
     """Session ownership cannot make an ambiguously paired signature separable."""
@@ -1201,6 +1208,61 @@ def test_migration_preserves_v2_leg_fingerprint_for_session_ownership() -> None:
             {
                 "session_id": "v2-leg-session",
                 "component_id": "legacy-component-id",
+                "signature_fingerprint": fingerprint,
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": "2026-08-09T11:00:00+00:00",
+            }
+        ],
+        now=datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+    )
+
+    load = migrated["unknown_loads"][0]
+    assert load["component_fingerprint"] == fingerprint
+    assert load["runtime_today_minutes"] == 60.0
+    assert load["estimated_energy_today_kwh"] == 0.5
+    assert load["runtime_windows"]["today"]["included_session_count"] == 1
+
+
+def test_migration_preserves_v2_fingerprint_when_older_payload_omits_leg_fields(
+) -> None:
+    """Missing v2 leg fields retain the producer fingerprint used by sessions."""
+
+    producer_signature = NilmSignature(
+        signature_id="sig-v2-no-legs",
+        median_delta_w=500.0,
+        median_delta_var=100.0,
+        median_delta_va=510.0,
+        median_delta_pf=0.0,
+        occurrence_count=4,
+        confidence=0.7,
+        dominant_leg="a",
+        split_phase_type="single_leg_a",
+        median_leg_a_delta_w=None,
+        median_leg_b_delta_w=None,
+        leg_balance_ratio=None,
+    )
+    fingerprint = nilm_signature_fingerprint(producer_signature)
+
+    migrated = unknown_loads.migrate_unknown_load_inventory(
+        circuit_id="mains",
+        existing_state={},
+        signature_payloads=[
+            {
+                "signature_id": "sig-v2-no-legs",
+                "median_delta_w": 500.0,
+                "median_delta_var": 100.0,
+                "median_delta_va": 510.0,
+                "median_delta_pf": 0.0,
+                "occurrence_count": 4,
+                "confidence": 0.7,
+                "dominant_leg": "a",
+                "split_phase_type": "single_leg_a",
+            }
+        ],
+        sessions=[
+            {
+                "session_id": "v2-no-leg-session",
+                "component_id": "retired-component-id",
                 "signature_fingerprint": fingerprint,
                 "start": "2026-08-09T10:00:00+00:00",
                 "end": "2026-08-09T11:00:00+00:00",
