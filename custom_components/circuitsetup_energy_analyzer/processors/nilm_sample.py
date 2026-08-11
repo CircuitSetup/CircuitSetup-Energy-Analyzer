@@ -750,6 +750,7 @@ class NilmSampleProcessor:
                 session_payloads,
                 assignments=assignments,
             )
+        next_sessions = _deduplicate_nilm_session_history(next_sessions)
         coverage = _nilm_session_history_coverage(
             next_sessions,
             configured_max_items=self._session_history_max_items,
@@ -803,21 +804,10 @@ class NilmSampleProcessor:
         if not isinstance(persisted_facts, Mapping):
             persisted_facts = {}
         prior = self._session_history_ingress_by_circuit.get(circuit_id)
-        source_count = max(
-            len(rows),
-            _bounded_ingress_count(
-                raw_facts.get("source_count_before_ingress"),
-                maximum=NILM_SESSION_HISTORY_COUNT_MAX,
-            ),
-            _bounded_ingress_count(
-                persisted_facts.get("source_count_before_ingress"),
-                maximum=NILM_SESSION_HISTORY_COUNT_MAX,
-            ),
-            _bounded_ingress_count(
-                prior.source_count_before_ingress if prior is not None else 0,
-                maximum=NILM_SESSION_HISTORY_COUNT_MAX,
-            ),
-        )
+        # The bounded projection is the only authoritative ingress count. A
+        # clipped tail can repeat a retained identity, so raw or historical
+        # ingress metadata must not manufacture an exact source count.
+        source_count = len(rows)
         facts = _NilmSessionHistoryIngressFacts(
             source_count_before_ingress=source_count,
             was_truncated=(
@@ -3992,6 +3982,75 @@ def _merge_nilm_session_history(
     )
 
 
+def _deduplicate_nilm_session_history(
+    sessions: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return canonical history rows deduplicated by their full evidence.
+
+    The caller has already received the fixed ingress prefix. This is bounded
+    O(R * F log F) CPU work, where F is the fixed scalar row schema (and the
+    optional fixed duration-close schema). It performs no I/O, awaits, replay,
+    or traversal of raw nested payloads. Rows that share an alias but differ in
+    any retained evidence stay separate for conflict/ambiguity reconstruction.
+    """
+
+    def scalar_key(value: Any) -> tuple[str, object]:
+        if value is None:
+            return "none", ""
+        if isinstance(value, bool):
+            return "bool", value
+        if isinstance(value, int):
+            return "int", value
+        if isinstance(value, float):
+            return "float", value
+        if isinstance(value, str):
+            return "str", value
+        return "unsupported", type(value).__name__
+
+    def evidence_key(payload: Mapping[str, Any]) -> tuple[tuple[str, object], ...]:
+        missing = object()
+        evidence: list[tuple[str, object]] = []
+        for key in sorted(payload):
+            value = payload[key]
+            if key == "_duration_bound_close" and isinstance(value, Mapping):
+                value_key: object = (
+                    "duration_close",
+                    tuple(
+                        (close_key, scalar_key(value.get(close_key, missing)))
+                        for close_key in (
+                            "session_id",
+                            "off_edge_id",
+                            "end",
+                            "duration_seconds",
+                            "estimated_energy_kwh",
+                            "confidence",
+                            "ambiguous",
+                            "alternate_match_count",
+                        )
+                    ),
+                )
+            else:
+                value_key = scalar_key(value)
+            evidence.append((key, value_key))
+        return tuple(evidence)
+
+    rows_by_evidence: dict[tuple[tuple[str, object], ...], dict[str, Any]] = {}
+    for session in sessions:
+        payload = dict(session)
+        rows_by_evidence[evidence_key(payload)] = payload
+    return [
+        payload
+        for _evidence, payload in sorted(
+            rows_by_evidence.items(),
+            key=lambda item: (
+                str(item[1].get("end") or item[1].get("start") or ""),
+                item[0],
+            ),
+            reverse=True,
+        )
+    ]
+
+
 def _nilm_session_history_coverage(
     sessions: Iterable[Mapping[str, Any]],
     *,
@@ -4021,13 +4080,10 @@ def _nilm_session_history_coverage(
                 )
             except (TypeError, ValueError, OverflowError):
                 continue
-    source_count = min(
-        NILM_SESSION_HISTORY_COUNT_MAX,
-        max(
-            len(session_list),
-            ingress.source_count_before_ingress if ingress is not None else 0,
-        ),
-    )
+    # ``session_list`` is the sorted, identity-deduplicated bounded view. A
+    # clipped ingress tail has no provable unique count, so its uncertainty is
+    # recorded by the incomplete identity proof rather than fabricated here.
+    source_count = min(NILM_SESSION_HISTORY_COUNT_MAX, len(session_list))
     retained_count = len(retained)
     retained_identities = {
         identity
@@ -4059,6 +4115,9 @@ def _nilm_session_history_coverage(
         newest_retained_at=max(retained_timestamps, default=None),
         retention_identity_components=dropped_components,
         retention_identity_components_complete=dropped_components_complete,
+        ingress_history_incomplete=(
+            ingress.was_truncated if ingress is not None else False
+        ),
     )
 
 
@@ -4139,7 +4198,7 @@ def _merge_nilm_session_history_coverage(
 ) -> NilmSessionHistoryCoverage:
     """Preserve dropped-history facts while refreshing the current retained view."""
 
-    if not persisted.was_truncated:
+    if not persisted.was_truncated and not persisted.ingress_history_incomplete:
         return current
     prior_list = tuple(
         item for item in prior_sessions if isinstance(item, Mapping)
@@ -4217,6 +4276,9 @@ def _merge_nilm_session_history_coverage(
         retention_identity_components=retention_identity_components,
         retention_identity_components_complete=(
             retention_identity_components_complete
+        ),
+        ingress_history_incomplete=(
+            persisted.ingress_history_incomplete or current.ingress_history_incomplete
         ),
     )
 

@@ -1239,7 +1239,7 @@ def test_feature_store_bounds_nilm_session_history_during_deserialization() -> N
     assert "session_id" not in retained[0]
     assert "on_edge_id" not in retained[1]
     ingress = restored.nilm_session_history_ingress_by_circuit["mains"]
-    assert ingress["source_count_before_ingress"] == max_rows + 2
+    assert ingress["source_count_before_ingress"] == max_rows
     assert ingress["was_truncated"] is True
     assert ingress["identity_aliases_complete"] is False
 

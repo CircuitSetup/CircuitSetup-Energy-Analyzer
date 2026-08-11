@@ -692,7 +692,6 @@ def _sanitize_nilm_session_history_ingress(
             "duration_bound_close_incomplete": False,
         }
     raw_source_count = len(raw_rows)
-    source_count = min(raw_source_count, NILM_SESSION_HISTORY_COUNT_MAX)
     rows: list[dict[str, Any]] = []
     identity_aliases_complete = raw_source_count <= cap
     invalid_alias_count = 0
@@ -741,7 +740,10 @@ def _sanitize_nilm_session_history_ingress(
         )
     was_truncated = raw_source_count > len(rows)
     return rows, {
-        "source_count_before_ingress": source_count,
+        # A fixed-prefix ingress cannot establish whether its unvisited tail
+        # repeats a retained identity. Only copied rows are an exact bounded
+        # count; the identity-completeness fact preserves that uncertainty.
+        "source_count_before_ingress": len(rows),
         "retained_count": len(rows),
         "was_truncated": was_truncated,
         "identity_aliases_complete": identity_aliases_complete,
@@ -851,6 +853,7 @@ class NilmSessionHistoryCoverage:
         _NilmSessionHistoryIdentityComponent, ...
     ] = ()
     retention_identity_components_complete: bool = False
+    ingress_history_incomplete: bool = False
 
 
 def _coverage_for_supplied_sessions(
@@ -2435,17 +2438,20 @@ def _estimate_status(
         )
         or observation_started_at is None
         or observation_started_at > window_start
-        or (
-            session_history_coverage is not None
-            and session_history_coverage.was_truncated
-            and (
-                session_history_coverage.oldest_retained_at is None
-                or session_history_coverage.oldest_retained_at > window_start
-            )
-        )
+        or _session_history_may_hide_open_session(session_history_coverage)
     ):
         return "partial_history"
     return "complete"
+
+
+def _session_history_may_hide_open_session(
+    coverage: NilmSessionHistoryCoverage | None,
+) -> bool:
+    """Return whether bounded history cannot rule out an omitted open session."""
+
+    return coverage is not None and (
+        coverage.was_truncated or coverage.ingress_history_incomplete
+    )
 
 
 def _session_evidence_relevant(
@@ -2577,6 +2583,8 @@ def _coverage_to_payload(coverage: NilmSessionHistoryCoverage) -> dict[str, Any]
             [[kind, value] for kind, value in component.aliases]
             for component in identity_components
         ]
+    if coverage.ingress_history_incomplete is True:
+        payload["_ingress_history_incomplete"] = True
     return payload
 
 
@@ -2614,6 +2622,16 @@ def nilm_session_history_coverage_from_payload(
         isinstance(raw_was_truncated, bool)
         and raw_was_truncated is expected_was_truncated
     )
+    raw_ingress_history_incomplete = payload.get(
+        "_ingress_history_incomplete", False
+    )
+    ingress_history_incomplete = (
+        raw_ingress_history_incomplete is True
+        or (
+            "_ingress_history_incomplete" in payload
+            and not isinstance(raw_ingress_history_incomplete, bool)
+        )
+    )
     return NilmSessionHistoryCoverage(
         configured_max_items=configured_max_items,
         source_count_before_retention=source_count,
@@ -2630,6 +2648,7 @@ def nilm_session_history_coverage_from_payload(
             and bounds_valid
             and dropped_count == len(components)
         ),
+        ingress_history_incomplete=ingress_history_incomplete,
     )
 
 
@@ -2720,7 +2739,9 @@ def _unknown_component_session_payload(
     running_ambiguous = (
         intrinsic_ambiguous or bool(ambiguous_sessions) or len(open_sessions) > 1
     )
-    if running_ambiguous:
+    if running_ambiguous or _session_history_may_hide_open_session(
+        session_history_coverage
+    ):
         payload["running_state"] = "unknown"
         payload["current_runtime_minutes"] = 0.0
     elif open_sessions:
