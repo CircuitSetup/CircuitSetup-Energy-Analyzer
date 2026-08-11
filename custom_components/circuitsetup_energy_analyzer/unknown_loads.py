@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from itertools import islice
 from math import isfinite
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -24,6 +25,14 @@ SIGNATURE_PAIR_AMBIGUITY_MARGIN = 0.08
 EDGE_COMPONENT_AMBIGUITY_MARGIN = 0.08
 LEGACY_IDENTITY_UNRESOLVED_KEY = "legacy_identity_unresolved"
 NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS = 8_192
+NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT = 2_000
+NILM_SESSION_HISTORY_IDENTITY_MAX_COMPONENTS = (
+    NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS
+)
+NILM_SESSION_HISTORY_IDENTITY_MAX_ALIASES_PER_COMPONENT = 2
+NILM_SESSION_HISTORY_IDENTITY_MAX_CHARS = 256
+NILM_SESSION_HISTORY_IDENTITY_MAX_UTF8_BYTES = 256
+_NILM_SESSION_HISTORY_MAX_FIELDS_PER_ROW = 64
 
 
 def _nilm_session_history_identity_alias(
@@ -33,9 +42,210 @@ def _nilm_session_history_identity_alias(
 
     if not isinstance(kind, str) or kind not in {"session", "on_edge"}:
         return None
-    if not isinstance(value, str) or not (normalized := value.strip()):
+    if (
+        not isinstance(value, str)
+        or len(value) > NILM_SESSION_HISTORY_IDENTITY_MAX_CHARS
+    ):
+        return None
+    if not (normalized := value.strip()):
+        return None
+    if len(normalized) > NILM_SESSION_HISTORY_IDENTITY_MAX_CHARS:
+        return None
+    if (
+        len(normalized.encode("utf-8"))
+        > NILM_SESSION_HISTORY_IDENTITY_MAX_UTF8_BYTES
+    ):
         return None
     return kind, normalized
+
+
+@dataclass(frozen=True, slots=True)
+class _NilmSessionHistoryIdentityComponent:
+    """One canonical bounded transitive stable-identity component."""
+
+    aliases: tuple[tuple[str, str], ...]
+
+
+def _nilm_session_history_identity_component_closure(
+    alias_groups: Iterable[Iterable[tuple[str, str]]],
+) -> tuple[_NilmSessionHistoryIdentityComponent, ...]:
+    """Close caller-bounded alias groups in O(A alpha(A) + A log A)."""
+
+    parents: dict[tuple[str, str], tuple[str, str]] = {}
+    ranks: dict[tuple[str, str], int] = {}
+
+    def find(alias: tuple[str, str]) -> tuple[str, str]:
+        root = alias
+        while parents[root] != root:
+            root = parents[root]
+        while parents[alias] != alias:
+            parent = parents[alias]
+            parents[alias] = root
+            alias = parent
+        return root
+
+    def union(first: tuple[str, str], second: tuple[str, str]) -> None:
+        first_root = find(first)
+        second_root = find(second)
+        if first_root == second_root:
+            return
+        first_rank = ranks[first_root]
+        second_rank = ranks[second_root]
+        if first_rank < second_rank or (
+            first_rank == second_rank and second_root < first_root
+        ):
+            first_root, second_root = second_root, first_root
+            first_rank, second_rank = second_rank, first_rank
+        parents[second_root] = first_root
+        if first_rank == second_rank:
+            ranks[first_root] += 1
+
+    for raw_group in alias_groups:
+        group = tuple(dict.fromkeys(raw_group))
+        if not group:
+            continue
+        for alias in group:
+            parents.setdefault(alias, alias)
+            ranks.setdefault(alias, 0)
+        for alias in group[1:]:
+            union(group[0], alias)
+
+    components_by_root: dict[
+        tuple[str, str], list[tuple[str, str]]
+    ] = {}
+    for alias in parents:
+        components_by_root.setdefault(find(alias), []).append(alias)
+    return tuple(
+        sorted(
+            (
+                _NilmSessionHistoryIdentityComponent(tuple(sorted(aliases)))
+                for aliases in components_by_root.values()
+            ),
+            key=lambda component: component.aliases,
+        )
+    )
+
+
+def _canonical_nilm_session_history_identity_components(
+    raw_components: Any,
+) -> tuple[tuple[_NilmSessionHistoryIdentityComponent, ...], bool]:
+    """Normalize a bounded component ledger without fabricating grouping evidence."""
+
+    if not isinstance(raw_components, (list, tuple)) or len(raw_components) > (
+        NILM_SESSION_HISTORY_IDENTITY_MAX_COMPONENTS
+    ):
+        return (), False
+    groups: list[tuple[tuple[str, str], ...]] = []
+    valid = True
+    for raw_component in raw_components:
+        raw_aliases = (
+            raw_component.aliases
+            if isinstance(raw_component, _NilmSessionHistoryIdentityComponent)
+            else raw_component
+        )
+        if (
+            not isinstance(raw_aliases, (list, tuple))
+            or not raw_aliases
+            or len(raw_aliases)
+            > NILM_SESSION_HISTORY_IDENTITY_MAX_ALIASES_PER_COMPONENT
+        ):
+            valid = False
+            continue
+        aliases: set[tuple[str, str]] = set()
+        component_valid = True
+        for raw_alias in raw_aliases:
+            if not isinstance(raw_alias, (list, tuple)) or len(raw_alias) != 2:
+                component_valid = False
+                break
+            alias = _nilm_session_history_identity_alias(
+                raw_alias[0], raw_alias[1]
+            )
+            if alias is None:
+                component_valid = False
+                break
+            aliases.add(alias)
+        if not component_valid or not aliases:
+            valid = False
+            continue
+        groups.append(tuple(aliases))
+    closed_components = _nilm_session_history_identity_component_closure(
+        groups
+    )
+    valid = valid and all(
+        len(component.aliases)
+        <= NILM_SESSION_HISTORY_IDENTITY_MAX_ALIASES_PER_COMPONENT
+        for component in closed_components
+    )
+    components = tuple(
+        component
+        for component in closed_components
+        if len(component.aliases)
+        <= NILM_SESSION_HISTORY_IDENTITY_MAX_ALIASES_PER_COMPONENT
+    )
+    if len(components) > NILM_SESSION_HISTORY_IDENTITY_MAX_COMPONENTS:
+        return (), False
+    return components, valid
+
+
+def _sanitize_nilm_session_history_ingress(
+    raw_rows: Any,
+    *,
+    max_source_rows: int,
+) -> tuple[list[dict[str, Any]], dict[str, int | bool]]:
+    """Copy a fixed prefix using bounded CPU and strict stable aliases only.
+
+    Complexity is O(R * F + R * A), where R is capped by ``max_source_rows``,
+    F is capped at 64 copied mapping fields, and A is the two stable alias keys.
+    The helper is synchronous and pure: it performs no I/O, replay, calibration,
+    sorting, timestamp parsing, sleeps, awaits, or executor work.
+    """
+
+    cap = max(int(max_source_rows), 0)
+    if not isinstance(raw_rows, (list, tuple)):
+        return [], {
+            "source_count_before_ingress": 0,
+            "retained_count": 0,
+            "was_truncated": bool(raw_rows),
+            "identity_aliases_complete": False,
+            "invalid_alias_count": 0,
+        }
+    source_count = len(raw_rows)
+    rows: list[dict[str, Any]] = []
+    identity_aliases_complete = source_count <= cap
+    invalid_alias_count = 0
+    for raw_row in raw_rows[:cap]:
+        if not isinstance(raw_row, Mapping):
+            identity_aliases_complete = False
+            continue
+        try:
+            field_count = len(raw_row)
+        except (TypeError, ValueError, OverflowError):
+            identity_aliases_complete = False
+            continue
+        if field_count > _NILM_SESSION_HISTORY_MAX_FIELDS_PER_ROW:
+            identity_aliases_complete = False
+        row = dict(
+            islice(raw_row.items(), _NILM_SESSION_HISTORY_MAX_FIELDS_PER_ROW)
+        )
+        for key, kind in (("session_id", "session"), ("on_edge_id", "on_edge")):
+            if key not in row:
+                continue
+            alias = _nilm_session_history_identity_alias(kind, row[key])
+            if alias is None:
+                row.pop(key, None)
+                invalid_alias_count += 1
+                identity_aliases_complete = False
+            else:
+                row[key] = alias[1]
+        rows.append(row)
+    was_truncated = source_count > len(rows)
+    return rows, {
+        "source_count_before_ingress": source_count,
+        "retained_count": len(rows),
+        "was_truncated": was_truncated,
+        "identity_aliases_complete": identity_aliases_complete,
+        "invalid_alias_count": invalid_alias_count,
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,8 +342,10 @@ class NilmSessionHistoryCoverage:
     dropped_count: int
     oldest_retained_at: datetime | None
     newest_retained_at: datetime | None
-    retention_identity_aliases: tuple[tuple[str, str], ...] = ()
-    retention_identity_aliases_complete: bool = False
+    retention_identity_components: tuple[
+        _NilmSessionHistoryIdentityComponent, ...
+    ] = ()
+    retention_identity_components_complete: bool = False
 
 
 def _coverage_for_supplied_sessions(
@@ -200,7 +412,7 @@ def _coverage_for_supplied_sessions(
         dropped_count=0,
         oldest_retained_at=min(timestamps, default=None),
         newest_retained_at=max(timestamps, default=None),
-        retention_identity_aliases_complete=True,
+        retention_identity_components_complete=True,
     )
 
 
@@ -414,7 +626,7 @@ def unknown_load_inventory_needs_rebuild(
     if provenance == "retained_session_history":
         coverage_payload = existing_state.get("session_history_coverage")
         if not isinstance(coverage_payload, Mapping) or not isinstance(
-            coverage_payload.get("_retention_identity_aliases_complete"), bool
+            coverage_payload.get("_retention_identity_components_complete"), bool
         ):
             return True
     if str(existing_state.get("estimate_status") or "") not in {
@@ -1242,8 +1454,14 @@ def _normalize_unknown_load_sessions(
                 )
             )
             continue
-        session_id = str(raw.get("session_id") or "").strip()
-        on_edge_id = str(raw.get("on_edge_id") or "").strip()
+        session_alias = _nilm_session_history_identity_alias(
+            "session", raw.get("session_id")
+        )
+        on_edge_alias = _nilm_session_history_identity_alias(
+            "on_edge", raw.get("on_edge_id")
+        )
+        session_id = session_alias[1] if session_alias is not None else ""
+        on_edge_id = on_edge_alias[1] if on_edge_alias is not None else ""
         identities = _session_identities(raw)
         start, evidence_end, has_trustworthy_interval = _session_evidence_interval(
             raw, now
@@ -1761,24 +1979,11 @@ def _observation_started_at(
 
 
 def _coverage_to_payload(coverage: NilmSessionHistoryCoverage) -> dict[str, Any]:
-    identity_aliases: set[tuple[str, str]] = set()
-    aliases_valid = (
-        len(coverage.retention_identity_aliases)
-        <= NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS
+    identity_components, components_valid = (
+        _canonical_nilm_session_history_identity_components(
+            coverage.retention_identity_components
+        )
     )
-    if aliases_valid:
-        for raw_alias in coverage.retention_identity_aliases:
-            if not isinstance(raw_alias, (list, tuple)) or len(raw_alias) != 2:
-                aliases_valid = False
-                continue
-            alias = _nilm_session_history_identity_alias(
-                raw_alias[0], raw_alias[1]
-            )
-            if alias is None:
-                aliases_valid = False
-                continue
-            identity_aliases.add(alias)
-    sorted_identity_aliases = sorted(identity_aliases)
     counts_valid = (
         coverage.source_count_before_retention
         == coverage.retained_count + coverage.dropped_count
@@ -1801,16 +2006,17 @@ def _coverage_to_payload(coverage: NilmSessionHistoryCoverage) -> dict[str, Any]
             if coverage.newest_retained_at is not None
             else None
         ),
-        "_retention_identity_aliases_complete": bool(
-            coverage.retention_identity_aliases_complete
-            and aliases_valid
+        "_retention_identity_components_complete": bool(
+            coverage.retention_identity_components_complete
+            and components_valid
             and counts_valid
-            and coverage.dropped_count <= len(sorted_identity_aliases)
+            and coverage.dropped_count == len(identity_components)
         ),
     }
-    if sorted_identity_aliases:
-        payload["_retention_identity_aliases"] = [
-            [kind, value] for kind, value in sorted_identity_aliases
+    if identity_components:
+        payload["_retention_identity_components"] = [
+            [[kind, value] for kind, value in component.aliases]
+            for component in identity_components
         ]
     return payload
 
@@ -1825,25 +2031,10 @@ def nilm_session_history_coverage_from_payload(
     try:
         oldest = payload.get("oldest_retained_at")
         newest = payload.get("newest_retained_at")
-        raw_aliases = payload.get("_retention_identity_aliases", ())
-        aliases: set[tuple[str, str]] = set()
-        aliases_valid = (
-            isinstance(raw_aliases, (list, tuple))
-            and len(raw_aliases)
-            <= NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS
+        raw_components = payload.get("_retention_identity_components", ())
+        components, components_valid = (
+            _canonical_nilm_session_history_identity_components(raw_components)
         )
-        if aliases_valid:
-            for raw_alias in raw_aliases:
-                if not isinstance(raw_alias, (list, tuple)) or len(raw_alias) != 2:
-                    aliases_valid = False
-                    continue
-                alias = _nilm_session_history_identity_alias(
-                    raw_alias[0], raw_alias[1]
-                )
-                if alias is None:
-                    aliases_valid = False
-                    continue
-                aliases.add(alias)
         source_count = int(payload["source_count_before_retention"])
         retained_count = int(payload["retained_count"])
         dropped_count = int(payload["dropped_count"])
@@ -1860,14 +2051,12 @@ def nilm_session_history_coverage_from_payload(
             dropped_count=dropped_count,
             oldest_retained_at=_as_utc_datetime(oldest) if oldest else None,
             newest_retained_at=_as_utc_datetime(newest) if newest else None,
-            retention_identity_aliases=tuple(sorted(aliases))[
-                :NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS
-            ],
-            retention_identity_aliases_complete=(
-                payload.get("_retention_identity_aliases_complete") is True
-                and aliases_valid
+            retention_identity_components=components,
+            retention_identity_components_complete=(
+                payload.get("_retention_identity_components_complete") is True
+                and components_valid
                 and counts_valid
-                and dropped_count <= len(aliases)
+                and dropped_count == len(components)
             ),
         )
     except (KeyError, TypeError, ValueError, OverflowError):

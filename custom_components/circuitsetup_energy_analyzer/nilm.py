@@ -7361,7 +7361,7 @@ def _nilm_session_id(
     on_edge_id: str,
     off_edge_id: str | None,
 ) -> str:
-    return "|".join(
+    identity = "|".join(
         (
             str(mains_circuit_id),
             str(signature_fingerprint),
@@ -7369,6 +7369,9 @@ def _nilm_session_id(
             off_edge_id or "open",
         )
     )
+    if len(identity) <= 256 and len(identity.encode("utf-8")) <= 256:
+        return identity
+    return f"nilm-session|{sha256(identity.encode('utf-8')).hexdigest()}"
 
 
 def _clamp(value: float) -> float:

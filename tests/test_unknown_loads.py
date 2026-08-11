@@ -463,10 +463,12 @@ def test_session_metadata_keeps_observation_starts_component_local() -> None:
 
 
 def test_oversized_retention_identity_metadata_is_rejected_deterministically() -> None:
-    """Persisted identity metadata cannot exceed its fixed storage contract."""
+    """Persisted identity components cannot exceed their fixed storage contract."""
 
     limit = unknown_loads.NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS
-    aliases = [["session", f"session-{index:05d}"] for index in range(limit + 1)]
+    components = [
+        [["session", f"session-{index:05d}"]] for index in range(limit + 1)
+    ]
     payload = {
         "configured_max_items": 2,
         "source_count_before_retention": 5,
@@ -475,21 +477,21 @@ def test_oversized_retention_identity_metadata_is_rejected_deterministically() -
         "dropped_count": 3,
         "oldest_retained_at": "2026-08-08T00:00:00+00:00",
         "newest_retained_at": "2026-08-10T00:00:00+00:00",
-        "_retention_identity_aliases": aliases,
-        "_retention_identity_aliases_complete": True,
+        "_retention_identity_components": components,
+        "_retention_identity_components_complete": True,
     }
 
     forward = unknown_loads.nilm_session_history_coverage_from_payload(payload)
     reverse = unknown_loads.nilm_session_history_coverage_from_payload(
-        {**payload, "_retention_identity_aliases": list(reversed(aliases))}
+        {**payload, "_retention_identity_components": list(reversed(components))}
     )
 
     assert forward is not None
     assert reverse is not None
-    assert forward.retention_identity_aliases == ()
-    assert reverse.retention_identity_aliases == ()
-    assert forward.retention_identity_aliases_complete is False
-    assert reverse.retention_identity_aliases_complete is False
+    assert getattr(forward, "retention_identity_components", ()) == ()
+    assert getattr(reverse, "retention_identity_components", ()) == ()
+    assert getattr(forward, "retention_identity_components_complete", None) is False
+    assert getattr(reverse, "retention_identity_components_complete", None) is False
 
 
 def test_retention_identity_metadata_accepts_only_strict_string_aliases() -> None:
@@ -503,45 +505,43 @@ def test_retention_identity_metadata_accepts_only_strict_string_aliases() -> Non
         "dropped_count": 3,
         "oldest_retained_at": "2026-08-08T00:00:00+00:00",
         "newest_retained_at": "2026-08-10T00:00:00+00:00",
-        "_retention_identity_aliases": [
-            ["session", None],
-            ["session", 7],
-            ["session", True],
-            ["session", {"not": "valid"}],
-            [None, "value"],
-            [7, "value"],
-            [True, "value"],
-            [{"not": "valid"}, "value"],
-            ["invalid_kind", "value"],
-            ["session", "   "],
-            ["session", " valid-session "],
-            ["on_edge", "valid-edge"],
+        "_retention_identity_components": [
+            [["session", None]],
+            [["session", 7]],
+            [["session", True]],
+            [["session", {"not": "valid"}]],
+            [[None, "value"]],
+            [[7, "value"]],
+            [[True, "value"]],
+            [[{"not": "valid"}, "value"]],
+            [["invalid_kind", "value"]],
+            [["session", "   "]],
+            [["session", " valid-session "], ["on_edge", "valid-edge"]],
         ],
-        "_retention_identity_aliases_complete": True,
+        "_retention_identity_components_complete": True,
     }
 
     coverage = unknown_loads.nilm_session_history_coverage_from_payload(payload)
 
     assert coverage is not None
-    assert coverage.retention_identity_aliases == (
-        ("on_edge", "valid-edge"),
-        ("session", "valid-session"),
+    components = getattr(coverage, "retention_identity_components", ())
+    assert tuple(component.aliases for component in components) == (
+        (("on_edge", "valid-edge"), ("session", "valid-session")),
     )
-    assert coverage.retention_identity_aliases_complete is False
+    assert getattr(coverage, "retention_identity_components_complete", None) is False
     roundtrip = unknown_loads._coverage_to_payload(coverage)
-    assert roundtrip["_retention_identity_aliases"] == [
-        ["on_edge", "valid-edge"],
-        ["session", "valid-session"],
+    assert roundtrip["_retention_identity_components"] == [
+        [["on_edge", "valid-edge"], ["session", "valid-session"]],
     ]
-    assert roundtrip["_retention_identity_aliases_complete"] is False
-    alias_repr = repr(roundtrip["_retention_identity_aliases"])
+    assert roundtrip["_retention_identity_components_complete"] is False
+    alias_repr = repr(roundtrip["_retention_identity_components"])
     assert "None" not in alias_repr
     assert "True" not in alias_repr
     assert "{'not': 'valid'}" not in alias_repr
 
 
 def test_complete_retention_identity_metadata_round_trips_canonically() -> None:
-    """A complete valid alias ledger remains complete, sorted, and deduplicated."""
+    """A complete component ledger remains complete, sorted, and deduplicated."""
 
     payload = {
         "configured_max_items": 2,
@@ -551,54 +551,53 @@ def test_complete_retention_identity_metadata_round_trips_canonically() -> None:
         "dropped_count": 2,
         "oldest_retained_at": "2026-08-08T00:00:00+00:00",
         "newest_retained_at": "2026-08-10T00:00:00+00:00",
-        "_retention_identity_aliases": [
-            ["session", "z-session"],
-            ["on_edge", "a-edge"],
-            ["session", "z-session"],
+        "_retention_identity_components": [
+            [["session", "z-session"], ["on_edge", "z-edge"]],
+            [["on_edge", "a-edge"], ["on_edge", "a-edge"]],
         ],
-        "_retention_identity_aliases_complete": True,
+        "_retention_identity_components_complete": True,
     }
 
     coverage = unknown_loads.nilm_session_history_coverage_from_payload(payload)
 
     assert coverage is not None
-    assert coverage.retention_identity_aliases == (
-        ("on_edge", "a-edge"),
-        ("session", "z-session"),
+    components = getattr(coverage, "retention_identity_components", ())
+    assert tuple(component.aliases for component in components) == (
+        (("on_edge", "a-edge"),),
+        (("on_edge", "z-edge"), ("session", "z-session")),
     )
-    assert coverage.retention_identity_aliases_complete is True
+    assert getattr(coverage, "retention_identity_components_complete", None) is True
     assert unknown_loads._coverage_to_payload(coverage) == {
         **{key: value for key, value in payload.items() if not key.startswith("_")},
-        "_retention_identity_aliases": [
-            ["on_edge", "a-edge"],
-            ["session", "z-session"],
+        "_retention_identity_components": [
+            [["on_edge", "a-edge"]],
+            [["on_edge", "z-edge"], ["session", "z-session"]],
         ],
-        "_retention_identity_aliases_complete": True,
+        "_retention_identity_components_complete": True,
     }
 
 
-def test_complete_retention_identity_metadata_requires_alias_per_drop() -> None:
-    """A complete claim cannot contradict its own historical dropped count."""
+def test_complete_retention_identity_metadata_requires_component_per_drop() -> None:
+    """Two aliases for one identity cannot prove two historical drops."""
 
     coverage = unknown_loads.nilm_session_history_coverage_from_payload(
         {
             "configured_max_items": 2,
-            "source_count_before_retention": 5,
+            "source_count_before_retention": 4,
             "retained_count": 2,
             "was_truncated": True,
-            "dropped_count": 3,
+            "dropped_count": 2,
             "oldest_retained_at": "2026-08-08T00:00:00+00:00",
             "newest_retained_at": "2026-08-10T00:00:00+00:00",
-            "_retention_identity_aliases": [
-                ["session", "only-one"],
-                ["session", "only-two"],
+            "_retention_identity_components": [
+                [["session", "one-session"], ["on_edge", "one-edge"]],
             ],
-            "_retention_identity_aliases_complete": True,
+            "_retention_identity_components_complete": True,
         }
     )
 
     assert coverage is not None
-    assert coverage.retention_identity_aliases_complete is False
+    assert getattr(coverage, "retention_identity_components_complete", None) is False
 
 
 def test_session_coverage_payload_bounds_identity_metadata_deterministically() -> None:
@@ -606,8 +605,13 @@ def test_session_coverage_payload_bounds_identity_metadata_deterministically() -
 
     now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
     limit = unknown_loads.NILM_SESSION_HISTORY_COVERAGE_IDENTITY_MAX_ITEMS
-    aliases = tuple(
-        ("session", f"session-{index:05d}") for index in range(limit + 1)
+    component_type = getattr(
+        unknown_loads, "_NilmSessionHistoryIdentityComponent", None
+    )
+    assert component_type is not None
+    components = tuple(
+        component_type((("session", f"session-{index:05d}"),))
+        for index in range(limit + 1)
     )
     sessions = [
         {
@@ -619,7 +623,7 @@ def test_session_coverage_payload_bounds_identity_metadata_deterministically() -
         }
     ]
 
-    def build(identity_aliases: tuple[tuple[str, str], ...]) -> list[list[str]]:
+    def build(identity_components: tuple[object, ...]) -> list[object]:
         inventory = build_unknown_load_inventory(
             circuit_id="mains",
             signatures=[signature("on-a", 500.0, 100.0, 510.0)],
@@ -634,17 +638,46 @@ def test_session_coverage_payload_bounds_identity_metadata_deterministically() -
                 dropped_count=1,
                 oldest_retained_at=now - timedelta(hours=1),
                 newest_retained_at=now,
-                retention_identity_aliases=identity_aliases,
+                retention_identity_components=identity_components,
             ),
         )
         return inventory["session_history_coverage"].get(  # type: ignore[return-value]
-            "_retention_identity_aliases", []
+            "_retention_identity_components", []
         )
 
-    forward = build(aliases)
-    reverse = build(tuple(reversed(aliases)))
+    forward = build(components)
+    reverse = build(tuple(reversed(components)))
 
     assert forward == reverse == []
+
+
+def test_retention_identity_aliases_reject_oversized_text_without_truncation() -> None:
+    """ASCII and multibyte over-limit aliases never collide as stored evidence."""
+
+    max_chars = getattr(unknown_loads, "NILM_SESSION_HISTORY_IDENTITY_MAX_CHARS", 256)
+    max_bytes = getattr(
+        unknown_loads, "NILM_SESSION_HISTORY_IDENTITY_MAX_UTF8_BYTES", 256
+    )
+
+    class EncodeBomb(str):
+        def encode(self, *_args: object, **_kwargs: object) -> bytes:
+            raise AssertionError("character-length rejection must precede encoding")
+
+    oversized_ascii = EncodeBomb("a" * (max_chars + 1))
+    oversized_multibyte = "é" * min(max_chars, max_bytes)
+    assert len(oversized_multibyte) <= max_chars
+    assert len(oversized_multibyte.encode()) > max_bytes
+
+    assert unknown_loads._nilm_session_history_identity_alias(
+        "session", oversized_ascii
+    ) is None
+    assert unknown_loads._nilm_session_history_identity_alias(
+        "session", oversized_multibyte
+    ) is None
+    exact = "a" * max_chars
+    assert unknown_loads._nilm_session_history_identity_alias(
+        "session", exact
+    ) == ("session", exact)
 
 
 def test_duplicate_open_and_closed_session_id_is_ambiguous() -> None:

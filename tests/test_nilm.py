@@ -3909,6 +3909,27 @@ def test_nilm_edge_id_distinguishes_known_load_residual_provenance() -> None:
     )
 
 
+def test_nilm_session_id_bounds_long_generated_identities_deterministically() -> None:
+    """Generated session IDs stay strict-ingress-safe without collisions."""
+
+    fingerprint = "revision=2|" + ("signature-segment|" * 20)
+    on_edge = "on|" + ("edge-segment|" * 12)
+    first = nilm_domain._nilm_session_id(
+        "mains", fingerprint, on_edge, "off-edge-a"
+    )
+    repeated = nilm_domain._nilm_session_id(
+        "mains", fingerprint, on_edge, "off-edge-a"
+    )
+    distinct = nilm_domain._nilm_session_id(
+        "mains", fingerprint, on_edge, "off-edge-b"
+    )
+
+    assert first == repeated
+    assert first != distinct
+    assert len(first) <= 256
+    assert len(first.encode("utf-8")) <= 256
+
+
 def test_session_pairing_handles_residual_edges_without_a_dominant_leg() -> None:
     sessions = pair_nilm_sessions_for_signatures(
         [

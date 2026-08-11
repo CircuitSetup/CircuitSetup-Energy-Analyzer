@@ -1212,6 +1212,38 @@ def test_feature_store_round_trips_nilm_session_history() -> None:
     assert restored.nilm_session_history_by_circuit == {"mains": [session]}
 
 
+def test_feature_store_bounds_nilm_session_history_during_deserialization() -> None:
+    """Persisted history is bounded and identities sanitized before materialization."""
+
+    max_rows = 2_000
+    max_chars = 256
+    rows = [
+        {
+            "session_id": f"session-{index}",
+            "on_edge_id": f"edge-{index}",
+            "start": "2026-08-10T00:00:00+00:00",
+            "end": "2026-08-10T00:05:00+00:00",
+        }
+        for index in range(max_rows + 2)
+    ]
+    rows[0]["session_id"] = "x" * (max_chars + 1)
+    rows[1]["on_edge_id"] = "é" * max_chars
+
+    restored = feature_store_data_from_dict(
+        {"nilm_session_history_by_circuit": {"mains": rows}}
+    )
+
+    retained = restored.nilm_session_history_by_circuit["mains"]
+    assert len(retained) == max_rows
+    assert retained[-1]["session_id"] == f"session-{max_rows - 1}"
+    assert "session_id" not in retained[0]
+    assert "on_edge_id" not in retained[1]
+    ingress = restored.nilm_session_history_ingress_by_circuit["mains"]
+    assert ingress["source_count_before_ingress"] == max_rows + 2
+    assert ingress["was_truncated"] is True
+    assert ingress["identity_aliases_complete"] is False
+
+
 def test_feature_store_round_trips_nilm_appliance_assignments() -> None:
     now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
     assignment = {
