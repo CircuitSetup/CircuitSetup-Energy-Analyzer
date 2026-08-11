@@ -4,7 +4,7 @@
 
 **Goal:** Let users select a closed, non-ambiguous NILM session for review and approval without automatically opening the interval editor.
 
-**Architecture:** Separate focus-only session selection from explicit session editing in the NILM workspace frontend. Keep approval eligibility authoritative in the backend panel payload so ambiguous sessions never receive an assignment action, while explicit Adjust/Edit controls continue to open the existing editor.
+**Architecture:** Separate focus-only session selection from explicit session editing in the NILM workspace frontend. Keep approval eligibility and user-facing visibility authoritative at the backend panel boundary: ambiguous session records remain bounded internal reconciliation evidence but are filtered out of the panel payload, while explicit Adjust/Edit controls continue to open the existing editor.
 
 **Tech Stack:** Python 3.13, Home Assistant panel payloads, browser-native JavaScript, Playwright, pytest, PowerShell verification scripts.
 
@@ -13,11 +13,12 @@
 - Selecting a non-ambiguous session review item selects its review card and focuses the same interval on the graph.
 - Selection keeps the interval editor closed.
 - The selected session's existing approval and rejection actions remain available.
-- Ambiguous sessions remain ineligible for approval.
+- Ambiguous sessions are absent from all user-facing session payloads and review/list surfaces.
+- Ambiguous records remain internal under the existing 45-day and 2,000-record-per-circuit retention caps.
 - Editing starts only from an explicit **Adjust interval** or **Edit interval** action.
 - Draft intervals and saved label intervals retain their current selection and editing behavior.
 - Bump `panel_contracts.py::PANEL_MODULE_VERSION` for shipped frontend JavaScript.
-- Do not change persisted data or the backend schema.
+- Do not change persisted data, retention limits, or the backend schema.
 
 ---
 
@@ -239,13 +240,138 @@ git add custom_components/circuitsetup_energy_analyzer/frontend/energy-analyzer-
 git commit -m "fix: separate NILM interval review from editing"
 ```
 
-### Task 3: Verify the complete branch
+### Task 3: Hide ambiguous sessions at the panel boundary
+
+**Files:**
+- Modify: `custom_components/circuitsetup_energy_analyzer/panel_nilm.py:2142-2157`
+- Modify: `custom_components/circuitsetup_energy_analyzer/panel_nilm.py:3046-3090`
+- Test: `tests/test_panel.py`
+- Test: `tests/e2e/panel.spec.js`
+
+**Interfaces:**
+- Consumes: `_nilm_workspace_visible_sessions(sessions, signatures, assignments) -> list[dict[str, Any]]`
+- Produces: a panel-facing session list containing no payload whose `ambiguous` field is truthy, while leaving `FeatureStoreData.nilm_session_history_by_circuit` unchanged.
+
+- [ ] **Step 1: Write failing backend regressions**
+
+Update the lane regression so an ambiguous unassigned session is excluded even if malformed input carries an assignment action:
+
+```python
+def test_nilm_workspace_lanes_review_only_assignable_unassigned_sessions() -> None:
+    lanes = _nilm_workspace_lanes(
+        assignments=[],
+        signatures=[],
+        label_intervals=[],
+        sessions=[
+            {"session_id": "clean", "actions": {"assign": {}}},
+            {
+                "session_id": "ambiguous",
+                "ambiguous": True,
+                "actions": {"assign": {}},
+            },
+        ],
+    )
+
+    assert lanes["needs_review"]["session_ids"] == ["clean"]
+```
+
+Add this panel-boundary regression so both generated and retained session shapes are covered:
+
+```python
+def test_nilm_workspace_visible_sessions_exclude_ambiguous_evidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_workspace_visible_sessions,
+    )
+
+    sessions = _nilm_workspace_visible_sessions(
+        [
+            {"session_id": "clean", "signature_fingerprint": "signature-clean"},
+            {
+                "session_id": "ambiguous-generated",
+                "signature_fingerprint": "signature-generated",
+                "ambiguous": True,
+            },
+            {
+                "session_id": "ambiguous-stored",
+                "signature_fingerprint": "signature-stored",
+                "assignment_id": "dishwasher",
+                "ambiguous": True,
+            },
+        ],
+        signatures=[],
+        assignments=[],
+    )
+
+    assert [session["session_id"] for session in sessions] == ["clean"]
+```
+
+- [ ] **Step 2: Run the backend regressions and verify RED**
+
+Run:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests\test_panel.py::test_nilm_workspace_lanes_review_only_assignable_unassigned_sessions tests\test_panel.py::test_nilm_workspace_visible_sessions_exclude_ambiguous_evidence -q
+```
+
+Expected: FAIL because the branch currently includes ambiguous sessions in the Needs Review lane and visible panel session list.
+
+- [ ] **Step 3: Filter at the user-facing boundary**
+
+Restore `_nilm_workspace_lanes` to require `actions.assign` and reject ambiguous payloads defensively. In `_nilm_workspace_visible_sessions`, add the ambiguity condition alongside existing hidden-assignment and hidden-fingerprint filters:
+
+```python
+return [
+    dict(session)
+    for session in sessions
+    if not bool(session.get("ambiguous"))
+    and str(session.get(ATTR_ASSIGNMENT_ID) or "").strip()
+    not in hidden_assignment_ids
+    and str(session.get("signature_fingerprint") or "").strip()
+    not in hidden_fingerprints
+]
+```
+
+Do not alter `nilm_session_history_by_circuit`, the session pairer, retention caps, or the processor merge path; retained ambiguous records must continue replacing stale same-ON-edge interpretations.
+
+- [ ] **Step 4: Replace the obsolete ambiguous-selection browser regression**
+
+Delete the entire `ambiguous NILM review intervals remain selectable without approval` browser test because it constructs a payload the backend contract now forbids. In the non-ambiguous browser test, scope both decision assertions to the selected inspector:
+
+```javascript
+const reviewInspector = panel.locator("[data-nilm-review-inspector]");
+await expect(reviewInspector).toBeVisible();
+await expect(reviewInspector.locator('[data-nilm-decision][value="identify"]')).toBeVisible();
+await expect(reviewInspector.locator('[data-nilm-decision][value="ignore"]')).toBeVisible();
+```
+
+The backend regressions from Step 1 are authoritative for absence of ambiguous session IDs from the panel payload.
+
+- [ ] **Step 5: Run focused panel, browser, and reconciliation tests**
+
+Run:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests\test_panel.py::test_nilm_workspace_ambiguous_session_is_not_assignable tests\test_panel.py::test_nilm_workspace_lanes_review_only_assignable_unassigned_sessions tests\test_panel.py::test_nilm_workspace_visible_sessions_exclude_ambiguous_evidence -q
+npx playwright test tests/e2e/panel.spec.js --grep "non-ambiguous NILM review intervals|NILM targeted routes focus identified intervals|NILM review supports decisions" --project "Desktop Chromium" --project "Mobile Chromium"
+.\.venv\Scripts\python.exe -m pytest tests\test_processors.py -k "ambiguous and session" -q
+```
+
+Expected: PASS. The processor tests confirm that internally retained ambiguous records still replace stale open or assigned sessions.
+
+- [ ] **Step 6: Commit the panel-boundary filter**
+
+```powershell
+git add custom_components/circuitsetup_energy_analyzer/panel_nilm.py tests/test_panel.py tests/e2e/panel.spec.js
+git commit -m "fix: hide ambiguous NILM sessions"
+```
+
+### Task 4: Verify the complete branch
 
 **Files:**
 - Verify only; no planned source changes.
 
 **Interfaces:**
-- Consumes: committed backend eligibility and frontend selection behavior from Tasks 1 and 2.
+- Consumes: committed backend eligibility, frontend selection behavior, and panel-boundary visibility policy from Tasks 1 through 3.
 - Produces: a clean, fully verified branch ready for review.
 
 - [ ] **Step 1: Run repository verification**
