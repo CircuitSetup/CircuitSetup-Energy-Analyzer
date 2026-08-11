@@ -1427,7 +1427,14 @@ export function createNilmWorkspaceMethods({
   _nilmFocusedLabelInterval() {
     const focused = this._nilmFocusedInterval;
     if (!focused) return null;
-    return (this._nilmWorkspace?.label_intervals || []).find((interval) => (
+    const intervals = this._nilmWorkspace?.label_intervals || [];
+    const intervalId = String(focused.interval_id || "").trim();
+    if (intervalId) {
+      return intervals.find((interval) => (
+        String(interval.interval_id || "").trim() === intervalId
+      )) || null;
+    }
+    return intervals.find((interval) => (
       Date.parse(interval.start || "") === focused.start
       && Date.parse(interval.end || "") === focused.end
     )) || null;
@@ -1465,7 +1472,12 @@ export function createNilmWorkspaceMethods({
       this._nilmFocusedInterval = null;
     }
     this._nilmGraphWindow = targetWindow;
-    this._nilmFocusedInterval = { start, end };
+    const intervalId = String(interval.interval_id || "").trim();
+    this._nilmFocusedInterval = {
+      start,
+      end,
+      ...(intervalId ? { interval_id: intervalId } : {}),
+    };
     this._render();
     if (options.scroll !== false) {
       requestAnimationFrame(() => {
@@ -1506,7 +1518,12 @@ export function createNilmWorkspaceMethods({
         end: new Date(end).toISOString(),
       }, { edit: false, scroll: false });
     } else {
-      this._nilmFocusedInterval = { start, end };
+      const intervalId = String(interval && interval.interval_id || "").trim();
+      this._nilmFocusedInterval = {
+        start,
+        end,
+        ...(intervalId ? { interval_id: intervalId } : {}),
+      };
       this._render();
     }
   }
@@ -1526,9 +1543,11 @@ export function createNilmWorkspaceMethods({
     interval[`${field}_millis`] = millis;
     this._nilmLabelIntervalDraft = { ...this._nilmLabelIntervalDraft, intervals };
     this._nilmActiveIntervalIndex = index;
-    this._nilmFocusedInterval = field === "start"
-      ? { start: millis, end: other }
-      : { start: other, end: millis };
+    const intervalId = String(interval.interval_id || "").trim();
+    this._nilmFocusedInterval = {
+      ...(field === "start" ? { start: millis, end: other } : { start: other, end: millis }),
+      ...(intervalId ? { interval_id: intervalId } : {}),
+    };
     this._render();
     this._scheduleNilmIntervalEvidence();
     return true;
@@ -2431,9 +2450,6 @@ export function createNilmWorkspaceMethods({
     const series = this._visibleNilmWorkspaceSeries(workspace, graphWindow);
     const graphEdges = this._nilmFocusedGraphEvidence(workspace).edges;
     const hasGraph = Boolean(graphWindow && series.length);
-    const graphEmpty = !this._nilmWorkspaceHistoryLoading
-      && !this._nilmWorkspaceHistoryError
-      && !hasGraph;
     const focusedInterval = this._nilmFocusedLabelInterval();
     const graph = this._nilmWorkspaceHistoryLoading
       ? `<div class="loading-skeleton graph-loading-skeleton" data-loading-skeleton role="status" aria-label="${this._escape(this._panelText("chart.loading_history"))}"></div>`
@@ -2442,12 +2458,9 @@ export function createNilmWorkspaceMethods({
         : hasGraph
           ? this._chartSvg(series, { graph_window_start: new Date(graphWindow.start).toISOString(), graph_window_end: new Date(graphWindow.end).toISOString(), y_axis_label: "W", nilm_select_interval: this._nilmIntervalEditorOpen, nilm_edges: graphEdges, nilm_sessions: graphBands })
           : `<p class="muted">${this._escape((workspace.history && workspace.history.missing_real_power_reason) || this._panelText("nilm_workspace.no_graph_history"))}</p>`;
-    const intervalAction = !this._nilmIntervalEditorOpen
-      ? graphEmpty
-        ? `<div class="actions"><button type="button" class="secondary" data-nilm-open-interval-editor>${this._escape(this._panelText("nilm_workspace.label_interval"))}</button></div>`
-        : hasGraph && focusedInterval
-          ? `<div class="actions"><button type="button" class="secondary" data-nilm-edit-focused-interval>${this._escape(this._panelText("nilm_workspace.edit_interval"))}</button></div>`
-          : ""
+    const canEditFocusedInterval = hasGraph && focusedInterval;
+    const intervalAction = !this._nilmIntervalEditorOpen && !this._nilmWorkspaceHistoryError
+      ? `<div class="actions"><button type="button" class="secondary" ${canEditFocusedInterval ? "data-nilm-edit-focused-interval" : "data-nilm-open-interval-editor"}>${this._escape(this._panelText(canEditFocusedInterval ? "nilm_workspace.edit_interval" : "nilm_workspace.label_interval"))}</button></div>`
       : "";
     return `
       ${this._nilmFocusedSignature ? `<p class="muted">${this._escape(this._panelText("nilm_workspace.focused_graph"))}</p>` : ""}
@@ -2497,11 +2510,14 @@ export function createNilmWorkspaceMethods({
     const sessionBands = focused && !(sessions || []).length
       ? workspace.sessions || []
       : sessions || [];
+    const focusedIntervalId = String(focused && focused.interval_id || "").trim();
     const focusedBands = [...sessionBands, ...labelBands].map((item) => ({
       ...item,
       selected: focused
-        ? Date.parse(item.start || "") === focused.start
-          && Date.parse(item.end || "") === focused.end
+        ? focusedIntervalId
+          ? String(item.interval_id || "").trim() === focusedIntervalId
+          : Date.parse(item.start || "") === focused.start
+            && Date.parse(item.end || "") === focused.end
         : Boolean(item.selected),
     }));
     return [...focusedBands, ...draftBands];
