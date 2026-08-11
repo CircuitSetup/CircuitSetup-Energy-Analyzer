@@ -7859,7 +7859,7 @@ test("NILM identified interval review cards focus the graph", async ({ page }) =
   expect(Date.parse(historyWindows.at(-1).end)).toBeGreaterThanOrEqual(Date.parse("2026-07-13T18:50:00Z"));
 });
 
-test("non-ambiguous NILM review intervals select without opening the editor", async ({ page }) => {
+test("open non-ambiguous NILM review sessions select without opening the editor", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (url.pathname.endsWith("/nilm_workspace_history")) {
       await route.fulfill({ json: nilmGraphFocusHistoryFixture() });
@@ -7867,12 +7867,19 @@ test("non-ambiguous NILM review intervals select without opening the editor", as
     }
     if (!url.pathname.endsWith("/nilm_workspace")) return false;
     const payload = structuredClone(apiPayload(url.pathname));
+    payload.sessions[0] = {
+      ...payload.sessions[0],
+      session_id: "open-session-1",
+      end: null,
+      duration_seconds: null,
+      off_delta_w: null,
+    };
     payload.lanes.needs_review = {
       ...payload.lanes.needs_review,
-      signature_ids: [],
-      session_ids: ["nilm-session-0"],
+      signature_ids: ["signature-1"],
+      session_ids: ["open-session-1"],
     };
-    payload.lane_counts.needs_review = 1;
+    payload.lane_counts.needs_review = 2;
     payload.history = {
       ...payload.history,
       api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
@@ -7882,7 +7889,7 @@ test("non-ambiguous NILM review intervals select without opening the editor", as
     return true;
   });
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
-  const reviewCard = panel.locator('[data-nilm-review-item="session:nilm-session-0"]');
+  const reviewCard = panel.locator('[data-nilm-review-item="session:open-session-1"]');
 
   await reviewCard.click();
 
@@ -7892,9 +7899,53 @@ test("non-ambiguous NILM review intervals select without opening the editor", as
   await expect(reviewInspector).toBeVisible();
   await expect(reviewInspector.locator('[data-nilm-decision][value="identify"]')).toBeVisible();
   await expect(reviewInspector.locator('[data-nilm-decision][value="ignore"]')).toBeVisible();
+});
+
+test("New NILM review signatures load their latest session on the graph", async ({ page }) => {
+  const historyWindows = [];
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      historyWindows.push({
+        start: url.searchParams.get("start"),
+        end: url.searchParams.get("end"),
+      });
+      await route.fulfill({ json: nilmGraphFocusHistoryFixture() });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.sessions = [{
+      ...payload.sessions[0],
+      signature_fingerprint: "stored-v2-fingerprint",
+    }];
+    payload.history = {
+      ...payload.history,
+      api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+      fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  const reviewCard = panel.locator('[data-nilm-review-item="signature:signature-1"]');
+
+  await reviewCard.click();
+
+  await expect(reviewCard).toHaveAttribute("aria-pressed", "true");
+  await expect(panel.locator("[data-nilm-interval-editor]")).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => (
+    window.__panel._nilmSignatureSessions("signature-1").map((session) => session.session_id)
+  ))).toEqual(["nilm-session-0", "nilm-session-1"]);
+  await expect.poll(() => page.evaluate(() => window.__panel._nilmFocusedOccurrence())).toMatchObject({
+    session_id: "nilm-session-1",
+    start: "2026-07-13T18:00:00Z",
+    end: "2026-07-13T18:45:00Z",
+  });
   await expect(
-    panel.locator('.nilm-session-band[data-nilm-session-start="2026-07-13T16:00:00Z"][data-nilm-selected="true"]'),
+    panel.locator('.nilm-session-band[data-nilm-session-start="2026-07-13T18:00:00Z"][data-nilm-selected="true"]'),
   ).toHaveCount(1);
+  expect(Date.parse(historyWindows.at(-1).start)).toBeLessThanOrEqual(Date.parse("2026-07-13T17:55:00Z"));
+  expect(Date.parse(historyWindows.at(-1).end)).toBeGreaterThanOrEqual(Date.parse("2026-07-13T18:50:00Z"));
 });
 
 function nilmGraphFocusHistoryFixture() {

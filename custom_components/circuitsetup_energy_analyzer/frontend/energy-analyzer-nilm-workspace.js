@@ -1653,10 +1653,43 @@ export function createNilmWorkspaceMethods({
   }
 
   _nilmSignatureSessions(signatureFingerprint) {
-    return (((this._nilmWorkspace && this._nilmWorkspace.sessions) || []))
-      .filter((session) => session.signature_fingerprint === signatureFingerprint
-        && session.end && !session.ambiguous)
-      .sort((left, right) => Date.parse(left.start || "") - Date.parse(right.start || ""));
+    const fingerprint = String(signatureFingerprint || "").trim();
+    if (!fingerprint) return [];
+    const workspace = this._nilmWorkspace || {};
+    const signature = (workspace.signatures || []).find((item) => {
+      const aliases = item && (item.signature_fingerprints || item.signature_ids);
+      return [
+        item && item.feedback_fingerprint,
+        item && item.signature_fingerprint,
+        item && item.signature_id,
+        ...(Array.isArray(aliases) ? aliases : []),
+      ].some((value) => String(value || "").trim() === fingerprint);
+    });
+    const sessionIds = new Set((signature && signature.session_ids || [])
+      .map((value) => String(value || "").trim())
+      .filter(Boolean));
+    const sessions = (workspace.sessions || []).filter((session) => (
+      session.end && !session.ambiguous && (
+        session.signature_fingerprint === fingerprint
+        || sessionIds.has(String(session.session_id || "").trim())
+      )
+    ));
+    const latest = signature && signature.latest_session;
+    const latestStart = Date.parse(latest && latest.start || "");
+    const latestEnd = Date.parse(latest && latest.end || "");
+    const latestId = String(latest && latest.session_id || "").trim();
+    const includesLatest = Boolean(latest) && sessions.some((session) => (
+      latestId
+        ? String(session.session_id || "").trim() === latestId
+        : session.start === latest.start && session.end === latest.end
+    ));
+    if (latest && !latest.ambiguous && Number.isFinite(latestStart)
+      && Number.isFinite(latestEnd) && latestEnd > latestStart && !includesLatest) {
+      sessions.push({ ...latest, signature_fingerprint: latest.signature_fingerprint || fingerprint });
+    }
+    return sessions.sort(
+      (left, right) => Date.parse(left.start || "") - Date.parse(right.start || ""),
+    );
   }
 
   _nilmFocusedOccurrence() {

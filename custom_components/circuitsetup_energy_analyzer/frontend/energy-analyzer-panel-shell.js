@@ -1637,8 +1637,10 @@ export class PanelShellMethods {
       button.addEventListener("click", () => {
         this._nilmSelectedReviewKey = button.dataset.nilmReviewItem;
         this._nilmSyncHelperSelection(this._nilmWorkspace);
+        const reviewItem = this._nilmSelectedReviewItem(this._nilmWorkspace);
+        this._render();
         void this._focusNilmReviewItem(
-          this._nilmSelectedReviewItem(this._nilmWorkspace),
+          reviewItem,
           { scroll: false },
         );
       });

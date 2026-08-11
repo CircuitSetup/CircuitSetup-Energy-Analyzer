@@ -456,7 +456,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260811-1"
+    assert PANEL_MODULE_VERSION == "20260811-2"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
