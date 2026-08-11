@@ -2671,6 +2671,55 @@ def test_nilm_workspace_ambiguous_session_is_not_assignable() -> None:
     assert "assign" not in payload.get("actions", {})
 
 
+def test_nilm_workspace_lanes_review_only_assignable_unassigned_sessions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_workspace_lanes,
+    )
+
+    lanes = _nilm_workspace_lanes(
+        assignments=[],
+        signatures=[],
+        label_intervals=[],
+        sessions=[
+            {"session_id": "clean", "actions": {"assign": {}}},
+            {
+                "session_id": "ambiguous",
+                "ambiguous": True,
+                "actions": {"assign": {}},
+            },
+        ],
+    )
+
+    assert lanes["needs_review"]["session_ids"] == ["clean"]
+
+
+def test_nilm_workspace_visible_sessions_exclude_ambiguous_evidence() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_workspace_visible_sessions,
+    )
+
+    sessions = _nilm_workspace_visible_sessions(
+        [
+            {"session_id": "clean", "signature_fingerprint": "signature-clean"},
+            {
+                "session_id": "ambiguous-generated",
+                "signature_fingerprint": "signature-generated",
+                "ambiguous": True,
+            },
+            {
+                "session_id": "ambiguous-stored",
+                "signature_fingerprint": "signature-stored",
+                "assignment_id": "dishwasher",
+                "ambiguous": True,
+            },
+        ],
+        signatures=[],
+        assignments=[],
+    )
+
+    assert [session["session_id"] for session in sessions] == ["clean"]
+
+
 def test_recurring_placeholder_sessions_promote_three_reviewable_components() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
