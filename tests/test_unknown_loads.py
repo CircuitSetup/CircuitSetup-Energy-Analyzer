@@ -7,6 +7,7 @@ from custom_components.circuitsetup_energy_analyzer.nilm import (
     NilmEdge,
     NilmSignature,
     cluster_recurring_signatures,
+    nilm_signature_fingerprint,
 )
 from custom_components.circuitsetup_energy_analyzer.unknown_loads import (
     build_unknown_load_inventory,
@@ -995,6 +996,63 @@ def test_migration_recomputes_windowed_values_when_sessions_are_available() -> N
     assert load["review_state"] == "assigned"
     assert load["user_label"] == "Basement load"
     assert load["runtime_today_minutes"] == 60.0
+
+
+def test_migration_preserves_v2_leg_fingerprint_for_session_ownership() -> None:
+    """Migration must retain v2 leg fields used to own persisted sessions."""
+
+    producer_signature = NilmSignature(
+        signature_id="sig-v2-legs",
+        median_delta_w=500.0,
+        median_delta_var=100.0,
+        median_delta_va=510.0,
+        median_delta_pf=0.0,
+        occurrence_count=4,
+        confidence=0.7,
+        dominant_leg="a",
+        split_phase_type="single_leg_a",
+        median_leg_a_delta_w=480.0,
+        median_leg_b_delta_w=20.0,
+        leg_balance_ratio=0.04,
+    )
+    fingerprint = nilm_signature_fingerprint(producer_signature)
+
+    migrated = unknown_loads.migrate_unknown_load_inventory(
+        circuit_id="mains",
+        existing_state={},
+        signature_payloads=[
+            {
+                "signature_id": "sig-v2-legs",
+                "median_delta_w": 500.0,
+                "median_delta_var": 100.0,
+                "median_delta_va": 510.0,
+                "median_delta_pf": 0.0,
+                "occurrence_count": 4,
+                "confidence": 0.7,
+                "dominant_leg": "a",
+                "split_phase_type": "single_leg_a",
+                "median_leg_a_delta_w": 480.0,
+                "median_leg_b_delta_w": 20.0,
+                "leg_balance_ratio": 0.04,
+            }
+        ],
+        sessions=[
+            {
+                "session_id": "v2-leg-session",
+                "component_id": "legacy-component-id",
+                "signature_fingerprint": fingerprint,
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": "2026-08-09T11:00:00+00:00",
+            }
+        ],
+        now=datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+    )
+
+    load = migrated["unknown_loads"][0]
+    assert load["component_fingerprint"] == fingerprint
+    assert load["runtime_today_minutes"] == 60.0
+    assert load["estimated_energy_today_kwh"] == 0.5
+    assert load["runtime_windows"]["today"]["included_session_count"] == 1
 
 
 def test_session_migration_preserves_legacy_rows_missing_current_components() -> None:

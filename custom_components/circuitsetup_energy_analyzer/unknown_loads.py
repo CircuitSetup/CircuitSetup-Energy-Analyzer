@@ -529,6 +529,9 @@ def _signature_from_payload(payload: Mapping[str, Any]) -> NilmSignature | None:
         confidence=_finite_or_zero(payload.get("confidence")),
         dominant_leg=str(payload.get("dominant_leg") or "unknown"),
         split_phase_type=str(payload.get("split_phase_type") or "unknown"),
+        median_leg_a_delta_w=_optional_float(payload.get("median_leg_a_delta_w")),
+        median_leg_b_delta_w=_optional_float(payload.get("median_leg_b_delta_w")),
+        leg_balance_ratio=_optional_float(payload.get("leg_balance_ratio")),
     )
 
 
