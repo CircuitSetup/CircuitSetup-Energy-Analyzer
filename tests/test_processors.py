@@ -9445,6 +9445,85 @@ def test_nilm_processor_coverage_is_component_and_window_specific() -> None:
     assert legacy["estimate_status"] == "legacy_unverified"
 
 
+def test_nilm_processor_retains_persisted_truncation_coverage_after_restart() -> None:
+    """A restarted processor must not recast a capped store as complete history."""
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.unknown_loads import (
+        NilmSessionHistoryCoverage,
+    )
+
+    store = FeatureStoreData(
+        nilm_session_history_by_circuit={"mains": []},
+        nilm_unknown_loads_by_circuit={
+            "mains": {
+                "session_history_coverage": {
+                    "configured_max_items": 2,
+                    "source_count_before_retention": 5,
+                    "retained_count": 2,
+                    "was_truncated": True,
+                    "dropped_count": 3,
+                    "oldest_retained_at": "2026-08-08T00:00:00+00:00",
+                    "newest_retained_at": "2026-08-10T00:00:00+00:00",
+                }
+            }
+        },
+    )
+    for day in (8, 10):
+        store.nilm_session_history_by_circuit["mains"].append(
+            {
+                "session_id": f"run-{day}",
+                "signature_fingerprint": "on-a",
+                "start": f"2026-08-{day:02d}T00:00:00+00:00",
+                "end": f"2026-08-{day:02d}T00:30:00+00:00",
+            }
+        )
+    restarted = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _: True, seed_demo_nilm_state=lambda *_: None,
+        min_delta_w_for_circuit=lambda _: 100.0, detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list), ignored_signatures=set(),
+        known_load_events=lambda *_: (), observe_topology=lambda *_: [],
+        session_history_max_items=2,
+    )
+
+    context = ProcessingContext(
+        now=datetime(2026, 8, 10, 12, 0, tzinfo=UTC),
+        hass=SimpleNamespace(data={DOMAIN: {}}), state=AnalyzerState(),
+        store_data=store, options={}, entry_data={}, known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="mains", name="Mains", appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    restarted.process(
+        NormalizedCircuitSample(
+            timestamp=context.now, circuit_id="mains", real_power=0.0,
+            current=None, voltage=None, reactive_power=None, apparent_power=None,
+            power_factor=None, frequency=None, energy=None,
+        ),
+        config, context, events=(),
+    )
+
+    assert restarted._session_history_coverage_by_circuit["mains"] == (
+        NilmSessionHistoryCoverage(
+            configured_max_items=2,
+            source_count_before_retention=5,
+            retained_count=2,
+            was_truncated=True,
+            dropped_count=3,
+            oldest_retained_at=datetime(2026, 8, 8, tzinfo=UTC),
+            newest_retained_at=datetime(2026, 8, 10, tzinfo=UTC),
+        )
+    )
+
+
 def test_nilm_sample_processor_caps_runtime_unmatched_edges() -> None:
     from collections import defaultdict
 

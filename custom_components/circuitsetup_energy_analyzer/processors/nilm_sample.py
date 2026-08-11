@@ -50,6 +50,7 @@ from ..unknown_loads import (
     NilmSessionHistoryCoverage,
     build_unknown_load_inventory,
     migrate_unknown_load_inventory,
+    nilm_session_history_coverage_from_payload,
     unknown_load_inventory_needs_rebuild,
 )
 from .base import FeatureResult, ProcessingContext, StateUpdate
@@ -710,6 +711,18 @@ class NilmSampleProcessor:
             next_sessions,
             configured_max_items=self._session_history_max_items,
         )
+        persisted_coverage = nilm_session_history_coverage_from_payload(
+            store_data.nilm_unknown_loads_by_circuit.get(circuit_id, {}).get(
+                "session_history_coverage"
+            )
+        )
+        if (
+            persisted_coverage is not None
+            and persisted_coverage.was_truncated
+            and coverage.source_count_before_retention
+            <= persisted_coverage.retained_count
+        ):
+            coverage = persisted_coverage
         next_sessions = next_sessions[: self._session_history_max_items]
         self._session_history_coverage_by_circuit[circuit_id] = coverage
         if next_sessions == existing_sessions:

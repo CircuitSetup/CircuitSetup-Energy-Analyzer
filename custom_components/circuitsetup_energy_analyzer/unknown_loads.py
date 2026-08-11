@@ -1380,6 +1380,29 @@ def _coverage_to_payload(coverage: NilmSessionHistoryCoverage) -> dict[str, Any]
     }
 
 
+def nilm_session_history_coverage_from_payload(
+    payload: Any,
+) -> NilmSessionHistoryCoverage | None:
+    """Read persisted coverage facts without treating malformed data as evidence."""
+
+    if not isinstance(payload, Mapping):
+        return None
+    try:
+        oldest = payload.get("oldest_retained_at")
+        newest = payload.get("newest_retained_at")
+        return NilmSessionHistoryCoverage(
+            configured_max_items=int(payload["configured_max_items"]),
+            source_count_before_retention=int(payload["source_count_before_retention"]),
+            retained_count=int(payload["retained_count"]),
+            was_truncated=bool(payload["was_truncated"]),
+            dropped_count=int(payload["dropped_count"]),
+            oldest_retained_at=_as_utc_datetime(oldest) if oldest else None,
+            newest_retained_at=_as_utc_datetime(newest) if newest else None,
+        )
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+
+
 def _edge_observation_started_at(loads: Iterable[Mapping[str, Any]]) -> datetime | None:
     observed: list[datetime] = []
     for load in loads:
