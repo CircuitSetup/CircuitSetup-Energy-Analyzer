@@ -6306,7 +6306,7 @@ test("NILM workspace renders kW history as watts", async ({ page }) => {
   await expect(points.first()).toHaveAttribute("data-chart-value", "800");
   await expect(points.first()).toHaveAttribute("data-chart-unit", "W");
   await expect(panel.locator(".axis-label")).toContainText("W");
-  await expect(panel.locator("[data-nilm-open-interval-editor]")).toHaveCount(0);
+  await expect(panel.locator("[data-nilm-open-interval-editor]")).toBeVisible();
 });
 
 test("NILM workspace rejects non-real-power history instead of relabeling it as watts", async ({ page }) => {
@@ -7673,7 +7673,7 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   await toHaveNoViolations(page);
 });
 
-test("assigned NILM intervals can be inspected and removed", async ({ page }) => {
+test("assigned NILM intervals can be labeled, inspected, and removed", async ({ page }) => {
   let workspaceLoads = 0;
   const historyWindows = [];
   await mockPanelApi(page, async ({ route, url }) => {
@@ -7688,6 +7688,9 @@ test("assigned NILM intervals can be inspected and removed", async ({ page }) =>
         { entity_id: "sensor.mains_power", state: "950", last_changed: "2026-07-13T18:05:00Z", effective_role: "real_power", source_unit: "W" },
         { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T18:45:00Z", effective_role: "real_power", source_unit: "W" },
         { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T19:00:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-14T14:00:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "800", last_changed: "2026-07-14T17:00:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-14T20:00:00Z", effective_role: "real_power", source_unit: "W" },
       ]] });
       return true;
     }
@@ -7705,6 +7708,12 @@ test("assigned NILM intervals can be inspected and removed", async ({ page }) =>
       api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=6",
       fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=6",
     };
+    payload.label_intervals.push({
+      ...payload.label_intervals[0],
+      interval_id: "interval-2",
+      label: "Second interval",
+    });
+    payload.assignments[0].label_interval_ids.push("interval-2");
     if (workspaceLoads > 1) {
       payload.label_intervals = [];
       payload.assignments[0].label_interval_ids = [];
@@ -7714,12 +7723,21 @@ test("assigned NILM intervals can be inspected and removed", async ({ page }) =>
   });
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
 
+  await expect(panel.locator("svg[data-chart-start]")).toBeVisible();
+  await expect(panel.locator("[data-nilm-open-interval-editor]")).toBeVisible();
+  await panel.locator("[data-nilm-open-interval-editor]").click();
+  await expect(panel.locator("[data-nilm-interval-editor]")).toBeVisible();
+  await panel.locator("[data-nilm-cancel-interval-editor]").click();
+  await expect(panel.locator("[data-nilm-interval-editor]")).toHaveCount(0);
+
   const homeAssistantTimeZone = "America/New_York";
   await page.evaluate((timeZone) => {
     window.__panel._hass.config.time_zone = timeZone;
   }, homeAssistantTimeZone);
   await panel.locator('[data-nilm-lane="assigned"]').click();
-  const savedInterval = panel.locator("[data-nilm-assigned-intervals] .metric");
+  const savedIntervals = panel.locator("[data-nilm-assigned-intervals] .metric");
+  await expect(savedIntervals).toHaveCount(2);
+  const savedInterval = savedIntervals.nth(1);
   await expect(savedInterval).toContainText("Labeled interval");
   const initialHistoryRequests = historyWindows.length;
   await savedInterval.locator('[data-nilm-label-interval-action="adjust"]').click();
@@ -7732,6 +7750,7 @@ test("assigned NILM intervals can be inspected and removed", async ({ page }) =>
   await expect(panel.locator('[data-nilm-label-interval-input="end"]')).toHaveValue(
     await datetimeLocalValue(page, "2026-07-13T18:45:00Z", homeAssistantTimeZone),
   );
+  await expect(panel.locator('[data-nilm-label-interval-input="label"]')).toHaveValue("Second interval");
   await expect.poll(() => historyWindows.length).toBe(initialHistoryRequests + 1);
   const adjustedWindow = historyWindows.at(-1);
   expect(Date.parse(adjustedWindow.start)).toBeLessThanOrEqual(Date.parse("2026-07-13T17:55:00Z"));
@@ -7781,7 +7800,7 @@ test("assigned NILM intervals can be inspected and removed", async ({ page }) =>
   await expect(panel.locator("[data-nilm-assigned-intervals]")).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
     service: "save_nilm_interval_changes",
-    data: { intervals: [], removed_interval_ids: ["interval-1"] },
+    data: { intervals: [], removed_interval_ids: ["interval-2"] },
   });
 });
 
@@ -7814,6 +7833,7 @@ test("NILM identified interval review cards focus the graph", async ({ page }) =
   await expect.poll(() => page.evaluate(() => window.__panel._nilmFocusedInterval)).toEqual({
     start: Date.parse("2026-07-13T18:00:00Z"),
     end: Date.parse("2026-07-13T18:45:00Z"),
+    interval_id: "interval-1",
   });
   await expect(panel.locator('.nilm-session-band[data-nilm-band-kind="label"][data-nilm-selected="true"]')).toHaveCount(1);
   expect(Date.parse(historyWindows.at(-1).start)).toBeLessThanOrEqual(Date.parse("2026-07-13T17:55:00Z"));
@@ -8067,6 +8087,7 @@ test("NILM targeted routes focus identified intervals on initial load", async ({
   await expect.poll(() => page.evaluate(() => window.__panel._nilmFocusedInterval)).toEqual({
     start: Date.parse("2026-07-13T18:00:00Z"),
     end: Date.parse("2026-07-13T18:45:00Z"),
+    interval_id: "interval-1",
   });
   await expect(intervalPanel.locator('[data-nilm-review-item="interval:interval-1"]')).toHaveAttribute("aria-pressed", "true");
   await expect(intervalPanel.locator('.nilm-session-band[data-nilm-band-kind="label"][data-nilm-selected="true"]')).toHaveCount(1);
@@ -8099,6 +8120,7 @@ test("NILM targeted routes focus identified intervals on initial load", async ({
   await expect.poll(() => page.evaluate(() => window.__panel._nilmFocusedInterval)).toEqual({
     start: Date.parse("2026-07-13T18:00:00Z"),
     end: Date.parse("2026-07-13T18:45:00Z"),
+    interval_id: "interval-1",
   });
   await expect(precedencePanel.locator('[data-nilm-review-item="interval:interval-1"]')).toHaveAttribute("aria-pressed", "true");
 
