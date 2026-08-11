@@ -228,6 +228,212 @@ def test_session_evidence_excludes_malformed_and_ambiguous_rows() -> None:
     assert window["estimate_status"] == "partial_history"
 
 
+def test_session_exclusions_are_component_and_window_specific() -> None:
+    """Rejected evidence affects only its owners and intersecting windows."""
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+
+    def owned_row(name: str, owner: str, age_days: int) -> dict[str, object]:
+        start = now - timedelta(days=age_days)
+        return {
+            "session_id": name,
+            "signature_id": owner,
+            "signature_fingerprint": owner,
+            "start": start.isoformat(),
+            "end": (start + timedelta(minutes=30)).isoformat(),
+        }
+
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[
+            signature("on-a", 500.0, 100.0, 510.0),
+            signature("on-b", 900.0, 100.0, 910.0),
+            signature("on-c", 1_400.0, 100.0, 1_410.0),
+        ],
+        edges=[],
+        sessions=[
+            owned_row("a-covered", "on-a", 32),
+            owned_row("b-covered", "on-b", 32),
+            owned_row("c-covered", "on-c", 32),
+            {
+                **owned_row("ab-ambiguous", "on-a", 8),
+                "on_signature_id": "on-b",
+            },
+            {
+                "session_id": "expired-malformed-a",
+                "signature_id": "on-a",
+                "start": (now - timedelta(days=31)).isoformat(),
+                "end": (now - timedelta(days=31, minutes=-30)).isoformat(),
+            },
+            {
+                "session_id": "untimed-malformed-c",
+                "signature_id": "on-c",
+                "signature_fingerprint": "on-c",
+                "start": "bad",
+                "end": "bad",
+            },
+            {"session_id": "ownerless-malformed", "start": "bad", "end": "bad"},
+        ],
+        now=now,
+    )
+
+    loads = {load["on_signature_id"]: load for load in inventory["unknown_loads"]}
+    for owner in ("on-a", "on-b"):
+        assert loads[owner]["estimate_status_by_window"] == {
+            "today": "complete",
+            "7_days": "complete",
+            "30_days": "ambiguous",
+        }
+        assert {
+            name: window["excluded_session_count"]
+            for name, window in loads[owner]["runtime_windows"].items()
+        } == {"today": 0, "7_days": 0, "30_days": 1}
+    assert loads["on-c"]["estimate_status_by_window"] == {
+        "today": "partial_history",
+        "7_days": "partial_history",
+        "30_days": "partial_history",
+    }
+    assert inventory["session_history_diagnostics"] == {
+        "invalid_count": 3,
+        "unowned_count": 1,
+    }
+
+
+def test_duplicate_exclusions_are_order_stable() -> None:
+    """Repeated rejected rows have one deterministic evidence identity."""
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    baseline = {
+        "session_id": "covered",
+        "signature_id": "on-a",
+        "signature_fingerprint": "on-a",
+        "start": (now - timedelta(days=31)).isoformat(),
+        "end": (now - timedelta(days=31, minutes=-30)).isoformat(),
+    }
+    duplicate = {
+        "session_id": "recent-malformed",
+        "signature_id": "on-a",
+        "start": (now - timedelta(hours=1)).isoformat(),
+        "end": (now - timedelta(minutes=30)).isoformat(),
+    }
+    ownerless = {
+        "session_id": "ownerless-malformed",
+        "start": "bad",
+        "end": "bad",
+    }
+
+    def build(rows: list[dict[str, object]]) -> dict[str, object]:
+        return build_unknown_load_inventory(
+            circuit_id="mains",
+            signatures=[signature("on-a", 500.0, 100.0, 510.0)],
+            edges=[],
+            sessions=rows,
+            now=now,
+        )
+
+    single = build([baseline, duplicate, ownerless])
+    forward = build(
+        [baseline, duplicate, dict(duplicate), ownerless, dict(ownerless)]
+    )
+    reverse = build(
+        [dict(ownerless), ownerless, dict(duplicate), duplicate, baseline]
+    )
+
+    assert single == forward == reverse
+    windows = forward["unknown_loads"][0]["runtime_windows"]
+    assert all(window["excluded_session_count"] == 1 for window in windows.values())
+    assert forward["session_history_diagnostics"] == {
+        "invalid_count": 2,
+        "unowned_count": 1,
+    }
+
+
+def test_inconsistent_exclusion_intervals_remain_conservative() -> None:
+    """A recent closed copy cannot disappear behind an expired open copy."""
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[signature("on-a", 500.0, 100.0, 510.0)],
+        edges=[],
+        sessions=[
+            {
+                "session_id": "covered",
+                "signature_id": "on-a",
+                "signature_fingerprint": "on-a",
+                "start": (now - timedelta(days=32)).isoformat(),
+                "end": (now - timedelta(days=32, minutes=-30)).isoformat(),
+            },
+            {
+                "session_id": "conflicting-exclusion",
+                "signature_id": "on-a",
+                "start": (now - timedelta(days=31)).isoformat(),
+                "end": None,
+            },
+            {
+                "session_id": "conflicting-exclusion",
+                "signature_id": "on-a",
+                "start": (now - timedelta(days=31)).isoformat(),
+                "end": (now - timedelta(minutes=30)).isoformat(),
+            },
+        ],
+        now=now,
+    )
+
+    load = inventory["unknown_loads"][0]
+    assert load["estimate_status_by_window"] == {
+        "today": "partial_history",
+        "7_days": "partial_history",
+        "30_days": "partial_history",
+    }
+    assert all(
+        window["excluded_session_count"] == 1
+        for window in load["runtime_windows"].values()
+    )
+
+
+def test_cross_owner_duplicate_uses_one_conservative_interval() -> None:
+    """Every candidate sees conflicting timing for a shared stable identity."""
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+
+    def row(name: str, owner: str, start: datetime) -> dict[str, object]:
+        return {
+            "session_id": name,
+            "signature_id": owner,
+            "signature_fingerprint": owner,
+            "start": start.isoformat(),
+            "end": (start + timedelta(minutes=30)).isoformat(),
+        }
+
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[
+            signature("on-a", 500.0, 100.0, 510.0),
+            signature("on-b", 900.0, 100.0, 910.0),
+        ],
+        edges=[],
+        sessions=[
+            row("a-covered", "on-a", now - timedelta(days=32)),
+            row("b-covered", "on-b", now - timedelta(days=32)),
+            row("shared-conflict", "on-a", now - timedelta(days=31)),
+            row("shared-conflict", "on-b", now - timedelta(hours=1)),
+        ],
+        now=now,
+    )
+
+    for load in inventory["unknown_loads"]:
+        assert load["estimate_status_by_window"] == {
+            "today": "ambiguous",
+            "7_days": "ambiguous",
+            "30_days": "ambiguous",
+        }
+        assert all(
+            window["excluded_session_count"] == 1
+            for window in load["runtime_windows"].values()
+        )
+
+
 def test_session_metadata_keeps_the_earliest_observation_start() -> None:
     """Rebuilds cannot move an established observation boundary forward."""
 

@@ -4,7 +4,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from math import isfinite
-from typing import Any
+from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .nilm import (
@@ -64,11 +64,45 @@ class _OwnedUnknownLoadSession:
     component_id: str
 
 
+_ExcludedSessionReason = Literal[
+    "ambiguous",
+    "malformed",
+    "known_load_masked",
+    "deduplicated",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class _RejectedUnknownLoadSession:
+    session_id: str
+    on_edge_id: str
+    identities: frozenset[str]
+    start: datetime | None
+    end: datetime | None
+    has_trustworthy_interval: bool
+    reason: _ExcludedSessionReason
+
+
+@dataclass(frozen=True, slots=True)
+class _ExcludedUnknownLoadSession:
+    component_id: str
+    session_id: str
+    on_edge_id: str
+    start: datetime | None
+    end: datetime | None
+    has_trustworthy_interval: bool
+    reason: _ExcludedSessionReason
+
+
 @dataclass(frozen=True, slots=True)
 class _SessionInventoryEvidence:
     sessions_by_component: Mapping[str, tuple[_OwnedUnknownLoadSession, ...]]
-    excluded_count_by_component: Mapping[str, int]
-    ambiguous_component_ids: frozenset[str]
+    excluded_sessions_by_component: Mapping[
+        str, tuple[_ExcludedUnknownLoadSession, ...]
+    ]
+    ambiguous_sessions_by_component: Mapping[
+        str, tuple[_ExcludedUnknownLoadSession, ...]
+    ]
     observation_started_at_by_component: Mapping[str, datetime | None]
     invalid_count: int
     unowned_count: int
@@ -1054,45 +1088,92 @@ def _runtime_window_definition() -> dict[str, str]:
     }
 
 
+def _session_identities(raw: Mapping[str, Any]) -> frozenset[str]:
+    return frozenset(
+        str(raw.get(key) or "").strip()
+        for key in (
+            "component_id",
+            "component_fingerprint",
+            "signature_id",
+            "signature_fingerprint",
+            "on_signature_id",
+            "on_signature_fingerprint",
+        )
+        if str(raw.get(key) or "").strip()
+    )
+
+
+def _session_evidence_interval(
+    raw: Mapping[str, Any], now: datetime
+) -> tuple[datetime | None, datetime | None, bool]:
+    """Parse an interval without fabricating an end for rejected open evidence."""
+
+    start: datetime | None = None
+    end: datetime | None = None
+    try:
+        start = _as_utc_datetime(raw.get("start"))
+    except (TypeError, ValueError, OverflowError):
+        pass
+    end_value = raw.get("end")
+    if end_value is not None:
+        try:
+            end = _as_utc_datetime(end_value)
+        except (TypeError, ValueError, OverflowError):
+            pass
+    trustworthy = (
+        start is not None
+        and start <= now
+        and (end_value is None or (end is not None and end >= start))
+    )
+    return start, end, trustworthy
+
+
 def _normalize_unknown_load_sessions(
     sessions: Iterable[Mapping[str, Any]], now: datetime
-) -> tuple[tuple[_NormalizedUnknownLoadSession, ...], tuple[frozenset[str], ...]]:
+) -> tuple[
+    tuple[_NormalizedUnknownLoadSession, ...],
+    tuple[_RejectedUnknownLoadSession, ...],
+]:
     """Validate persisted sessions without allowing malformed storage to raise."""
 
     normalized: list[_NormalizedUnknownLoadSession] = []
-    invalid_identities: list[frozenset[str]] = []
+    rejected: list[_RejectedUnknownLoadSession] = []
     for raw in sessions:
         if not isinstance(raw, Mapping):
-            invalid_identities.append(frozenset())
+            rejected.append(
+                _RejectedUnknownLoadSession(
+                    session_id="",
+                    on_edge_id="",
+                    identities=frozenset(),
+                    start=None,
+                    end=None,
+                    has_trustworthy_interval=False,
+                    reason="malformed",
+                )
+            )
             continue
+        session_id = str(raw.get("session_id") or "").strip()
+        on_edge_id = str(raw.get("on_edge_id") or "").strip()
+        identities = _session_identities(raw)
+        start, evidence_end, has_trustworthy_interval = _session_evidence_interval(
+            raw, now
+        )
+        reason: _ExcludedSessionReason | None = None
+        if bool(raw.get("ambiguous")):
+            reason = "ambiguous"
+        elif bool(raw.get("known_load_masked")):
+            reason = "known_load_masked"
         try:
-            session_id = str(raw.get("session_id") or "").strip()
             fingerprint = str(raw.get("signature_fingerprint") or "").strip()
-            if not session_id or not fingerprint:
+            if reason is not None or not session_id or not fingerprint:
                 raise ValueError("missing session identity")
-            if bool(raw.get("ambiguous")) or bool(raw.get("known_load_masked")):
-                raise ValueError("excluded session evidence")
-            start = _as_utc_datetime(raw.get("start"))
+            if not has_trustworthy_interval or start is None:
+                raise ValueError("invalid session interval")
             end_value = raw.get("end")
             is_open = end_value is None
-            end = now if is_open else _as_utc_datetime(end_value)
-            if start > now or end < start or not all(
-                isfinite(value)
-                for value in ((end - start).total_seconds(),)
-            ):
+            end = now if is_open else evidence_end
+            if end is None:
                 raise ValueError("invalid session interval")
-            identities = frozenset(
-                value
-                for value in (
-                    str(raw.get("component_id") or "").strip(),
-                    str(raw.get("component_fingerprint") or "").strip(),
-                    str(raw.get("signature_id") or "").strip(),
-                    fingerprint,
-                    str(raw.get("on_signature_id") or "").strip(),
-                    str(raw.get("on_signature_fingerprint") or "").strip(),
-                )
-                if value
-            )
             normalized.append(
                 _NormalizedUnknownLoadSession(
                     session_id=session_id,
@@ -1100,30 +1181,27 @@ def _normalize_unknown_load_sessions(
                     start=start,
                     end=end,
                     is_open=is_open,
-                    on_edge_id=str(raw.get("on_edge_id") or "").strip(),
+                    on_edge_id=on_edge_id,
                     identities=identities,
                 )
             )
         except (TypeError, ValueError, OverflowError):
-            invalid_identities.append(
-                frozenset(
-                    str(raw.get(key) or "").strip()
-                    for key in (
-                        "component_id",
-                        "component_fingerprint",
-                        "signature_id",
-                        "signature_fingerprint",
-                        "on_signature_id",
-                        "on_signature_fingerprint",
-                    )
-                    if str(raw.get(key) or "").strip()
+            rejected.append(
+                _RejectedUnknownLoadSession(
+                    session_id=session_id,
+                    on_edge_id=on_edge_id,
+                    identities=identities,
+                    start=start,
+                    end=evidence_end,
+                    has_trustworthy_interval=has_trustworthy_interval,
+                    reason=reason or "malformed",
                 )
             )
-    return tuple(normalized), tuple(invalid_identities)
+    return tuple(normalized), tuple(rejected)
 
 
 def _session_owner_candidates(
-    session: _NormalizedUnknownLoadSession,
+    session_identities: frozenset[str],
     components: Iterable[_UnknownLoadComponent],
     existing_state: Mapping[str, Any],
 ) -> tuple[str, ...]:
@@ -1131,14 +1209,14 @@ def _session_owner_candidates(
 
     candidates: list[str] = []
     for component in components:
-        identities = {
+        component_identities = {
             component.component_id,
             component.component_fingerprint,
             component.on_signature.signature_id,
             nilm_signature_fingerprint(component.on_signature),
             nilm_signature_fingerprint_v1(component.on_signature),
         }
-        if session.identities & identities:
+        if session_identities & component_identities:
             candidates.append(component.component_id)
             continue
         loads = existing_state.get("unknown_loads")
@@ -1161,7 +1239,7 @@ def _session_owner_candidates(
                     "fingerprint",
                 )
             }
-            if session.identities & (legacy_identities - {""}):
+            if session_identities & (legacy_identities - {""}):
                 candidates.append(component.component_id)
                 break
     return tuple(sorted(set(candidates)))
@@ -1169,11 +1247,14 @@ def _session_owner_candidates(
 
 def _deduplicate_owned_sessions(
     sessions: Iterable[_OwnedUnknownLoadSession],
-) -> tuple[tuple[_OwnedUnknownLoadSession, ...], set[str]]:
+) -> tuple[
+    tuple[_OwnedUnknownLoadSession, ...],
+    tuple[_ExcludedUnknownLoadSession, ...],
+]:
     """Apply stable session/on-edge/interval deduplication conservatively."""
 
     retained = list(sessions)
-    excluded_components: set[str] = set()
+    excluded: list[_ExcludedUnknownLoadSession] = []
     for key_fn in (
         lambda item: ("session", item.session.session_id),
         lambda item: ("on_edge", item.session.on_edge_id)
@@ -1202,11 +1283,166 @@ def _deduplicate_owned_sessions(
                 len(closed) > 1
                 and len({(item.session.start, item.session.end) for item in closed}) > 1
             ):
-                excluded_components.update(components)
+                intervals = {
+                    (
+                        item.session.start,
+                        None if item.session.is_open else item.session.end,
+                    )
+                    for item in group
+                }
+                trustworthy = len(intervals) == 1
+                concrete_ends = [
+                    item.session.end for item in group if not item.session.is_open
+                ]
+                for component_id in sorted(components):
+                    excluded.append(
+                        _ExcludedUnknownLoadSession(
+                            component_id=component_id,
+                            session_id=min(
+                                item.session.session_id for item in group
+                            ),
+                            on_edge_id=min(
+                                item.session.on_edge_id for item in group
+                            ),
+                            start=min(item.session.start for item in group),
+                            end=(
+                                next(iter(intervals))[1]
+                                if trustworthy
+                                else (max(concrete_ends) if concrete_ends else None)
+                            ),
+                            has_trustworthy_interval=trustworthy,
+                            reason="deduplicated",
+                        )
+                    )
                 continue
             next_retained.append(closed[0] if closed else group[0])
         retained = next_retained
-    return tuple(retained), excluded_components
+    return tuple(retained), tuple(excluded)
+
+
+def _excluded_session(
+    component_id: str,
+    item: _RejectedUnknownLoadSession | _NormalizedUnknownLoadSession,
+    *,
+    reason: _ExcludedSessionReason,
+) -> _ExcludedUnknownLoadSession:
+    if isinstance(item, _NormalizedUnknownLoadSession):
+        start = item.start
+        end = None if item.is_open else item.end
+        trustworthy = True
+    else:
+        start = item.start
+        end = item.end
+        trustworthy = item.has_trustworthy_interval
+    return _ExcludedUnknownLoadSession(
+        component_id=component_id,
+        session_id=item.session_id,
+        on_edge_id=item.on_edge_id,
+        start=start,
+        end=end,
+        has_trustworthy_interval=trustworthy,
+        reason=reason,
+    )
+
+
+def _excluded_session_identity(
+    item: _ExcludedUnknownLoadSession,
+) -> tuple[Any, ...]:
+    if item.session_id:
+        return ("session", item.component_id, item.session_id)
+    if item.on_edge_id:
+        return ("on_edge", item.component_id, item.on_edge_id)
+    return (
+        "interval",
+        item.component_id,
+        item.start,
+        item.end,
+        item.reason,
+    )
+
+
+def _rejected_session_identity(
+    item: _RejectedUnknownLoadSession,
+) -> tuple[Any, ...]:
+    if item.session_id:
+        return ("session", item.session_id)
+    if item.on_edge_id:
+        return ("on_edge", item.on_edge_id)
+    return (
+        "interval",
+        tuple(sorted(item.identities)),
+        item.start,
+        item.end,
+        item.reason,
+    )
+
+
+def _deduplicate_rejected_sessions(
+    sessions: Iterable[_RejectedUnknownLoadSession],
+) -> tuple[_RejectedUnknownLoadSession, ...]:
+    """Deduplicate raw rejected diagnostics before ownership and counting."""
+
+    grouped: dict[tuple[Any, ...], list[_RejectedUnknownLoadSession]] = {}
+    for item in sessions:
+        grouped.setdefault(_rejected_session_identity(item), []).append(item)
+    deduplicated: list[_RejectedUnknownLoadSession] = []
+    for key in sorted(grouped, key=repr):
+        group = grouped[key]
+        intervals = {
+            (item.start, item.end, item.has_trustworthy_interval) for item in group
+        }
+        trustworthy = len(intervals) == 1 and group[0].has_trustworthy_interval
+        starts = [item.start for item in group if item.start is not None]
+        ends = [item.end for item in group if item.end is not None]
+        deduplicated.append(
+            _RejectedUnknownLoadSession(
+                session_id=min(item.session_id for item in group),
+                on_edge_id=min(item.on_edge_id for item in group),
+                identities=frozenset().union(
+                    *(item.identities for item in group)
+                ),
+                start=min(starts) if starts else None,
+                end=(group[0].end if trustworthy else (max(ends) if ends else None)),
+                has_trustworthy_interval=trustworthy,
+                reason=min(item.reason for item in group),
+            )
+        )
+    return tuple(deduplicated)
+
+
+def _deduplicate_excluded_sessions(
+    sessions: Iterable[_ExcludedUnknownLoadSession],
+) -> tuple[_ExcludedUnknownLoadSession, ...]:
+    """Collapse repeated rejected evidence into deterministic stable records."""
+
+    grouped: dict[tuple[Any, ...], list[_ExcludedUnknownLoadSession]] = {}
+    for item in sessions:
+        grouped.setdefault(_excluded_session_identity(item), []).append(item)
+    deduplicated: list[_ExcludedUnknownLoadSession] = []
+    for key in sorted(grouped, key=repr):
+        group = grouped[key]
+        intervals = {
+            (item.start, item.end, item.has_trustworthy_interval) for item in group
+        }
+        trustworthy = len(intervals) == 1 and group[0].has_trustworthy_interval
+        starts = [item.start for item in group if item.start is not None]
+        ends = [item.end for item in group if item.end is not None]
+        deduplicated.append(
+            _ExcludedUnknownLoadSession(
+                component_id=group[0].component_id,
+                session_id=min(item.session_id for item in group),
+                on_edge_id=min(item.on_edge_id for item in group),
+                start=min(starts) if starts else None,
+                end=(
+                    group[0].end
+                    if trustworthy
+                    else (max(ends) if ends else None)
+                ),
+                has_trustworthy_interval=trustworthy,
+                reason=min(item.reason for item in group),
+            )
+        )
+    return tuple(deduplicated)
 
 
 def _session_inventory_evidence(
@@ -1217,38 +1453,49 @@ def _session_inventory_evidence(
     existing_state: Mapping[str, Any],
 ) -> _SessionInventoryEvidence:
     component_list = tuple(components)
-    normalized, invalid_identities = _normalize_unknown_load_sessions(sessions, now)
+    normalized, rejected = _normalize_unknown_load_sessions(sessions, now)
+    rejected = _deduplicate_rejected_sessions(rejected)
     owned: list[_OwnedUnknownLoadSession] = []
-    excluded = {component.component_id: 0 for component in component_list}
-    ambiguous_ids: set[str] = set()
-    unowned_count = sum(1 for identities in invalid_identities if not identities)
-    for identities in invalid_identities:
-        for component in component_list:
-            component_identities = {
-                component.component_id,
-                component.component_fingerprint,
-                component.on_signature.signature_id,
-                nilm_signature_fingerprint(component.on_signature),
-                nilm_signature_fingerprint_v1(component.on_signature),
-            }
-            if identities & component_identities:
-                excluded[component.component_id] += 1
+    excluded: dict[str, list[_ExcludedUnknownLoadSession]] = {
+        component.component_id: [] for component in component_list
+    }
+    ambiguous: dict[str, list[_ExcludedUnknownLoadSession]] = {
+        component.component_id: [] for component in component_list
+    }
+    unowned_evidence: set[tuple[Any, ...]] = set()
+    for item in rejected:
+        candidates = _session_owner_candidates(
+            item.identities, component_list, existing_state
+        )
+        if not candidates:
+            unowned_evidence.add(("rejected", *_rejected_session_identity(item)))
+            continue
+        if len(candidates) == 1:
+            component_id = candidates[0]
+            excluded[component_id].append(
+                _excluded_session(component_id, item, reason=item.reason)
+            )
+            continue
+        for component_id in candidates:
+            ambiguous[component_id].append(
+                _excluded_session(component_id, item, reason="ambiguous")
+            )
     for session in normalized:
-        candidates = _session_owner_candidates(session, component_list, existing_state)
+        candidates = _session_owner_candidates(
+            session.identities, component_list, existing_state
+        )
         if len(candidates) != 1:
-            targets = candidates
             if not candidates:
-                unowned_count += 1
-            for component_id in targets:
-                excluded[component_id] += 1
-                if len(candidates) > 1:
-                    ambiguous_ids.add(component_id)
+                unowned_evidence.add(("session", session.session_id))
+            for component_id in candidates:
+                ambiguous[component_id].append(
+                    _excluded_session(component_id, session, reason="ambiguous")
+                )
             continue
         owned.append(_OwnedUnknownLoadSession(session, candidates[0]))
     retained, dedup_excluded = _deduplicate_owned_sessions(owned)
-    for component_id in dedup_excluded:
-        excluded[component_id] += 1
-        ambiguous_ids.add(component_id)
+    for item in dedup_excluded:
+        ambiguous[item.component_id].append(item)
     return _SessionInventoryEvidence(
         sessions_by_component={
             component.component_id: tuple(
@@ -1256,8 +1503,18 @@ def _session_inventory_evidence(
             )
             for component in component_list
         },
-        excluded_count_by_component=excluded,
-        ambiguous_component_ids=frozenset(ambiguous_ids),
+        excluded_sessions_by_component={
+            component.component_id: _deduplicate_excluded_sessions(
+                excluded[component.component_id]
+            )
+            for component in component_list
+        },
+        ambiguous_sessions_by_component={
+            component.component_id: _deduplicate_excluded_sessions(
+                ambiguous[component.component_id]
+            )
+            for component in component_list
+        },
         observation_started_at_by_component={
             component.component_id: min(
                 (
@@ -1269,8 +1526,8 @@ def _session_inventory_evidence(
             )
             for component in component_list
         },
-        invalid_count=len(invalid_identities),
-        unowned_count=unowned_count,
+        invalid_count=len(rejected),
+        unowned_count=len(unowned_evidence),
     )
 
 
@@ -1312,16 +1569,24 @@ def _union_session_seconds(
 
 def _estimate_status(
     *,
-    ambiguous: bool,
-    excluded_count: int,
+    intrinsic_ambiguous: bool,
+    ambiguous_evidence: Iterable[_ExcludedUnknownLoadSession],
+    excluded_evidence: Iterable[_ExcludedUnknownLoadSession],
     observation_started_at: datetime | None,
     window_start: datetime,
+    window_end: datetime,
     session_history_coverage: NilmSessionHistoryCoverage | None,
 ) -> str:
-    if ambiguous:
+    if intrinsic_ambiguous or any(
+        _session_evidence_relevant(item, window_start, window_end)
+        for item in ambiguous_evidence
+    ):
         return "ambiguous"
     if (
-        excluded_count
+        any(
+            _session_evidence_relevant(item, window_start, window_end)
+            for item in excluded_evidence
+        )
         or observation_started_at is None
         or observation_started_at > window_start
         or (
@@ -1335,6 +1600,18 @@ def _estimate_status(
     ):
         return "partial_history"
     return "complete"
+
+
+def _session_evidence_relevant(
+    item: _ExcludedUnknownLoadSession,
+    window_start: datetime,
+    window_end: datetime,
+) -> bool:
+    if not item.has_trustworthy_interval or item.start is None:
+        return True
+    if item.end is None:
+        return window_start <= item.start < window_end
+    return item.start < window_end and item.end > window_start
 
 
 def _worst_estimate_status(statuses: Iterable[str]) -> str:
@@ -1473,19 +1750,26 @@ def _unknown_component_session_payload(
         if key in existing_load:
             payload[key] = existing_load[key]
     sessions = evidence.sessions_by_component[component.component_id]
-    ambiguous = (
+    ambiguous_sessions = evidence.ambiguous_sessions_by_component[
+        component.component_id
+    ]
+    excluded_sessions = evidence.excluded_sessions_by_component[
+        component.component_id
+    ]
+    intrinsic_ambiguous = (
         component.pair_status == "ambiguous"
-        or component.component_id in evidence.ambiguous_component_ids
         or (
             component.component_id in allocation.ambiguous_component_ids
             and not sessions
         )
     )
     open_sessions = [item for item in sessions if item.session.is_open]
-    if ambiguous or len(open_sessions) > 1:
+    running_ambiguous = (
+        intrinsic_ambiguous or bool(ambiguous_sessions) or len(open_sessions) > 1
+    )
+    if running_ambiguous:
         payload["running_state"] = "unknown"
         payload["current_runtime_minutes"] = 0.0
-        ambiguous = True
     elif open_sessions:
         payload["running_state"] = "probably_on"
         payload["current_runtime_minutes"] = round(
@@ -1500,17 +1784,32 @@ def _unknown_component_session_payload(
     estimate_statuses: dict[str, str] = {}
     runtime_windows: dict[str, dict[str, Any]] = {}
     for name, (start, end, nominal_days) in windows.items():
+        relevant_ambiguous = tuple(
+            item
+            for item in ambiguous_sessions
+            if _session_evidence_relevant(item, start, end)
+        )
+        relevant_excluded = tuple(
+            item
+            for item in excluded_sessions
+            if _session_evidence_relevant(item, start, end)
+        )
+        window_ambiguous = (
+            intrinsic_ambiguous or len(open_sessions) > 1 or bool(relevant_ambiguous)
+        )
         seconds = (
-            0.0 if ambiguous else _union_session_seconds(sessions, start, end)
+            0.0 if window_ambiguous else _union_session_seconds(sessions, start, end)
         )
         runtime_minutes = round(seconds / 60.0, 3)
         status = _estimate_status(
-            ambiguous=ambiguous,
-            excluded_count=evidence.excluded_count_by_component[component.component_id],
+            intrinsic_ambiguous=intrinsic_ambiguous or len(open_sessions) > 1,
+            ambiguous_evidence=ambiguous_sessions,
+            excluded_evidence=excluded_sessions,
             observation_started_at=evidence.observation_started_at_by_component[
                 component.component_id
             ],
             window_start=start,
+            window_end=end,
             session_history_coverage=session_history_coverage,
         )
         estimate_statuses[name] = status
@@ -1548,11 +1847,10 @@ def _unknown_component_session_payload(
             "included_session_count": sum(
                 1 for item in sessions if _clip_session_seconds(item, start, end) > 0.0
             )
-            if not ambiguous
+            if not window_ambiguous
             else 0,
-            "excluded_session_count": evidence.excluded_count_by_component[
-                component.component_id
-            ],
+            "excluded_session_count": len(relevant_excluded)
+            + len(relevant_ambiguous),
         }
         suffix = {"today": "today", "7_days": "7_days", "30_days": "30_days"}[name]
         payload[f"runtime_{suffix}_minutes"] = runtime_minutes
@@ -1567,9 +1865,11 @@ def _unknown_component_session_payload(
         existing_state,
     )
     payload["runtime_window_definition"] = _runtime_window_definition()
-    payload["separation_status"] = "ambiguous" if ambiguous else "separable"
+    payload["separation_status"] = (
+        "ambiguous" if running_ambiguous else "separable"
+    )
     payload["energy_estimate_confidence"] = (
-        0.0 if ambiguous else float(payload["confidence"])
+        0.0 if running_ambiguous else float(payload["confidence"])
     )
     return payload
 
