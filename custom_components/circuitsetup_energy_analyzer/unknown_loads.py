@@ -11,6 +11,7 @@ from .nilm import (
     NilmEdge,
     NilmSignature,
     nilm_signature_fingerprint,
+    nilm_signature_fingerprint_v1,
     nilm_signature_is_assignable,
     nilm_signature_is_off_direction,
 )
@@ -529,6 +530,9 @@ def _signature_from_payload(payload: Mapping[str, Any]) -> NilmSignature | None:
         confidence=_finite_or_zero(payload.get("confidence")),
         dominant_leg=str(payload.get("dominant_leg") or "unknown"),
         split_phase_type=str(payload.get("split_phase_type") or "unknown"),
+        median_leg_a_delta_w=_optional_float(payload.get("median_leg_a_delta_w")),
+        median_leg_b_delta_w=_optional_float(payload.get("median_leg_b_delta_w")),
+        leg_balance_ratio=_optional_float(payload.get("leg_balance_ratio")),
     )
 
 
@@ -1070,6 +1074,7 @@ def _session_owner_candidates(
             component.component_fingerprint,
             component.on_signature.signature_id,
             nilm_signature_fingerprint(component.on_signature),
+            nilm_signature_fingerprint_v1(component.on_signature),
         }
         if session.identities & identities:
             candidates.append(component.component_id)
@@ -1333,8 +1338,12 @@ def _unknown_component_session_payload(
             payload[key] = existing_load[key]
     sessions = evidence.sessions_by_component[component.component_id]
     ambiguous = (
-        payload["separation_status"] == "ambiguous"
+        component.pair_status == "ambiguous"
         or component.component_id in evidence.ambiguous_component_ids
+        or (
+            component.component_id in allocation.ambiguous_component_ids
+            and not sessions
+        )
     )
     open_sessions = [item for item in sessions if item.session.is_open]
     if ambiguous or len(open_sessions) > 1:
