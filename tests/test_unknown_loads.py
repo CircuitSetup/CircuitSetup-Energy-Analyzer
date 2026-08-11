@@ -11,6 +11,7 @@ from custom_components.circuitsetup_energy_analyzer.nilm import (
     nilm_signature_fingerprint_v1,
 )
 from custom_components.circuitsetup_energy_analyzer.unknown_loads import (
+    NilmSessionHistoryCoverage,
     build_unknown_load_inventory,
     estimate_unknown_load,
 )
@@ -434,8 +435,8 @@ def test_cross_owner_duplicate_uses_one_conservative_interval() -> None:
         )
 
 
-def test_session_metadata_keeps_the_earliest_observation_start() -> None:
-    """Rebuilds cannot move an established observation boundary forward."""
+def test_session_metadata_keeps_observation_starts_component_local() -> None:
+    """A top-level boundary cannot become component history on rebuild."""
 
     inventory = build_unknown_load_inventory(
         circuit_id="mains",
@@ -457,12 +458,12 @@ def test_session_metadata_keeps_the_earliest_observation_start() -> None:
 
     load = inventory["unknown_loads"][0]
     assert inventory["observation_started_at"] == "2026-07-01T00:00:00+00:00"
-    assert load["observation_started_at"] == "2026-07-01T00:00:00+00:00"
+    assert load["observation_started_at"] == "2026-08-09T10:00:00+00:00"
     assert load["estimate_status"] == "partial_history"
 
 
-def test_duplicate_open_and_closed_session_prefers_the_closed_run() -> None:
-    """A reconstructed close replaces its stale open predecessor for one edge."""
+def test_duplicate_open_and_closed_session_id_is_ambiguous() -> None:
+    """A stable ID with conflicting open/closed intervals is unusable evidence."""
 
     inventory = build_unknown_load_inventory(
         circuit_id="mains",
@@ -470,18 +471,18 @@ def test_duplicate_open_and_closed_session_prefers_the_closed_run() -> None:
         edges=[],
         sessions=[
             {
-                "session_id": "open-copy",
+                "session_id": "shared-copy",
                 "component_id": "sig-dedup",
                 "signature_fingerprint": "dedup",
-                "on_edge_id": "edge-1",
+                "on_edge_id": "open-edge",
                 "start": "2026-08-09T10:00:00+00:00",
                 "end": None,
             },
             {
-                "session_id": "closed-copy",
+                "session_id": "shared-copy",
                 "component_id": "sig-dedup",
                 "signature_fingerprint": "dedup",
-                "on_edge_id": "edge-1",
+                "on_edge_id": "closed-edge",
                 "start": "2026-08-09T10:00:00+00:00",
                 "end": "2026-08-09T11:00:00+00:00",
             },
@@ -490,9 +491,108 @@ def test_duplicate_open_and_closed_session_prefers_the_closed_run() -> None:
     )
 
     load = inventory["unknown_loads"][0]
-    assert load["runtime_today_minutes"] == 60.0
+    assert load["runtime_today_minutes"] == 0.0
     assert load["current_runtime_minutes"] == 0.0
-    assert load["running_state"] == "probably_off"
+    assert load["running_state"] == "unknown"
+    assert load["estimate_status_by_window"]["today"] == "ambiguous"
+    assert load["runtime_windows"]["today"]["excluded_session_count"] == 1
+
+
+def test_duplicate_open_and_closed_on_edge_id_is_ambiguous() -> None:
+    """A shared ON edge with conflicting intervals is also unusable evidence."""
+
+    inventory = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[signature("sig-on-edge-dedup", 500.0, 100.0, 510.0)],
+        edges=[],
+        sessions=[
+            {
+                "session_id": "open-copy",
+                "component_id": "sig-on-edge-dedup",
+                "signature_fingerprint": "on-edge-dedup",
+                "on_edge_id": "shared-edge",
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": None,
+            },
+            {
+                "session_id": "closed-copy",
+                "component_id": "sig-on-edge-dedup",
+                "signature_fingerprint": "on-edge-dedup",
+                "on_edge_id": "shared-edge",
+                "start": "2026-08-09T10:00:00+00:00",
+                "end": "2026-08-09T11:00:00+00:00",
+            },
+        ],
+        now=datetime(2026, 8, 9, 12, 0, tzinfo=UTC),
+    )
+
+    load = inventory["unknown_loads"][0]
+    assert load["runtime_today_minutes"] == 0.0
+    assert load["running_state"] == "unknown"
+    assert load["estimate_status_by_window"]["today"] == "ambiguous"
+    assert load["runtime_windows"]["today"]["excluded_session_count"] == 1
+
+
+def test_rebuild_keeps_component_observation_starts_separate() -> None:
+    """One component's established history cannot extend another's coverage."""
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    a_start = now - timedelta(days=31)
+    b_start = now - timedelta(days=5)
+    sessions = [
+        {
+            "session_id": "a-old",
+            "component_id": "on-a",
+            "signature_fingerprint": "on-a",
+            "start": a_start.isoformat(),
+            "end": (a_start + timedelta(minutes=30)).isoformat(),
+        },
+        {
+            "session_id": "b-new",
+            "component_id": "on-b",
+            "signature_fingerprint": "on-b",
+            "start": b_start.isoformat(),
+            "end": (b_start + timedelta(minutes=30)).isoformat(),
+        },
+    ]
+    coverage = NilmSessionHistoryCoverage(
+        configured_max_items=2_000,
+        source_count_before_retention=2,
+        retained_count=2,
+        was_truncated=False,
+        dropped_count=0,
+        oldest_retained_at=a_start,
+        newest_retained_at=b_start + timedelta(minutes=30),
+    )
+    first = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[
+            signature("on-a", 500.0, 100.0, 510.0),
+            signature("on-b", 900.0, 100.0, 910.0),
+        ],
+        edges=[],
+        sessions=sessions,
+        now=now,
+        session_history_coverage=coverage,
+    )
+    second = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[
+            signature("on-a", 500.0, 100.0, 510.0),
+            signature("on-b", 900.0, 100.0, 910.0),
+        ],
+        edges=[],
+        sessions=sessions,
+        now=now,
+        session_history_coverage=coverage,
+        existing_state=first,
+    )
+
+    by_signature = {
+        load["on_signature_id"]: load for load in second["unknown_loads"]
+    }
+    assert by_signature["on-a"]["observation_started_at"] == a_start.isoformat()
+    assert by_signature["on-b"]["observation_started_at"] == b_start.isoformat()
 
 
 def test_partially_overlapping_closed_sessions_count_union_runtime_once() -> None:
@@ -1007,6 +1107,51 @@ def test_edge_compatible_inventory_includes_window_metadata() -> None:
         "estimate_status"
     ] == "partial_history"
     assert not unknown_loads.unknown_load_inventory_needs_rebuild(inventory)
+
+
+def test_session_backed_builder_without_coverage_is_stable_and_current() -> None:
+    """Direct public builders provide accepted retained-history provenance."""
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    component = signature("sig-direct-session", 500.0, 100.0, 510.0)
+    sessions = [
+        {
+            "session_id": "direct-run",
+            "component_id": "sig-direct-session",
+            "signature_fingerprint": "direct-session",
+            "start": (now - timedelta(days=31)).isoformat(),
+            "end": (now - timedelta(days=31, minutes=-30)).isoformat(),
+        }
+    ]
+    first = build_unknown_load_inventory(
+        circuit_id="mains",
+        signatures=[component],
+        edges=[],
+        sessions=sessions,
+        now=now,
+    )
+    migrated = unknown_loads.migrate_unknown_load_inventory(
+        circuit_id="mains",
+        existing_state=first,
+        signature_payloads=[
+            {
+                "signature_id": component.signature_id,
+                "median_delta_w": component.median_delta_w,
+                "median_delta_var": component.median_delta_var,
+                "median_delta_va": component.median_delta_va,
+                "occurrence_count": component.occurrence_count,
+                "confidence": component.confidence,
+            }
+        ],
+        sessions=sessions,
+        now=now,
+    )
+
+    assert first["estimate_provenance"] == "retained_session_history"
+    assert first["session_history_coverage"]["source_count_before_retention"] == 1
+    assert not unknown_loads.unknown_load_inventory_needs_rebuild(first)
+    assert not unknown_loads.unknown_load_inventory_needs_rebuild(migrated)
+    assert migrated["estimate_provenance"] == "retained_session_history"
 
 
 def test_build_unknown_load_inventory_marks_overlapping_events_ambiguous() -> None:

@@ -716,20 +716,20 @@ class NilmSampleProcessor:
                 "session_history_coverage"
             )
         )
-        if (
-            persisted_coverage is not None
-            and persisted_coverage.was_truncated
-            and coverage.source_count_before_retention
-            <= persisted_coverage.retained_count
-        ):
-            coverage = persisted_coverage
+        if persisted_coverage is not None:
+            coverage = _merge_nilm_session_history_coverage(
+                persisted_coverage,
+                coverage,
+                prior_sessions=existing_sessions,
+                final_sessions=next_sessions,
+            )
         next_sessions = next_sessions[: self._session_history_max_items]
         self._session_history_coverage_by_circuit[circuit_id] = coverage
         if next_sessions == existing_sessions:
             self._session_history_context_by_circuit[circuit_id] = (
                 self._session_history_context(circuit_id, store_data)
             )
-            return False
+            return coverage != persisted_coverage
         store_data.nilm_session_history_by_circuit[circuit_id] = next_sessions
         self._session_history_context_by_circuit[circuit_id] = (
             self._session_history_context(circuit_id, store_data)
@@ -3880,6 +3880,71 @@ def _nilm_session_history_coverage(
         dropped_count=source_count - retained_count,
         oldest_retained_at=min(retained_timestamps, default=None),
         newest_retained_at=max(retained_timestamps, default=None),
+    )
+
+
+def _nilm_session_history_identity_aliases(
+    session: Mapping[str, Any],
+) -> frozenset[tuple[str, str]]:
+    """Return all stable aliases that identify one retained session."""
+
+    identities: set[tuple[str, str]] = set()
+    session_id = str(session.get("session_id") or "").strip()
+    if session_id:
+        identities.add(("session", session_id))
+    on_edge_id = str(session.get("on_edge_id") or "").strip()
+    if on_edge_id:
+        identities.add(("on_edge", on_edge_id))
+    return frozenset(identities)
+
+
+def _merge_nilm_session_history_coverage(
+    persisted: NilmSessionHistoryCoverage,
+    current: NilmSessionHistoryCoverage,
+    *,
+    prior_sessions: Iterable[Any],
+    final_sessions: Iterable[Mapping[str, Any]],
+) -> NilmSessionHistoryCoverage:
+    """Preserve dropped-history facts while refreshing the current retained view."""
+
+    if not persisted.was_truncated:
+        return current
+    prior_list = tuple(
+        item for item in prior_sessions if isinstance(item, Mapping)
+    )
+    prior_identities = {
+        identity
+        for item in prior_list
+        for identity in _nilm_session_history_identity_aliases(item)
+    }
+    final_list = tuple(final_sessions)
+    seen_identities = set(prior_identities)
+    new_identity_count = 0
+    for session in final_list:
+        identities = _nilm_session_history_identity_aliases(session)
+        if not identities or not identities.isdisjoint(seen_identities):
+            seen_identities.update(identities)
+            continue
+        new_identity_count += 1
+        seen_identities.update(identities)
+    historical_source_count = max(
+        persisted.source_count_before_retention,
+        persisted.retained_count,
+        len(prior_list),
+    )
+    source_count = max(
+        current.source_count_before_retention,
+        historical_source_count + new_identity_count,
+    )
+    retained_count = current.retained_count
+    return NilmSessionHistoryCoverage(
+        configured_max_items=current.configured_max_items,
+        source_count_before_retention=source_count,
+        retained_count=retained_count,
+        was_truncated=source_count > retained_count,
+        dropped_count=max(0, source_count - retained_count),
+        oldest_retained_at=current.oldest_retained_at,
+        newest_retained_at=current.newest_retained_at,
     )
 
 

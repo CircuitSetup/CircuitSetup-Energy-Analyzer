@@ -121,6 +121,69 @@ class NilmSessionHistoryCoverage:
     newest_retained_at: datetime | None
 
 
+def _coverage_for_supplied_sessions(
+    sessions: Iterable[Mapping[str, Any]],
+    *,
+    configured_max_items: int | None,
+) -> NilmSessionHistoryCoverage:
+    """Describe directly supplied sessions when no retention facts are available."""
+
+    session_list = tuple(sessions)
+    timestamps: list[datetime] = []
+    stable_identity_groups: list[set[tuple[str, str]]] = []
+    anonymous_count = 0
+    for session in session_list:
+        if not isinstance(session, Mapping):
+            anonymous_count += 1
+            continue
+        aliases = {
+            (kind, value)
+            for kind, value in (
+                ("session", str(session.get("session_id") or "").strip()),
+                ("on_edge", str(session.get("on_edge_id") or "").strip()),
+            )
+            if value
+        }
+        if aliases:
+            matching_groups = [
+                group for group in stable_identity_groups if group & aliases
+            ]
+            if matching_groups:
+                merged = set(aliases)
+                for group in matching_groups:
+                    merged.update(group)
+                    stable_identity_groups.remove(group)
+                stable_identity_groups.append(merged)
+            else:
+                stable_identity_groups.append(set(aliases))
+        else:
+            anonymous_count += 1
+        for key in ("start", "end"):
+            value = session.get(key)
+            if value is None:
+                continue
+            try:
+                timestamps.append(_as_utc_datetime(value))
+            except (TypeError, ValueError, OverflowError):
+                continue
+    try:
+        configured = (
+            int(configured_max_items) if configured_max_items is not None else 0
+        )
+    except (TypeError, ValueError, OverflowError):
+        configured = 0
+    retained_count = len(stable_identity_groups) + anonymous_count
+    return NilmSessionHistoryCoverage(
+        configured_max_items=max(configured, retained_count),
+        source_count_before_retention=retained_count,
+        retained_count=retained_count,
+        was_truncated=False,
+        dropped_count=0,
+        oldest_retained_at=min(timestamps, default=None),
+        newest_retained_at=max(timestamps, default=None),
+    )
+
+
 def estimate_unknown_load(signature: NilmSignature) -> dict[str, Any]:
     """Return a conservative user-facing estimate for an unknown NILM signature."""
 
@@ -186,6 +249,11 @@ def build_unknown_load_inventory(
     allocation = _allocate_unknown_edges(components, edge_list)
     now_utc = _as_utc_datetime(now)
     session_list = tuple(sessions)
+    if session_list and session_history_coverage is None:
+        session_history_coverage = _coverage_for_supplied_sessions(
+            session_list,
+            configured_max_items=session_history_max_items,
+        )
     session_evidence = _session_inventory_evidence(
         session_list,
         components=components,
@@ -1279,17 +1347,14 @@ def _deduplicate_owned_sessions(
                 continue
             components = {item.component_id for item in group}
             closed = [item for item in group if not item.session.is_open]
-            if len(components) != 1 or (
-                len(closed) > 1
-                and len({(item.session.start, item.session.end) for item in closed}) > 1
-            ):
-                intervals = {
-                    (
-                        item.session.start,
-                        None if item.session.is_open else item.session.end,
-                    )
-                    for item in group
-                }
+            intervals = {
+                (
+                    item.session.start,
+                    None if item.session.is_open else item.session.end,
+                )
+                for item in group
+            }
+            if len(components) != 1 or len(intervals) != 1:
                 trustworthy = len(intervals) == 1
                 concrete_ends = [
                     item.session.end for item in group if not item.session.is_open
@@ -1862,7 +1927,7 @@ def _unknown_component_session_payload(
     payload["estimate_status"] = _worst_estimate_status(estimate_statuses.values())
     payload["observation_started_at"] = _observation_started_at(
         evidence.observation_started_at_by_component[component.component_id],
-        existing_state,
+        existing_load,
     )
     payload["runtime_window_definition"] = _runtime_window_definition()
     payload["separation_status"] = (

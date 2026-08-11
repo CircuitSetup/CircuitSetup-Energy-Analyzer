@@ -9725,9 +9725,154 @@ def test_nilm_processor_retains_persisted_truncation_coverage_after_restart() ->
             was_truncated=True,
             dropped_count=3,
             oldest_retained_at=datetime(2026, 8, 8, tzinfo=UTC),
-            newest_retained_at=datetime(2026, 8, 10, tzinfo=UTC),
+            newest_retained_at=datetime(2026, 8, 10, 0, 30, tzinfo=UTC),
         )
     )
+
+
+@pytest.mark.parametrize(
+    "case",
+    ("new_session", "interval_update", "capacity_increase", "capacity_decrease"),
+)
+def test_nilm_processor_restart_merges_persisted_truncation_coverage(
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    """Restarted retention facts remain cumulative while current bounds refresh."""
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.processors import nilm_sample
+    from custom_components.circuitsetup_energy_analyzer.unknown_loads import (
+        NilmSessionHistoryCoverage,
+    )
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+
+    def row(
+        session_id: str,
+        start: datetime,
+        end: datetime,
+        *,
+        on_edge_id: str,
+    ) -> dict[str, object]:
+        return {
+            "session_id": session_id,
+            "signature_fingerprint": "on-a",
+            "on_edge_id": on_edge_id,
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+        }
+
+    older_start = now - timedelta(days=2)
+    older_end = older_start + timedelta(minutes=30)
+    newer_start = now - timedelta(days=1)
+    newer_end = newer_start + timedelta(minutes=30)
+    sessions = [
+        row("run-newer", newer_start, newer_end, on_edge_id="edge-newer"),
+        row("run-older", older_start, older_end, on_edge_id="edge-older"),
+    ]
+    updates: list[dict[str, object]] = []
+    configured_max_items = 2
+    expected = NilmSessionHistoryCoverage(
+        configured_max_items=2,
+        source_count_before_retention=5,
+        retained_count=2,
+        was_truncated=True,
+        dropped_count=3,
+        oldest_retained_at=older_start,
+        newest_retained_at=newer_end,
+    )
+    if case == "new_session":
+        new_start = now - timedelta(minutes=30)
+        updates = [row("run-new", new_start, now, on_edge_id="edge-new")]
+        expected = NilmSessionHistoryCoverage(
+            configured_max_items=2,
+            source_count_before_retention=6,
+            retained_count=2,
+            was_truncated=True,
+            dropped_count=4,
+            oldest_retained_at=newer_start,
+            newest_retained_at=now,
+        )
+    elif case == "interval_update":
+        updated_end = now - timedelta(hours=1)
+        updates = [
+            row(
+                "run-newer-reconstructed",
+                newer_start,
+                updated_end,
+                on_edge_id="edge-newer",
+            )
+        ]
+        expected = NilmSessionHistoryCoverage(
+            configured_max_items=2,
+            source_count_before_retention=5,
+            retained_count=2,
+            was_truncated=True,
+            dropped_count=3,
+            oldest_retained_at=older_start,
+            newest_retained_at=updated_end,
+        )
+    elif case == "capacity_increase":
+        configured_max_items = 4
+        expected = NilmSessionHistoryCoverage(
+            configured_max_items=4,
+            source_count_before_retention=5,
+            retained_count=2,
+            was_truncated=True,
+            dropped_count=3,
+            oldest_retained_at=older_start,
+            newest_retained_at=newer_end,
+        )
+    else:
+        configured_max_items = 1
+        expected = NilmSessionHistoryCoverage(
+            configured_max_items=1,
+            source_count_before_retention=5,
+            retained_count=1,
+            was_truncated=True,
+            dropped_count=4,
+            oldest_retained_at=newer_start,
+            newest_retained_at=newer_end,
+        )
+    store = FeatureStoreData(
+        nilm_session_history_by_circuit={"mains": sessions},
+        nilm_unknown_loads_by_circuit={
+            "mains": {
+                "session_history_coverage": {
+                    "configured_max_items": 2,
+                    "source_count_before_retention": 5,
+                    "retained_count": 2,
+                    "was_truncated": True,
+                    "dropped_count": 3,
+                    "oldest_retained_at": older_start.isoformat(),
+                    "newest_retained_at": newer_end.isoformat(),
+                }
+            }
+        },
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _: True,
+        seed_demo_nilm_state=lambda *_: None,
+        min_delta_w_for_circuit=lambda _: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda *_: (),
+        observe_topology=lambda *_: [],
+        session_history_max_items=configured_max_items,
+    )
+    monkeypatch.setattr(
+        nilm_sample,
+        "_nilm_session_history_payloads",
+        lambda *_args, **_kwargs: updates,
+    )
+
+    processor.refresh_session_history("mains", store)
+
+    assert processor._session_history_coverage_by_circuit["mains"] == expected
 
 
 def test_nilm_sample_processor_caps_runtime_unmatched_edges() -> None:
