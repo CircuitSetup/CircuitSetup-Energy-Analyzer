@@ -3097,6 +3097,40 @@ def test_nilm_workspace_omits_empty_ambiguity_audit() -> None:
     assert "ambiguity_audit" not in payload
 
 
+def test_exact_signature_lookup_does_not_build_sessions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An exact signature deep link must not generate unrelated sessions."""
+    from custom_components.circuitsetup_energy_analyzer import panel_nilm
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_item_payload,
+    )
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="Mains",
+        entity_id="sensor.mains_power",
+    )
+    coordinator.state.nilm_unknown_loads_by_circuit = {
+        "mains": {"unknown_loads": [{"signature_id": "sig-1"}]}
+    }
+
+    def fail_if_called(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("exact signature lookup built workspace sessions")
+
+    monkeypatch.setattr(panel_nilm, "_nilm_workspace_sessions", fail_if_called)
+
+    result = nilm_workspace_item_payload(
+        [coordinator],
+        kind="signature",
+        item_id="sig-1",
+        circuit_id="mains",
+        entry_id="entry-1",
+    )
+
+    assert result["status"] == "ok"
+
+
 def test_nilm_workspace_quality_collections_and_exact_items_are_bounded() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_collection_payload,

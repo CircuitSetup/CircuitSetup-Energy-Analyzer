@@ -9124,6 +9124,44 @@ def test_nilm_processor_refresh_preserves_persisted_measured_trace_after_restart
     assert store.nilm_session_history_by_circuit["mains"] == [measured]
 
 
+def test_unchanged_session_history_does_not_resanitize_ingress(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A repeated source update must reuse its already-bounded history."""
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer.processors import nilm_sample
+
+    processor = nilm_sample.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda *_args: None,
+        min_delta_w_for_circuit=lambda _circuit_id: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda *_args: (),
+        observe_topology=lambda *_args: [],
+    )
+    store = FeatureStoreData(nilm_session_history_by_circuit={"mains": []})
+    calls = 0
+    sanitize = nilm_sample._sanitize_nilm_session_history_ingress
+
+    def count_sanitize(*args: object, **kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        return sanitize(*args, **kwargs)
+
+    monkeypatch.setattr(
+        nilm_sample, "_sanitize_nilm_session_history_ingress", count_sanitize
+    )
+
+    processor._bound_session_history_ingress("mains", store)
+    processor._bound_session_history_ingress("mains", store)
+
+    assert calls == 1
+
+
 def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> None:
     from collections import defaultdict
 

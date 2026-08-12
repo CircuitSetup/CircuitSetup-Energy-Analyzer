@@ -218,6 +218,23 @@ def test_nilm_processor_never_subtracts_unavailable_legacy_power() -> None:
     assert point.subtraction_complete is False
 
 
+def test_monotonic_residual_trace_append_never_uses_slow_rebuild(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Appending newer points must not reconstruct the retained trace."""
+    processor = _processor()
+
+    def fail_if_called(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("monotonic trace append rebuilt the full trace")
+
+    monkeypatch.setattr(processor, "_rebuild_residual_trace", fail_if_called)
+
+    processor._append_residual_trace_point("mains", _point(BASE_TIME, 100.0))
+    processor._append_residual_trace_point(
+        "mains", _point(BASE_TIME + timedelta(seconds=1), 101.0)
+    )
+
+
 def test_residual_trace_is_collected_only_for_mains_nilm() -> None:
     processor = _processor()
 

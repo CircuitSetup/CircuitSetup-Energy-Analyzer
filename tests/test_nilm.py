@@ -89,6 +89,34 @@ def test_assignment_model_does_not_synthesize_active_transitions_from_plateaus(
     }
 
 
+def test_pairing_builds_one_trace_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Competing candidates share one indexed residual trace."""
+    calls = 0
+    trace_index = nilm_domain._nilm_trace_index
+
+    def count_trace_index(*args: object, **kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        return trace_index(*args, **kwargs)
+
+    monkeypatch.setattr(nilm_domain, "_nilm_trace_index", count_trace_index)
+
+    sessions = pair_nilm_sessions_for_signatures(
+        [edge(0, 150.0), edge(300, -150.0)],
+        mains_circuit_id="mains",
+        signature_specs=[{"signature_fingerprint": "pump", "median_delta_w": 150.0}],
+        power_trace=[
+            (BASE_TIME + timedelta(seconds=index * 30), 150.0)
+            for index in range(12)
+        ],
+    )
+
+    assert sessions
+    assert calls == 1
+
+
 def test_assignment_model_requires_distinct_days_for_active_state_split() -> None:
     intervals = _multistate_intervals(
         [("01", power) for power in (100, 105, 98, 102, 300, 305, 298, 302)]
