@@ -206,10 +206,11 @@ class NilmWorkspaceCollectionView(HomeAssistantView):
     async def get(self, request: Any) -> Any:
         """Return an explicitly whitelisted NILM collection."""
         from . import panel
-        from .panel_nilm import nilm_workspace_collection_payload
+        from .panel_nilm import async_nilm_workspace_collection_payload
 
         hass = request.app[panel.KEY_HASS]
-        payload = nilm_workspace_collection_payload(
+        payload = await async_nilm_workspace_collection_payload(
+            hass,
             panel._loaded_coordinators(hass),
             collection=request.query.get("collection"),
             circuit_id=request.query.get("circuit_id"),
@@ -232,10 +233,11 @@ class NilmWorkspaceItemView(HomeAssistantView):
     async def get(self, request: Any) -> Any:
         """Return one safe exact NILM item selected by stable ID."""
         from . import panel
-        from .panel_nilm import nilm_workspace_item_payload
+        from .panel_nilm import async_nilm_workspace_item_payload
 
         hass = request.app[panel.KEY_HASS]
-        payload = nilm_workspace_item_payload(
+        payload = await async_nilm_workspace_item_payload(
+            hass,
             panel._loaded_coordinators(hass),
             kind=request.query.get("kind"),
             item_id=request.query.get("id"),

@@ -90,3 +90,85 @@ introducing live coordinator access or mutation from an executor.
 - `custom_components/circuitsetup_energy_analyzer/panel_nilm.py`
 - `tests/test_panel.py`
 - `.superpowers/sdd/2026-08-12-nilm-ha-performance-mitigation/task-5-report.md`
+
+## Review fix round 1
+
+The original benchmark conclusion above was invalid because its panel fixture
+used 100 retained sessions, not the 2,000-row retention maximum. The benchmark
+fixture now uses `max(SESSION_COUNTS)` (2,000), requests the maximum collection
+page limit of 50, and measures both signature and session exact-item routes.
+
+### Executor implementation
+
+The collection and exact-item HTTP views now capture a bounded, detached
+snapshot on the event loop and submit the pure synchronous payload builder via
+`hass.async_add_executor_job`. The snapshot contains only the selected circuit's
+signatures, 2,000-row-capped session history, intervals, attributions, inventory,
+and unmatched edges, plus configured-circuit assignment data needed for helper
+semantics. Referenced HA states and reference-option rows are copied on the
+event loop. Executor code does not retain or access the live coordinator, HA
+state machine, or persistence objects. Direct synchronous payload helpers remain
+available for pure callers and benchmarks.
+
+No background worker, persisted cache, or writer was added. Request
+cancellation naturally cancels the awaiting view, and a regression test proves
+that no JSON response is published after cancellation.
+
+### Corrected maximum-retention benchmark
+
+Command:
+
+```text
+.\.venv\Scripts\python.exe scripts\benchmark_nilm_performance.py
+```
+
+Five-run measurements on the same Python 3.12.10 / Windows / AMD64 environment:
+
+| Panel request, 2,000 retained sessions | Median | Minimum | Serialized bytes |
+| --- | ---: | ---: | ---: |
+| Main workspace | 106.662 ms | 101.582 ms | 35,275 |
+| Sessions collection, limit 50 | 102.725 ms | 100.482 ms | 69,351 |
+| Exact session | 93.847 ms | 92.157 ms | 1,558 |
+| Exact signature | 15.581 ms | 15.478 ms | 2,972 |
+
+Both binding gates are exceeded: the session-backed reads visit 2,000 retained
+rows (>500), and all maximum-retention panel medians exceed 10 ms. Consequently,
+collection and item HTTP construction is executor-offloaded from immutable
+snapshots. The main workspace keeps its existing bounded preview behavior as
+allowed by the Task 5 brief; this review specifically binds async collection and
+item construction to the snapshot builder.
+
+### Review RED/GREEN and contract evidence
+
+RED before async route implementation:
+
+```text
+rtk pytest tests/test_panel.py -q -k "workspace_collection_view_forwards or workspace_item_view_forwards"
+Pytest: 0 passed, 2 failed
+```
+
+Both failures were the expected missing async collection/item builder symbols.
+
+GREEN after implementation:
+
+```text
+rtk pytest tests/test_panel.py -q -k "workspace_collection_view_forwards or workspace_item_view_forwards"
+Pytest: 2 passed
+
+rtk pytest tests/test_panel.py -q -k "detached_snapshot or cancelled_nilm_collection"
+Pytest: 2 passed
+
+rtk pytest tests/test_panel.py -q
+Pytest: 202 passed
+
+rtk ruff check custom_components/circuitsetup_energy_analyzer/panel_nilm.py custom_components/circuitsetup_energy_analyzer/panel_views.py tests/test_panel.py scripts/benchmark_nilm_performance.py
+Ruff: No issues found
+
+rtk git diff --check
+exit 0
+```
+
+Additional changed files in this review round:
+
+- `custom_components/circuitsetup_energy_analyzer/panel_views.py`
+- `scripts/benchmark_nilm_performance.py`

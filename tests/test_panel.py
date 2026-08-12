@@ -5254,7 +5254,7 @@ async def test_nilm_workspace_collection_view_forwards_bounded_scope(
 
     captured: dict[str, object] = {}
 
-    def collection_payload(_coordinators, **kwargs):
+    async def collection_payload(_hass, _coordinators, **kwargs):
         captured.update(kwargs)
         return {"status": "ok", "items": []}
 
@@ -5272,7 +5272,7 @@ async def test_nilm_workspace_collection_view_forwards_bounded_scope(
     )
     monkeypatch.setattr(
         panel_nilm,
-        "nilm_workspace_collection_payload",
+        "async_nilm_workspace_collection_payload",
         collection_payload,
     )
     monkeypatch.setattr(panel, "_loaded_coordinators", lambda _hass: ())
@@ -5301,7 +5301,7 @@ async def test_nilm_workspace_item_view_forwards_exact_scope(
 
     captured: dict[str, object] = {}
 
-    def item_payload(_coordinators, **kwargs):
+    async def item_payload(_hass, _coordinators, **kwargs):
         captured.update(kwargs)
         return {"status": "ok", "item": {"session_id": "session-1"}}
 
@@ -5314,7 +5314,9 @@ async def test_nilm_workspace_item_view_forwards_exact_scope(
             "entry_id": "entry-2",
         },
     )
-    monkeypatch.setattr(panel_nilm, "nilm_workspace_item_payload", item_payload)
+    monkeypatch.setattr(
+        panel_nilm, "async_nilm_workspace_item_payload", item_payload
+    )
     monkeypatch.setattr(panel, "_loaded_coordinators", lambda _hass: ())
     monkeypatch.setattr(panel.web, "json_response", lambda payload: payload)
 
@@ -5328,6 +5330,99 @@ async def test_nilm_workspace_item_view_forwards_exact_scope(
         "circuit_id": "mains",
         "entry_id": "entry-2",
     }
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_collection_async_read_uses_detached_snapshot() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        async_nilm_workspace_collection_payload,
+    )
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="Mains",
+        entity_id="sensor.mains_power",
+    )
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [
+            {
+                "session_id": "session-1",
+                "signature_fingerprint": "signature-1",
+                "start": "2026-08-12T12:00:00+00:00",
+                "end": "2026-08-12T12:05:00+00:00",
+            }
+        ]
+    }
+
+    class Hass:
+        executor_calls = 0
+
+        async def async_add_executor_job(self, job):
+            self.executor_calls += 1
+            coordinator.store_data.nilm_session_history_by_circuit["mains"].clear()
+            return job()
+
+    hass = Hass()
+    payload = await async_nilm_workspace_collection_payload(
+        hass,
+        [coordinator],
+        collection="sessions",
+        circuit_id="mains",
+        entry_id="entry-1",
+        limit=50,
+    )
+
+    assert hass.executor_calls == 1
+    assert payload["status"] == "ok"
+    assert payload["total_count"] == 1
+    assert payload["items"][0]["session_id"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_nilm_collection_view_does_not_publish_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="Mains",
+        entity_id="sensor.mains_power",
+    )
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class Hass:
+        data = {DOMAIN: {"entry-1": coordinator}}
+
+        async def async_add_executor_job(self, _job):
+            started.set()
+            await release.wait()
+            return {"status": "ok", "items": []}
+
+    published: list[object] = []
+    monkeypatch.setattr(
+        panel.web,
+        "json_response",
+        lambda payload: published.append(payload) or payload,
+    )
+    request = SimpleNamespace(
+        app={panel.KEY_HASS: Hass()},
+        query={
+            "collection": "sessions",
+            "circuit_id": "mains",
+            "entry_id": "entry-1",
+        },
+    )
+
+    task = asyncio.create_task(panel.NilmWorkspaceCollectionView().get(request))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    release.set()
+
+    assert published == []
 
 
 @pytest.mark.asyncio

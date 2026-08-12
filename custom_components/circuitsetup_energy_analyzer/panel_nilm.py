@@ -8,11 +8,13 @@ import math
 from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from hashlib import sha256
 from hmac import compare_digest
 from hmac import new as hmac_new
 from secrets import token_bytes
 from statistics import fmean, median
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -242,6 +244,148 @@ _NILM_ESTIMATE_QUALITY_WINDOWS = (
     ("7_days", "runtime_7_days_minutes", "estimated_energy_7_days_kwh"),
     ("30_days", "runtime_30_days_minutes", "estimated_energy_30_days_kwh"),
 )
+
+
+def _nilm_workspace_read_snapshot(
+    coordinators: Iterable[Any],
+    *,
+    circuit_id: str | None,
+    entry_id: str | None,
+) -> tuple[Any, ...]:
+    """Capture bounded detached inputs for an executor-backed workspace read."""
+
+    target = _nilm_workspace_target(tuple(coordinators), circuit_id, entry_id=entry_id)
+    if target is None:
+        return ()
+    coordinator, config, _sources = target
+    selected_circuit_id = config.circuit_id
+    store = getattr(coordinator, "store_data", None)
+
+    def circuit_mapping(name: str) -> dict[str, Any]:
+        value = getattr(store, name, {})
+        if not isinstance(value, Mapping):
+            return {}
+        return {
+            selected_circuit_id: deepcopy(value.get(selected_circuit_id, []))
+        }
+
+    assignments_by_circuit = getattr(
+        store, "nilm_appliance_assignments_by_circuit", {}
+    )
+    configured_circuit_ids = {
+        str(getattr(item, "circuit_id", "") or "")
+        for item in getattr(coordinator, "circuit_configs", ()) or ()
+        if str(getattr(item, "circuit_id", "") or "")
+    }
+    snapshot_assignments = (
+        {
+            key: deepcopy(value)
+            for key, value in assignments_by_circuit.items()
+            if key in configured_circuit_ids
+        }
+        if isinstance(assignments_by_circuit, Mapping)
+        else {}
+    )
+    assignment_rows = (
+        assignments_by_circuit.get(selected_circuit_id, ())
+        if isinstance(assignments_by_circuit, Mapping)
+        else ()
+    )
+    reference_ids = {
+        str(item.get(field) or "").strip()
+        for item in _iter_items(assignment_rows)
+        if isinstance(item, Mapping)
+        for field in ("reference_state_entity_id", "reference_power_entity_id")
+        if str(item.get(field) or "").strip()
+    }
+    live_states = getattr(getattr(coordinator, "hass", None), "states", None)
+    get_state = getattr(live_states, "get", None)
+    state_rows: dict[str, Any] = {}
+    if callable(get_state):
+        for entity_id in reference_ids:
+            if (row := get_state(entity_id)) is not None:
+                state_rows[entity_id] = deepcopy(row)
+    snapshot_states = SimpleNamespace(
+        get=lambda entity_id, rows=state_rows: rows.get(entity_id)
+    )
+    snapshot_store = SimpleNamespace(
+        nilm_signatures=circuit_mapping("nilm_signatures"),
+        nilm_session_history_by_circuit=circuit_mapping(
+            "nilm_session_history_by_circuit"
+        ),
+        nilm_label_intervals_by_circuit=circuit_mapping(
+            "nilm_label_intervals_by_circuit"
+        ),
+        nilm_appliance_assignments_by_circuit=snapshot_assignments,
+        nilm_known_load_attributions_by_circuit=circuit_mapping(
+            "nilm_known_load_attributions_by_circuit"
+        ),
+    )
+    inventory = getattr(
+        getattr(coordinator, "state", None), "nilm_unknown_loads_by_circuit", {}
+    )
+    snapshot_state = SimpleNamespace(
+        nilm_unknown_loads_by_circuit={
+            selected_circuit_id: deepcopy(inventory.get(selected_circuit_id, {}))
+        }
+        if isinstance(inventory, Mapping)
+        else {}
+    )
+    return (
+        SimpleNamespace(
+            entry_id=str(getattr(coordinator, "entry_id", "") or ""),
+            circuit_configs=deepcopy(
+                tuple(getattr(coordinator, "circuit_configs", ()) or ())
+            ),
+            store_data=snapshot_store,
+            state=snapshot_state,
+            _nilm_unmatched_edges={
+                selected_circuit_id: deepcopy(
+                    getattr(coordinator, "_nilm_unmatched_edges", {}).get(
+                        selected_circuit_id, ()
+                    )
+                )
+            },
+            hass=SimpleNamespace(states=snapshot_states),
+            _nilm_reference_options_snapshot=deepcopy(
+                _nilm_reference_options(coordinator)
+            ),
+        ),
+    )
+
+
+async def async_nilm_workspace_collection_payload(
+    hass: Any,
+    coordinators: Iterable[Any],
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Build a collection payload from an event-loop-captured snapshot."""
+
+    snapshot = _nilm_workspace_read_snapshot(
+        coordinators,
+        circuit_id=kwargs.get("circuit_id"),
+        entry_id=kwargs.get("entry_id"),
+    )
+    return await hass.async_add_executor_job(
+        partial(nilm_workspace_collection_payload, snapshot, **kwargs)
+    )
+
+
+async def async_nilm_workspace_item_payload(
+    hass: Any,
+    coordinators: Iterable[Any],
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Build an exact-item payload from an event-loop-captured snapshot."""
+
+    snapshot = _nilm_workspace_read_snapshot(
+        coordinators,
+        circuit_id=kwargs.get("circuit_id"),
+        entry_id=kwargs.get("entry_id"),
+    )
+    return await hass.async_add_executor_job(
+        partial(nilm_workspace_item_payload, snapshot, **kwargs)
+    )
 
 
 def nilm_workspace_payload(
@@ -2656,6 +2800,9 @@ def _add_nilm_reference_evidence(
 def _nilm_reference_options(
     coordinator: Any,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    snapshot = getattr(coordinator, "_nilm_reference_options_snapshot", None)
+    if isinstance(snapshot, tuple) and len(snapshot) == 2:
+        return snapshot
     hass = getattr(coordinator, "hass", None)
     states = getattr(hass, "states", None)
     async_all = getattr(states, "async_all", None)

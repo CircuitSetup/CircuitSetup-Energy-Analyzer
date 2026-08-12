@@ -187,21 +187,29 @@ def run_benchmarks() -> dict[str, object]:
                 lambda points=points: _append_trace(list(reversed(points)))
             ),
         }
-    coordinator = _coordinator(100)
+    coordinator = _coordinator(max(SESSION_COUNTS))
     routes = {
         "main": lambda: nilm_workspace_payload(
             [coordinator], circuit_id="mains", entry_id="benchmark"
         ),
-        "collection": lambda: nilm_workspace_collection_payload(
+        "collection_max_limit": lambda: nilm_workspace_collection_payload(
             [coordinator],
             collection="sessions",
             circuit_id="mains",
             entry_id="benchmark",
+            limit=50,
         ),
-        "item": lambda: nilm_workspace_item_payload(
+        "item_signature": lambda: nilm_workspace_item_payload(
             [coordinator],
             kind="signature",
             item_id="sig-1",
+            circuit_id="mains",
+            entry_id="benchmark",
+        ),
+        "item_session": lambda: nilm_workspace_item_payload(
+            [coordinator],
+            kind="session",
+            item_id="session-0",
             circuit_id="mains",
             entry_id="benchmark",
         ),
