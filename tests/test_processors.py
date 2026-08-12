@@ -9129,6 +9129,7 @@ def test_unchanged_session_history_does_not_resanitize_ingress(
 ) -> None:
     """Steady samples reuse ingress, but a persisted history mutation invalidates it."""
     from collections import defaultdict
+    from copy import deepcopy
 
     from custom_components.circuitsetup_energy_analyzer.processors import nilm_sample
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
@@ -9210,6 +9211,122 @@ def test_unchanged_session_history_does_not_resanitize_ingress(
     processor.process(sample, config, context, events=())
 
     assert calls == 2
+
+    retained = store.nilm_session_history_by_circuit["mains"][0]
+    retained["start"] = {"malformed": "timestamp"}
+
+    processor.process(sample, config, context, events=())
+
+    assert calls == 3
+    assert store.nilm_session_history_by_circuit["mains"] == [
+        {
+            "session_id": "session-1",
+            "signature_fingerprint": "pump",
+            "on_edge_id": "on-1",
+            "start": now.isoformat(),
+        },
+        {
+            "session_id": "session-2",
+            "signature_fingerprint": "pump",
+            "on_edge_id": "on-2",
+        },
+    ]
+
+    cached_inventory = deepcopy(store.nilm_unknown_loads_by_circuit["mains"])
+    forced = nilm_sample.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda *_args: None,
+        min_delta_w_for_circuit=lambda _circuit_id: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda *_args: (),
+        observe_topology=lambda *_args: [],
+    )
+    forced_result = forced.process(sample, config, context, events=())
+    forced_inventory = {
+        update.path: update.value for update in forced_result.state_updates
+    }[("nilm_unknown_loads_by_circuit", "mains")]
+    assert forced_inventory == cached_inventory
+
+
+def test_nilm_input_row_mutations_invalidate_session_rebuild(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Signature and assignment field edits invalidate through public processing."""
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer.processors import nilm_sample
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.state import AnalyzerState
+
+    now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+    store = FeatureStoreData(
+        nilm_signatures={"mains": [{"fingerprint": "pump", "median_delta_w": 400.0}]},
+        nilm_appliance_assignments_by_circuit={
+            "mains": [{"assignment_id": "pump", "display_name": "Pump"}]
+        },
+        nilm_session_history_by_circuit={"mains": []},
+    )
+    processor = nilm_sample.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda *_args: None,
+        min_delta_w_for_circuit=lambda _circuit_id: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda *_args: (),
+        observe_topology=lambda *_args: [],
+    )
+    processor._evaluated_signature_circuits.add("mains")
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    sample = NormalizedCircuitSample(
+        timestamp=now,
+        circuit_id="mains",
+        real_power=100.0,
+    )
+    calls = 0
+    build_sessions = nilm_sample._nilm_session_history_payloads
+
+    def count_builds(*args: object, **kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        return build_sessions(*args, **kwargs)
+
+    monkeypatch.setattr(nilm_sample, "_nilm_session_history_payloads", count_builds)
+
+    processor.process(sample, config, context, events=())
+    baseline_calls = calls
+    processor.process(sample, config, context, events=())
+    assert calls == baseline_calls
+
+    store.nilm_signatures["mains"][0]["median_delta_w"] = 450.0
+    processor.process(sample, config, context, events=())
+    assert calls == baseline_calls + 1
+
+    assignment = store.nilm_appliance_assignments_by_circuit["mains"][0]
+    assignment["display_name"] = "Well Pump"
+    processor.process(sample, config, context, events=())
+    assert calls == baseline_calls + 2
 
 
 def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> None:
