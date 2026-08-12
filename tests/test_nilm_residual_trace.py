@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,6 +23,7 @@ from custom_components.circuitsetup_energy_analyzer.nilm import (
     NilmResidualPowerPoint,
     NilmResidualTraceMetadata,
     _nilm_normalized_power_trace,
+    nilm_residual_point_quality_key,
     pair_nilm_sessions_for_signatures,
 )
 from custom_components.circuitsetup_energy_analyzer.normalize import (
@@ -216,6 +217,70 @@ def test_nilm_processor_never_subtracts_unavailable_legacy_power() -> None:
     assert point.unavailable_known_circuit_ids == ("direct_a",)
     assert point.missing_known_circuit_ids == ("direct_b",)
     assert point.subtraction_complete is False
+
+
+def test_monotonic_residual_trace_append_never_uses_slow_rebuild(
+) -> None:
+    """Appending a newer point must not iterate the complete retained trace."""
+    processor = _processor()
+
+    class IterationCountingDeque(deque[NilmResidualPowerPoint]):
+        def __init__(self, points: list[NilmResidualPowerPoint]) -> None:
+            super().__init__(points)
+            self.iteration_count = 0
+
+        def __iter__(self):  # type: ignore[no-untyped-def]
+            self.iteration_count += 1
+            return super().__iter__()
+
+    trace = IterationCountingDeque([_point(BASE_TIME, 100.0)])
+    processor._residual_power_trace_by_circuit["mains"] = trace  # noqa: SLF001
+    processor._append_residual_trace_point(
+        "mains", _point(BASE_TIME + timedelta(seconds=1), 101.0)
+    )
+
+    assert trace.iteration_count == 0
+    assert [point.timestamp for point in trace] == [
+        BASE_TIME,
+        BASE_TIME + timedelta(seconds=1),
+    ]
+
+
+def test_residual_trace_equal_timestamp_uses_normalization_quality() -> None:
+    processor = _processor()
+    worse = _point(BASE_TIME, 100.0, complete=False, coverage=0.5)
+    better = _point(BASE_TIME, 101.0)
+
+    processor._append_residual_trace_point("mains", worse)  # noqa: SLF001
+    revision = processor._revisions("mains").residual_trace  # noqa: SLF001
+    processor._append_residual_trace_point("mains", better)  # noqa: SLF001
+
+    assert processor._residual_power_trace_by_circuit["mains"][-1] == better  # noqa: SLF001
+    assert processor._revisions("mains").residual_trace == revision + 1  # noqa: SLF001
+    assert nilm_residual_point_quality_key(better) > nilm_residual_point_quality_key(
+        worse
+    )
+    assert _nilm_normalized_power_trace([better, worse]) == (better,)
+
+    processor._append_residual_trace_point("mains", worse)  # noqa: SLF001
+    assert processor._residual_power_trace_by_circuit["mains"][-1] == better  # noqa: SLF001
+    assert processor._revisions("mains").residual_trace == revision + 1  # noqa: SLF001
+
+
+def test_residual_trace_out_of_order_rebuilds_sorted_retained_trace() -> None:
+    processor = _processor()
+    t2 = BASE_TIME + timedelta(seconds=2)
+    t3 = BASE_TIME + timedelta(seconds=3)
+    processor._append_residual_trace_point("mains", _point(BASE_TIME, 100.0))  # noqa: SLF001
+    processor._append_residual_trace_point("mains", _point(t3, 103.0))  # noqa: SLF001
+
+    processor._append_residual_trace_point("mains", _point(t2, 102.0))  # noqa: SLF001
+
+    trace = processor._residual_power_trace_by_circuit["mains"]  # noqa: SLF001
+    assert [point.timestamp for point in trace] == [BASE_TIME, t2, t3]
+    metadata = processor._residual_trace_metadata_by_circuit["mains"]  # noqa: SLF001
+    assert metadata.oldest_point_at == BASE_TIME
+    assert metadata.newest_point_at == t3
 
 
 def test_residual_trace_is_collected_only_for_mains_nilm() -> None:

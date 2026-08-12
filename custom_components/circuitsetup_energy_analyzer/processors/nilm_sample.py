@@ -46,6 +46,7 @@ from ..nilm import (
     known_load_attribution_records,
     nilm_helper_candidate_to_dict,
     nilm_known_load_attribution_to_dict,
+    nilm_residual_point_quality_key,
     nilm_session_to_dict,
     nilm_signature_fingerprint,
     nilm_signature_fingerprint_v1,
@@ -110,24 +111,246 @@ class _NilmSessionHistoryIngressFacts:
     duration_bound_close_incomplete: bool
 
 
-def _nilm_stable_snapshot(value: Any) -> object:
-    """Return a deterministic, comparison-safe snapshot of stored NILM inputs."""
-    if isinstance(value, Mapping):
-        return tuple(
-            (str(key), _nilm_stable_snapshot(item))
-            for key, item in sorted(value.items(), key=lambda entry: str(entry[0]))
-        )
-    if isinstance(value, (list, tuple)):
-        return tuple(_nilm_stable_snapshot(item) for item in value)
-    if isinstance(value, (set, frozenset)):
-        return tuple(sorted((_nilm_stable_snapshot(item) for item in value), key=repr))
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, float) and not isfinite(value):
-        return repr(value)
-    if value is None or isinstance(value, (str, int, float, bool)):
+@dataclass(slots=True)
+class _NilmCircuitRevisions:
+    """Runtime-only revisions for inputs used by derived NILM caches."""
+
+    session_history: int = 0
+    signatures: int = 0
+    assignments: int = 0
+    unmatched_edges: int = 0
+    residual_trace: int = 0
+
+
+class _NilmTrackedDict(dict[str, Any]):
+    """Stored mapping that reports external mutations to its owning list."""
+
+    def __init__(self, value: Mapping[str, Any], changed: Callable[[], None]) -> None:
+        self._changed = changed
+        for key, item in value.items():
+            dict.__setitem__(self, key, _nilm_tracked_value(item, changed))
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        dict.__setitem__(self, key, _nilm_tracked_value(value, self._changed))
+        self._changed()
+
+    def __delitem__(self, key: str) -> None:
+        dict.__delitem__(self, key)
+        self._changed()
+
+    def clear(self) -> None:
+        if self:
+            dict.clear(self)
+            self._changed()
+
+    def pop(self, key: str, *default: Any) -> Any:
+        existed = key in self
+        result = dict.pop(self, key, *default)
+        if existed:
+            self._changed()
+        return result
+
+    def popitem(self) -> tuple[str, Any]:
+        result = dict.popitem(self)
+        self._changed()
+        return result
+
+    def setdefault(self, key: str, default: Any = None) -> Any:
+        if key in self:
+            return dict.__getitem__(self, key)
+        value = _nilm_tracked_value(default, self._changed)
+        dict.__setitem__(self, key, value)
+        self._changed()
         return value
-    return repr(value)
+
+    def update(self, *args: Any, **kwargs: Any) -> None:
+        incoming = dict(*args, **kwargs)
+        if not incoming:
+            return
+        for key, value in incoming.items():
+            dict.__setitem__(self, key, _nilm_tracked_value(value, self._changed))
+        self._changed()
+
+    def __ior__(self, value: Mapping[str, Any]) -> _NilmTrackedDict:
+        self.update(value)
+        return self
+
+
+class _NilmTrackedList(list[Any]):
+    """Stored collection with an exact O(1) runtime mutation revision."""
+
+    def __init__(self, values: Iterable[Any]) -> None:
+        self.mutation_revision = 0
+        list.__init__(
+            self,
+            (_nilm_tracked_value(item, self._mark_changed) for item in values),
+        )
+
+    def _mark_changed(self) -> None:
+        self.mutation_revision += 1
+
+    def __setitem__(self, index: Any, value: Any) -> None:
+        if isinstance(index, slice):
+            value = [_nilm_tracked_value(item, self._mark_changed) for item in value]
+        else:
+            value = _nilm_tracked_value(value, self._mark_changed)
+        list.__setitem__(self, index, value)
+        self._mark_changed()
+
+    def __delitem__(self, index: Any) -> None:
+        list.__delitem__(self, index)
+        self._mark_changed()
+
+    def append(self, value: Any) -> None:
+        list.append(self, _nilm_tracked_value(value, self._mark_changed))
+        self._mark_changed()
+
+    def extend(self, values: Iterable[Any]) -> None:
+        incoming = [_nilm_tracked_value(item, self._mark_changed) for item in values]
+        if incoming:
+            list.extend(self, incoming)
+            self._mark_changed()
+
+    def insert(self, index: int, value: Any) -> None:
+        list.insert(self, index, _nilm_tracked_value(value, self._mark_changed))
+        self._mark_changed()
+
+    def pop(self, index: int = -1) -> Any:
+        result = list.pop(self, index)
+        self._mark_changed()
+        return result
+
+    def remove(self, value: Any) -> None:
+        list.remove(self, value)
+        self._mark_changed()
+
+    def clear(self) -> None:
+        if self:
+            list.clear(self)
+            self._mark_changed()
+
+    def reverse(self) -> None:
+        list.reverse(self)
+        self._mark_changed()
+
+    def sort(self, *args: Any, **kwargs: Any) -> None:
+        list.sort(self, *args, **kwargs)
+        self._mark_changed()
+
+    def __iadd__(self, values: Iterable[Any]) -> _NilmTrackedList:
+        self.extend(values)
+        return self
+
+    def __imul__(self, count: int) -> _NilmTrackedList:
+        list.__imul__(self, count)
+        self._mark_changed()
+        return self
+
+
+def _nilm_tracked_value(value: Any, changed: Callable[[], None]) -> Any:
+    if isinstance(value, _NilmTrackedDict):
+        return _NilmTrackedDict(value, changed)
+    if isinstance(value, Mapping):
+        return _NilmTrackedDict(value, changed)
+    if isinstance(value, (list, tuple)):
+        return _NilmTrackedNestedList(value, changed)
+    return value
+
+
+class _NilmTrackedNestedList(list[Any]):
+    """Nested list that forwards mutations to the top-level owner."""
+
+    def __init__(self, values: Iterable[Any], changed: Callable[[], None]) -> None:
+        self._changed = changed
+        list.__init__(self, (_nilm_tracked_value(item, changed) for item in values))
+
+    def __setitem__(self, index: Any, value: Any) -> None:
+        if isinstance(index, slice):
+            value = [_nilm_tracked_value(item, self._changed) for item in value]
+        else:
+            value = _nilm_tracked_value(value, self._changed)
+        list.__setitem__(self, index, value)
+        self._changed()
+
+    def append(self, value: Any) -> None:
+        list.append(self, _nilm_tracked_value(value, self._changed))
+        self._changed()
+
+    def extend(self, values: Iterable[Any]) -> None:
+        incoming = [_nilm_tracked_value(item, self._changed) for item in values]
+        if incoming:
+            list.extend(self, incoming)
+            self._changed()
+
+    def insert(self, index: int, value: Any) -> None:
+        list.insert(self, index, _nilm_tracked_value(value, self._changed))
+        self._changed()
+
+    def __delitem__(self, index: Any) -> None:
+        list.__delitem__(self, index)
+        self._changed()
+
+    def pop(self, index: int = -1) -> Any:
+        result = list.pop(self, index)
+        self._changed()
+        return result
+
+    def remove(self, value: Any) -> None:
+        list.remove(self, value)
+        self._changed()
+
+    def clear(self) -> None:
+        if self:
+            list.clear(self)
+            self._changed()
+
+    def reverse(self) -> None:
+        list.reverse(self)
+        self._changed()
+
+    def sort(self, *args: Any, **kwargs: Any) -> None:
+        list.sort(self, *args, **kwargs)
+        self._changed()
+
+    def __iadd__(self, values: Iterable[Any]) -> _NilmTrackedNestedList:
+        self.extend(values)
+        return self
+
+    def __imul__(self, count: int) -> _NilmTrackedNestedList:
+        list.__imul__(self, count)
+        self._changed()
+        return self
+
+
+def _nilm_collection_boundary(value: object) -> tuple[int, int, int, int]:
+    """Return an exact O(1) token for tracked collection changes."""
+    if not isinstance(value, (list, tuple)):
+        return (id(value), -1, 0, 0)
+    return (
+        id(value),
+        len(value),
+        value.mutation_revision if isinstance(value, _NilmTrackedList) else -1,
+        0,
+    )
+
+
+def ensure_nilm_tracked_collection(mapping: Any, key: str) -> Any:
+    """Install and return the exact runtime mutation wrapper for one source."""
+
+    if not isinstance(mapping, Mapping) or key not in mapping:
+        return None
+    value = mapping.get(key)
+    if isinstance(value, _NilmTrackedList):
+        return value
+    tracked = _NilmTrackedList(value if isinstance(value, (list, tuple)) else ())
+    mapping[key] = tracked
+    return tracked
+
+
+def nilm_tracked_collection_revision(value: Any) -> int | None:
+    """Return an exact mutation revision, or None for an uncertain source."""
+
+    return value.mutation_revision if isinstance(value, _NilmTrackedList) else None
 
 
 def _nilm_inventory_time_context(
@@ -368,20 +591,6 @@ def _nilm_residual_utc_timestamp(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
-def _nilm_residual_point_replacement_key(
-    point: NilmResidualPowerPoint,
-) -> tuple[object, ...]:
-    """Resolve identical timestamps deterministically without changing order."""
-    return (
-        int(point.subtraction_complete),
-        point.known_source_coverage,
-        -len(point.quality_flags),
-        point.quality_flags,
-        point.residual_power_w,
-        point.explained_known_power_w,
-    )
-
-
 def _nilm_residual_diagnostic_total(
     metadata: NilmResidualTraceMetadata | None,
     field: str,
@@ -462,6 +671,16 @@ class NilmSampleProcessor:
         self._helper_events_max_items = min(self._unmatched_edges_max_items, 512)
         self._hydrated_unmatched_edge_circuits: set[str] = set()
         self._evaluated_signature_circuits: set[str] = set()
+        self._revisions_by_circuit: dict[str, _NilmCircuitRevisions] = {}
+        self._session_history_boundary_by_circuit: dict[
+            str, tuple[int, int, int, int]
+        ] = {}
+        self._signature_boundary_by_circuit: dict[
+            str, tuple[int, int, int, int]
+        ] = {}
+        self._assignment_boundary_by_circuit: dict[
+            str, tuple[int, int, int, int]
+        ] = {}
         self._session_history_context_by_circuit: dict[str, object] = {}
         self._session_history_coverage_by_circuit: dict[
             str, NilmSessionHistoryCoverage
@@ -494,18 +713,111 @@ class NilmSampleProcessor:
             4_096,
         )
 
+    def _revisions(self, circuit_id: str) -> _NilmCircuitRevisions:
+        return self._revisions_by_circuit.setdefault(
+            circuit_id, _NilmCircuitRevisions()
+        )
+
+    def _replace_session_history(
+        self,
+        circuit_id: str,
+        store_data: Any,
+        rows: list[dict[str, Any]],
+        *,
+        force_revision: bool = False,
+    ) -> bool:
+        histories = store_data.nilm_session_history_by_circuit
+        current = histories.get(circuit_id, [])
+        if (
+            not force_revision
+            and isinstance(current, _NilmTrackedList)
+            and rows == current
+        ):
+            self._session_history_boundary_by_circuit[circuit_id] = (
+                _nilm_collection_boundary(current)
+            )
+            return False
+        tracked = _NilmTrackedList(rows)
+        histories[circuit_id] = tracked
+        if force_revision or rows != current:
+            self._revisions(circuit_id).session_history += 1
+        self._session_history_boundary_by_circuit[circuit_id] = (
+            _nilm_collection_boundary(tracked)
+        )
+        return force_revision or rows != current
+
+    def _sync_input_revisions(self, circuit_id: str, store_data: Any) -> None:
+        revisions = self._revisions(circuit_id)
+        for collection, boundaries, attribute in (
+            (
+                store_data.nilm_signatures,
+                self._signature_boundary_by_circuit,
+                "signatures",
+            ),
+            (
+                store_data.nilm_appliance_assignments_by_circuit,
+                self._assignment_boundary_by_circuit,
+                "assignments",
+            ),
+        ):
+            values = collection.get(circuit_id, ())
+            if not isinstance(values, _NilmTrackedList):
+                values = _NilmTrackedList(values)
+                collection[circuit_id] = values
+            boundary = _nilm_collection_boundary(values)
+            prior = boundaries.get(circuit_id)
+            if prior is not None and prior != boundary:
+                setattr(revisions, attribute, getattr(revisions, attribute) + 1)
+            boundaries[circuit_id] = boundary
+
     def _append_residual_trace_point(
         self,
         circuit_id: str,
         point: NilmResidualPowerPoint,
     ) -> None:
-        """Retain a sorted bounded trace and disclose every cap truncation."""
+        """Retain a sorted bounded trace with an O(1) monotonic append path."""
         trace = self._residual_power_trace_by_circuit.setdefault(circuit_id, deque())
+        if not trace or point.timestamp > trace[-1].timestamp:
+            trace.append(point)
+            cutoff = point.timestamp - self._residual_power_trace_horizon
+            while trace and trace[0].timestamp < cutoff:
+                trace.popleft()
+            cap_removed = 0
+            while len(trace) > self._residual_power_trace_max_items:
+                trace.popleft()
+                cap_removed += 1
+            self._update_residual_trace_metadata(
+                circuit_id, point, point_retained=True, cap_removed=cap_removed
+            )
+            self._revisions(circuit_id).residual_trace += 1
+            return
+
+        if point.timestamp == trace[-1].timestamp:
+            existing = trace[-1]
+            if nilm_residual_point_quality_key(point) <= (
+                nilm_residual_point_quality_key(existing)
+            ):
+                return
+            trace[-1] = point
+            self._update_residual_trace_metadata(
+                circuit_id, point, point_retained=True, cap_removed=0
+            )
+            self._revisions(circuit_id).residual_trace += 1
+            return
+
+        self._rebuild_residual_trace(circuit_id, point)
+
+    def _rebuild_residual_trace(
+        self, circuit_id: str, point: NilmResidualPowerPoint
+    ) -> None:
+        """Insert an out-of-order point through the bounded slow path."""
+        trace = self._residual_power_trace_by_circuit[circuit_id]
+        before = tuple(trace)
         points_by_timestamp = {existing.timestamp: existing for existing in trace}
         existing = points_by_timestamp.get(point.timestamp)
         accepted_point = existing is None or (
-            _nilm_residual_point_replacement_key(point)
-            >= _nilm_residual_point_replacement_key(existing)
+            nilm_residual_point_quality_key(point)
+            > nilm_residual_point_quality_key(existing)
         )
         if accepted_point:
             points_by_timestamp[point.timestamp] = point
@@ -522,10 +834,29 @@ class NilmSampleProcessor:
             retained = retained[-self._residual_power_trace_max_items :]
         trace.clear()
         trace.extend(retained)
-        previous = self._residual_trace_metadata_by_circuit.get(circuit_id)
         point_retained = accepted_point and point != existing and any(
             item.timestamp == point.timestamp for item in retained
         )
+        self._update_residual_trace_metadata(
+            circuit_id,
+            point,
+            point_retained=point_retained,
+            cap_removed=cap_removed,
+        )
+        if tuple(trace) != before:
+            self._revisions(circuit_id).residual_trace += 1
+
+    def _update_residual_trace_metadata(
+        self,
+        circuit_id: str,
+        point: NilmResidualPowerPoint,
+        *,
+        point_retained: bool,
+        cap_removed: int,
+    ) -> None:
+        """Refresh endpoint metadata and bounded lifetime diagnostics."""
+        trace = self._residual_power_trace_by_circuit[circuit_id]
+        previous = self._residual_trace_metadata_by_circuit.get(circuit_id)
         truncation_count = min(
             (previous.trace_point_cap_truncation_count if previous else 0)
             + int(cap_removed > 0),
@@ -540,11 +871,11 @@ class NilmSampleProcessor:
                     or (
                         previous is not None
                         and previous.point_cap_truncated
-                        and len(retained) == self._residual_power_trace_max_items
+                        and len(trace) == self._residual_power_trace_max_items
                     )
                 ),
-                oldest_point_at=retained[0].timestamp if retained else None,
-                newest_point_at=retained[-1].timestamp if retained else None,
+                oldest_point_at=trace[0].timestamp if trace else None,
+                newest_point_at=trace[-1].timestamp if trace else None,
                 stale_subtraction_prevented_count=_nilm_residual_diagnostic_total(
                     previous,
                     "stale_subtraction_prevented_count",
@@ -578,7 +909,12 @@ class NilmSampleProcessor:
         if not self._nilm_enabled(circuit_config):
             return FeatureResult()
 
+        session_history_revision = self._revisions(circuit_id).session_history
         self._bound_session_history_ingress(circuit_id, context.store_data)
+        external_session_history_changed = (
+            self._revisions(circuit_id).session_history != session_history_revision
+        )
+        self._sync_input_revisions(circuit_id, context.store_data)
 
         self._seed_demo_nilm_state(circuit_config, sample.timestamp)
 
@@ -828,8 +1164,8 @@ class NilmSampleProcessor:
                 edge for edge in next_unmatched if id(edge) not in accepted_ids
             ]
             if completed_sessions:
-                history = (
-                    context.store_data.nilm_session_history_by_circuit.setdefault(
+                history = list(
+                    context.store_data.nilm_session_history_by_circuit.get(
                         circuit_id, []
                     )
                 )
@@ -843,6 +1179,13 @@ class NilmSampleProcessor:
                     reverse=True,
                 )
                 del history[self._session_history_max_items :]
+                rows, _ = _sanitize_nilm_session_history_ingress(
+                    history,
+                    max_source_rows=self._session_history_max_items,
+                )
+                self._replace_session_history(
+                    circuit_id, context.store_data, rows
+                )
                 store_dirty = True
 
         next_unmatched = _newest_nilm_edges(
@@ -890,7 +1233,12 @@ class NilmSampleProcessor:
                 store_dirty = True
                 self._helper_links_dirty = False
             if payloads != context.store_data.nilm_signatures.get(circuit_id, []):
-                context.store_data.nilm_signatures[circuit_id] = payloads
+                tracked_payloads = _NilmTrackedList(payloads)
+                context.store_data.nilm_signatures[circuit_id] = tracked_payloads
+                self._revisions(circuit_id).signatures += 1
+                self._signature_boundary_by_circuit[circuit_id] = (
+                    _nilm_collection_boundary(tracked_payloads)
+                )
                 store_dirty = True
         session_history_changed = False
         session_context = self._session_history_context(
@@ -899,6 +1247,7 @@ class NilmSampleProcessor:
         )
         if (
             evidence_changed
+            or external_session_history_changed
             or self._session_history_context_by_circuit.get(circuit_id)
             != session_context
         ):
@@ -1062,7 +1411,7 @@ class NilmSampleProcessor:
                 self._session_history_context(circuit_id, store_data)
             )
             return coverage != persisted_coverage
-        store_data.nilm_session_history_by_circuit[circuit_id] = next_sessions
+        self._replace_session_history(circuit_id, store_data, next_sessions)
         self._session_history_context_by_circuit[circuit_id] = (
             self._session_history_context(circuit_id, store_data)
         )
@@ -1076,8 +1425,16 @@ class NilmSampleProcessor:
         """Install one deterministic bounded copy before any history consumer."""
 
         histories = store_data.nilm_session_history_by_circuit
+        current = histories.get(circuit_id, ())
+        boundary = _nilm_collection_boundary(current)
+        prior_boundary = self._session_history_boundary_by_circuit.get(circuit_id)
+        if (
+            prior_boundary == boundary
+            and circuit_id in self._session_history_ingress_by_circuit
+        ):
+            return self._session_history_ingress_by_circuit[circuit_id]
         rows, raw_facts = _sanitize_nilm_session_history_ingress(
-            histories.get(circuit_id, ()),
+            current,
             max_source_rows=self._session_history_max_items,
         )
         ingress_by_circuit = getattr(
@@ -1165,7 +1522,16 @@ class NilmSampleProcessor:
                 )
             ),
         )
-        histories[circuit_id] = rows
+        replaced = self._replace_session_history(
+            circuit_id,
+            store_data,
+            rows,
+            force_revision=(prior_boundary is not None and prior_boundary != boundary),
+        )
+        if not replaced and circuit_id not in self._session_history_boundary_by_circuit:
+            self._session_history_boundary_by_circuit[circuit_id] = (
+                _nilm_collection_boundary(current)
+            )
         ingress_store = getattr(
             store_data, "nilm_session_history_ingress_by_circuit", None
         )
@@ -1186,18 +1552,18 @@ class NilmSampleProcessor:
         self._session_history_ingress_by_circuit[circuit_id] = facts
         return facts
 
-    @staticmethod
-    def _session_history_context(circuit_id: str, store_data: Any) -> object:
+    def _session_history_context(self, circuit_id: str, store_data: Any) -> object:
         """Return the assignment and signature inputs that affect pairing."""
-        return _nilm_stable_snapshot(
-            (
-                store_data.nilm_signatures.get(circuit_id, ()),
-                store_data.nilm_appliance_assignments_by_circuit.get(circuit_id, ()),
-            )
+        revisions = self._revisions(circuit_id)
+        return (
+            revisions.signatures,
+            revisions.assignments,
+            revisions.unmatched_edges,
+            revisions.residual_trace,
         )
 
-    @staticmethod
     def _inventory_context(
+        self,
         circuit_id: str,
         store_data: Any,
         *,
@@ -1206,17 +1572,16 @@ class NilmSampleProcessor:
         time_zone: str,
     ) -> object:
         """Return derived-session inputs that affect unknown-load inventory."""
-        return _nilm_stable_snapshot(
-            (
-                store_data.nilm_signatures.get(circuit_id, ()),
+        revisions = self._revisions(circuit_id)
+        return (
+            revisions.signatures,
+            revisions.session_history,
+            _nilm_inventory_time_context(
                 store_data.nilm_session_history_by_circuit.get(circuit_id, ()),
-                _nilm_inventory_time_context(
-                    store_data.nilm_session_history_by_circuit.get(circuit_id, ()),
-                    existing_inventory,
-                    now=now,
-                    time_zone=time_zone,
-                ),
-            )
+                existing_inventory,
+                now=now,
+                time_zone=time_zone,
+            ),
         )
 
     def refresh_state(

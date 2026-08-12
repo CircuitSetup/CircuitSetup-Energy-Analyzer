@@ -3097,6 +3097,114 @@ def test_nilm_workspace_omits_empty_ambiguity_audit() -> None:
     assert "ambiguity_audit" not in payload
 
 
+def test_exact_signature_lookup_does_not_build_sessions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An exact signature deep link must not generate unrelated sessions."""
+    from custom_components.circuitsetup_energy_analyzer import panel_nilm
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_item_payload,
+    )
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="Mains",
+        entity_id="sensor.mains_power",
+    )
+    coordinator.state.nilm_unknown_loads_by_circuit = {
+        "mains": {"unknown_loads": [{"signature_id": "sig-1"}]}
+    }
+
+    def fail_if_called(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("exact signature lookup built workspace sessions")
+
+    monkeypatch.setattr(panel_nilm, "_nilm_workspace_sessions", fail_if_called)
+
+    result = nilm_workspace_item_payload(
+        [coordinator],
+        kind="signature",
+        item_id="sig-1",
+        circuit_id="mains",
+        entry_id="entry-1",
+    )
+
+    assert result["status"] == "ok"
+
+
+def test_signature_collection_does_not_build_sessions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A signature page must not generate unrelated sessions."""
+    from custom_components.circuitsetup_energy_analyzer import panel_nilm
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_collection_payload,
+    )
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="Mains",
+        entity_id="sensor.mains_power",
+    )
+
+    def fail_if_called(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("signature collection built workspace sessions")
+
+    monkeypatch.setattr(panel_nilm, "_nilm_workspace_sessions", fail_if_called)
+
+    result = nilm_workspace_collection_payload(
+        [coordinator],
+        collection="signatures",
+        circuit_id="mains",
+        entry_id="entry-1",
+    )
+
+    assert result["status"] == "ok"
+
+
+def test_exact_assignment_lookup_does_not_build_attributions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An exact assignment link must not build unrelated attributions."""
+    from custom_components.circuitsetup_energy_analyzer import panel_nilm
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_item_payload,
+    )
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="Mains",
+        entity_id="sensor.mains_power",
+    )
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-1",
+                "mains_circuit_id": "mains",
+                "display_name": "Dryer",
+                "lifecycle_state": "assigned",
+                "signature_fingerprints": [],
+            }
+        ]
+    }
+
+    def fail_if_called(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("exact assignment lookup built attributions")
+
+    monkeypatch.setattr(
+        panel_nilm, "_nilm_known_load_attributions_for_circuit", fail_if_called
+    )
+
+    result = nilm_workspace_item_payload(
+        [coordinator],
+        kind="assignment",
+        item_id="assignment-1",
+        circuit_id="mains",
+        entry_id="entry-1",
+    )
+
+    assert result["status"] in {"ok", "retired"}
+
+
 def test_nilm_workspace_quality_collections_and_exact_items_are_bounded() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_collection_payload,
@@ -5146,7 +5254,7 @@ async def test_nilm_workspace_collection_view_forwards_bounded_scope(
 
     captured: dict[str, object] = {}
 
-    def collection_payload(_coordinators, **kwargs):
+    async def collection_payload(_hass, _coordinators, **kwargs):
         captured.update(kwargs)
         return {"status": "ok", "items": []}
 
@@ -5164,7 +5272,7 @@ async def test_nilm_workspace_collection_view_forwards_bounded_scope(
     )
     monkeypatch.setattr(
         panel_nilm,
-        "nilm_workspace_collection_payload",
+        "async_nilm_workspace_collection_payload",
         collection_payload,
     )
     monkeypatch.setattr(panel, "_loaded_coordinators", lambda _hass: ())
@@ -5193,7 +5301,7 @@ async def test_nilm_workspace_item_view_forwards_exact_scope(
 
     captured: dict[str, object] = {}
 
-    def item_payload(_coordinators, **kwargs):
+    async def item_payload(_hass, _coordinators, **kwargs):
         captured.update(kwargs)
         return {"status": "ok", "item": {"session_id": "session-1"}}
 
@@ -5206,7 +5314,9 @@ async def test_nilm_workspace_item_view_forwards_exact_scope(
             "entry_id": "entry-2",
         },
     )
-    monkeypatch.setattr(panel_nilm, "nilm_workspace_item_payload", item_payload)
+    monkeypatch.setattr(
+        panel_nilm, "async_nilm_workspace_item_payload", item_payload
+    )
     monkeypatch.setattr(panel, "_loaded_coordinators", lambda _hass: ())
     monkeypatch.setattr(panel.web, "json_response", lambda payload: payload)
 
@@ -5220,6 +5330,214 @@ async def test_nilm_workspace_item_view_forwards_exact_scope(
         "circuit_id": "mains",
         "entry_id": "entry-2",
     }
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_collection_async_read_uses_detached_snapshot() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        async_nilm_workspace_collection_payload,
+    )
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="Mains",
+        entity_id="sensor.mains_power",
+    )
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [
+            {
+                "session_id": "session-1",
+                "signature_fingerprint": "signature-1",
+                "start": "2026-08-12T12:00:00+00:00",
+                "end": "2026-08-12T12:05:00+00:00",
+            }
+        ]
+    }
+
+    class Hass:
+        executor_calls = 0
+
+        async def async_add_executor_job(self, job):
+            self.executor_calls += 1
+            return job()
+
+    hass = Hass()
+    payload = await async_nilm_workspace_collection_payload(
+        hass,
+        [coordinator],
+        collection="sessions",
+        circuit_id="mains",
+        entry_id="entry-1",
+        limit=50,
+    )
+
+    assert hass.executor_calls == 1
+    assert payload["status"] == "ok"
+    assert payload["total_count"] == 1
+    assert payload["items"][0]["session_id"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_async_read_retries_stale_snapshot() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        async_nilm_workspace_collection_payload,
+    )
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="Mains",
+        entity_id="sensor.mains_power",
+    )
+    history = [
+        {
+            "session_id": "session-1",
+            "signature_fingerprint": "signature-1",
+            "start": "2026-08-12T12:00:00+00:00",
+            "end": "2026-08-12T12:05:00+00:00",
+        }
+    ]
+    coordinator.store_data.nilm_session_history_by_circuit = {"mains": history}
+
+    class Hass:
+        executor_calls = 0
+
+        async def async_add_executor_job(self, job):
+            self.executor_calls += 1
+            payload = job()
+            if self.executor_calls == 1:
+                coordinator.store_data.nilm_session_history_by_circuit[
+                    "mains"
+                ].append(
+                    {
+                        "session_id": "session-2",
+                        "signature_fingerprint": "signature-1",
+                        "start": "2026-08-12T13:00:00+00:00",
+                        "end": "2026-08-12T13:05:00+00:00",
+                    }
+                )
+            return payload
+
+    hass = Hass()
+    payload = await async_nilm_workspace_collection_payload(
+        hass,
+        [coordinator],
+        collection="sessions",
+        circuit_id="mains",
+        entry_id="entry-1",
+        limit=50,
+    )
+
+    assert hass.executor_calls == 2
+    assert payload["total_count"] == 2
+    assert {item["session_id"] for item in payload["items"]} == {
+        "session-1",
+        "session-2",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", ["in_place", "non_tail_replacement"])
+async def test_nilm_workspace_async_read_retries_exact_tracked_mutations(
+    mutation: str,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        async_nilm_workspace_collection_payload,
+    )
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="Mains",
+        entity_id="sensor.mains_power",
+    )
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [
+            {
+                "session_id": f"session-{index}",
+                "signature_fingerprint": "signature-1",
+                "start": f"2026-08-12T1{index}:00:00+00:00",
+                "end": f"2026-08-12T1{index}:05:00+00:00",
+                "median_power_w": 100.0,
+            }
+            for index in range(3)
+        ]
+    }
+
+    class Hass:
+        executor_calls = 0
+
+        async def async_add_executor_job(self, job):
+            self.executor_calls += 1
+            payload = job()
+            if self.executor_calls == 1:
+                rows = coordinator.store_data.nilm_session_history_by_circuit["mains"]
+                if mutation == "in_place":
+                    rows[0]["median_power_w"] = 250.0
+                else:
+                    rows[0] = {**rows[0], "median_power_w": 300.0}
+            return payload
+
+    hass = Hass()
+    payload = await async_nilm_workspace_collection_payload(
+        hass,
+        [coordinator],
+        collection="sessions",
+        circuit_id="mains",
+        entry_id="entry-1",
+        limit=50,
+    )
+
+    assert hass.executor_calls == 2
+    by_id = {item["session_id"]: item for item in payload["items"]}
+    assert by_id["session-0"]["median_power_w"] == (
+        250.0 if mutation == "in_place" else 300.0
+    )
+
+
+@pytest.mark.asyncio
+async def test_cancelled_nilm_collection_view_does_not_publish_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="Mains",
+        entity_id="sensor.mains_power",
+    )
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class Hass:
+        data = {DOMAIN: {"entry-1": coordinator}}
+
+        async def async_add_executor_job(self, _job):
+            started.set()
+            await release.wait()
+            return {"status": "ok", "items": []}
+
+    published: list[object] = []
+    monkeypatch.setattr(
+        panel.web,
+        "json_response",
+        lambda payload: published.append(payload) or payload,
+    )
+    request = SimpleNamespace(
+        app={panel.KEY_HASS: Hass()},
+        query={
+            "collection": "sessions",
+            "circuit_id": "mains",
+            "entry_id": "entry-1",
+        },
+    )
+
+    task = asyncio.create_task(panel.NilmWorkspaceCollectionView().get(request))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    release.set()
+
+    assert published == []
 
 
 @pytest.mark.asyncio

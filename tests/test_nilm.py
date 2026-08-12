@@ -89,6 +89,42 @@ def test_assignment_model_does_not_synthesize_active_transitions_from_plateaus(
     }
 
 
+def test_pairing_builds_one_trace_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Competing candidates share one indexed residual trace."""
+    calls = 0
+    trace_index = nilm_domain._nilm_trace_index
+
+    def count_trace_index(*args: object, **kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        return trace_index(*args, **kwargs)
+
+    monkeypatch.setattr(nilm_domain, "_nilm_trace_index", count_trace_index)
+
+    sessions = pair_nilm_sessions_for_signatures(
+        [
+            edge(0, 150.0),
+            edge(300, -150.0),
+            edge(600, 250.0),
+            edge(900, -250.0),
+        ],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {"signature_fingerprint": "pump", "median_delta_w": 150.0},
+            {"signature_fingerprint": "fan", "median_delta_w": 250.0},
+        ],
+        power_trace=[
+            (BASE_TIME + timedelta(seconds=index * 30), 150.0)
+            for index in range(32)
+        ],
+    )
+
+    assert {session.signature_fingerprint for session in sessions} == {"fan", "pump"}
+    assert calls == 1
+
+
 def test_assignment_model_requires_distinct_days_for_active_state_split() -> None:
     intervals = _multistate_intervals(
         [("01", power) for power in (100, 105, 98, 102, 300, 305, 298, 302)]
@@ -5938,6 +5974,42 @@ def test_session_pairing_memoizes_and_bounds_trace_evidence(
 
     assert len(trace_pairs) == nilm_domain.NILM_SESSION_TRACE_PAIR_MAX_ITEMS
     assert len(set(trace_pairs)) == len(trace_pairs)
+
+
+def test_session_pairing_reuses_trace_evidence_for_shared_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+    original_trace_evidence = nilm_domain._nilm_session_trace_evidence
+
+    def trace_evidence(*args: object, **kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        return original_trace_evidence(*args, **kwargs)
+
+    monkeypatch.setattr(nilm_domain, "_nilm_session_trace_evidence", trace_evidence)
+    pair_nilm_sessions_for_signatures(
+        [
+            edge(0, 100.0),
+            edge(0, 100.0),
+            edge(600, -100.0),
+            edge(600, -100.0),
+        ],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {"signature_fingerprint": "load-a", "typical_watts": 100.0},
+            {"signature_fingerprint": "load-b", "typical_watts": 100.0},
+        ],
+        power_trace=[
+            (BASE_TIME - timedelta(seconds=30), 0.0),
+            (BASE_TIME, 0.0),
+            (BASE_TIME + timedelta(seconds=300), 100.0),
+            (BASE_TIME + timedelta(seconds=600), 0.0),
+            (BASE_TIME + timedelta(seconds=630), 0.0),
+        ],
+    )
+
+    assert calls == 1
 
 
 def test_session_pairing_reuses_scores_for_identical_profiles(
