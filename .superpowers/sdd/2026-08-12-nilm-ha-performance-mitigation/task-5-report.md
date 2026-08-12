@@ -1,0 +1,92 @@
+# Task 5 report: lazy NILM panel reads
+
+## Outcome
+
+Replaced the eager generic workspace context with a request-local
+`_NilmWorkspaceReadSource`. Generic collection routes now ask it for one named,
+whitelisted collection, and exact-item routes resolve through the source mapped
+to the requested item kind. Prepared signatures, intervals, assignments, and
+merged sessions are cached only within that request.
+
+The specialized ambiguity collection route remains unchanged. The main
+`nilm_workspace_payload` path retains its existing bounded previews.
+
+## RED proof
+
+Before production changes:
+
+```text
+rtk pytest tests/test_panel.py -q
+Pytest: 197 passed, 3 failed
+```
+
+The three expected structural failures were:
+
+- exact signature lookup called `_nilm_workspace_sessions`;
+- the signatures collection called `_nilm_workspace_sessions`;
+- exact assignment lookup called
+  `_nilm_known_load_attributions_for_circuit`.
+
+All failures were raised by structural spies at the eager
+`_nilm_workspace_collection_context` call path, demonstrating the intended
+isolation regression rather than a fixture or syntax error.
+
+## GREEN proof
+
+```text
+rtk pytest tests/test_panel.py -q
+Pytest: 200 passed
+
+rtk pytest tests/test_panel.py tests/e2e -q
+Pytest: 200 passed
+
+rtk git diff --check
+exit 0
+
+rtk ruff check custom_components/circuitsetup_energy_analyzer/panel_nilm.py tests/test_panel.py
+Ruff: No issues found
+```
+
+## Benchmark and executor decision
+
+Command:
+
+```text
+.\.venv\Scripts\python.exe scripts\benchmark_nilm_performance.py
+```
+
+Environment: Python 3.12.10, Windows 10, 16 logical CPUs, AMD64 Family 23.
+The benchmark performs five repetitions. Its maximum bounded panel fixture has
+100 retained sessions (the collection response remains capped by the route
+limit).
+
+| Panel request | Median | Minimum | Serialized bytes |
+| --- | ---: | ---: | ---: |
+| Main workspace | 5.917 ms | 5.831 ms | 35,151 |
+| Sessions collection | 5.479 ms | 5.457 ms | 27,798 |
+| Exact signature item | 0.978 ms | 0.970 ms | 2,972 |
+
+No executor offload was added. The maximum panel reads visited 100 retained
+session rows, below the greater-than-500-row threshold, and every median was
+below 10 ms across five runs. Keeping these reads on the event loop also avoids
+introducing live coordinator access or mutation from an executor.
+
+## Contract checks
+
+- Collection limit validation, signed cursor generation/validation, stable
+  ordering, pagination metadata, error envelopes, and entry-scoped actions
+  continue through the existing helpers.
+- Exact item payload fields and retired-assignment status remain unchanged.
+- Timestamp-less assignment focus lazily consults related sessions and then
+  label intervals; timestamp-less signature focus consults persisted sessions
+  without generating edge-derived workspace sessions.
+- Exact ambiguous-session links retain read-only `open_on_graph` actions.
+- The dedicated ambiguity grouping and occurrence behavior was not folded into
+  the generic source.
+- No frontend files changed, so `PANEL_MODULE_VERSION` was not bumped.
+
+## Changed files
+
+- `custom_components/circuitsetup_energy_analyzer/panel_nilm.py`
+- `tests/test_panel.py`
+- `.superpowers/sdd/2026-08-12-nilm-ha-performance-mitigation/task-5-report.md`

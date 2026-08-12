@@ -229,6 +229,14 @@ _NILM_WORKSPACE_ITEM_KINDS = frozenset(
         "known_load_attribution",
     }
 )
+_NILM_WORKSPACE_ITEM_SOURCES = {
+    "session": ("sessions", "session_id"),
+    "ambiguous_session": ("ambiguous_sessions", "session_id"),
+    "label_interval": ("label_intervals", ATTR_INTERVAL_ID),
+    "assignment": ("assignments", ATTR_ASSIGNMENT_ID),
+    "signature": ("signatures", ATTR_SIGNATURE_ID),
+    "known_load_attribution": ("known_load_attributions", "attribution_id"),
+}
 _NILM_ESTIMATE_QUALITY_WINDOWS = (
     ("today", "runtime_today_minutes", "estimated_energy_today_kwh"),
     ("7_days", "runtime_7_days_minutes", "estimated_energy_7_days_kwh"),
@@ -701,7 +709,7 @@ def _nilm_workspace_generic_collection_payload(
         return _nilm_workspace_collection_error("not_found")
     coordinator, config, _sources = target
     selected_entry_id = str(getattr(coordinator, "entry_id", "") or "")
-    items = _nilm_workspace_collection_context(coordinator, config)[collection]
+    items = _NilmWorkspaceReadSource(coordinator, config).collection(collection)
     ordered = _nilm_workspace_ordered_collection(collection, items)
     total_count = len(ordered)
     cursor_key = _nilm_workspace_generic_collection_cursor_key(
@@ -772,74 +780,142 @@ def _nilm_workspace_generic_collection_limit(value: Any) -> int | None:
     return min(parsed, MAX_NILM_WORKSPACE_COLLECTION_LIMIT)
 
 
-def _nilm_workspace_collection_context(
-    coordinator: Any,
-    config: CircuitConfig,
-) -> dict[str, list[dict[str, Any]]]:
-    """Build the bounded/read-only collections from one selected source."""
+class _NilmWorkspaceReadSource:
+    """Request-local, lazily prepared NILM workspace read source."""
 
-    circuit_id = config.circuit_id
-    signatures = _nilm_workspace_signatures(coordinator, circuit_id, config=config)
-    all_label_intervals = _nilm_label_intervals_for_circuit(
-        coordinator, circuit_id, limit=None
-    )
-    assignments = _nilm_assignments_for_circuit(
-        coordinator,
-        circuit_id,
-        label_intervals=all_label_intervals,
-    )
-    _add_nilm_helper_evidence(
-        assignments,
-        signatures,
-        circuit_id,
-        coordinator=coordinator,
-        config=config,
-    )
-    _add_nilm_reference_evidence(assignments, circuit_id, coordinator=coordinator)
-    assignment_options = _nilm_assignment_options(assignments, config=config)
-    _add_nilm_assignment_options(signatures, assignment_options)
-    _add_nilm_assignment_options(all_label_intervals, assignment_options)
-    reviewed_session_ids = _nilm_reviewed_session_ids_by_assignment(assignments)
-    merged_sessions = _merge_nilm_session_payloads(
-        _nilm_workspace_sessions(
-            _nilm_edges_for_circuit(coordinator, circuit_id),
-            circuit_id,
-            signatures=signatures,
-            assignments=assignments,
-            reviewed_session_ids=reviewed_session_ids,
-            limit=None,
-        ),
-        _nilm_session_history_for_circuit(
-            coordinator,
-            circuit_id,
-            reviewed_session_ids=reviewed_session_ids,
-        ),
-    )
-    labels = _nilm_session_display_labels(signatures, assignments)
-    sessions = _add_nilm_session_display_labels(
-        _nilm_workspace_visible_sessions(merged_sessions, signatures, assignments),
-        labels,
-    )
-    _add_nilm_assignment_options(sessions, assignment_options)
-    _add_nilm_session_signature_reviews(sessions, signatures)
-    ambiguous_sessions = [
-        _nilm_ambiguity_audit_item(session, labels, circuit_id=circuit_id)
-        for session in _nilm_workspace_ambiguous_sessions(
-            merged_sessions,
-            signatures,
-            assignments,
+    def __init__(self, coordinator: Any, config: CircuitConfig) -> None:
+        self.coordinator = coordinator
+        self.config = config
+        self.circuit_id = config.circuit_id
+        self._collections: dict[str, list[dict[str, Any]]] = {}
+        self._merged_sessions: list[dict[str, Any]] | None = None
+        self._raw_signatures: list[dict[str, Any]] | None = None
+        self._raw_intervals: list[dict[str, Any]] | None = None
+        self._raw_assignments: list[dict[str, Any]] | None = None
+
+    def collection(self, name: str) -> list[dict[str, Any]]:
+        if name not in self._collections:
+            self._collections[name] = self._build_collection(name)
+        return self._collections[name]
+
+    def item(self, kind: str, item_id: str) -> dict[str, Any] | None:
+        collection, identity = _NILM_WORKSPACE_ITEM_SOURCES[kind]
+        return next(
+            (
+                dict(item)
+                for item in self.collection(collection)
+                if str(item.get(identity) or "").strip() == item_id
+            ),
+            None,
         )
-    ]
-    return {
-        "sessions": sessions,
-        "ambiguous_sessions": ambiguous_sessions,
-        "label_intervals": all_label_intervals,
-        "assignments": assignments,
-        "signatures": signatures,
-        "known_load_attributions": _nilm_known_load_attributions_for_circuit(
-            coordinator, circuit_id
-        ),
-    }
+
+    def _build_collection(self, name: str) -> list[dict[str, Any]]:
+        if name == "signatures":
+            signatures = self._signatures()
+            _add_nilm_assignment_options(signatures, self._assignment_options())
+            return signatures
+        if name == "label_intervals":
+            intervals = self._intervals()
+            _add_nilm_assignment_options(intervals, self._assignment_options())
+            return intervals
+        if name == "assignments":
+            return self._assignments()
+        if name in {"sessions", "ambiguous_sessions"}:
+            signatures = self.collection("signatures")
+            assignments = self.collection("assignments")
+            merged = self._sessions()
+            labels = _nilm_session_display_labels(signatures, assignments)
+            if name == "ambiguous_sessions":
+                return [
+                    _nilm_ambiguity_audit_item(
+                        session, labels, circuit_id=self.circuit_id
+                    )
+                    for session in _nilm_workspace_ambiguous_sessions(
+                        merged, signatures, assignments
+                    )
+                ]
+            sessions = _add_nilm_session_display_labels(
+                _nilm_workspace_visible_sessions(merged, signatures, assignments),
+                labels,
+            )
+            _add_nilm_assignment_options(sessions, self._assignment_options())
+            _add_nilm_session_signature_reviews(sessions, signatures)
+            return sessions
+        if name == "known_load_attributions":
+            return _nilm_known_load_attributions_for_circuit(
+                self.coordinator, self.circuit_id
+            )
+        raise KeyError(name)
+
+    def _assignment_options(self) -> list[dict[str, Any]]:
+        return _nilm_assignment_options(self._assignments(), config=self.config)
+
+    def _signatures(self) -> list[dict[str, Any]]:
+        if self._raw_signatures is None:
+            self._raw_signatures = _nilm_workspace_signatures(
+                self.coordinator, self.circuit_id, config=self.config
+            )
+        return self._raw_signatures
+
+    def _intervals(self) -> list[dict[str, Any]]:
+        if self._raw_intervals is None:
+            self._raw_intervals = _nilm_label_intervals_for_circuit(
+                self.coordinator, self.circuit_id, limit=None
+            )
+        return self._raw_intervals
+
+    def _assignments(self) -> list[dict[str, Any]]:
+        if self._raw_assignments is None:
+            self._raw_assignments = _nilm_assignments_for_circuit(
+                self.coordinator,
+                self.circuit_id,
+                label_intervals=self._intervals(),
+            )
+            _add_nilm_helper_evidence(
+                self._raw_assignments,
+                self._signatures(),
+                self.circuit_id,
+                coordinator=self.coordinator,
+                config=self.config,
+            )
+            _add_nilm_reference_evidence(
+                self._raw_assignments,
+                self.circuit_id,
+                coordinator=self.coordinator,
+            )
+        return self._raw_assignments
+
+    def _sessions(self) -> list[dict[str, Any]]:
+        if self._merged_sessions is None:
+            signatures = self.collection("signatures")
+            assignments = self.collection("assignments")
+            reviewed_ids = _nilm_reviewed_session_ids_by_assignment(assignments)
+            self._merged_sessions = _merge_nilm_session_payloads(
+                _nilm_workspace_sessions(
+                    _nilm_edges_for_circuit(self.coordinator, self.circuit_id),
+                    self.circuit_id,
+                    signatures=signatures,
+                    assignments=assignments,
+                    reviewed_session_ids=reviewed_ids,
+                    limit=None,
+                ),
+                _nilm_session_history_for_circuit(
+                    self.coordinator,
+                    self.circuit_id,
+                    reviewed_session_ids=reviewed_ids,
+                ),
+            )
+        return self._merged_sessions
+
+    def retained_sessions(self) -> list[dict[str, Any]]:
+        """Return persisted sessions without generating edge-derived sessions."""
+
+        reviewed_ids = _nilm_reviewed_session_ids_by_assignment(self._assignments())
+        return _nilm_session_history_for_circuit(
+            self.coordinator,
+            self.circuit_id,
+            reviewed_session_ids=reviewed_ids,
+        )
 
 
 def _nilm_workspace_ordered_collection(
@@ -1126,23 +1202,8 @@ def nilm_workspace_item_payload(
         return _nilm_workspace_item_error("not_found", normalized_kind)
     coordinator, config, _sources = target
     selected_entry_id = str(getattr(coordinator, "entry_id", "") or "")
-    collections = _nilm_workspace_collection_context(coordinator, config)
-    collection, identity = {
-        "session": ("sessions", "session_id"),
-        "ambiguous_session": ("ambiguous_sessions", "session_id"),
-        "label_interval": ("label_intervals", ATTR_INTERVAL_ID),
-        "assignment": ("assignments", ATTR_ASSIGNMENT_ID),
-        "signature": ("signatures", ATTR_SIGNATURE_ID),
-        "known_load_attribution": ("known_load_attributions", "attribution_id"),
-    }[normalized_kind]
-    item = next(
-        (
-            dict(candidate)
-            for candidate in collections[collection]
-            if str(candidate.get(identity) or "").strip() == normalized_id
-        ),
-        None,
-    )
+    source = _NilmWorkspaceReadSource(coordinator, config)
+    item = source.item(normalized_kind, normalized_id)
     if item is None:
         return _nilm_workspace_item_error("not_found", normalized_kind)
     if normalized_kind == "ambiguous_session":
@@ -1166,7 +1227,7 @@ def nilm_workspace_item_payload(
             item,
             normalized_kind,
             config,
-            collections=collections,
+            collections=source,
         ),
         "safe_actions": _nilm_workspace_item_safe_actions(item, normalized_kind),
     }
@@ -1203,7 +1264,7 @@ def _nilm_workspace_item_focus(
     kind: str,
     config: CircuitConfig,
     *,
-    collections: Mapping[str, Iterable[Mapping[str, Any]]] | None = None,
+    collections: Any = None,
 ) -> dict[str, Any]:
     start = _datetime_from_iso(item.get("start"))
     end = _datetime_from_iso(item.get("end"))
@@ -1238,11 +1299,21 @@ def _nilm_workspace_item_related_interval(
 ) -> Mapping[str, Any] | None:
     """Find the newest retained session/label interval for an exact item."""
 
-    if not isinstance(collections, Mapping):
+    if isinstance(collections, Mapping):
+        get_collection = collections.get
+    elif isinstance(collections, _NilmWorkspaceReadSource):
+        get_collection = collections.collection
+    else:
         return None
+    session_source = (
+        collections.retained_sessions()
+        if kind == "signature"
+        and isinstance(collections, _NilmWorkspaceReadSource)
+        else get_collection("sessions")
+    )
     sessions = [
         candidate
-        for candidate in _iter_items(collections.get("sessions"))
+        for candidate in _iter_items(session_source)
         if isinstance(candidate, Mapping)
         and _datetime_from_iso(candidate.get("start")) is not None
         and _datetime_from_iso(candidate.get("end")) is not None
@@ -1266,7 +1337,7 @@ def _nilm_workspace_item_related_interval(
         if not candidates and assignment_id:
             candidates = [
                 ("label_intervals", candidate)
-                for candidate in _iter_items(collections.get("label_intervals"))
+                for candidate in _iter_items(get_collection("label_intervals"))
                 if isinstance(candidate, Mapping)
                 and str(candidate.get(ATTR_ASSIGNMENT_ID) or "").strip()
                 == assignment_id
