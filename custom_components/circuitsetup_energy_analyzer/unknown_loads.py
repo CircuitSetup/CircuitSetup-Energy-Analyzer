@@ -1595,6 +1595,8 @@ def _legacy_unverified_inventory(
         load["runtime_window_definition"] = _runtime_window_definition()
         load["runtime_windows"] = {
             name: {
+                "requested_start": None,
+                "requested_end": None,
                 "coverage_start": None,
                 "coverage_end": None,
                 "coverage_days": 0.0,
@@ -2889,6 +2891,8 @@ def _add_edge_window_metadata(
     included = int(load.get("matched_on_edge_count") or 0)
     load["runtime_windows"] = {
         name: {
+            "requested_start": start.isoformat(),
+            "requested_end": end.isoformat(),
             "coverage_start": max(start, observed).isoformat()
             if observed is not None
             else start.isoformat(),
@@ -3000,6 +3004,8 @@ def _unknown_component_session_payload(
         )
         estimate_statuses[name] = status
         runtime_windows[name] = {
+            "requested_start": start.isoformat(),
+            "requested_end": end.isoformat(),
             "coverage_start": max(
                 start,
                 evidence.observation_started_at_by_component[component.component_id],

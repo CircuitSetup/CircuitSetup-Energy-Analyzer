@@ -481,6 +481,23 @@ class StorePersistenceManager:
                 ),
                 reverse=True,
             )[: self._nilm_session_history_max_items]
+        for circuit_id, attributions in list(
+            store_data.nilm_known_load_attributions_by_circuit.items()
+        ):
+            retained = [
+                dict(attribution)
+                for attribution in attributions
+                if isinstance(attribution, Mapping)
+                and self._mapping_time(attribution, "timestamp") >= cutoff
+            ]
+            store_data.nilm_known_load_attributions_by_circuit[circuit_id] = sorted(
+                retained,
+                key=lambda attribution: (
+                    self._mapping_time(attribution, "timestamp"),
+                    str(attribution.get("attribution_id") or ""),
+                ),
+                reverse=True,
+            )[: self._nilm_session_history_max_items]
 
     def prune_alert_feedback(self, now: datetime) -> None:
         """Apply retention caps to alert feedback state."""

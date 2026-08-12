@@ -156,6 +156,12 @@ def test_inventory_uses_stored_sessions_for_independent_runtime_windows() -> Non
     assert load["estimated_energy_today_kwh"] == 0.5
     assert load["estimated_energy_7_days_kwh"] == 1.25
     assert load["estimated_energy_30_days_kwh"] == 2.25
+    assert load["runtime_windows"]["7_days"]["requested_start"] == (
+        "2026-08-02T12:00:00+00:00"
+    )
+    assert load["runtime_windows"]["7_days"]["requested_end"] == (
+        "2026-08-09T12:00:00+00:00"
+    )
 
 
 def test_session_windows_clip_boundaries_and_local_midnight() -> None:

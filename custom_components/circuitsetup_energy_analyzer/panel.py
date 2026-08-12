@@ -79,6 +79,7 @@ from .panel_views import (
     NilmIntervalEvidenceView,
     NilmWorkspaceCollectionView,
     NilmWorkspaceHistoryView,
+    NilmWorkspaceItemView,
     NilmWorkspaceView,
     SetupHealthView,
 )
@@ -2438,6 +2439,7 @@ def _register_view(hass: Any) -> None:
         register_view(SetupHealthView())
         register_view(NilmWorkspaceView())
         register_view(NilmWorkspaceCollectionView())
+        register_view(NilmWorkspaceItemView())
         register_view(NilmWorkspaceHistoryView())
         register_view(NilmIntervalEvidenceView())
 

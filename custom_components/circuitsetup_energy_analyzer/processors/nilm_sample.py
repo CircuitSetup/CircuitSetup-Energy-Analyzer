@@ -27,6 +27,7 @@ from ..nilm import (
     NilmComponentStatus,
     NilmEdge,
     NilmEdgeDetector,
+    NilmKnownLoadAttributionRecord,
     NilmReconciliationResult,
     NilmResidualPowerPoint,
     NilmResidualTraceMetadata,
@@ -42,7 +43,9 @@ from ..nilm import (
     conservation_tolerance_w,
     discover_nilm_helper_candidates,
     duration_state_score_for_transition,
+    known_load_attribution_records,
     nilm_helper_candidate_to_dict,
+    nilm_known_load_attribution_to_dict,
     nilm_session_to_dict,
     nilm_signature_fingerprint,
     nilm_signature_fingerprint_v1,
@@ -679,6 +682,7 @@ class NilmSampleProcessor:
         candidate_edges = [*existing_unmatched, *recovered_edges, *edges]
         matched_edges = ()
         rejected_topology_candidates = ()
+        attribution_records: tuple[NilmKnownLoadAttributionRecord, ...] = ()
         defer_known_events = detector.has_pending_transition and not edges
         if candidate_edges and known_events and not defer_known_events:
             topology_by_circuit = {
@@ -694,11 +698,26 @@ class NilmSampleProcessor:
             )
             matched_edges = mask.matched_edges
             rejected_topology_candidates = mask.rejected_topology_candidates
+            attribution_records = known_load_attribution_records(candidate_edges, mask)
             next_unmatched = list(mask.unmatched_edges)
         else:
             next_unmatched = candidate_edges
         if defer_known_events and known_events:
             self._pending_known_load_events[circuit_id] = known_events
+
+        if attribution_records:
+            stored_attributions = (
+                context.store_data.nilm_known_load_attributions_by_circuit
+            )
+            existing_attributions = stored_attributions.get(circuit_id)
+            next_attributions = _merged_known_load_attribution_payloads(
+                existing_attributions,
+                attribution_records,
+                max_items=self._session_history_max_items,
+            )
+            if next_attributions != existing_attributions:
+                stored_attributions[circuit_id] = next_attributions
+                store_dirty = True
 
         runtime = _initial_component_runtime(
             assignments,
@@ -3850,6 +3869,36 @@ def _newest_nilm_edges(edges: Iterable[NilmEdge], max_items: int) -> list[NilmEd
     if max_items <= 0:
         return []
     return sorted(edges, key=lambda edge: edge.timestamp)[-max_items:]
+
+
+def _merged_known_load_attribution_payloads(
+    existing: Any,
+    records: Iterable[NilmKnownLoadAttributionRecord],
+    *,
+    max_items: int,
+) -> list[dict[str, Any]]:
+    """Merge evaluated records by stable ID without rewriting equivalent rows."""
+
+    existing_rows = existing if isinstance(existing, list) else ()
+    by_id: dict[str, dict[str, Any]] = {
+        str(item.get("attribution_id")): dict(item)
+        for item in existing_rows
+        if isinstance(item, Mapping)
+        and str(item.get("attribution_id") or "").strip()
+    }
+    for record in records:
+        payload = nilm_known_load_attribution_to_dict(record)
+        by_id[payload["attribution_id"]] = payload
+    if max_items <= 0:
+        return []
+    return sorted(
+        by_id.values(),
+        key=lambda item: (
+            str(item.get("timestamp") or ""),
+            str(item.get("attribution_id") or ""),
+        ),
+        reverse=True,
+    )[:max_items]
 
 
 def _nilm_edge_to_storage(edge: NilmEdge) -> dict[str, Any] | None:

@@ -145,6 +145,7 @@ NILM_SIGNATURE_PANEL_FIELDS = (
     "known_load_overlap",
     "running_state",
     "current_runtime_minutes",
+    "runtime_today_minutes",
     "estimated_energy_today_kwh",
     "runtime_7_days_minutes",
     "runtime_30_days_minutes",
@@ -156,6 +157,12 @@ NILM_SIGNATURE_PANEL_FIELDS = (
     "observation_started_at",
     "runtime_window_definition",
     "energy_estimate_confidence",
+    "energy_source",
+    "power_coverage",
+    "covered_duration_seconds",
+    "longest_trace_gap_seconds",
+    "trace_point_cap_truncated",
+    "session_history_truncated",
     "review_state",
     "ignored",
     "merged_into",
@@ -179,6 +186,7 @@ MAX_NILM_WORKSPACE_KNOWN_LOADS = 8
 MAX_NILM_WORKSPACE_EDGES = 40
 MAX_NILM_WORKSPACE_SESSIONS = 20
 MAX_NILM_WORKSPACE_LABEL_INTERVALS = 40
+MAX_NILM_WORKSPACE_KNOWN_LOAD_ATTRIBUTIONS = 20
 MAX_NILM_AMBIGUITY_AUDIT_GROUP_PREVIEW = 3
 DEFAULT_NILM_WORKSPACE_COLLECTION_LIMIT = 20
 MAX_NILM_WORKSPACE_COLLECTION_LIMIT = 50
@@ -195,6 +203,30 @@ _NILM_AMBIGUITY_REASON_CODES = frozenset(
         "signature_candidate_conflict",
         "stop_boundary_conflict",
     }
+)
+_NILM_WORKSPACE_GENERIC_COLLECTIONS = frozenset(
+    {
+        "sessions",
+        "label_intervals",
+        "assignments",
+        "signatures",
+        "known_load_attributions",
+    }
+)
+_NILM_WORKSPACE_ITEM_KINDS = frozenset(
+    {
+        "session",
+        "ambiguous_session",
+        "label_interval",
+        "assignment",
+        "signature",
+        "known_load_attribution",
+    }
+)
+_NILM_ESTIMATE_QUALITY_WINDOWS = (
+    ("today", "runtime_today_minutes", "estimated_energy_today_kwh"),
+    ("7_days", "runtime_7_days_minutes", "estimated_energy_7_days_kwh"),
+    ("30_days", "runtime_30_days_minutes", "estimated_energy_30_days_kwh"),
 )
 
 
@@ -240,7 +272,6 @@ def nilm_workspace_payload(
         config.circuit_id,
         limit=None,
     )
-    label_intervals = all_label_intervals[:MAX_NILM_WORKSPACE_LABEL_INTERVALS]
     assignments = _nilm_assignments_for_circuit(
         coordinator,
         config.circuit_id,
@@ -298,30 +329,37 @@ def nilm_workspace_payload(
         session_display_labels,
     )
     _add_nilm_component_occurrences(signatures, all_sessions)
-    sessions = _nilm_workspace_session_page(
-        _add_nilm_session_display_labels(
-            _nilm_workspace_visible_sessions(
-                _merge_nilm_session_payloads(
-                    _nilm_workspace_sessions(
-                        recent_edges,
-                        config.circuit_id,
-                        signatures=signatures,
-                        assignments=assignments,
-                        reviewed_session_ids=reviewed_session_ids,
-                    ),
-                    stored_sessions,
-                ),
-                signatures,
-                assignments,
-            ),
-            session_display_labels,
-        ),
-        limit=MAX_NILM_WORKSPACE_SESSIONS,
-    )
     _add_nilm_assignment_options(signatures, assignment_options)
+    label_intervals, label_interval_meta = _nilm_workspace_collection_metadata(
+        "label_intervals",
+        all_label_intervals,
+        limit=MAX_NILM_WORKSPACE_LABEL_INTERVALS,
+        circuit_id=config.circuit_id,
+        entry_id=selected_entry_id,
+    )
     _add_nilm_assignment_options(label_intervals, assignment_options)
-    _add_nilm_assignment_options(sessions, assignment_options)
-    _add_nilm_session_signature_reviews(sessions, signatures)
+    _add_nilm_assignment_options(all_sessions, assignment_options)
+    _add_nilm_session_signature_reviews(all_sessions, signatures)
+    sessions, session_meta = _nilm_workspace_collection_metadata(
+        "sessions",
+        all_sessions,
+        limit=MAX_NILM_WORKSPACE_SESSIONS,
+        circuit_id=config.circuit_id,
+        entry_id=selected_entry_id,
+    )
+    all_known_load_attributions = _nilm_known_load_attributions_for_circuit(
+        coordinator,
+        config.circuit_id,
+    )
+    known_load_attributions, attribution_meta = (
+        _nilm_workspace_collection_metadata(
+            "known_load_attributions",
+            all_known_load_attributions,
+            limit=MAX_NILM_WORKSPACE_KNOWN_LOAD_ATTRIBUTIONS,
+            circuit_id=config.circuit_id,
+            entry_id=selected_entry_id,
+        )
+    )
     virtual_appliances = _nilm_virtual_appliances_for_assignments(
         assignments,
         sessions,
@@ -363,7 +401,7 @@ def nilm_workspace_payload(
         "signatures": signatures,
         "signature_count": len(signatures),
         "label_intervals": label_intervals,
-        "label_interval_count": len(label_intervals),
+        "label_interval_count": len(all_label_intervals),
         "assignments": assignments,
         "assignment_count": len(assignments),
         "virtual_appliances": virtual_appliances,
@@ -392,6 +430,22 @@ def nilm_workspace_payload(
         "edge_count": len(edges),
         "sessions": sessions,
         "session_count": len(all_sessions),
+        "known_load_attributions": known_load_attributions,
+        "collection_meta": {
+            "sessions": session_meta,
+            "label_intervals": label_interval_meta,
+            "known_load_attributions": attribution_meta,
+            "ambiguous_sessions": {
+                "total_count": (
+                    int(ambiguity_audit["total_count"])
+                    if ambiguity_audit is not None
+                    else 0
+                ),
+                "returned_count": 0,
+                "truncated": ambiguity_audit is not None,
+                "next_cursor": None,
+            },
+        },
     }
     if ambiguity_audit is not None:
         payload["ambiguity_audit"] = ambiguity_audit
@@ -413,6 +467,17 @@ def nilm_workspace_collection_payload(
 ) -> dict[str, Any]:
     """Return one explicitly whitelisted, read-only NILM audit collection."""
 
+    if collection in _NILM_WORKSPACE_GENERIC_COLLECTIONS:
+        return _nilm_workspace_generic_collection_payload(
+            coordinators,
+            collection=str(collection),
+            circuit_id=circuit_id,
+            entry_id=entry_id,
+            cursor=cursor,
+            limit=limit,
+            group_id=group_id,
+            view=view,
+        )
     if collection != "ambiguous_sessions":
         return {
             "status": "invalid_collection",
@@ -603,6 +668,621 @@ def nilm_workspace_collection_payload(
             else None
         ),
     }
+
+
+def _nilm_workspace_generic_collection_payload(
+    coordinators: Iterable[Any],
+    *,
+    collection: str,
+    circuit_id: str | None,
+    entry_id: str | None,
+    cursor: str | None,
+    limit: Any,
+    group_id: str | None,
+    view: str | None,
+) -> dict[str, Any]:
+    """Return one non-ambiguous bounded workspace collection page."""
+
+    if group_id is not None or view is not None:
+        return _nilm_workspace_collection_error("invalid_scope")
+    page_limit = _nilm_workspace_generic_collection_limit(limit)
+    if page_limit is None:
+        return _nilm_workspace_collection_error("invalid_limit")
+    target = _nilm_workspace_target(
+        tuple(coordinators), circuit_id, entry_id=entry_id
+    )
+    if target is None:
+        return _nilm_workspace_collection_error("not_found")
+    coordinator, config, _sources = target
+    selected_entry_id = str(getattr(coordinator, "entry_id", "") or "")
+    items = _nilm_workspace_collection_context(coordinator, config)[collection]
+    ordered = _nilm_workspace_ordered_collection(collection, items)
+    total_count = len(ordered)
+    cursor_key = _nilm_workspace_generic_collection_cursor_key(
+        cursor,
+        collection=collection,
+        circuit_id=config.circuit_id,
+        entry_id=selected_entry_id,
+    )
+    if cursor is not None and cursor_key is None:
+        return _nilm_workspace_collection_error(
+            "invalid_cursor", total_count=total_count
+        )
+    if cursor_key is not None:
+        ordered = [
+            item
+            for item in ordered
+            if _nilm_workspace_collection_sort_key(collection, item) > cursor_key
+        ]
+    page = ordered[:page_limit]
+    truncated = len(ordered) > len(page)
+    return _scope_nilm_actions(
+        {
+            "status": "ok",
+            "collection": collection,
+            "items": page,
+            "total_count": total_count,
+            "returned_count": len(page),
+            "truncated": truncated,
+            "next_cursor": (
+                _nilm_workspace_generic_collection_cursor(
+                    collection,
+                    page[-1],
+                    circuit_id=config.circuit_id,
+                    entry_id=selected_entry_id,
+                )
+                if truncated and page
+                else None
+            ),
+        },
+        selected_entry_id,
+    )
+
+
+def _nilm_workspace_collection_error(
+    status: str,
+    *,
+    total_count: int = 0,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "items": [],
+        "total_count": total_count,
+        "returned_count": 0,
+        "truncated": False,
+        "next_cursor": None,
+    }
+
+
+def _nilm_workspace_generic_collection_limit(value: Any) -> int | None:
+    if value is None:
+        return DEFAULT_NILM_WORKSPACE_COLLECTION_LIMIT
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if parsed <= 0:
+        return None
+    return min(parsed, MAX_NILM_WORKSPACE_COLLECTION_LIMIT)
+
+
+def _nilm_workspace_collection_context(
+    coordinator: Any,
+    config: CircuitConfig,
+) -> dict[str, list[dict[str, Any]]]:
+    """Build the bounded/read-only collections from one selected source."""
+
+    circuit_id = config.circuit_id
+    signatures = _nilm_workspace_signatures(coordinator, circuit_id, config=config)
+    all_label_intervals = _nilm_label_intervals_for_circuit(
+        coordinator, circuit_id, limit=None
+    )
+    assignments = _nilm_assignments_for_circuit(
+        coordinator,
+        circuit_id,
+        label_intervals=all_label_intervals,
+    )
+    _add_nilm_helper_evidence(
+        assignments,
+        signatures,
+        circuit_id,
+        coordinator=coordinator,
+        config=config,
+    )
+    _add_nilm_reference_evidence(assignments, circuit_id, coordinator=coordinator)
+    assignment_options = _nilm_assignment_options(assignments, config=config)
+    _add_nilm_assignment_options(signatures, assignment_options)
+    _add_nilm_assignment_options(all_label_intervals, assignment_options)
+    reviewed_session_ids = _nilm_reviewed_session_ids_by_assignment(assignments)
+    merged_sessions = _merge_nilm_session_payloads(
+        _nilm_workspace_sessions(
+            _nilm_edges_for_circuit(coordinator, circuit_id),
+            circuit_id,
+            signatures=signatures,
+            assignments=assignments,
+            reviewed_session_ids=reviewed_session_ids,
+            limit=None,
+        ),
+        _nilm_session_history_for_circuit(
+            coordinator,
+            circuit_id,
+            reviewed_session_ids=reviewed_session_ids,
+        ),
+    )
+    labels = _nilm_session_display_labels(signatures, assignments)
+    sessions = _add_nilm_session_display_labels(
+        _nilm_workspace_visible_sessions(merged_sessions, signatures, assignments),
+        labels,
+    )
+    _add_nilm_assignment_options(sessions, assignment_options)
+    _add_nilm_session_signature_reviews(sessions, signatures)
+    ambiguous_sessions = [
+        _nilm_ambiguity_audit_item(session, labels, circuit_id=circuit_id)
+        for session in _nilm_workspace_ambiguous_sessions(
+            merged_sessions,
+            signatures,
+            assignments,
+        )
+    ]
+    return {
+        "sessions": sessions,
+        "ambiguous_sessions": ambiguous_sessions,
+        "label_intervals": all_label_intervals,
+        "assignments": assignments,
+        "signatures": signatures,
+        "known_load_attributions": _nilm_known_load_attributions_for_circuit(
+            coordinator, circuit_id
+        ),
+    }
+
+
+def _nilm_workspace_ordered_collection(
+    collection: str,
+    items: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    return sorted(
+        (
+            dict(item)
+            for item in items
+            if _nilm_workspace_collection_identity(collection, item)
+        ),
+        key=lambda item: _nilm_workspace_collection_sort_key(collection, item),
+    )
+
+
+def _nilm_workspace_collection_identity(
+    collection: str,
+    item: Mapping[str, Any],
+) -> str:
+    field = {
+        "sessions": "session_id",
+        "label_intervals": ATTR_INTERVAL_ID,
+        "assignments": ATTR_ASSIGNMENT_ID,
+        "signatures": ATTR_SIGNATURE_ID,
+        "known_load_attributions": "attribution_id",
+    }.get(collection, "")
+    return str(item.get(field) or "").strip()
+
+
+def _nilm_workspace_collection_timestamp(
+    collection: str,
+    item: Mapping[str, Any],
+) -> datetime | None:
+    fields = {
+        "sessions": ("end", "start"),
+        "label_intervals": ("end", "start", "updated_at", "created_at"),
+        "assignments": ("updated_at", "created_at"),
+        "signatures": ("last_seen", "first_seen"),
+        "known_load_attributions": ("timestamp",),
+    }.get(collection, ())
+    return next(
+        (
+            timestamp
+            for field in fields
+            if (timestamp := _datetime_from_iso(item.get(field))) is not None
+        ),
+        None,
+    )
+
+
+def _nilm_workspace_collection_sort_key(
+    collection: str,
+    item: Mapping[str, Any],
+) -> tuple[int, float, str]:
+    timestamp = _nilm_workspace_collection_timestamp(collection, item)
+    timestamp_key = -timestamp.timestamp() if timestamp is not None else float("inf")
+    completion_key = (
+        0
+        if collection != "sessions" or _datetime_from_iso(item.get("end")) is not None
+        else 1
+    )
+    return (
+        completion_key,
+        timestamp_key,
+        _nilm_workspace_collection_identity(collection, item),
+    )
+
+
+def _nilm_workspace_generic_collection_cursor(
+    collection: str,
+    item: Mapping[str, Any],
+    *,
+    circuit_id: str,
+    entry_id: str,
+) -> str:
+    timestamp = _nilm_workspace_collection_timestamp(collection, item)
+    item_id = _nilm_workspace_collection_identity(collection, item)
+    if not item_id:
+        return ""
+    return _nilm_ambiguity_cursor_token(
+        [
+            "collection",
+            collection,
+            str(circuit_id or ""),
+            str(entry_id or ""),
+            0
+            if collection != "sessions"
+            or _datetime_from_iso(item.get("end")) is not None
+            else 1,
+            timestamp.isoformat() if timestamp is not None else "",
+            item_id,
+        ]
+    )
+
+
+def _nilm_workspace_generic_collection_cursor_key(
+    cursor: Any,
+    *,
+    collection: str,
+    circuit_id: str,
+    entry_id: str,
+) -> tuple[int, float, str] | None:
+    value = _nilm_ambiguity_cursor_value(cursor)
+    if not isinstance(value, list) or len(value) != 7:
+        return None
+    (
+        kind,
+        cursor_collection,
+        cursor_circuit_id,
+        cursor_entry_id,
+        completion,
+        raw_time,
+        item_id,
+    ) = value
+    if (
+        kind != "collection"
+        or cursor_collection != collection
+        or cursor_circuit_id != str(circuit_id or "")
+        or cursor_entry_id != str(entry_id or "")
+        or completion not in {0, 1}
+        or not isinstance(raw_time, str)
+        or not (normalized_item_id := _nilm_ambiguity_text(item_id))
+    ):
+        return None
+    timestamp = _datetime_from_iso(raw_time) if raw_time else None
+    return (
+        completion,
+        -timestamp.timestamp() if timestamp is not None else float("inf"),
+        normalized_item_id,
+    )
+
+
+def _nilm_workspace_collection_metadata(
+    collection: str,
+    items: Iterable[Mapping[str, Any]],
+    *,
+    limit: int,
+    circuit_id: str,
+    entry_id: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    ordered = _nilm_workspace_ordered_collection(collection, items)
+    page = ordered[:limit]
+    truncated = len(ordered) > len(page)
+    return page, {
+        "total_count": len(ordered),
+        "returned_count": len(page),
+        "truncated": truncated,
+        "next_cursor": (
+            _nilm_workspace_generic_collection_cursor(
+                collection,
+                page[-1],
+                circuit_id=circuit_id,
+                entry_id=entry_id,
+            )
+            if truncated and page
+            else None
+        ),
+    }
+
+
+def _nilm_known_load_attributions_for_circuit(
+    coordinator: Any,
+    circuit_id: str,
+) -> list[dict[str, Any]]:
+    store_data = getattr(coordinator, "store_data", None)
+    records_by_circuit = getattr(
+        store_data, "nilm_known_load_attributions_by_circuit", {}
+    )
+    if not isinstance(records_by_circuit, Mapping):
+        return []
+    display_names = {
+        config.circuit_id: config.name
+        for config in getattr(coordinator, "circuit_configs", ()) or ()
+        if isinstance(config, CircuitConfig)
+    }
+    payloads = [
+        payload
+        for record in _iter_items(records_by_circuit.get(circuit_id, ()))
+        if isinstance(record, Mapping)
+        if (payload := _nilm_known_load_attribution_payload(record)) is not None
+    ]
+    for payload in payloads:
+        payload["known_load_labels"] = [
+            display_names.get(known_circuit_id, known_circuit_id)
+            for known_circuit_id in payload["known_circuit_ids"]
+        ]
+    return _nilm_workspace_ordered_collection("known_load_attributions", payloads)
+
+
+def _nilm_known_load_attribution_payload(
+    record: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    attribution_id = str(record.get("attribution_id") or "").strip()
+    timestamp = _datetime_from_iso(record.get("timestamp"))
+    aggregate_edge_id = str(record.get("aggregate_edge_id") or "").strip()
+    aggregate_delta_w = _nilm_optional_finite_number(record.get("aggregate_delta_w"))
+    explained_delta_w = _nilm_optional_finite_number(record.get("explained_delta_w"))
+    residual_delta_w = _nilm_optional_finite_number(record.get("residual_delta_w"))
+    if (
+        not attribution_id
+        or timestamp is None
+        or not aggregate_edge_id
+        or aggregate_delta_w is None
+        or explained_delta_w is None
+        or residual_delta_w is None
+        or not math.isclose(
+            aggregate_delta_w,
+            explained_delta_w + residual_delta_w,
+            rel_tol=0.0,
+            abs_tol=1e-6,
+        )
+    ):
+        return None
+    known_circuit_ids = _unique_strings(
+        _iter_items(record.get("known_circuit_ids"))
+    )[:8]
+    rejected = [
+        {
+            "known_circuit_id": str(item.get("known_circuit_id") or "").strip(),
+            "topology_status": str(item.get("topology_status") or "").strip(),
+            "selection_status": str(item.get("selection_status") or "").strip(),
+        }
+        for item in _iter_items(record.get("rejected_candidate_summaries"))
+        if isinstance(item, Mapping)
+        and str(item.get("known_circuit_id") or "").strip()
+    ][:4]
+    return {
+        "attribution_id": attribution_id,
+        "timestamp": timestamp.isoformat(),
+        "aggregate_edge_id": aggregate_edge_id,
+        "aggregate_delta_w": aggregate_delta_w,
+        "explained_delta_w": explained_delta_w,
+        "residual_delta_w": residual_delta_w,
+        "known_circuit_ids": known_circuit_ids,
+        "selection_method": str(record.get("selection_method") or "unattributed"),
+        "compound": bool(record.get("compound")),
+        "magnitude_score": _nilm_optional_finite_number(
+            record.get("magnitude_score")
+        ),
+        "time_score": _nilm_optional_finite_number(record.get("time_score")),
+        "topology_score": _nilm_optional_finite_number(
+            record.get("topology_score")
+        ),
+        "total_score": _nilm_optional_finite_number(record.get("total_score")),
+        "time_offsets_s": [
+            value
+            for item in _iter_items(record.get("time_offsets_s"))
+            if (value := _nilm_optional_finite_number(item)) is not None
+        ][:8],
+        "topology_statuses": _unique_strings(
+            _iter_items(record.get("topology_statuses"))
+        )[:8],
+        "residual_edge_id": (
+            str(record.get("residual_edge_id") or "").strip() or None
+        ),
+        "ambiguity_status": str(record.get("ambiguity_status") or "unmatched"),
+        "rejected_candidate_summaries": rejected,
+        "provenance_version": _nilm_nonnegative_count(
+            record.get("provenance_version")
+        )
+        or 1,
+    }
+
+
+def nilm_workspace_item_payload(
+    coordinators: Iterable[Any],
+    *,
+    kind: str | None = None,
+    item_id: str | None = None,
+    circuit_id: str | None = None,
+    entry_id: str | None = None,
+) -> dict[str, Any]:
+    """Resolve one safe, exact NILM workspace item without loading a page."""
+
+    normalized_kind = str(kind or "").strip().lower()
+    normalized_id = _nilm_ambiguity_text(item_id)
+    if normalized_kind not in _NILM_WORKSPACE_ITEM_KINDS or normalized_id is None:
+        return _nilm_workspace_item_error("invalid_kind", normalized_kind or None)
+    target = _nilm_workspace_target(
+        tuple(coordinators), circuit_id, entry_id=entry_id
+    )
+    if target is None:
+        return _nilm_workspace_item_error("not_found", normalized_kind)
+    coordinator, config, _sources = target
+    selected_entry_id = str(getattr(coordinator, "entry_id", "") or "")
+    collections = _nilm_workspace_collection_context(coordinator, config)
+    collection, identity = {
+        "session": ("sessions", "session_id"),
+        "ambiguous_session": ("ambiguous_sessions", "session_id"),
+        "label_interval": ("label_intervals", ATTR_INTERVAL_ID),
+        "assignment": ("assignments", ATTR_ASSIGNMENT_ID),
+        "signature": ("signatures", ATTR_SIGNATURE_ID),
+        "known_load_attribution": ("known_load_attributions", "attribution_id"),
+    }[normalized_kind]
+    item = next(
+        (
+            dict(candidate)
+            for candidate in collections[collection]
+            if str(candidate.get(identity) or "").strip() == normalized_id
+        ),
+        None,
+    )
+    if item is None:
+        return _nilm_workspace_item_error("not_found", normalized_kind)
+    if normalized_kind == "ambiguous_session":
+        # Exact deep links are read-only audit navigation.  The regular
+        # ambiguity audit may expose a deliberate manual-interval action,
+        # but a link must never open an editor or advertise that action.
+        item["safe_actions"] = ["open_on_graph"]
+    if normalized_kind == "session" and _datetime_from_iso(item.get("end")) is None:
+        return _nilm_workspace_item_error("not_found", normalized_kind)
+    status = (
+        "retired"
+        if normalized_kind == "assignment"
+        and str(item.get("lifecycle_state") or "").strip().lower() == "retired"
+        else "ok"
+    )
+    payload = {
+        "status": status,
+        "kind": normalized_kind,
+        "item": item,
+        "focus": _nilm_workspace_item_focus(
+            item,
+            normalized_kind,
+            config,
+            collections=collections,
+        ),
+        "safe_actions": _nilm_workspace_item_safe_actions(item, normalized_kind),
+    }
+    return _scope_nilm_actions(payload, selected_entry_id)
+
+
+def _nilm_workspace_item_error(
+    status: str,
+    kind: str | None,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "kind": kind,
+        "item": None,
+        "focus": None,
+        "safe_actions": [],
+    }
+
+
+def _nilm_workspace_item_safe_actions(
+    item: Mapping[str, Any],
+    kind: str,
+) -> list[str]:
+    if kind == "ambiguous_session":
+        return ["open_on_graph"]
+    if kind == "known_load_attribution":
+        return ["open_on_graph"]
+    actions = item.get("actions")
+    return sorted(actions) if isinstance(actions, Mapping) else []
+
+
+def _nilm_workspace_item_focus(
+    item: Mapping[str, Any],
+    kind: str,
+    config: CircuitConfig,
+    *,
+    collections: Mapping[str, Iterable[Mapping[str, Any]]] | None = None,
+) -> dict[str, Any]:
+    start = _datetime_from_iso(item.get("start"))
+    end = _datetime_from_iso(item.get("end"))
+    if kind == "known_load_attribution":
+        timestamp = _datetime_from_iso(item.get("timestamp"))
+        if timestamp is not None:
+            start = timestamp - timedelta(seconds=30)
+            end = timestamp + timedelta(seconds=30)
+    elif kind == "signature":
+        start = _datetime_from_iso(item.get("first_seen"))
+        end = _datetime_from_iso(item.get("last_seen"))
+    if kind in {"assignment", "signature"} and (
+        start is None or end is None or end <= start
+    ):
+        related = _nilm_workspace_item_related_interval(item, kind, collections)
+        if related is not None:
+            start = _datetime_from_iso(related.get("start"))
+            end = _datetime_from_iso(related.get("end"))
+    if end is None:
+        end = start
+    return {
+        "start": start.isoformat() if start is not None else None,
+        "end": end.isoformat() if end is not None else None,
+        "entity_ids": _sensor_entity_ids(config),
+    }
+
+
+def _nilm_workspace_item_related_interval(
+    item: Mapping[str, Any],
+    kind: str,
+    collections: Mapping[str, Iterable[Mapping[str, Any]]] | None,
+) -> Mapping[str, Any] | None:
+    """Find the newest retained session/label interval for an exact item."""
+
+    if not isinstance(collections, Mapping):
+        return None
+    sessions = [
+        candidate
+        for candidate in _iter_items(collections.get("sessions"))
+        if isinstance(candidate, Mapping)
+        and _datetime_from_iso(candidate.get("start")) is not None
+        and _datetime_from_iso(candidate.get("end")) is not None
+    ]
+    candidates: list[tuple[str, Mapping[str, Any]]] = []
+    if kind == "assignment":
+        assignment_id = str(item.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        fingerprints = {
+            str(value or "").strip()
+            for value in _iter_items(item.get("signature_fingerprints"))
+            if str(value or "").strip()
+        }
+        candidates = [
+            ("sessions", candidate)
+            for candidate in sessions
+            if str(candidate.get(ATTR_ASSIGNMENT_ID) or "").strip()
+            == assignment_id
+            or str(candidate.get("signature_fingerprint") or "").strip()
+            in fingerprints
+        ]
+        if not candidates and assignment_id:
+            candidates = [
+                ("label_intervals", candidate)
+                for candidate in _iter_items(collections.get("label_intervals"))
+                if isinstance(candidate, Mapping)
+                and str(candidate.get(ATTR_ASSIGNMENT_ID) or "").strip()
+                == assignment_id
+                and _datetime_from_iso(candidate.get("start")) is not None
+                and _datetime_from_iso(candidate.get("end")) is not None
+            ]
+    elif kind == "signature":
+        identifiers = _nilm_signature_identifiers(item)
+        candidates = [
+            ("sessions", candidate)
+            for candidate in sessions
+            if any(
+                str(candidate.get(field) or "").strip() in identifiers
+                for field in ("signature_fingerprint", ATTR_SIGNATURE_ID)
+            )
+        ]
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda candidate: _nilm_workspace_collection_sort_key(*candidate),
+    )[1]
 
 
 def _nilm_workspace_collection_limit(value: Any) -> int:
@@ -906,7 +1586,99 @@ def _nilm_signature_payload(signature: Mapping[str, Any]) -> dict[str, Any]:
     review_state = _nilm_review_state(signature)
     if review_state:
         payload["review_state"] = review_state
+    payload["estimate_quality"] = _nilm_estimate_quality_rows(payload)
     return payload
+
+
+def _nilm_estimate_quality_rows(
+    signature: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Expose per-window estimate evidence without inferring missing values."""
+
+    windows = signature.get("runtime_windows")
+    statuses = signature.get("estimate_status_by_window")
+    window_payloads = windows if isinstance(windows, Mapping) else {}
+    status_payloads = statuses if isinstance(statuses, Mapping) else {}
+    observation_started_at = signature.get("observation_started_at")
+    energy_source = signature.get("energy_source")
+    source_quality = signature.get("energy_estimate_confidence")
+    rows: list[dict[str, Any]] = []
+    for window, runtime_key, energy_key in _NILM_ESTIMATE_QUALITY_WINDOWS:
+        details = window_payloads.get(window)
+        details = details if isinstance(details, Mapping) else {}
+        status = str(
+            status_payloads.get(window)
+            or details.get("estimate_status")
+            or signature.get("estimate_status")
+            or "legacy_unverified"
+        ).strip().lower()
+        if status not in {
+            "complete",
+            "partial_history",
+            "ambiguous",
+            "legacy_unverified",
+        }:
+            status = "legacy_unverified"
+        rows.append(
+            {
+                "window": window,
+                "status": status,
+                "runtime_minutes": _nilm_optional_finite_number(
+                    signature.get(runtime_key)
+                ),
+                "energy_kwh": _nilm_optional_finite_number(signature.get(energy_key)),
+                "observation_started_at": observation_started_at,
+                "requested_start": details.get("requested_start"),
+                "requested_end": details.get("requested_end"),
+                "coverage_start": details.get("coverage_start"),
+                "coverage_end": details.get("coverage_end"),
+                "coverage_days": _nilm_optional_finite_number(
+                    details.get("coverage_days")
+                ),
+                "nominal_days": _nilm_optional_finite_number(
+                    details.get("nominal_days")
+                ),
+                "included_session_count": _nilm_nonnegative_count(
+                    details.get("included_session_count")
+                ),
+                "excluded_session_count": _nilm_nonnegative_count(
+                    details.get("excluded_session_count")
+                ),
+                "energy_source": str(energy_source).strip() if energy_source else None,
+                "energy_quality": _nilm_optional_finite_number(source_quality),
+                "power_coverage": _nilm_optional_finite_number(
+                    signature.get("power_coverage")
+                ),
+                "longest_trace_gap_seconds": _nilm_optional_finite_number(
+                    signature.get("longest_trace_gap_seconds")
+                ),
+                "retention_truncated": bool(
+                    signature.get("session_history_truncated")
+                    or signature.get("trace_point_cap_truncated")
+                ),
+            }
+        )
+    return rows
+
+
+def _nilm_optional_finite_number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _nilm_nonnegative_count(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return None
+    return count if count >= 0 else None
 
 
 def _add_nilm_component_occurrences(

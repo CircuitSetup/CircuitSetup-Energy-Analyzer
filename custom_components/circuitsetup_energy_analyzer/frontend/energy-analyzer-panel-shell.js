@@ -1385,6 +1385,111 @@ export class PanelShellMethods {
           overflow-wrap: anywhere;
           padding-inline-start: 20px;
         }
+        .nilm-evidence-section {
+          border-color: var(--divider-color, #d8dde6);
+        }
+        .nilm-evidence-details,
+        .nilm-estimate-quality,
+        .nilm-known-load-attributions,
+        .nilm-known-load-attribution,
+        .nilm-session-pagination {
+          display: grid;
+          gap: 10px;
+          min-width: 0;
+        }
+        .nilm-evidence-details > summary {
+          cursor: pointer;
+          font-size: 18px;
+          font-weight: 700;
+          min-height: 44px;
+          padding-block: 8px;
+        }
+        .nilm-estimate-quality-rows,
+        .nilm-known-load-attributions {
+          display: grid;
+          gap: 12px;
+          min-width: 0;
+        }
+        .nilm-estimate-quality-row,
+        .nilm-known-load-attribution {
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
+          padding: 12px;
+        }
+        .nilm-estimate-quality-heading {
+          align-items: center;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          justify-content: space-between;
+        }
+        .nilm-quality-chip {
+          border-radius: 8px;
+          font-size: 12px;
+          font-weight: 700;
+          padding: 4px 8px;
+        }
+        .nilm-quality-complete {
+          background: color-mix(in srgb, var(--success-color, #2e7d32) 18%, transparent);
+          color: #1b5e20;
+        }
+        .nilm-quality-partial_history,
+        .nilm-quality-legacy_unverified {
+          background: color-mix(in srgb, var(--warning-color, #b26a00) 18%, transparent);
+          color: var(--warning-color, #8a5200);
+        }
+        .nilm-quality-ambiguous {
+          background: color-mix(in srgb, var(--error-color, #ba1a1a) 16%, transparent);
+          color: var(--error-color, #ba1a1a);
+        }
+        .nilm-evidence-facts {
+          display: grid;
+          gap: 8px;
+          grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+          margin: 0;
+        }
+        .nilm-evidence-facts > div {
+          min-width: 0;
+        }
+        .nilm-evidence-facts dt {
+          color: var(--secondary-text-color, #5f6b7a);
+          font-size: 12px;
+        }
+        .nilm-evidence-facts dd {
+          font-weight: 600;
+          margin: 3px 0 0;
+          overflow-wrap: anywhere;
+        }
+        .nilm-evidence-details-list {
+          margin-block: 10px;
+        }
+        .nilm-known-load-attribution h4,
+        .nilm-estimate-quality h3 {
+          margin: 0;
+        }
+        .nilm-conservation-check {
+          border-inline-start: 3px solid var(--primary-color, #03a9f4);
+          margin: 0;
+          padding-inline-start: 8px;
+        }
+        .nilm-rejected-candidates {
+          margin: 8px 0 0;
+          padding-inline-start: 20px;
+        }
+        .nilm-interval-quality {
+          margin: 8px 0 0;
+          overflow-wrap: anywhere;
+        }
+        .nilm-interval-quality-caution {
+          color: var(--warning-color, #8a5200);
+        }
+        .nilm-interval-quality-blocking {
+          color: var(--error-color, #ba1a1a);
+        }
+        .nilm-session-pagination {
+          align-items: start;
+          margin-top: 10px;
+        }
         .sr-only {
           height: 1px;
           margin: -1px;
@@ -1452,6 +1557,9 @@ export class PanelShellMethods {
           }
           .workspace-progress {
             grid-column: 1 / -1;
+          }
+          .nilm-evidence-facts {
+            grid-template-columns: minmax(0, 1fr);
           }
           .appliance-insights-controls {
             grid-template-columns: minmax(0, 1fr);
@@ -1745,6 +1853,12 @@ export class PanelShellMethods {
             { append: true },
           ).finally(() => this._restoreNilmFocus(focus));
         }
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-load-more-sessions]")) {
+      button.addEventListener("click", () => {
+        const focus = this._nilmFocusState(button);
+        void this._loadMoreNilmSessions().finally(() => this._restoreNilmFocus(focus));
       });
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-ambiguity-open-graph]")) {

@@ -457,7 +457,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260812-1"
+    assert PANEL_MODULE_VERSION == "20260812-2"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -1972,13 +1972,16 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
             {"value": "assignment-dishwasher", "label": "Dishwasher"}
         ],
     }
-    assert payload["label_intervals"][0]["label"] == "Dishwasher"
-    assert payload["label_intervals"][0]["actions"]["delete"] == {
+    label_intervals_by_id = {
+        interval["interval_id"]: interval for interval in payload["label_intervals"]
+    }
+    assert label_intervals_by_id["label-1"]["label"] == "Dishwasher"
+    assert label_intervals_by_id["label-1"]["actions"]["delete"] == {
         "domain": DOMAIN,
         "service": "delete_nilm_label_interval",
         "data": {"circuit_id": "mains", "interval_id": "label-1"},
     }
-    assert payload["label_intervals"][0]["actions"]["assign"] == {
+    assert label_intervals_by_id["label-1"]["actions"]["assign"] == {
         "domain": DOMAIN,
         "service": "assign_interval_to_appliance",
         "data": {"circuit_id": "mains", "interval_id": "label-1"},
@@ -3089,6 +3092,299 @@ def test_nilm_workspace_omits_empty_ambiguity_audit() -> None:
     )
 
     assert "ambiguity_audit" not in payload
+
+
+def test_nilm_workspace_quality_collections_and_exact_items_are_bounded() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_collection_payload,
+        nilm_workspace_item_payload,
+        nilm_workspace_payload,
+    )
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="Mains",
+        entity_id="sensor.mains_power",
+    )
+    coordinator.circuit_configs = (
+        *coordinator.circuit_configs,
+        CircuitConfig(
+            circuit_id="dryer",
+            name="Clothes dryer",
+            appliance_profile=ApplianceProfile.DRYER,
+            mode=CircuitMode.SINGLE_PHASE,
+        ),
+    )
+    start = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+
+    def session(index: int, *, ambiguous: bool = False) -> dict[str, object]:
+        timestamp = start + timedelta(minutes=index)
+        return {
+            "session_id": f"session-{index}",
+            "mains_circuit_id": "mains",
+            "signature_fingerprint": "signature-1",
+            "on_edge_id": f"on-{index}",
+            "off_edge_id": f"off-{index}",
+            "start": timestamp.isoformat(),
+            "end": (timestamp + timedelta(minutes=5)).isoformat(),
+            "ambiguous": ambiguous,
+        }
+
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [*(session(index) for index in range(25)), session(99, ambiguous=True)]
+    }
+    coordinator.store_data.nilm_label_intervals_by_circuit = {
+        "mains": [
+            {
+                "interval_id": f"interval-{index}",
+                "start": (start + timedelta(minutes=index)).isoformat(),
+                "end": (start + timedelta(minutes=index + 1)).isoformat(),
+            }
+            for index in range(45)
+        ]
+    }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-1",
+                "mains_circuit_id": "mains",
+                "display_name": "Dryer",
+                "lifecycle_state": "assigned",
+                "signature_fingerprints": ["signature-1"],
+            }
+        ]
+    }
+    coordinator.store_data.nilm_known_load_attributions_by_circuit = {
+        "mains": [
+            {
+                "attribution_id": f"attribution-{index}",
+                "timestamp": (start + timedelta(minutes=index)).isoformat(),
+                "aggregate_edge_id": f"edge-{index}",
+                "aggregate_delta_w": 100.0,
+                "explained_delta_w": 80.0,
+                "residual_delta_w": 20.0,
+                "known_circuit_ids": ["dryer"],
+                "selection_method": "global_assignment",
+                "compound": False,
+                "ambiguity_status": "matched",
+                "rejected_candidate_summaries": [],
+                "provenance_version": 1,
+            }
+            for index in range(25)
+        ]
+    }
+    coordinator.state.nilm_unknown_loads_by_circuit = {
+        "mains": {
+            "unknown_loads": [
+                {
+                    "signature_id": "signature-1",
+                    "runtime_today_minutes": 0.0,
+                    "estimated_energy_today_kwh": 0.0,
+                    "runtime_7_days_minutes": 125.0,
+                    "estimated_energy_7_days_kwh": 1.2,
+                    "runtime_30_days_minutes": 125.0,
+                    "estimated_energy_30_days_kwh": 1.2,
+                    "estimate_status_by_window": {
+                        "today": "complete",
+                        "7_days": "partial_history",
+                        "30_days": "legacy_unverified",
+                    },
+                    "runtime_windows": {
+                        "today": {
+                            "coverage_start": start.isoformat(),
+                            "coverage_end": start.isoformat(),
+                            "coverage_days": 0.0,
+                            "nominal_days": 0.0,
+                            "estimate_status": "complete",
+                            "included_session_count": 0,
+                            "excluded_session_count": 0,
+                        },
+                        "7_days": {
+                            "requested_start": (start - timedelta(days=6)).isoformat(),
+                            "requested_end": (start + timedelta(days=1)).isoformat(),
+                            "coverage_start": start.isoformat(),
+                            "coverage_end": (start + timedelta(days=1)).isoformat(),
+                            "coverage_days": 1.0,
+                            "nominal_days": 7.0,
+                            "estimate_status": "partial_history",
+                            "included_session_count": 2,
+                            "excluded_session_count": 1,
+                        },
+                        "30_days": {
+                            "coverage_start": start.isoformat(),
+                            "coverage_end": (start + timedelta(days=1)).isoformat(),
+                            "coverage_days": 1.0,
+                            "nominal_days": 30.0,
+                            "estimate_status": "legacy_unverified",
+                            "included_session_count": 2,
+                            "excluded_session_count": 0,
+                        },
+                    },
+                    "observation_started_at": start.isoformat(),
+                }
+            ]
+        }
+    }
+
+    payload = nilm_workspace_payload(
+        [coordinator], circuit_id="mains", entry_id="entry-1"
+    )
+
+    assert payload["label_interval_count"] == 45
+    assert payload["collection_meta"]["sessions"] == {
+        "total_count": 25,
+        "returned_count": 20,
+        "truncated": True,
+        "next_cursor": payload["collection_meta"]["sessions"]["next_cursor"],
+    }
+    assert payload["collection_meta"]["sessions"]["next_cursor"]
+    assert payload["collection_meta"]["label_intervals"]["total_count"] == 45
+    assert payload["collection_meta"]["known_load_attributions"]["total_count"] == 25
+    assert len(payload["known_load_attributions"]) == 20
+    assert payload["known_load_attributions"][0]["known_load_labels"] == [
+        "Clothes dryer"
+    ]
+    quality = payload["signatures"][0]["estimate_quality"]
+    assert [row["window"] for row in quality] == ["today", "7_days", "30_days"]
+    assert quality[0]["runtime_minutes"] == 0.0
+    assert quality[0]["energy_kwh"] == 0.0
+    assert quality[1]["status"] == "partial_history"
+    assert quality[1]["requested_start"] == (start - timedelta(days=6)).isoformat()
+    assert quality[1]["requested_end"] == (start + timedelta(days=1)).isoformat()
+    assert quality[2]["status"] == "legacy_unverified"
+
+    first_page = nilm_workspace_collection_payload(
+        [coordinator],
+        collection="sessions",
+        circuit_id="mains",
+        entry_id="entry-1",
+        limit=2,
+    )
+    coordinator.store_data.nilm_session_history_by_circuit["mains"].append(
+        {
+            **session(100),
+            "session_id": "session-newer",
+            "start": (start + timedelta(days=1)).isoformat(),
+            "end": (start + timedelta(days=1, minutes=5)).isoformat(),
+        }
+    )
+    second_page = nilm_workspace_collection_payload(
+        [coordinator],
+        collection="sessions",
+        circuit_id="mains",
+        entry_id="entry-1",
+        cursor=first_page["next_cursor"],
+        limit=2,
+    )
+
+    assert first_page["status"] == "ok"
+    assert first_page["total_count"] == 25
+    assert first_page["returned_count"] == len(first_page["items"]) == 2
+    assert first_page["truncated"] is True
+    assert {item["session_id"] for item in first_page["items"]}.isdisjoint(
+        item["session_id"] for item in second_page["items"]
+    )
+    assert "session-newer" not in {
+        item["session_id"] for item in second_page["items"]
+    }
+    assert nilm_workspace_collection_payload(
+        [coordinator],
+        collection="sessions",
+        circuit_id="mains",
+        entry_id="entry-1",
+        limit="0",
+    )["status"] == "invalid_limit"
+    assert nilm_workspace_collection_payload(
+        [coordinator],
+        collection="sessions",
+        circuit_id="mains",
+        entry_id="entry-1",
+        cursor="not-an-opaque-cursor",
+    )["status"] == "invalid_cursor"
+    interval_page = nilm_workspace_collection_payload(
+        [coordinator],
+        collection="label_intervals",
+        circuit_id="mains",
+        entry_id="entry-1",
+        limit=2,
+    )
+    attribution_page = nilm_workspace_collection_payload(
+        [coordinator],
+        collection="known_load_attributions",
+        circuit_id="mains",
+        entry_id="entry-1",
+        limit=2,
+    )
+    assert interval_page["status"] == "ok"
+    assert interval_page["returned_count"] == len(interval_page["items"]) == 2
+    assert interval_page["items"][0]["actions"]["delete"]["data"]["entry_id"] == (
+        "entry-1"
+    )
+    assert attribution_page["status"] == "ok"
+    assert attribution_page["returned_count"] == len(attribution_page["items"]) == 2
+
+    exact = nilm_workspace_item_payload(
+        [coordinator],
+        kind="session",
+        item_id="session-0",
+        circuit_id="mains",
+        entry_id="entry-1",
+    )
+    ambiguous = nilm_workspace_item_payload(
+        [coordinator],
+        kind="ambiguous_session",
+        item_id="session-99",
+        circuit_id="mains",
+        entry_id="entry-1",
+    )
+
+    assert exact["status"] == "ok"
+    assert exact["item"]["session_id"] == "session-0"
+    assert exact["safe_actions"]
+    assert ambiguous["status"] == "ok"
+    assert ambiguous["item"]["session_id"] == "session-99"
+    assert ambiguous["safe_actions"] == ["open_on_graph"]
+    assert ambiguous["item"]["safe_actions"] == ["open_on_graph"]
+    assert "actions" not in ambiguous["item"]
+    for kind, item_id in (
+        ("label_interval", "interval-1"),
+        ("assignment", "assignment-1"),
+        ("signature", "signature-1"),
+        ("known_load_attribution", "attribution-0"),
+    ):
+        resolved = nilm_workspace_item_payload(
+            [coordinator],
+            kind=kind,
+            item_id=item_id,
+            circuit_id="mains",
+            entry_id="entry-1",
+        )
+        assert resolved["status"] == "ok"
+        assert resolved["item"] is not None
+        assert resolved["focus"]["start"]
+        assert resolved["focus"]["end"]
+        assert resolved["focus"]["entity_ids"] == ["sensor.mains_power"]
+    assert nilm_workspace_item_payload(
+        [coordinator],
+        kind="edge",
+        item_id="edge-1",
+        circuit_id="mains",
+        entry_id="entry-1",
+    )["status"] == "invalid_kind"
+    assert nilm_workspace_item_payload(
+        [coordinator],
+        kind="session",
+        item_id="missing-session",
+        circuit_id="mains",
+        entry_id="entry-1",
+    )["status"] == "not_found"
+    assert nilm_workspace_item_payload(
+        [coordinator],
+        kind="session",
+        item_id="x" * 257,
+        circuit_id="mains",
+        entry_id="entry-1",
+    )["status"] == "invalid_kind"
 
 
 def test_nilm_ambiguity_audit_summary_counts_before_group_preview_slice() -> None:
@@ -4884,6 +5180,43 @@ async def test_nilm_workspace_collection_view_forwards_bounded_scope(
         "cursor": "opaque-cursor",
         "limit": "10",
         "view": "groups",
+    }
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_item_view_forwards_exact_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel, panel_nilm
+
+    captured: dict[str, object] = {}
+
+    def item_payload(_coordinators, **kwargs):
+        captured.update(kwargs)
+        return {"status": "ok", "item": {"session_id": "session-1"}}
+
+    request = SimpleNamespace(
+        app={panel.KEY_HASS: SimpleNamespace()},
+        query={
+            "kind": "session",
+            "id": "session-1",
+            "circuit_id": "mains",
+            "entry_id": "entry-2",
+        },
+    )
+    monkeypatch.setattr(panel_nilm, "nilm_workspace_item_payload", item_payload)
+    monkeypatch.setattr(panel, "_loaded_coordinators", lambda _hass: ())
+    monkeypatch.setattr(panel.web, "json_response", lambda payload: payload)
+
+    payload = await panel.NilmWorkspaceItemView().get(request)
+
+    assert panel.NilmWorkspaceItemView.requires_auth is True
+    assert payload == {"status": "ok", "item": {"session_id": "session-1"}}
+    assert captured == {
+        "kind": "session",
+        "item_id": "session-1",
+        "circuit_id": "mains",
+        "entry_id": "entry-2",
     }
 
 
@@ -7139,6 +7472,7 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
         NILM_WORKSPACE_API_PATH,
         NILM_WORKSPACE_COLLECTION_API_PATH,
         NILM_WORKSPACE_HISTORY_API_PATH,
+        NILM_WORKSPACE_ITEM_API_PATH,
         SETUP_HEALTH_API_PATH,
     )
 
@@ -7189,6 +7523,7 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
         SETUP_HEALTH_API_PATH,
         NILM_WORKSPACE_API_PATH,
         NILM_WORKSPACE_COLLECTION_API_PATH,
+        NILM_WORKSPACE_ITEM_API_PATH,
         NILM_WORKSPACE_HISTORY_API_PATH,
         NILM_INTERVAL_EVIDENCE_API_PATH,
     ]
@@ -7352,7 +7687,7 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
 
     assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
     assert len(http.static_paths) == 1
-    assert len(http.views) == 9
+    assert len(http.views) == 10
     assert resource_updates == [
         (
             "dashboard-graph-module",

@@ -3269,6 +3269,8 @@ KNOWN_LOAD_TOPOLOGY_WEIGHT = 0.15
 KNOWN_LOAD_ASSIGNMENT_AMBIGUITY_MARGIN = 0.05
 KNOWN_LOAD_EXACT_ASSIGNMENT_MAX_BITMASK_NODES = 12
 KNOWN_LOAD_GLOBAL_ASSIGNMENT_MAX_NODES = 32
+NILM_KNOWN_LOAD_ATTRIBUTION_PROVENANCE_VERSION = 1
+NILM_KNOWN_LOAD_ATTRIBUTION_MAX_REJECTED_CANDIDATES = 4
 NILM_SESSION_GLOBAL_MATCHING_MAX_NODES = 64
 NILM_SESSION_CANDIDATE_EDGE_MAX_ITEMS = 64
 NILM_SESSION_CANDIDATE_PAIR_MAX_ITEMS = 512
@@ -3335,6 +3337,8 @@ class KnownLoadMatch:
     power_match_confidence: float | None = None
     selection_status: str | None = None
     known_circuit_ids: tuple[str, ...] = ()
+    time_offsets_seconds: tuple[float, ...] = ()
+    topology_statuses: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -3346,11 +3350,37 @@ class NilmMaskResult:
     residual_edges: tuple[NilmEdge, ...] = ()
     ambiguous_edge_count: int = 0
     rejected_topology_candidates: tuple[KnownLoadMatch, ...] = ()
+    ambiguous_edge_ids: tuple[str, ...] = ()
 
     @property
     def topology_rejections(self) -> tuple[KnownLoadMatch, ...]:
         """Compatibility alias for bounded topology-rejection diagnostics."""
         return self.rejected_topology_candidates
+
+
+@dataclass(frozen=True, slots=True)
+class NilmKnownLoadAttributionRecord:
+    """Bounded, persistent provenance for one evaluated aggregate transition."""
+
+    attribution_id: str
+    timestamp: datetime
+    aggregate_edge_id: str
+    aggregate_delta_w: float
+    explained_delta_w: float
+    residual_delta_w: float
+    known_circuit_ids: tuple[str, ...]
+    selection_method: str
+    compound: bool
+    magnitude_score: float | None
+    time_score: float | None
+    topology_score: float | None
+    total_score: float | None
+    time_offsets_s: tuple[float, ...]
+    topology_statuses: tuple[str, ...]
+    residual_edge_id: str | None
+    ambiguity_status: str
+    rejected_candidate_summaries: tuple[Mapping[str, Any], ...]
+    provenance_version: int
 
 
 def known_load_topology_for_config(config: CircuitConfig) -> KnownLoadTopology:
@@ -5004,6 +5034,8 @@ def _compound_known_load_matches(
                 )
             ),
             selection_status="candidate",
+            time_offsets_seconds=tuple(float(item[4]) for item in group),
+            topology_statuses=topology_statuses,
         )
         event_indices = tuple(item[0] for item in group)
         matches.append((edge_index, event_indices, match))
@@ -5277,6 +5309,10 @@ def attribute_known_loads(
                 key=lambda item: (item[1], item[0]),
             )
         ),
+        tuple(
+            _nilm_edge_id(edges[index])
+            for index in sorted(ambiguous_edge_indices)
+        ),
     )
 
 
@@ -5293,6 +5329,223 @@ def mask_known_loads(
         known_events,
         time_window=time_window,
         watt_tolerance_ratio=watt_tolerance_ratio,
+    )
+
+
+def known_load_attribution_records(
+    aggregate_edges: Iterable[NilmEdge],
+    result: NilmMaskResult,
+) -> tuple[NilmKnownLoadAttributionRecord, ...]:
+    """Build immutable provenance rows for aggregate edges actually evaluated.
+
+    This is intentionally a pure projection of an existing masking decision. It
+    never participates in candidate selection, so persisted explanations cannot
+    alter pairing, scoring, or residual behavior.
+    """
+
+    edges_by_id = {
+        _nilm_edge_id(edge): edge
+        for edge in aggregate_edges
+        if edge.origin == "aggregate"
+    }
+    matches_by_edge_id = {
+        _nilm_edge_id(match.edge): match for match in result.matched_edges
+    }
+    rejections_by_edge_id: dict[str, list[KnownLoadMatch]] = defaultdict(list)
+    for match in result.rejected_topology_candidates:
+        rejections_by_edge_id[_nilm_edge_id(match.edge)].append(match)
+    ambiguous_edge_ids = set(result.ambiguous_edge_ids)
+    records: list[NilmKnownLoadAttributionRecord] = []
+    for aggregate_edge_id, edge in sorted(
+        edges_by_id.items(),
+        key=lambda item: (item[1].timestamp, item[0]),
+        reverse=True,
+    ):
+        match = matches_by_edge_id.get(aggregate_edge_id)
+        rejections = _known_load_rejection_summaries(
+            rejections_by_edge_id.get(aggregate_edge_id, ())
+        )
+        if match is not None:
+            try:
+                explained_delta_w = float(match.explained_delta_w)
+                residual_delta_w = float(match.residual_delta_w)
+            except (TypeError, ValueError):
+                match = None
+            else:
+                if not isclose(
+                    edge.delta_w,
+                    explained_delta_w + residual_delta_w,
+                    rel_tol=0.0,
+                    abs_tol=1e-6,
+                ):
+                    # Never turn incomplete compatibility data into a false
+                    # attribution. The conservative record below retains the
+                    # aggregate edge as unexplained instead.
+                    match = None
+        if match is not None:
+            known_circuit_ids = tuple(
+                dict.fromkeys(match.known_circuit_ids or (match.known_circuit_id,))
+            )
+            record = NilmKnownLoadAttributionRecord(
+                attribution_id=_nilm_known_load_attribution_id(aggregate_edge_id),
+                timestamp=edge.timestamp,
+                aggregate_edge_id=aggregate_edge_id,
+                aggregate_delta_w=float(edge.delta_w),
+                explained_delta_w=explained_delta_w,
+                residual_delta_w=residual_delta_w,
+                known_circuit_ids=known_circuit_ids,
+                selection_method=match.selection_method,
+                compound=(
+                    len(known_circuit_ids) > 1
+                    or match.selection_method == "compound"
+                ),
+                magnitude_score=match.magnitude_score,
+                time_score=match.time_score,
+                topology_score=match.topology_score,
+                total_score=match.confidence,
+                time_offsets_s=_known_load_attribution_time_offsets(match),
+                topology_statuses=_known_load_attribution_topology_statuses(match),
+                residual_edge_id=(
+                    _nilm_edge_id(match.residual_edge)
+                    if match.residual_edge is not None
+                    else None
+                ),
+                ambiguity_status="matched",
+                rejected_candidate_summaries=rejections,
+                provenance_version=NILM_KNOWN_LOAD_ATTRIBUTION_PROVENANCE_VERSION,
+            )
+        else:
+            ambiguity_status = (
+                "ambiguous"
+                if aggregate_edge_id in ambiguous_edge_ids
+                else "topology_rejected"
+                if rejections
+                else "unmatched"
+            )
+            topology_statuses = tuple(
+                str(summary["topology_status"])
+                for summary in rejections
+                if summary.get("topology_status")
+            ) or ("not_attributed",)
+            record = NilmKnownLoadAttributionRecord(
+                attribution_id=_nilm_known_load_attribution_id(aggregate_edge_id),
+                timestamp=edge.timestamp,
+                aggregate_edge_id=aggregate_edge_id,
+                aggregate_delta_w=float(edge.delta_w),
+                explained_delta_w=0.0,
+                residual_delta_w=float(edge.delta_w),
+                known_circuit_ids=(),
+                selection_method="unattributed",
+                compound=False,
+                magnitude_score=None,
+                time_score=None,
+                topology_score=None,
+                total_score=None,
+                time_offsets_s=(),
+                topology_statuses=topology_statuses,
+                residual_edge_id=None,
+                ambiguity_status=ambiguity_status,
+                rejected_candidate_summaries=rejections,
+                provenance_version=NILM_KNOWN_LOAD_ATTRIBUTION_PROVENANCE_VERSION,
+            )
+        records.append(record)
+    return tuple(records)
+
+
+def nilm_known_load_attribution_to_dict(
+    record: NilmKnownLoadAttributionRecord,
+) -> dict[str, Any]:
+    """Return the JSON-safe persistence/read-model representation of a record."""
+
+    return {
+        "attribution_id": record.attribution_id,
+        "timestamp": record.timestamp.isoformat(),
+        "aggregate_edge_id": record.aggregate_edge_id,
+        "aggregate_delta_w": record.aggregate_delta_w,
+        "explained_delta_w": record.explained_delta_w,
+        "residual_delta_w": record.residual_delta_w,
+        "known_circuit_ids": list(record.known_circuit_ids),
+        "selection_method": record.selection_method,
+        "compound": record.compound,
+        "magnitude_score": record.magnitude_score,
+        "time_score": record.time_score,
+        "topology_score": record.topology_score,
+        "total_score": record.total_score,
+        "time_offsets_s": list(record.time_offsets_s),
+        "topology_statuses": list(record.topology_statuses),
+        "residual_edge_id": record.residual_edge_id,
+        "ambiguity_status": record.ambiguity_status,
+        "rejected_candidate_summaries": [
+            dict(summary) for summary in record.rejected_candidate_summaries
+        ],
+        "provenance_version": record.provenance_version,
+    }
+
+
+def _nilm_known_load_attribution_id(aggregate_edge_id: str) -> str:
+    """Return a stable, opaque ID scoped to a deterministic aggregate edge."""
+
+    fingerprint = sha256(aggregate_edge_id.encode("utf-8")).hexdigest()[:24]
+    return f"nilm-known-load-attribution:v1|{fingerprint}"
+
+
+def _known_load_attribution_time_offsets(
+    match: KnownLoadMatch,
+) -> tuple[float, ...]:
+    """Return per-contributor offsets when a compound match retained them."""
+
+    offsets: list[float] = []
+    for value in match.time_offsets_seconds:
+        try:
+            offset = float(value)
+        except (TypeError, ValueError):
+            continue
+        if isfinite(offset):
+            offsets.append(offset)
+    if offsets:
+        return tuple(offsets)
+    if match.time_offset_seconds is None:
+        return ()
+    try:
+        offset = float(match.time_offset_seconds)
+    except (TypeError, ValueError):
+        return ()
+    return (offset,) if isfinite(offset) else ()
+
+
+def _known_load_attribution_topology_statuses(
+    match: KnownLoadMatch,
+) -> tuple[str, ...]:
+    """Return individual topology outcomes, retaining legacy match support."""
+
+    statuses = tuple(
+        status
+        for value in match.topology_statuses
+        if (status := str(value or "").strip())
+    )
+    return statuses or (str(match.topology_status or "not_evaluated"),)
+
+
+def _known_load_rejection_summaries(
+    matches: Iterable[KnownLoadMatch],
+) -> tuple[Mapping[str, Any], ...]:
+    """Expose bounded rejection facts without presenting them as attribution."""
+
+    ordered = sorted(
+        matches,
+        key=lambda match: (
+            -float(match.confidence),
+            float(match.time_distance_seconds or 0.0),
+            match.known_circuit_id,
+        ),
+    )[:NILM_KNOWN_LOAD_ATTRIBUTION_MAX_REJECTED_CANDIDATES]
+    return tuple(
+        {
+            "known_circuit_id": match.known_circuit_id,
+            "topology_status": match.topology_status or "not_evaluated",
+            "selection_status": match.selection_status or "rejected_topology",
+        }
+        for match in ordered
     )
 
 

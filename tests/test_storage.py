@@ -42,7 +42,7 @@ def test_feature_store_round_trips_nilm_helper_candidates() -> None:
 
     restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
 
-    assert STORAGE_VERSION == 10
+    assert STORAGE_VERSION == 11
     assert restored.nilm_signatures["ac-2"][0]["helper_candidates"] == [candidate]
 
 
@@ -65,6 +65,31 @@ def test_feature_store_round_trips_nilm_unmatched_edges() -> None:
     restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
 
     assert restored.nilm_unmatched_edges_by_circuit == {"mains": [edge]}
+
+
+def test_feature_store_v10_payload_defaults_attribution_ledger() -> None:
+    """The v10 payload remains readable when v11 adds the attribution ledger."""
+
+    restored = feature_store_data_from_dict(
+        {
+            "schema_version": 10,
+            "nilm_session_history_by_circuit": {
+                "mains": [
+                    {
+                        "session_id": "legacy-session",
+                        "start": "2026-08-01T00:00:00+00:00",
+                    }
+                ]
+            },
+        }
+    )
+
+    assert STORAGE_VERSION == 11
+    assert (
+        restored.nilm_session_history_by_circuit["mains"][0]["session_id"]
+        == "legacy-session"
+    )
+    assert restored.nilm_known_load_attributions_by_circuit == {}
 
 
 def test_feature_store_preserves_empty_nilm_unmatched_edge_marker() -> None:
@@ -407,6 +432,48 @@ def test_feature_store_round_trips_unknown_load_inventory() -> None:
     assert feature_store_data_to_dict(data)["schema_version"] == STORAGE_VERSION
 
 
+def test_feature_store_round_trips_known_load_attribution_ledger() -> None:
+    attribution = {
+        "attribution_id": "known-load-attribution:v1|edge-1",
+        "timestamp": "2026-08-12T11:42:03+00:00",
+        "aggregate_edge_id": "edge-1",
+        "aggregate_delta_w": 1204.0,
+        "explained_delta_w": 1006.0,
+        "residual_delta_w": 198.0,
+        "known_circuit_ids": ["dryer"],
+        "selection_method": "global_assignment",
+        "compound": False,
+        "magnitude_score": 0.96,
+        "time_score": 0.98,
+        "topology_score": 1.0,
+        "total_score": 0.95,
+        "time_offsets_s": [1.8],
+        "topology_statuses": ["consistent"],
+        "residual_edge_id": "edge-1-residual",
+        "ambiguity_status": "matched",
+        "rejected_candidate_summaries": [
+            {
+                "known_circuit_id": "water_heater",
+                "reason": "topology_mismatch",
+            }
+        ],
+        "provenance_version": 1,
+    }
+    data = FeatureStoreData(
+        nilm_known_load_attributions_by_circuit={"mains": [attribution]}
+    )
+
+    payload = feature_store_data_to_dict(data)
+    restored = feature_store_data_from_dict(payload)
+
+    assert payload["nilm_known_load_attributions_by_circuit"] == {
+        "mains": [attribution]
+    }
+    assert restored.nilm_known_load_attributions_by_circuit == {
+        "mains": [attribution]
+    }
+
+
 def test_feature_store_round_trips_weather_context() -> None:
     data = FeatureStoreData(
         weather_context_by_circuit={
@@ -470,8 +537,8 @@ def test_feature_store_round_trips_water_correlation_state() -> None:
     )
 
 
-def test_feature_store_schema_ten_round_trips_hvac_efficiency_history() -> None:
-    assert STORAGE_VERSION == 10
+def test_feature_store_schema_eleven_round_trips_hvac_efficiency_history() -> None:
+    assert STORAGE_VERSION == 11
     history = {
         "heat_pump|climate.downstairs|heating": [
             {
@@ -497,7 +564,7 @@ def test_feature_store_schema_ten_round_trips_hvac_efficiency_history() -> None:
     payload = feature_store_data_to_dict(data)
     restored = feature_store_data_from_dict(payload)
 
-    assert payload["schema_version"] == 10
+    assert payload["schema_version"] == 11
     assert restored.hvac_response_history_by_stream == history
     assert restored.hvac_response_context_by_stream == {
         "heat_pump|climate.downstairs|heating": {
@@ -1747,7 +1814,7 @@ def test_notification_preferences_and_digest_settings_round_trip() -> None:
 
     restored = feature_store_data_from_dict(feature_store_data_to_dict(data))
 
-    assert STORAGE_VERSION == 10
+    assert STORAGE_VERSION == 11
     assert restored.appliance_notification_preferences == (
         data.appliance_notification_preferences
     )

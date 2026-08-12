@@ -77,6 +77,9 @@ class FeatureStoreData:
     nilm_session_history_by_circuit: dict[str, list[dict[str, Any]]] = field(
         default_factory=dict
     )
+    nilm_known_load_attributions_by_circuit: dict[str, list[dict[str, Any]]] = (
+        field(default_factory=dict)
+    )
     nilm_session_history_ingress_by_circuit: dict[
         str, dict[str, int | bool]
     ] = field(default_factory=dict, repr=False)
@@ -343,6 +346,9 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
         "nilm_session_history_by_circuit": _dict_of_list_dicts(
             data.nilm_session_history_by_circuit
         ),
+        "nilm_known_load_attributions_by_circuit": _dict_of_list_dicts(
+            data.nilm_known_load_attributions_by_circuit
+        ),
         "nilm_label_intervals_by_circuit": _dict_of_list_dicts(
             data.nilm_label_intervals_by_circuit
         ),
@@ -495,6 +501,11 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         ),
         nilm_session_history_by_circuit=nilm_session_history,
         nilm_session_history_ingress_by_circuit=nilm_session_history_ingress,
+        nilm_known_load_attributions_by_circuit=(
+            _nilm_known_load_attributions_from_raw(
+                raw.get("nilm_known_load_attributions_by_circuit", {})
+            )
+        ),
         nilm_label_intervals_by_circuit=_dict_of_list_dicts(
             raw.get("nilm_label_intervals_by_circuit", {})
         ),
@@ -748,6 +759,9 @@ def prune_events(
         nilm_unknown_loads_by_circuit=data.nilm_unknown_loads_by_circuit,
         nilm_unmatched_edges_by_circuit=data.nilm_unmatched_edges_by_circuit,
         nilm_session_history_by_circuit=data.nilm_session_history_by_circuit,
+        nilm_known_load_attributions_by_circuit=(
+            data.nilm_known_load_attributions_by_circuit
+        ),
         nilm_label_intervals_by_circuit=data.nilm_label_intervals_by_circuit,
         nilm_appliance_assignments_by_circuit=(
             data.nilm_appliance_assignments_by_circuit
@@ -950,6 +964,45 @@ def _nilm_session_history_from_raw(
         if ingress["was_truncated"] or not ingress["identity_aliases_complete"]:
             ingress_by_circuit[circuit_id] = ingress
     return histories, ingress_by_circuit
+
+
+def _nilm_known_load_attributions_from_raw(
+    values: Any,
+) -> dict[str, list[dict[str, Any]]]:
+    """Materialize a bounded, deterministic known-load attribution ledger."""
+
+    attributions: dict[str, list[dict[str, Any]]] = {}
+    for key, value in _mapping_items(values):
+        if not isinstance(value, list):
+            continue
+        rows: list[dict[str, Any]] = []
+        for item in value:
+            if not isinstance(item, Mapping):
+                continue
+            attribution_id = str(item.get("attribution_id", "")).strip()
+            timestamp = str(item.get("timestamp", "")).strip()
+            if not attribution_id or not timestamp:
+                continue
+            row = dict(item)
+            row["attribution_id"] = attribution_id
+            row["timestamp"] = timestamp
+            rejected = item.get("rejected_candidate_summaries", ())
+            row["rejected_candidate_summaries"] = [
+                dict(candidate)
+                for candidate in rejected
+                if isinstance(candidate, Mapping)
+            ][:4] if isinstance(rejected, list | tuple) else []
+            rows.append(row)
+        if rows:
+            attributions[str(key)] = sorted(
+                rows,
+                key=lambda row: (
+                    str(row["timestamp"]),
+                    str(row["attribution_id"]),
+                ),
+                reverse=True,
+            )[:NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT]
+    return attributions
 
 
 def _dict_of_list_dicts_including_empty(
