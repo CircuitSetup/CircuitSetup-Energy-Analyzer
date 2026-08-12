@@ -353,26 +353,6 @@ def nilm_tracked_collection_revision(value: Any) -> int | None:
     return value.mutation_revision if isinstance(value, _NilmTrackedList) else None
 
 
-def _nilm_stable_snapshot(value: Any) -> object:
-    """Return a deterministic, comparison-safe snapshot of stored NILM inputs."""
-    if isinstance(value, Mapping):
-        return tuple(
-            (str(key), _nilm_stable_snapshot(item))
-            for key, item in sorted(value.items(), key=lambda entry: str(entry[0]))
-        )
-    if isinstance(value, (list, tuple)):
-        return tuple(_nilm_stable_snapshot(item) for item in value)
-    if isinstance(value, (set, frozenset)):
-        return tuple(sorted((_nilm_stable_snapshot(item) for item in value), key=repr))
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, float) and not isfinite(value):
-        return repr(value)
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    return repr(value)
-
-
 def _nilm_inventory_time_context(
     sessions: Iterable[object],
     existing_inventory: Mapping[str, Any],

@@ -57,7 +57,10 @@ from custom_components.circuitsetup_energy_analyzer.phase_balance import (
     DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
 )
 from custom_components.circuitsetup_energy_analyzer.standby import StandbySettings
-from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
+from custom_components.circuitsetup_energy_analyzer.storage import (
+    FeatureStoreData,
+    feature_store_data_to_dict,
+)
 from custom_components.circuitsetup_energy_analyzer.usage import (
     EnergyUsageSettings,
     record_energy_usage,
@@ -9535,6 +9538,7 @@ def test_nilm_processor_builds_inventory_after_refreshing_current_sessions(
     assert inventory["unknown_loads"][0]["runtime_today_minutes"] == 60.0
 
     snapshot = deepcopy(inventory)
+    serialized_snapshot = feature_store_data_to_dict(store_data)
     def unexpected_rebuild(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("stable NILM samples must not rebuild derived history")
 
@@ -9562,6 +9566,7 @@ def test_nilm_processor_builds_inventory_after_refreshing_current_sessions(
 
     assert not second_result.store_dirty
     assert store_data.nilm_unknown_loads_by_circuit["mains"] == snapshot
+    assert feature_store_data_to_dict(store_data) == serialized_snapshot
     assert current_inventory == snapshot
 
 
