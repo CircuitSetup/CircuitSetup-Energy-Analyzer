@@ -1,6 +1,7 @@
 export function createNilmWorkspaceMethods({
   NILM_WORKSPACE_API_PATH,
   NILM_WORKSPACE_CALL_API_PATH,
+  NILM_WORKSPACE_COLLECTION_API_PATH,
   NILM_INTERVAL_EVIDENCE_API_PATH,
   NILM_LOW_CONFIDENCE_THRESHOLD,
   EXPAND_NILM_QUERY_PARAM,
@@ -33,6 +34,7 @@ export function createNilmWorkspaceMethods({
         return;
       }
       this._nilmWorkspace = workspace;
+      this._nilmSyncAmbiguityAudit(workspace);
       this._nilmSyncHelperSelection(workspace);
       await this._loadNilmWorkspaceHistory(workspace, requestId, routeKey);
       if (!this._isCurrentRequest(requestId, routeKey)) {
@@ -74,6 +76,354 @@ export function createNilmWorkspaceMethods({
       apiPath: (nilm && nilm.workspace_call_api_path) || routeApiPath,
       fetchPath: (nilm && nilm.workspace_api_path) || `${NILM_WORKSPACE_API_PATH}?${query}`,
     };
+  }
+
+  _nilmAmbiguityAudit(workspace = this._nilmWorkspace) {
+    const audit = workspace && workspace.ambiguity_audit;
+    const totalCount = Number(audit && audit.total_count);
+    const fetchPath = String(audit && audit.fetch_path || "").trim();
+    return audit && Number.isFinite(totalCount) && totalCount > 0 && fetchPath
+      ? audit
+      : null;
+  }
+
+  _resetNilmAmbiguityAudit({ preserveExpanded = false } = {}) {
+    const expanded = Boolean(preserveExpanded && this._nilmAmbiguityAuditExpanded);
+    this._nilmAmbiguityAuditRequestToken = (this._nilmAmbiguityAuditRequestToken || 0) + 1;
+    this._nilmAmbiguityAuditExpanded = expanded;
+    this._nilmAmbiguityAuditLoading = false;
+    this._nilmAmbiguityAuditError = "";
+    this._nilmAmbiguityAuditItems = [];
+    this._nilmAmbiguityAuditFetchedPath = "";
+    this._nilmAmbiguityAuditNextCursor = null;
+    this._nilmAmbiguityAuditTruncated = false;
+    this._nilmAmbiguityAuditExpandedGroups = new Set();
+    this._nilmAmbiguityAuditGroupResults = new Map();
+    this._nilmAmbiguityAuditGroupSummaries = new Map();
+    this._nilmAmbiguityAuditGroupSummariesLoading = false;
+    this._nilmAmbiguityAuditGroupSummariesError = "";
+    this._nilmAmbiguityAuditGroupSummariesNextCursor = null;
+    this._nilmAmbiguityAuditGroupSummariesFetched = false;
+  }
+
+  _nilmSyncAmbiguityAudit(workspace, { invalidate = false } = {}) {
+    const audit = this._nilmAmbiguityAudit(workspace);
+    const fetchPath = String(audit && audit.fetch_path || "").trim();
+    const sourceChanged = fetchPath !== this._nilmAmbiguityAuditSourcePath;
+    if (sourceChanged || invalidate) {
+      this._resetNilmAmbiguityAudit({
+        preserveExpanded: invalidate && !sourceChanged && Boolean(audit),
+      });
+      this._nilmAmbiguityAuditSourcePath = fetchPath;
+    }
+    return this._nilmAmbiguityAuditExpanded ? audit : null;
+  }
+
+  _nilmAmbiguityAuditRequestPaths(fetchPath, groupId = "", params = {}) {
+    const url = new URL(fetchPath || NILM_WORKSPACE_COLLECTION_API_PATH, window.location.origin);
+    if (!url.searchParams.has("limit")) url.searchParams.set("limit", "20");
+    const normalizedGroupId = String(groupId || "").trim();
+    if (normalizedGroupId) url.searchParams.set("group_id", normalizedGroupId);
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && String(value).trim()) {
+        url.searchParams.set(key, String(value));
+      }
+    }
+    const requestPath = `${url.pathname}${url.search}`;
+    return {
+      apiPath: requestPath.replace(/^\/api\//, ""),
+      fetchPath: requestPath,
+    };
+  }
+
+  _isCurrentNilmAmbiguityAuditRequest(token, requestId, routeKey, fetchPath) {
+    return token === this._nilmAmbiguityAuditRequestToken
+      && this._isCurrentRequest(requestId, routeKey)
+      && this._nilmAmbiguityAudit(this._nilmWorkspace)?.fetch_path === fetchPath;
+  }
+
+  _isCurrentNilmAmbiguityAuditGroupRequest(token, requestId, routeKey, fetchPath, groupId) {
+    return this._isCurrentNilmAmbiguityAuditRequest(token, requestId, routeKey, fetchPath)
+      && this._nilmAmbiguityAuditExpanded
+      && Boolean(this._nilmAmbiguityAuditExpandedGroups?.has(groupId));
+  }
+
+  _isCurrentNilmAmbiguityAuditGroupSummariesRequest(token, requestId, routeKey, fetchPath) {
+    return this._isCurrentNilmAmbiguityAuditRequest(token, requestId, routeKey, fetchPath)
+      && this._nilmAmbiguityAuditExpanded;
+  }
+
+  _nilmAmbiguityAuditGroups(audit = this._nilmAmbiguityAudit()) {
+    const groups = new Map();
+    for (const group of Array.isArray(audit && audit.group_preview) ? audit.group_preview : []) {
+      const groupId = String(group && group.group_id || "").trim();
+      if (groupId) groups.set(groupId, group);
+    }
+    for (const [groupId, group] of this._nilmAmbiguityAuditGroupSummaries?.entries() || []) {
+      if (groupId) groups.set(groupId, group);
+    }
+    return Array.from(groups.values()).sort((left, right) => {
+      const countDelta = (Number(right?.occurrence_count) || 0)
+        - (Number(left?.occurrence_count) || 0);
+      if (countDelta) return countDelta;
+      const leftLatest = Date.parse(left?.latest_at || "");
+      const rightLatest = Date.parse(right?.latest_at || "");
+      const latestDelta = (Number.isFinite(rightLatest) ? rightLatest : 0)
+        - (Number.isFinite(leftLatest) ? leftLatest : 0);
+      if (latestDelta) return latestDelta;
+      return String(left?.group_id || "").localeCompare(String(right?.group_id || ""));
+    });
+  }
+
+  _nilmAmbiguityAuditGroup(audit, groupId) {
+    const id = String(groupId || "").trim();
+    return this._nilmAmbiguityAuditGroups(audit).find((group) => (
+      String(group && group.group_id || "").trim() === id
+    )) || null;
+  }
+
+  _nilmAmbiguityAuditGroupItems(groupId) {
+    const id = String(groupId || "").trim();
+    return (this._nilmAmbiguityAuditItems || []).filter((item) => (
+      String(item && item.group_id || "").trim() === id
+    ));
+  }
+
+  async _toggleNilmAmbiguityAudit() {
+    const audit = this._nilmAmbiguityAudit();
+    if (!audit) return;
+    this._nilmAmbiguityAuditExpanded = !this._nilmAmbiguityAuditExpanded;
+    if (!this._nilmAmbiguityAuditExpanded) {
+      this._nilmAmbiguityAuditRequestToken += 1;
+      this._nilmAmbiguityAuditLoading = false;
+      this._nilmAmbiguityAuditExpandedGroups = new Set();
+      this._nilmAmbiguityAuditGroupResults = new Map();
+      this._nilmAmbiguityAuditGroupSummaries = new Map();
+      this._nilmAmbiguityAuditGroupSummariesLoading = false;
+      this._nilmAmbiguityAuditGroupSummariesError = "";
+      this._nilmAmbiguityAuditGroupSummariesNextCursor = null;
+      this._nilmAmbiguityAuditGroupSummariesFetched = false;
+      this._render();
+      return;
+    }
+    this._render();
+    await this._loadNilmAmbiguityAudit(audit);
+  }
+
+  async _loadNilmAmbiguityAudit(audit = this._nilmAmbiguityAudit()) {
+    const sourcePath = String(audit && audit.fetch_path || "").trim();
+    if (!sourcePath || this._nilmAmbiguityAuditLoading
+      || this._nilmAmbiguityAuditFetchedPath === sourcePath) {
+      return;
+    }
+    const token = this._nilmAmbiguityAuditRequestToken + 1;
+    this._nilmAmbiguityAuditRequestToken = token;
+    const requestId = this._evidenceRequestId;
+    const routeKey = this._loadedRouteKey || this._routeKey();
+    const { apiPath, fetchPath } = this._nilmAmbiguityAuditRequestPaths(sourcePath);
+    this._nilmAmbiguityAuditLoading = true;
+    this._nilmAmbiguityAuditError = "";
+    this._render();
+    try {
+      const payload = await this._requestJson(apiPath, fetchPath);
+      if (!this._isCurrentNilmAmbiguityAuditRequest(token, requestId, routeKey, sourcePath)) {
+        return;
+      }
+      this._nilmAmbiguityAuditItems = Array.isArray(payload && payload.items)
+        ? payload.items.slice(0, 20)
+        : [];
+      this._nilmAmbiguityAuditNextCursor = payload && payload.next_cursor || null;
+      this._nilmAmbiguityAuditTruncated = Boolean(payload && payload.truncated);
+      this._nilmAmbiguityAuditFetchedPath = sourcePath;
+      this._nilmAmbiguityAuditError = "";
+    } catch (error) {
+      if (!this._isCurrentNilmAmbiguityAuditRequest(token, requestId, routeKey, sourcePath)) {
+        return;
+      }
+      this._nilmAmbiguityAuditError = this._panelTextFormat(
+        "errors.load_nilm_workspace",
+        { message: error.message },
+      );
+    } finally {
+      if (this._isCurrentNilmAmbiguityAuditRequest(token, requestId, routeKey, sourcePath)) {
+        this._nilmAmbiguityAuditLoading = false;
+        this._render();
+      }
+    }
+  }
+
+  async _toggleNilmAmbiguityGroup(groupId) {
+    const id = String(groupId || "").trim();
+    if (!id) return;
+    const groups = new Set(this._nilmAmbiguityAuditExpandedGroups || []);
+    if (groups.has(id)) {
+      groups.delete(id);
+      const results = new Map(this._nilmAmbiguityAuditGroupResults || []);
+      if (results.get(id)?.loading) results.delete(id);
+      this._nilmAmbiguityAuditGroupResults = results;
+    } else {
+      groups.add(id);
+    }
+    this._nilmAmbiguityAuditExpandedGroups = groups;
+    this._render();
+    if (!groups.has(id)) return;
+    const audit = this._nilmAmbiguityAudit();
+    const group = this._nilmAmbiguityAuditGroup(audit, id);
+    if (audit && group) await this._loadNilmAmbiguityAuditGroup(audit, group);
+  }
+
+  async _loadNilmAmbiguityAuditGroup(audit, group, { append = false } = {}) {
+    const sourcePath = String(audit && audit.fetch_path || "").trim();
+    const groupId = String(group && group.group_id || "").trim();
+    const totalCount = Math.max(0, Number(group && group.occurrence_count) || 0);
+    if (!sourcePath || !groupId) return;
+    const globalItems = this._nilmAmbiguityAuditGroupItems(groupId);
+    const globalFetchCoversGroup = this._nilmAmbiguityAuditFetchedPath === sourcePath
+      && globalItems.length >= totalCount;
+    const existing = this._nilmAmbiguityAuditGroupResults?.get(groupId);
+    const cursor = append ? String(existing?.nextCursor || "").trim() : "";
+    if (append) {
+      if (!existing?.fetched || existing.loading || !cursor) return;
+    } else if (globalFetchCoversGroup || existing?.loading || existing?.fetched) {
+      return;
+    }
+
+    const token = this._nilmAmbiguityAuditRequestToken;
+    const requestId = this._evidenceRequestId;
+    const routeKey = this._loadedRouteKey || this._routeKey();
+    const { apiPath, fetchPath } = this._nilmAmbiguityAuditRequestPaths(sourcePath, groupId, {
+      cursor,
+    });
+    const results = this._nilmAmbiguityAuditGroupResults || new Map();
+    results.set(groupId, {
+      items: append ? existing?.items || [] : [],
+      loading: true,
+      fetched: Boolean(append && existing?.fetched),
+      error: "",
+      totalCount: Math.max(0, Number(existing?.totalCount) || totalCount),
+      truncated: Boolean(append && existing?.truncated),
+      nextCursor: append ? cursor : null,
+    });
+    this._nilmAmbiguityAuditGroupResults = results;
+    this._render();
+    try {
+      const payload = await this._requestJson(apiPath, fetchPath);
+      if (!this._isCurrentNilmAmbiguityAuditGroupRequest(
+        token, requestId, routeKey, sourcePath, groupId,
+      )) return;
+      const pageItems = Array.isArray(payload && payload.items)
+        ? payload.items.slice(0, 20)
+        : [];
+      const itemBySessionId = new Map();
+      for (const item of append ? existing?.items || [] : []) {
+        const sessionId = String(item && item.session_id || "").trim();
+        if (sessionId) itemBySessionId.set(sessionId, item);
+      }
+      for (const item of pageItems) {
+        const sessionId = String(item && item.session_id || "").trim();
+        if (sessionId) itemBySessionId.set(sessionId, item);
+      }
+      results.set(groupId, {
+        items: Array.from(itemBySessionId.values()),
+        loading: false,
+        fetched: true,
+        error: "",
+        totalCount: Math.max(0, Number(payload && payload.total_count) || totalCount),
+        truncated: Boolean(payload && payload.truncated),
+        nextCursor: payload && payload.next_cursor || null,
+      });
+    } catch (error) {
+      if (!this._isCurrentNilmAmbiguityAuditGroupRequest(
+        token, requestId, routeKey, sourcePath, groupId,
+      )) return;
+      results.set(groupId, {
+        items: append ? existing?.items || [] : [],
+        loading: false,
+        fetched: Boolean(append && existing?.fetched),
+        error: this._panelTextFormat("errors.load_nilm_workspace", { message: error.message }),
+        totalCount: Math.max(0, Number(existing?.totalCount) || totalCount),
+        truncated: Boolean(append && existing?.truncated),
+        nextCursor: append ? cursor : null,
+      });
+    } finally {
+      if (this._isCurrentNilmAmbiguityAuditGroupRequest(
+        token, requestId, routeKey, sourcePath, groupId,
+      )) this._render();
+    }
+  }
+
+  async _loadNilmAmbiguityAuditGroupSummaries(
+    audit = this._nilmAmbiguityAudit(),
+    { append = false } = {},
+  ) {
+    const sourcePath = String(audit && audit.fetch_path || "").trim();
+    const cursor = append ? this._nilmAmbiguityAuditGroupSummariesNextCursor : null;
+    if (!sourcePath || this._nilmAmbiguityAuditGroupSummariesLoading
+      || (append && !cursor) || (!append && this._nilmAmbiguityAuditGroupSummariesFetched)) {
+      return;
+    }
+    const token = this._nilmAmbiguityAuditRequestToken;
+    const requestId = this._evidenceRequestId;
+    const routeKey = this._loadedRouteKey || this._routeKey();
+    const { apiPath, fetchPath } = this._nilmAmbiguityAuditRequestPaths(sourcePath, "", {
+      view: "groups",
+      cursor,
+    });
+    this._nilmAmbiguityAuditGroupSummariesLoading = true;
+    this._nilmAmbiguityAuditGroupSummariesError = "";
+    this._render();
+    try {
+      const payload = await this._requestJson(apiPath, fetchPath);
+      if (!this._isCurrentNilmAmbiguityAuditGroupSummariesRequest(
+        token, requestId, routeKey, sourcePath,
+      )) return;
+      const summaries = append
+        ? new Map(this._nilmAmbiguityAuditGroupSummaries)
+        : new Map();
+      for (const group of Array.isArray(payload && payload.groups) ? payload.groups : []) {
+        const groupId = String(group && group.group_id || "").trim();
+        if (groupId) summaries.set(groupId, group);
+      }
+      this._nilmAmbiguityAuditGroupSummaries = summaries;
+      this._nilmAmbiguityAuditGroupSummariesNextCursor = payload && payload.next_cursor || null;
+      this._nilmAmbiguityAuditGroupSummariesFetched = true;
+    } catch (error) {
+      if (!this._isCurrentNilmAmbiguityAuditGroupSummariesRequest(
+        token, requestId, routeKey, sourcePath,
+      )) return;
+      this._nilmAmbiguityAuditGroupSummariesError = this._panelTextFormat(
+        "errors.load_nilm_workspace",
+        { message: error.message },
+      );
+    } finally {
+      if (this._isCurrentNilmAmbiguityAuditGroupSummariesRequest(
+        token, requestId, routeKey, sourcePath,
+      )) {
+        this._nilmAmbiguityAuditGroupSummariesLoading = false;
+        this._render();
+      }
+    }
+  }
+
+  async _focusNilmAmbiguityOccurrence(item, options = {}) {
+    const start = Date.parse(item && item.start || "");
+    const end = Date.parse(item && item.end || "");
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return false;
+    this._nilmFocusedAmbiguitySession = { ...item };
+    const focused = await this._loadNilmIntervalOnGraph(item, {
+      clearSignature: true,
+      clearAmbiguity: false,
+      edit: false,
+      scroll: options.scroll !== false,
+    });
+    return focused === true;
+  }
+
+  async _createNilmAmbiguityManualInterval(item) {
+    if (!(await this._focusNilmAmbiguityOccurrence(item))) return false;
+    if (!this._setNilmIntervalDraft(item)) return false;
+    this._render();
+    return true;
   }
 
   async _refreshNilmWorkspaceData(
@@ -124,6 +474,15 @@ export function createNilmWorkspaceMethods({
             this._nilmWorkspaceHistoryError = "";
             this._nilmWorkspaceHistoryFailedRequest = null;
             this._nilmWorkspace = workspace;
+            const auditToReload = this._nilmSyncAmbiguityAudit(workspace, { invalidate: true });
+            if (auditToReload) await this._loadNilmAmbiguityAudit(auditToReload);
+            if (cycle !== this._nilmWorkspaceRefreshCycle
+                || !this._isCurrentRequest(requestId, routeKey)) {
+              return false;
+            }
+            if (generation !== cycle.requested) {
+              continue;
+            }
             return true;
           }
         } finally {
@@ -956,6 +1315,12 @@ export function createNilmWorkspaceMethods({
       ["nilmIdentifyMode", "[data-nilm-identify-mode]", "nilmDecisionKey"],
       ["nilmLane", "[data-nilm-lane]", "nilmLane"],
       ["nilmReviewItem", "[data-nilm-review-item]", "nilmReviewItem"],
+      ["nilmAmbiguityToggle", "[data-nilm-ambiguity-toggle]", "nilmAmbiguityToggle"],
+      ["nilmAmbiguityGroup", "[data-nilm-ambiguity-group]", "nilmAmbiguityGroup"],
+      ["nilmAmbiguityLoadGroups", "[data-nilm-ambiguity-load-groups]", "nilmAmbiguityLoadGroups"],
+      ["nilmAmbiguityLoadOccurrences", "[data-nilm-ambiguity-load-occurrences]", "nilmAmbiguityLoadOccurrences"],
+      ["nilmAmbiguityOpenGraph", "[data-nilm-ambiguity-open-graph]", "nilmAmbiguitySessionId"],
+      ["nilmAmbiguityOccurrence", "[data-nilm-ambiguity-occurrence]", "nilmAmbiguityOccurrence"],
       ["nilmBoundaryHandle", "[data-nilm-boundary-handle]", "nilmBoundaryHandle"],
     ];
     const control = controls.find(([flag]) => Object.prototype.hasOwnProperty.call(dataset, flag));
@@ -1473,6 +1838,9 @@ export function createNilmWorkspaceMethods({
       this._nilmFocusedOccurrenceIndex = -1;
       this._nilmFocusedInterval = null;
     }
+    if (options.clearAmbiguity !== false) {
+      this._nilmFocusedAmbiguitySession = null;
+    }
     this._nilmGraphWindow = targetWindow;
     const intervalId = String(interval.interval_id || "").trim();
     this._nilmFocusedInterval = {
@@ -1700,6 +2068,26 @@ export function createNilmWorkspaceMethods({
   }
 
   _nilmFocusedGraphEvidence(workspace) {
+    const ambiguousOccurrence = this._nilmFocusedAmbiguitySession;
+    if (ambiguousOccurrence) {
+      return {
+        sessions: [{ ...ambiguousOccurrence, selected: true }],
+        edges: [
+          {
+            timestamp: ambiguousOccurrence.start,
+            direction: "on",
+            delta_w: ambiguousOccurrence.on_delta_w,
+            delta_var: ambiguousOccurrence.on_delta_var,
+          },
+          {
+            timestamp: ambiguousOccurrence.end,
+            direction: "off",
+            delta_w: ambiguousOccurrence.off_delta_w,
+            delta_var: ambiguousOccurrence.off_delta_var,
+          },
+        ],
+      };
+    }
     const occurrence = this._nilmFocusedOccurrence();
     if (!this._nilmFocusedSignature || !occurrence) {
       return { sessions: [], edges: [] };
@@ -2370,6 +2758,7 @@ export function createNilmWorkspaceMethods({
         ${intervalEditor || intervalFeedback ? `<section class="workspace-section nilm-interval-editor-section section-surface">${intervalEditor}${intervalFeedback}</section>` : ""}
         <section class="workspace-section section-surface">${this._renderNilmWorkspaceLanes(workspace)}</section>
         <section class="workspace-section section-surface">${this._renderNilmReviewLayout(workspace)}</section>
+        ${this._renderNilmAmbiguityAudit(workspace)}
         ${this._renderNilmSecondaryCollections(workspace)}
       </div>
     `;
@@ -2607,6 +2996,224 @@ export function createNilmWorkspaceMethods({
     }
     this._lastActionMessage = "";
     return this._loadNilmIntervalOnGraph(interval, { edit: false, scroll: options.scroll !== false });
+  }
+
+  _renderNilmAmbiguityAudit(workspace) {
+    const audit = this._nilmAmbiguityAudit(workspace);
+    if (!audit) return "";
+    const totalCount = Math.max(0, Number(audit.total_count) || 0);
+    const expanded = Boolean(this._nilmAmbiguityAuditExpanded);
+    const contentId = "nilm_ambiguity_audit_content";
+    const groupResults = this._nilmAmbiguityAuditGroupResults?.values() || [];
+    const groupLoading = Array.from(groupResults).some((result) => result?.loading);
+    const groupError = Array.from(this._nilmAmbiguityAuditGroupResults?.values() || [])
+      .some((result) => result?.error);
+    const groupSummariesLoading = Boolean(this._nilmAmbiguityAuditGroupSummariesLoading);
+    const groupSummariesError = Boolean(this._nilmAmbiguityAuditGroupSummariesError);
+    const status = this._nilmAmbiguityAuditLoading
+      ? this._panelText("nilm_workspace.ambiguity_audit_loading")
+      : this._nilmAmbiguityAuditError
+        ? this._panelText("nilm_workspace.ambiguity_audit_load_failed")
+        : groupLoading
+          ? this._panelText("nilm_workspace.ambiguity_audit_loading")
+          : groupError
+            ? this._panelText("nilm_workspace.ambiguity_audit_load_failed")
+            : groupSummariesLoading
+              ? this._panelText("nilm_workspace.ambiguity_audit_loading")
+              : groupSummariesError
+                ? this._panelText("nilm_workspace.ambiguity_audit_load_failed")
+                : expanded && this._nilmAmbiguityAuditFetchedPath === audit.fetch_path
+                  ? this._panelText("nilm_workspace.ambiguity_audit_loaded")
+                  : "";
+    const groups = this._nilmAmbiguityAuditGroups(audit);
+    return `<section class="workspace-section section-surface nilm-ambiguity-audit" data-nilm-ambiguity-audit>
+      <h2>${this._escape(this._panelText("nilm_workspace.ambiguity_audit_title"))}</h2>
+      <p id="nilm_ambiguity_audit_summary"><strong>${this._escape(this._panelTextFormat("nilm_workspace.ambiguity_audit_summary", { count: totalCount }))}</strong></p>
+      <p class="muted" data-nilm-ambiguity-no-action>${this._escape(this._panelText("nilm_workspace.ambiguity_audit_no_action"))}</p>
+      <button type="button" class="secondary" data-nilm-ambiguity-toggle="audit" aria-expanded="${expanded}" aria-controls="${contentId}" aria-describedby="nilm_ambiguity_audit_summary nilm_ambiguity_audit_no_action">
+        ${this._escape(this._panelText("nilm_workspace.ambiguity_audit_review"))}
+      </button>
+      <p id="nilm_ambiguity_audit_no_action" class="sr-only">${this._escape(this._panelText("nilm_workspace.ambiguity_audit_no_action"))}</p>
+      <p data-nilm-ambiguity-live aria-live="polite" aria-atomic="true" class="sr-only">${this._escape(status)}</p>
+      <div id="${contentId}" data-nilm-ambiguity-content role="region" aria-label="${this._escape(this._panelText("nilm_workspace.ambiguity_audit_title"))}" ${expanded ? "" : "hidden"}>
+        ${this._renderNilmAmbiguityAuditContent(groups, audit)}
+      </div>
+    </section>`;
+  }
+
+  _renderNilmAmbiguityAuditContent(groups, audit) {
+    if (this._nilmAmbiguityAuditLoading) {
+      return `<p class="muted" data-nilm-ambiguity-loading>${this._escape(this._panelText("nilm_workspace.ambiguity_audit_loading"))}</p>`;
+    }
+    if (this._nilmAmbiguityAuditError) {
+      return `<p class="muted" data-nilm-ambiguity-error>${this._escape(this._panelText("nilm_workspace.ambiguity_audit_load_failed"))}</p>`;
+    }
+    if (!groups.length) {
+      return "";
+    }
+    const fetched = this._nilmAmbiguityAuditFetchedPath === this._nilmAmbiguityAudit()?.fetch_path;
+    const more = this._nilmAmbiguityAuditTruncated
+      ? `<p class="muted">${this._escape(this._panelText("nilm_workspace.ambiguity_audit_bounded"))}</p>`
+      : "";
+    const totalGroups = Math.max(0, Number(audit && audit.group_count) || 0);
+    const appendGroups = Boolean(this._nilmAmbiguityAuditGroupSummariesNextCursor);
+    const canLoadMoreGroups = appendGroups
+      || totalGroups > groups.length;
+    const groupSummaryControl = canLoadMoreGroups
+      ? `<button type="button" class="secondary" data-nilm-ambiguity-load-groups data-nilm-ambiguity-append="${appendGroups}" ${this._nilmAmbiguityAuditGroupSummariesLoading ? "disabled" : ""}>
+          ${this._escape(this._panelTextFormat(
+            appendGroups
+              ? "nilm_workspace.ambiguity_audit_load_more_groups"
+              : "nilm_workspace.ambiguity_audit_view_all_groups",
+            { count: totalGroups },
+          ))}
+        </button>`
+      : "";
+    const groupSummaryError = this._nilmAmbiguityAuditGroupSummariesError
+      ? `<p class="muted" data-nilm-ambiguity-groups-error>${this._escape(this._panelText("nilm_workspace.ambiguity_audit_load_failed"))}</p>`
+      : "";
+    return `<div class="nilm-ambiguity-groups" data-nilm-ambiguity-groups>
+      ${groups.map((group) => this._renderNilmAmbiguityAuditGroup(group, fetched)).join("")}
+      ${more}
+      ${groupSummaryError}
+      ${groupSummaryControl}
+    </div>`;
+  }
+
+  _renderNilmAmbiguityAuditGroup(group, fetched) {
+    const groupId = String(group && group.group_id || "").trim();
+    if (!groupId) return "";
+    const expanded = Boolean(this._nilmAmbiguityAuditExpandedGroups?.has(groupId));
+    const occurrenceId = `nilm_ambiguity_group_${this._escape(groupId)}`;
+    const count = Math.max(0, Number(group.occurrence_count) || 0);
+    const labels = Array.isArray(group.candidate_labels)
+      ? group.candidate_labels.filter(Boolean).slice(0, 3)
+      : [];
+    const candidateText = labels.length
+      ? labels.join(" · ")
+      : this._friendlyFeature(group.category || "other");
+    const globalItems = fetched ? this._nilmAmbiguityAuditGroupItems(groupId) : [];
+    const groupResult = this._nilmAmbiguityAuditGroupResults?.get(groupId);
+    const globalFetchCoversGroup = fetched && globalItems.length >= count;
+    const groupLoaded = Boolean(groupResult?.fetched || globalFetchCoversGroup);
+    const items = groupResult?.fetched ? groupResult.items : globalItems;
+    return `<section class="nilm-ambiguity-group" data-nilm-ambiguity-group-card="${this._escape(groupId)}">
+      <button type="button" class="secondary nilm-ambiguity-group-toggle" data-nilm-ambiguity-group="${this._escape(groupId)}" aria-expanded="${expanded}" aria-controls="${occurrenceId}">
+        <span><strong>${this._escape(candidateText)}</strong></span>
+        <span>${this._escape(this._panelTextFormat("nilm_workspace.ambiguity_audit_occurrences", { count }))}</span>
+      </button>
+      <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.ambiguity_audit_latest", { latest: this._formatDateTime(group.latest_at) }))}</p>
+      <div id="${occurrenceId}" data-nilm-ambiguity-occurrences="${this._escape(groupId)}" ${expanded ? "" : "hidden"}>
+        ${expanded ? this._renderNilmAmbiguityOccurrences(items, count, {
+          loaded: groupLoaded,
+          loading: Boolean(groupResult?.loading),
+          error: groupResult?.error || "",
+          nextCursor: groupResult?.nextCursor || null,
+          groupId,
+        }) : ""}
+      </div>
+    </section>`;
+  }
+
+  _renderNilmAmbiguityOccurrences(items, totalCount, state = {}) {
+    if (state.loading && !items.length) {
+      return `<p class="muted" data-nilm-ambiguity-group-loading>${this._escape(this._panelText("nilm_workspace.ambiguity_audit_loading"))}</p>`;
+    }
+    if (state.error && !items.length) {
+      return `<p class="muted" data-nilm-ambiguity-group-error>${this._escape(this._panelText("nilm_workspace.ambiguity_audit_load_failed"))}</p>`;
+    }
+    if (!state.loaded) {
+      return `<p class="muted" data-nilm-ambiguity-group-loading>${this._escape(this._panelText("nilm_workspace.ambiguity_audit_loading"))}</p>`;
+    }
+    if (!items.length) {
+      return `<p class="muted">${this._escape(this._panelText("nilm_workspace.ambiguity_audit_no_loaded_occurrences"))}</p>`;
+    }
+    const shown = Math.min(items.length, totalCount);
+    const more = totalCount > shown
+      ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.ambiguity_audit_showing_occurrences", { shown, total: totalCount }))}</p>`
+      : "";
+    const loading = state.loading
+      ? `<p class="muted" data-nilm-ambiguity-group-loading>${this._escape(this._panelText("nilm_workspace.ambiguity_audit_loading"))}</p>`
+      : "";
+    const error = state.error
+      ? `<p class="muted" data-nilm-ambiguity-group-error>${this._escape(this._panelText("nilm_workspace.ambiguity_audit_load_failed"))}</p>`
+      : "";
+    const groupId = String(state.groupId || "").trim();
+    const loadMore = state.nextCursor && groupId
+      ? `<button type="button" class="secondary" data-nilm-ambiguity-load-occurrences="${this._escape(groupId)}" ${state.loading ? "disabled" : ""}>${this._escape(this._panelText("nilm_workspace.ambiguity_audit_load_more_occurrences"))}</button>`
+      : "";
+    return `<div class="nilm-ambiguity-occurrence-list">
+      ${items.map((item) => this._renderNilmAmbiguityOccurrence(item)).join("")}
+      ${more}
+      ${loading}
+      ${error}
+      ${loadMore}
+    </div>`;
+  }
+
+  _renderNilmAmbiguityOccurrence(item) {
+    const sessionId = String(item && item.session_id || "").trim();
+    if (!sessionId) return "";
+    const selected = String(this._nilmFocusedAmbiguitySession?.session_id || "") === sessionId;
+    const safeActions = new Set(Array.isArray(item.safe_actions) ? item.safe_actions : []);
+    const candidates = Array.isArray(item.candidate_explanations)
+      ? item.candidate_explanations.slice(0, 3)
+      : [];
+    const likelyCandidates = candidates.slice(0, 2)
+      .map((candidate) => candidate.display_label || candidate.assignment_id || candidate.signature_fingerprint)
+      .filter(Boolean);
+    const reasonCodes = Array.isArray(item.ambiguity_reason_codes)
+      ? item.ambiguity_reason_codes.filter(Boolean).slice(0, 3)
+      : [];
+    const facts = [
+      this._formatDateTime(item.start),
+      item.duration_seconds !== undefined && item.duration_seconds !== null
+        ? this._nilmSessionDuration(item)
+        : "",
+      item.median_power_w !== undefined && item.median_power_w !== null
+        ? `${this._formatMetricValue(item.median_power_w)} W`
+        : "",
+    ].filter(Boolean);
+    return `<article class="nilm-ambiguity-occurrence" data-nilm-ambiguity-occurrence="${this._escape(sessionId)}" data-nilm-selected="${selected}">
+      <strong>${this._escape(facts.join(" · "))}</strong>
+      ${likelyCandidates.length ? `<p class="muted">${this._escape(likelyCandidates.join(" · "))}</p>` : ""}
+      <p class="muted">${this._escape(this._friendlyFeature(item.ambiguity_category || "other"))}</p>
+      <div class="actions">
+        ${safeActions.has("open_on_graph") ? `<button type="button" class="secondary" data-nilm-ambiguity-open-graph data-nilm-ambiguity-session-id="${this._escape(sessionId)}">${this._escape(this._panelText("nilm_workspace.ambiguity_audit_open_graph"))}</button>` : ""}
+        ${safeActions.has("create_manual_interval") ? `<button type="button" data-nilm-ambiguity-create-interval data-nilm-ambiguity-session-id="${this._escape(sessionId)}">${this._escape(this._panelText("nilm_workspace.ambiguity_audit_create_interval"))}</button>` : ""}
+      </div>
+      <details>
+        <summary>${this._escape(this._panelText("nilm_workspace.ambiguity_audit_advanced"))}</summary>
+        ${reasonCodes.length ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.ambiguity_audit_reason_codes", { codes: reasonCodes.join(", ") }))}</p>` : ""}
+        ${candidates.length ? `<ul>${candidates.map((candidate) => `<li>${this._escape(this._nilmAmbiguityCandidateDetail(candidate))}</li>`).join("")}</ul>` : ""}
+      </details>
+    </article>`;
+  }
+
+  _nilmAmbiguityCandidateDetail(candidate) {
+    const label = candidate.display_label || candidate.assignment_id || candidate.signature_fingerprint || candidate.candidate_id || "";
+    const margin = Number(candidate.score_margin_from_best);
+    return Number.isFinite(margin)
+      ? this._panelTextFormat("nilm_workspace.ambiguity_audit_candidate_margin", {
+        candidate: label,
+        margin: this._formatMetricValue(margin),
+      })
+      : String(label);
+  }
+
+  _nilmAmbiguityAuditItem(sessionId) {
+    const id = String(sessionId || "").trim();
+    const globalItem = (this._nilmAmbiguityAuditItems || []).find((item) => (
+      String(item && item.session_id || "").trim() === id
+    ));
+    if (globalItem) return globalItem;
+    for (const result of this._nilmAmbiguityAuditGroupResults?.values() || []) {
+      const item = (result?.items || []).find((candidate) => (
+        String(candidate && candidate.session_id || "").trim() === id
+      ));
+      if (item) return item;
+    }
+    return null;
   }
 
   _renderNilmSecondaryCollections(workspace) {
@@ -2862,6 +3469,7 @@ export function createNilmWorkspaceMethods({
     this._nilmSelectedReviewKey = "";
     this._nilmFocusedSignature = "";
     this._nilmFocusedOccurrenceIndex = -1;
+    this._nilmFocusedAmbiguitySession = null;
     this._nilmFocusedInterval = null;
     this._render();
   }

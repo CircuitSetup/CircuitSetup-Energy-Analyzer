@@ -2,6 +2,7 @@ export const EVIDENCE_API_PATH = "/api/circuitsetup_energy_analyzer/alert_eviden
 export const EVIDENCE_CALL_API_PATH = "circuitsetup_energy_analyzer/alert_evidence";
 export const NILM_WORKSPACE_API_PATH = "/api/circuitsetup_energy_analyzer/nilm_workspace";
 export const NILM_WORKSPACE_CALL_API_PATH = "circuitsetup_energy_analyzer/nilm_workspace";
+export const NILM_WORKSPACE_COLLECTION_API_PATH = "/api/circuitsetup_energy_analyzer/nilm_workspace/collection";
 export const NILM_INTERVAL_EVIDENCE_API_PATH = "/api/circuitsetup_energy_analyzer/nilm_interval_evidence";
 export const APPLIANCE_DETAIL_API_PATH = "/api/circuitsetup_energy_analyzer/appliance_detail";
 export const APPLIANCE_DETAIL_CALL_API_PATH = "circuitsetup_energy_analyzer/appliance_detail";
@@ -50,6 +51,7 @@ export const PANEL_METHOD_DEPENDENCIES = {
   SETUP_HEALTH_CALL_API_PATH,
   NILM_WORKSPACE_API_PATH,
   NILM_WORKSPACE_CALL_API_PATH,
+  NILM_WORKSPACE_COLLECTION_API_PATH,
   NILM_INTERVAL_EVIDENCE_API_PATH,
   HISTORY_CALL_API_PREFIX,
   MAX_CHART_POINTS_PER_SERIES,
@@ -326,6 +328,22 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._payload = null;
     this._historySeries = [];
     this._nilmWorkspace = null;
+    this._nilmAmbiguityAuditExpanded = false;
+    this._nilmAmbiguityAuditLoading = false;
+    this._nilmAmbiguityAuditError = "";
+    this._nilmAmbiguityAuditItems = [];
+    this._nilmAmbiguityAuditFetchedPath = "";
+    this._nilmAmbiguityAuditNextCursor = null;
+    this._nilmAmbiguityAuditTruncated = false;
+    this._nilmAmbiguityAuditExpandedGroups = new Set();
+    this._nilmAmbiguityAuditGroupResults = new Map();
+    this._nilmAmbiguityAuditGroupSummaries = new Map();
+    this._nilmAmbiguityAuditGroupSummariesLoading = false;
+    this._nilmAmbiguityAuditGroupSummariesError = "";
+    this._nilmAmbiguityAuditGroupSummariesNextCursor = null;
+    this._nilmAmbiguityAuditGroupSummariesFetched = false;
+    this._nilmAmbiguityAuditRequestToken = 0;
+    this._nilmFocusedAmbiguitySession = null;
     this._applianceDetail = null;
     this._applianceInsights = null;
     this._applianceInsights = null;
@@ -483,6 +501,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._nilmActiveLane = "needs_review";
       this._nilmSelectedReviewKey = "";
       this._nilmFocusedInterval = null;
+      this._nilmFocusedAmbiguitySession = null;
       this._nilmIntervalGraphSnapshot = null;
     }
     this._loadedRouteKey = routeKey;
@@ -492,6 +511,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._historySeries = [];
     this._nilmWorkspaceHistoryLoading = false;
     this._nilmWorkspace = null;
+    this._resetNilmAmbiguityAudit();
     this._applianceDetail = null;
     this._applianceDetailHistorySeries = [];
     this._applianceDetailHistoryHours = 0;
@@ -520,6 +540,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmReferenceDrafts.clear();
     this._nilmFocusedSignature = "";
     this._nilmFocusedOccurrenceIndex = -1;
+    this._nilmFocusedAmbiguitySession = null;
     this._nilmGraphWindow = null;
     this._nilmFocusedInterval = null;
     this._nilmIntervalGraphSnapshot = null;

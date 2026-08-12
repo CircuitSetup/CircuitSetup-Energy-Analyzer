@@ -8,6 +8,7 @@ from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .nilm import (
+    NILM_AMBIGUITY_CANDIDATE_MAX_ITEMS,
     NilmEdge,
     NilmSignature,
     nilm_signature_fingerprint,
@@ -38,7 +39,7 @@ NILM_SESSION_HISTORY_COUNT_MAX = 1_000_000
 _NILM_SESSION_HISTORY_TIMESTAMP_LATEST = (
     datetime.max - timedelta(days=30)
 ).replace(tzinfo=UTC)
-_NILM_SESSION_HISTORY_MAX_ROW_FIELDS = 42
+_NILM_SESSION_HISTORY_MAX_ROW_FIELDS = 43
 _NILM_SESSION_HISTORY_MAX_UNKNOWN_FIELDS = (
     NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT * 64
 )
@@ -95,6 +96,26 @@ _NILM_SESSION_HISTORY_ROW_BOOLEAN_FIELDS = (
     "post_context_coverage",
     "trace_point_cap_truncated",
 )
+_NILM_SESSION_HISTORY_AMBIGUITY_CANDIDATE_FIELDS = (
+    "candidate_id",
+    "candidate_kind",
+    "signature_fingerprint",
+    "assignment_id",
+    "edge_id",
+    "total_score",
+    "score_margin_from_best",
+    "reason_code",
+)
+_NILM_SESSION_HISTORY_AMBIGUITY_CANDIDATE_KINDS = frozenset(
+    {"assignment", "signature", "stop_boundary"}
+)
+_NILM_SESSION_HISTORY_AMBIGUITY_REASON_CODES = frozenset(
+    {
+        "assignment_candidate_conflict",
+        "signature_candidate_conflict",
+        "stop_boundary_conflict",
+    }
+)
 _NILM_SESSION_HISTORY_ENERGY_SOURCES = frozenset(
     {
         "residual_trace_measured",
@@ -119,6 +140,7 @@ _NILM_SESSION_HISTORY_ROW_OUTPUT_FIELDS = (
     "overlap_count",
     "ambiguous",
     "alternate_match_count",
+    "ambiguity_candidates",
     "known_load_masked",
     "known_load_confidence",
     "assignment_id",
@@ -434,7 +456,7 @@ def _canonical_nilm_session_history_identity_components(
 def _canonical_nilm_session_history_duration_close(
     raw_close: Any,
 ) -> tuple[dict[str, Any] | None, bool]:
-    """Project an all-or-nothing scalar duration-close record."""
+    """Project an all-or-nothing bounded duration-close record."""
 
     if not isinstance(raw_close, Mapping):
         return None, False
@@ -442,7 +464,14 @@ def _canonical_nilm_session_history_duration_close(
         field_count = len(raw_close)
     except (TypeError, ValueError, OverflowError):
         return None, False
-    if field_count != len(_NILM_SESSION_HISTORY_DURATION_CLOSE_FIELDS):
+    raw_candidates = _nilm_session_history_mapping_value(
+        raw_close,
+        "ambiguity_candidates",
+    )
+    expected_field_count = len(_NILM_SESSION_HISTORY_DURATION_CLOSE_FIELDS) + int(
+        raw_candidates is not _NILM_SESSION_HISTORY_MISSING
+    )
+    if field_count != expected_field_count:
         return None, False
     values = {
         key: _nilm_session_history_mapping_value(raw_close, key)
@@ -493,7 +522,104 @@ def _canonical_nilm_session_history_duration_close(
     if normalized is None:
         return None, False
     close["alternate_match_count"] = normalized
+    if raw_candidates is not _NILM_SESSION_HISTORY_MISSING:
+        candidates, candidates_complete = (
+            _canonical_nilm_session_history_ambiguity_candidates(raw_candidates)
+        )
+        if not candidates_complete:
+            return None, False
+        close["ambiguity_candidates"] = candidates
     return close, True
+
+
+def _canonical_nilm_session_history_ambiguity_candidates(
+    raw_candidates: Any,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Project only the fixed, bounded ambiguity evidence retained by NILM."""
+
+    if not isinstance(raw_candidates, (list, tuple)):
+        return [], False
+    valid = len(raw_candidates) <= NILM_AMBIGUITY_CANDIDATE_MAX_ITEMS
+    candidates: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for raw_candidate in raw_candidates[:NILM_AMBIGUITY_CANDIDATE_MAX_ITEMS]:
+        if not isinstance(raw_candidate, Mapping):
+            valid = False
+            continue
+        try:
+            field_count = len(raw_candidate)
+        except (TypeError, ValueError, OverflowError):
+            valid = False
+            continue
+        if field_count != len(_NILM_SESSION_HISTORY_AMBIGUITY_CANDIDATE_FIELDS):
+            valid = False
+            continue
+        values = {
+            key: _nilm_session_history_mapping_value(raw_candidate, key)
+            for key in _NILM_SESSION_HISTORY_AMBIGUITY_CANDIDATE_FIELDS
+        }
+        if any(
+            value is _NILM_SESSION_HISTORY_MISSING for value in values.values()
+        ):
+            valid = False
+            continue
+        candidate_id = _nilm_session_history_text(values["candidate_id"])
+        candidate_kind = _nilm_session_history_text(values["candidate_kind"])
+        reason_code = _nilm_session_history_text(values["reason_code"])
+        if (
+            candidate_id is None
+            or candidate_id in seen_ids
+            or candidate_kind
+            not in _NILM_SESSION_HISTORY_AMBIGUITY_CANDIDATE_KINDS
+            or reason_code not in _NILM_SESSION_HISTORY_AMBIGUITY_REASON_CODES
+        ):
+            valid = False
+            continue
+        candidate: dict[str, Any] = {
+            "candidate_id": candidate_id,
+            "candidate_kind": candidate_kind,
+            "reason_code": reason_code,
+        }
+        candidate_valid = True
+        for key in ("signature_fingerprint", "assignment_id", "edge_id"):
+            value = values[key]
+            if value is None:
+                candidate[key] = None
+                continue
+            normalized = _nilm_session_history_text(value)
+            if normalized is None:
+                candidate_valid = False
+                break
+            candidate[key] = normalized
+        for key in ("total_score", "score_margin_from_best"):
+            if not candidate_valid:
+                break
+            value = values[key]
+            if value is None:
+                candidate[key] = None
+                continue
+            normalized = _nilm_session_history_number(value, unit_interval=True)
+            if normalized is None:
+                candidate_valid = False
+                break
+            candidate[key] = normalized
+        if not candidate_valid:
+            valid = False
+            continue
+        seen_ids.add(candidate_id)
+        candidates.append(candidate)
+
+    candidates.sort(
+        key=lambda candidate: (
+            -(
+                candidate["total_score"]
+                if isinstance(candidate["total_score"], float)
+                else -1.0
+            ),
+            candidate["candidate_id"],
+        )
+    )
+    return candidates, valid
 
 
 def _canonical_nilm_session_history_row(
@@ -502,8 +628,8 @@ def _canonical_nilm_session_history_row(
     """Project one row to the fixed scalar NILM session schema.
 
     The caller visits at most 2,000 rows. This function reads a fixed bounded
-    scalar schema, never iterates unknown keys or nested values, and emits scalars or
-    canonical <=64-byte timestamp text only.
+    scalar schema plus at most three fixed candidate records. It never iterates
+    unknown keys or unbounded nested values, and emits canonical scalar text.
     """
 
     facts: dict[str, int | bool] = {
@@ -527,6 +653,7 @@ def _canonical_nilm_session_history_row(
         *_NILM_SESSION_HISTORY_ROW_NUMBER_FIELDS,
         *_NILM_SESSION_HISTORY_ROW_COUNT_FIELDS,
         *_NILM_SESSION_HISTORY_ROW_BOOLEAN_FIELDS,
+        "ambiguity_candidates",
         _NILM_SESSION_HISTORY_LEGACY_ENERGY_FIELD,
         "_duration_bound_close",
     )
@@ -709,6 +836,23 @@ def _canonical_nilm_session_history_row(
             )
             continue
         row[key] = value
+
+    ambiguity_candidates = values["ambiguity_candidates"]
+    if ambiguity_candidates is not _NILM_SESSION_HISTORY_MISSING:
+        projected_candidates, candidates_complete = (
+            _canonical_nilm_session_history_ambiguity_candidates(
+                ambiguity_candidates
+            )
+        )
+        if not candidates_complete:
+            facts["identity_aliases_complete"] = False
+            facts["invalid_scalar_count"] = _saturated_nilm_session_history_count(
+                int(facts["invalid_scalar_count"]),
+                1,
+                maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+            )
+        if projected_candidates:
+            row["ambiguity_candidates"] = projected_candidates
 
     row = {
         key: row[key] for key in _NILM_SESSION_HISTORY_ROW_OUTPUT_FIELDS if key in row

@@ -1355,6 +1355,85 @@ def test_feature_store_projects_nilm_session_rows_to_canonical_scalars() -> None
     )
 
 
+def test_feature_store_round_trips_bounded_nilm_ambiguity_candidates() -> None:
+    """Closed ambiguous sessions retain only their compact audit evidence."""
+    from custom_components.circuitsetup_energy_analyzer.nilm import (
+        NilmAmbiguityCandidateSummary,
+        NilmSession,
+        nilm_session_to_dict,
+    )
+
+    now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
+    candidates = (
+        NilmAmbiguityCandidateSummary(
+            candidate_id="candidate-low",
+            candidate_kind="assignment",
+            signature_fingerprint="signature-low",
+            assignment_id="assignment-low",
+            edge_id=None,
+            total_score=0.7,
+            score_margin_from_best=0.25,
+            reason_code="assignment_candidate_conflict",
+        ),
+        NilmAmbiguityCandidateSummary(
+            candidate_id="candidate-best",
+            candidate_kind="assignment",
+            signature_fingerprint="signature-best",
+            assignment_id="assignment-best",
+            edge_id=None,
+            total_score=0.95,
+            score_margin_from_best=0.0,
+            reason_code="assignment_candidate_conflict",
+        ),
+        NilmAmbiguityCandidateSummary(
+            candidate_id="candidate-middle",
+            candidate_kind="assignment",
+            signature_fingerprint="signature-middle",
+            assignment_id="assignment-middle",
+            edge_id=None,
+            total_score=0.92,
+            score_margin_from_best=0.03,
+            reason_code="assignment_candidate_conflict",
+        ),
+        NilmAmbiguityCandidateSummary(
+            candidate_id="candidate-other",
+            candidate_kind="assignment",
+            signature_fingerprint="signature-other",
+            assignment_id="assignment-other",
+            edge_id=None,
+            total_score=0.9,
+            score_margin_from_best=0.05,
+            reason_code="assignment_candidate_conflict",
+        ),
+    )
+    canonical = nilm_session_to_dict(
+        NilmSession(
+            session_id="ambiguous-session",
+            mains_circuit_id="mains",
+            signature_fingerprint="signature-best",
+            on_edge_id="on-edge",
+            off_edge_id="off-edge",
+            start=now,
+            end=now + timedelta(minutes=5),
+            duration_seconds=300.0,
+            median_power_w=500.0,
+            estimated_energy_kwh=0.042,
+            confidence=0.9,
+            ambiguous=True,
+            ambiguity_candidates=candidates,
+        )
+    )
+
+    restored = feature_store_data_from_dict(
+        {"nilm_session_history_by_circuit": {"mains": [canonical]}}
+    )
+
+    assert [
+        candidate["candidate_id"] for candidate in canonical["ambiguity_candidates"]
+    ] == ["candidate-best", "candidate-middle", "candidate-other"]
+    assert restored.nilm_session_history_by_circuit["mains"] == [canonical]
+
+
 def test_feature_store_migrates_legacy_session_energy_to_public_scalar() -> None:
     """Legacy runtime rows retain energy through the canonical public field."""
 
@@ -1381,7 +1460,7 @@ def test_feature_store_migrates_legacy_session_energy_to_public_scalar() -> None
     assert "mains" not in restored.nilm_session_history_ingress_by_circuit
 
 
-def test_feature_store_keeps_only_complete_scalar_duration_close_records() -> None:
+def test_feature_store_keeps_only_complete_bounded_duration_close_records() -> None:
     """Private duration restoration data is all-or-nothing at hydration."""
     now = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
     valid_close = {
@@ -1393,6 +1472,18 @@ def test_feature_store_keeps_only_complete_scalar_duration_close_records() -> No
         "confidence": 0.8,
         "ambiguous": False,
         "alternate_match_count": 0,
+        "ambiguity_candidates": [
+            {
+                "candidate_id": "stop-boundary-early",
+                "candidate_kind": "stop_boundary",
+                "signature_fingerprint": "signature-a",
+                "assignment_id": "dryer",
+                "edge_id": "off-a",
+                "total_score": 0.9,
+                "score_margin_from_best": 0.0,
+                "reason_code": "stop_boundary_conflict",
+            }
+        ],
     }
     base = {
         "mains_circuit_id": "mains",

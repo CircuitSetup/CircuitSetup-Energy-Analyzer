@@ -54,6 +54,7 @@ NILM_VALIDATION_PRIOR_CORRECT = 2.0
 NILM_VALIDATION_PRIOR_WRONG = 2.0
 NILM_VALIDATION_MAX_REPLAY_WINDOW = timedelta(days=31)
 NILM_SESSION_MAX_DURATION = timedelta(hours=12)
+NILM_AMBIGUITY_CANDIDATE_MAX_ITEMS = 3
 NILM_RESIDUAL_TRACE_PRE_CONTEXT = timedelta(seconds=30)
 NILM_RESIDUAL_TRACE_POST_CONTEXT = timedelta(seconds=30)
 NILM_RESIDUAL_TRACE_SAFETY_MARGIN = timedelta(minutes=5)
@@ -3542,6 +3543,20 @@ class NilmResidualTraceMetadata:
 
 
 @dataclass(frozen=True, slots=True)
+class NilmAmbiguityCandidateSummary:
+    """One bounded, durable explanation for an ambiguous NILM session."""
+
+    candidate_id: str
+    candidate_kind: str
+    signature_fingerprint: str | None
+    assignment_id: str | None
+    edge_id: str | None
+    total_score: float | None
+    score_margin_from_best: float | None
+    reason_code: str
+
+
+@dataclass(frozen=True, slots=True)
 class NilmSession:
     """Probable appliance run reconstructed from compatible NILM edges."""
 
@@ -3559,6 +3574,7 @@ class NilmSession:
     overlap_count: int = 0
     ambiguous: bool = False
     alternate_match_count: int = 0
+    ambiguity_candidates: tuple[NilmAmbiguityCandidateSummary, ...] = ()
     known_load_masked: bool = False
     known_load_confidence: float | None = None
     assignment_id: str | None = None
@@ -3590,7 +3606,7 @@ class NilmSession:
 
 def nilm_session_to_dict(session: NilmSession) -> dict[str, Any]:
     """Return compact, storage-safe NILM session metadata."""
-    return {
+    payload = {
         "session_id": session.session_id,
         "mains_circuit_id": session.mains_circuit_id,
         "signature_fingerprint": session.signature_fingerprint,
@@ -3647,6 +3663,51 @@ def nilm_session_to_dict(session: NilmSession) -> dict[str, Any]:
             session.trace_point_cap_truncation_count
         ),
     }
+    if session.ambiguity_candidates:
+        payload["ambiguity_candidates"] = _nilm_ambiguity_candidates_to_dict(
+            session.ambiguity_candidates
+        )
+    return payload
+
+
+def _nilm_ambiguity_candidates_to_dict(
+    candidates: Iterable[NilmAmbiguityCandidateSummary],
+) -> list[dict[str, Any]]:
+    """Serialize only the best bounded ambiguity evidence deterministically."""
+
+    def sort_key(candidate: NilmAmbiguityCandidateSummary) -> tuple[float, str]:
+        score = candidate.total_score
+        return (
+            -(
+                float(score)
+                if isinstance(score, (int, float)) and isfinite(score)
+                else -1.0
+            ),
+            candidate.candidate_id,
+        )
+
+    bounded: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for candidate in sorted(candidates, key=sort_key):
+        candidate_id = str(candidate.candidate_id or "").strip()
+        if not candidate_id or candidate_id in seen_ids:
+            continue
+        seen_ids.add(candidate_id)
+        bounded.append(
+            {
+                "candidate_id": candidate_id,
+                "candidate_kind": candidate.candidate_kind,
+                "signature_fingerprint": candidate.signature_fingerprint,
+                "assignment_id": candidate.assignment_id,
+                "edge_id": candidate.edge_id,
+                "total_score": candidate.total_score,
+                "score_margin_from_best": candidate.score_margin_from_best,
+                "reason_code": candidate.reason_code,
+            }
+        )
+        if len(bounded) >= NILM_AMBIGUITY_CANDIDATE_MAX_ITEMS:
+            break
+    return bounded
 
 
 def nilm_signature_fingerprint_v1(signature: NilmSignature) -> str:
@@ -5924,6 +5985,164 @@ class _NilmSessionCandidate:
     trace_evidence: _NilmSessionTraceEvidence | None = None
 
 
+def _nilm_ambiguity_candidate_id(
+    *,
+    candidate_kind: str,
+    signature_fingerprint: str | None,
+    assignment_id: str | None,
+    edge_id: str | None,
+    reason_code: str,
+) -> str:
+    """Return a stable opaque ID from retained candidate evidence only."""
+
+    parts = (
+        candidate_kind,
+        signature_fingerprint or "",
+        assignment_id or "",
+        edge_id or "",
+        reason_code,
+    )
+    digest = sha256("\x1f".join(parts).encode("utf-8")).hexdigest()[:24]
+    return f"nilm-ambiguity:{digest}"
+
+
+def _nilm_pair_ambiguity_reason_code(
+    ranked: Iterable[_NilmSessionCandidate],
+    *,
+    ambiguity_margin: float,
+) -> str | None:
+    """Return the retained conflict category behind one ambiguous pair."""
+
+    candidates = tuple(ranked)
+    if not candidates:
+        return None
+    best = candidates[0]
+    assignment_ids = {
+        candidate.assignment_id
+        for candidate in candidates
+        if candidate.assignment_id
+        and best.score - candidate.score <= ambiguity_margin
+    }
+    if len(assignment_ids) > 1:
+        return "assignment_candidate_conflict"
+    signature_fingerprints = {
+        candidate.signature_fingerprint
+        for candidate in candidates
+        if best.score - candidate.score <= ambiguity_margin
+    }
+    if len(signature_fingerprints) > 1:
+        return "signature_candidate_conflict"
+    return None
+
+
+def _nilm_session_ambiguity_candidates(
+    candidate: _NilmSessionCandidate,
+    *,
+    pair_candidates: Iterable[_NilmSessionCandidate],
+    pair_reason_code: str | None,
+    close_alternates: Iterable[_NilmSessionCandidate],
+    ambiguity_margin: float,
+) -> tuple[NilmAmbiguityCandidateSummary, ...]:
+    """Retain at most three actual pairing alternatives for an audit view."""
+
+    summaries: list[NilmAmbiguityCandidateSummary] = []
+    ranked_pair_candidates = sorted(
+        pair_candidates,
+        key=lambda item: (
+            -item.score,
+            item.signature_fingerprint,
+            item.assignment_id or "",
+            item.off_index,
+        ),
+    )
+    if pair_reason_code and ranked_pair_candidates:
+        best_score = ranked_pair_candidates[0].score
+        for alternate in ranked_pair_candidates:
+            if best_score - alternate.score > ambiguity_margin:
+                continue
+            candidate_kind = "assignment" if alternate.assignment_id else "signature"
+            summaries.append(
+                NilmAmbiguityCandidateSummary(
+                    candidate_id=_nilm_ambiguity_candidate_id(
+                        candidate_kind=candidate_kind,
+                        signature_fingerprint=alternate.signature_fingerprint,
+                        assignment_id=alternate.assignment_id,
+                        edge_id=None,
+                        reason_code=pair_reason_code,
+                    ),
+                    candidate_kind=candidate_kind,
+                    signature_fingerprint=alternate.signature_fingerprint,
+                    assignment_id=alternate.assignment_id,
+                    edge_id=None,
+                    total_score=round(alternate.score, 3),
+                    score_margin_from_best=round(
+                        max(best_score - alternate.score, 0.0), 3
+                    ),
+                    reason_code=pair_reason_code,
+                )
+            )
+
+    boundary_candidates = (candidate, *tuple(close_alternates))
+    if len(boundary_candidates) > 1:
+        best_score = max(item.score for item in boundary_candidates)
+        for alternate in boundary_candidates:
+            edge_id = _nilm_edge_id(alternate.off_edge)
+            summaries.append(
+                NilmAmbiguityCandidateSummary(
+                    candidate_id=_nilm_ambiguity_candidate_id(
+                        candidate_kind="stop_boundary",
+                        signature_fingerprint=alternate.signature_fingerprint,
+                        assignment_id=alternate.assignment_id,
+                        edge_id=edge_id,
+                        reason_code="stop_boundary_conflict",
+                    ),
+                    candidate_kind="stop_boundary",
+                    signature_fingerprint=alternate.signature_fingerprint,
+                    assignment_id=alternate.assignment_id,
+                    edge_id=edge_id,
+                    total_score=round(alternate.score, 3),
+                    score_margin_from_best=round(
+                        max(best_score - alternate.score, 0.0), 3
+                    ),
+                    reason_code="stop_boundary_conflict",
+                )
+            )
+
+    return tuple(
+        _nilm_ambiguity_candidates_to_dictless(summaries)[
+            :NILM_AMBIGUITY_CANDIDATE_MAX_ITEMS
+        ]
+    )
+
+
+def _nilm_ambiguity_candidates_to_dictless(
+    candidates: Iterable[NilmAmbiguityCandidateSummary],
+) -> list[NilmAmbiguityCandidateSummary]:
+    """Return deterministic bounded candidate objects without serializing them."""
+
+    def sort_key(candidate: NilmAmbiguityCandidateSummary) -> tuple[float, str]:
+        score = candidate.total_score
+        return (
+            -(
+                float(score)
+                if isinstance(score, (int, float)) and isfinite(score)
+                else -1.0
+            ),
+            candidate.candidate_id,
+        )
+
+    bounded: list[NilmAmbiguityCandidateSummary] = []
+    seen_ids: set[str] = set()
+    for summary in sorted(candidates, key=sort_key):
+        if summary.candidate_id in seen_ids:
+            continue
+        seen_ids.add(summary.candidate_id)
+        bounded.append(summary)
+        if len(bounded) >= NILM_AMBIGUITY_CANDIDATE_MAX_ITEMS:
+            break
+    return bounded
+
+
 def _select_nilm_session_candidates(
     candidates: Iterable[_NilmSessionCandidate],
     *,
@@ -6317,6 +6536,7 @@ def pair_nilm_sessions_for_signatures(
     candidates = _nilm_cycle_local_session_candidates(candidates)
 
     ambiguous_pairs: set[tuple[int, int]] = set()
+    ambiguity_reason_codes_by_pair: dict[tuple[int, int], str] = {}
     preferred_candidates: dict[tuple[int, int], _NilmSessionCandidate] = {}
     by_pair: dict[tuple[int, int], list[_NilmSessionCandidate]] = {}
     for candidate in candidates:
@@ -6337,6 +6557,13 @@ def pair_nilm_sessions_for_signatures(
             continue
         if len(assigned) > 1:
             ambiguous_pairs.add(pair)
+            ambiguity_reason_codes_by_pair[pair] = (
+                _nilm_pair_ambiguity_reason_code(
+                    ranked,
+                    ambiguity_margin=ambiguity_margin,
+                )
+                or "assignment_candidate_conflict"
+            )
             preferred_candidates[pair] = ranked[0]
             continue
         if (
@@ -6345,6 +6572,13 @@ def pair_nilm_sessions_for_signatures(
             and ranked[0].score - ranked[1].score <= ambiguity_margin
         ):
             ambiguous_pairs.add(pair)
+            ambiguity_reason_codes_by_pair[pair] = (
+                _nilm_pair_ambiguity_reason_code(
+                    ranked,
+                    ambiguity_margin=ambiguity_margin,
+                )
+                or "signature_candidate_conflict"
+            )
         preferred_candidates.setdefault(pair, ranked[0])
 
     used_on_indices: set[int] = set()
@@ -6404,6 +6638,13 @@ def pair_nilm_sessions_for_signatures(
                 known_load_masked=False,
                 known_load_confidence=None,
                 trace_evidence=candidate.trace_evidence,
+                ambiguity_candidates=_nilm_session_ambiguity_candidates(
+                    candidate,
+                    pair_candidates=by_pair[pair],
+                    pair_reason_code=ambiguity_reason_codes_by_pair.get(pair),
+                    close_alternates=close_alternates,
+                    ambiguity_margin=ambiguity_margin,
+                ),
             )
         )
 
@@ -7031,6 +7272,7 @@ def _closed_nilm_session(
     known_load_masked: bool,
     known_load_confidence: float | None,
     trace_evidence: _NilmSessionTraceEvidence | None = None,
+    ambiguity_candidates: tuple[NilmAmbiguityCandidateSummary, ...] = (),
 ) -> NilmSession:
     on_edge_id = _nilm_edge_id(on_edge)
     off_edge_id = _nilm_edge_id(off_edge)
@@ -7093,6 +7335,7 @@ def _closed_nilm_session(
         confidence=round(_clamp(confidence), 3),
         ambiguous=ambiguous,
         alternate_match_count=alternate_match_count,
+        ambiguity_candidates=ambiguity_candidates,
         known_load_masked=known_load_masked,
         known_load_confidence=_nilm_known_load_confidence(
             known_load_masked,

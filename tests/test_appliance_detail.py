@@ -216,6 +216,49 @@ def test_nilm_assignment_combines_stored_and_newly_derived_sessions() -> None:
     }
 
 
+def test_nilm_virtual_state_excludes_assigned_stop_boundary_ambiguity() -> None:
+    """Ambiguous completed evidence cannot become an appliance alert."""
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        nilm_virtual_appliance_alerts,
+        published_nilm_virtual_appliance_states,
+    )
+
+    coordinator = _nilm_coordinator()
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ][0]
+    assignment.update({"lifecycle_state": "published", "confidence": 0.91})
+    coordinator._nilm_unmatched_edges = {"mains": []}
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [{
+            **_nilm_session(
+                "ambiguous-stop-boundary",
+                start=datetime(2026, 6, 30, 8, 0, tzinfo=UTC),
+                end=datetime(2026, 6, 30, 8, 30, tzinfo=UTC),
+                duration_seconds=1800.0,
+                energy_kwh=0.41,
+            ),
+            "ambiguous": True,
+            "ambiguity_candidates": [{
+                "candidate_id": "stop-boundary-early",
+                "candidate_kind": "stop_boundary",
+                "edge_id": "off-early",
+                "reason_code": "stop_boundary_conflict",
+            }],
+        }]
+    }
+
+    state = published_nilm_virtual_appliance_states(coordinator)[0]
+
+    assert state.sessions == ()
+    assert state.latest_session_id is None
+    assert state.estimated_energy_kwh_today == 0.0
+    assert nilm_virtual_appliance_alerts(
+        coordinator,
+        now=datetime(2026, 6, 30, 10, 0, tzinfo=UTC),
+    ) == ()
+
+
 def _nilm_session(
     session_id: str,
     *,

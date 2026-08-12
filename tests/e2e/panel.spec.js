@@ -5888,6 +5888,915 @@ test("NILM lane tabs support keyboard navigation", async ({ page }) => {
   await expect(assigned).toHaveAttribute("aria-selected", "true");
 });
 
+
+test("NILM ambiguity audit is absent when no completed uncertain evidence exists", async ({ page }) => {
+  await mockPanelApi(page);
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+
+  await expect(panel.locator("[data-nilm-ambiguity-audit]")).toHaveCount(0);
+});
+
+
+test("NILM ambiguity audit is neutral, bounded, and focuses without editing", async ({ page }) => {
+  let collectionRequests = 0;
+  const collectionPath = "/api/circuitsetup_energy_analyzer/nilm_workspace/collection";
+  const groupId = "amb-group-assignment";
+  const boundaryGroupId = "amb-group-boundary";
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname === collectionPath) {
+      collectionRequests += 1;
+      expect(url.searchParams.get("collection")).toBe("ambiguous_sessions");
+      expect(url.searchParams.get("limit")).toBe("20");
+      if (url.searchParams.get("group_id") === boundaryGroupId) {
+        await route.fulfill({ json: {
+          status: "ok",
+          total_count: 1,
+          returned_count: 1,
+          truncated: false,
+          next_cursor: null,
+          items: [{
+            session_id: "ambiguous-boundary",
+            group_id: boundaryGroupId,
+            start: "2026-07-13T15:00:00Z",
+            end: "2026-07-13T15:10:00Z",
+            duration_seconds: 600,
+            median_power_w: 900,
+            estimated_energy_kwh: 0.15,
+            ambiguous: true,
+            ambiguity_category: "stop_boundary_conflict",
+            ambiguity_reason_codes: ["stop_boundary_conflict"],
+            candidate_explanations: [],
+            safe_actions: ["open_on_graph", "create_manual_interval"],
+          }],
+        } });
+        return true;
+      }
+      expect(url.searchParams.get("group_id")).toBeNull();
+      await route.fulfill({ json: {
+        status: "ok",
+        total_count: 21,
+        returned_count: 20,
+        truncated: true,
+        next_cursor: "opaque-cursor",
+        items: [
+          {
+            session_id: "ambiguous-2",
+            group_id: groupId,
+            start: "2026-07-13T17:00:00Z",
+            end: "2026-07-13T17:25:00Z",
+            on_edge_id: "on-2",
+            off_edge_id: "off-2",
+            duration_seconds: 1500,
+            median_power_w: 900,
+            estimated_energy_kwh: 0.375,
+            ambiguous: true,
+            ambiguity_category: "assignment_candidate_conflict",
+            ambiguity_reason_codes: ["assignment_candidate_conflict"],
+            candidate_explanations: [
+              {
+                candidate_id: "assignment-dryer",
+                candidate_kind: "assignment",
+                assignment_id: "dryer",
+                signature_fingerprint: "signature-dryer",
+                total_score: 0.92,
+                score_margin_from_best: 0,
+                reason_code: "assignment_candidate_conflict",
+                display_label: "Dryer",
+              },
+              {
+                candidate_id: "assignment-ev",
+                candidate_kind: "assignment",
+                assignment_id: "ev",
+                signature_fingerprint: "signature-ev",
+                total_score: 0.9,
+                score_margin_from_best: 0.02,
+                reason_code: "assignment_candidate_conflict",
+                display_label: "EV charger",
+              },
+            ],
+            safe_actions: ["open_on_graph", "create_manual_interval"],
+          },
+          {
+            session_id: "ambiguous-1",
+            group_id: groupId,
+            start: "2026-07-13T16:00:00Z",
+            end: "2026-07-13T16:20:00Z",
+            duration_seconds: 1200,
+            median_power_w: 900,
+            estimated_energy_kwh: 0.3,
+            ambiguous: true,
+            ambiguity_category: "assignment_candidate_conflict",
+            ambiguity_reason_codes: ["assignment_candidate_conflict"],
+            candidate_explanations: [],
+            safe_actions: ["open_on_graph", "create_manual_interval"],
+          },
+          ...Array.from({ length: 18 }, (_, index) => ({
+            session_id: `ambiguous-extra-${index}`,
+            group_id: groupId,
+            start: "2026-07-13T15:00:00Z",
+            end: "2026-07-13T15:10:00Z",
+            duration_seconds: 600,
+            median_power_w: 900,
+            estimated_energy_kwh: 0.15,
+            ambiguous: true,
+            ambiguity_category: "assignment_candidate_conflict",
+            ambiguity_reason_codes: ["assignment_candidate_conflict"],
+            candidate_explanations: [],
+            safe_actions: ["open_on_graph", "create_manual_interval"],
+          })),
+        ],
+      } });
+      return true;
+    }
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: [[
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T16:50:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "900", last_changed: "2026-07-13T17:00:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T17:25:00Z", effective_role: "real_power", source_unit: "W" },
+      ]] });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.history = {
+      ...payload.history,
+      entities: ["sensor.mains_power"],
+      api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+      fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+      max_hours: 24,
+    };
+    payload.ambiguity_audit = {
+      total_count: 21,
+      requires_action: false,
+      collapsed_by_default: true,
+      group_count: 2,
+      group_preview: [
+        {
+          group_id: groupId,
+          category: "assignment_candidate_conflict",
+          candidate_labels: ["Dryer", "EV charger"],
+          occurrence_count: 20,
+          latest_at: "2026-07-13T17:25:00Z",
+        },
+        {
+          group_id: boundaryGroupId,
+          category: "stop_boundary_conflict",
+          candidate_labels: [],
+          occurrence_count: 1,
+          latest_at: "2026-07-13T15:10:00Z",
+        },
+      ],
+      group_preview_truncated: false,
+      fetch_path: `${collectionPath}?collection=ambiguous_sessions&circuit_id=mains`,
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  const audit = panel.locator("[data-nilm-ambiguity-audit]");
+  const toggle = audit.locator("[data-nilm-ambiguity-toggle]");
+
+  await expect(audit).toBeVisible();
+  await expect(audit).toContainText("21 events could not be identified confidently");
+  await expect(audit).toContainText("No action is required");
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await expect(toggle).toHaveAttribute(
+    "aria-describedby",
+    "nilm_ambiguity_audit_summary nilm_ambiguity_audit_no_action",
+  );
+  await expect(audit.locator("[data-nilm-ambiguity-content]")).toBeHidden();
+  await expect(audit.locator("[data-nilm-session-action], [data-nilm-assignment-action]")).toHaveCount(0);
+
+  await toggle.click();
+  await expect.poll(() => collectionRequests).toBe(1);
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(audit.locator("[data-nilm-ambiguity-live]")).toContainText("loaded");
+  const group = audit.locator(`[data-nilm-ambiguity-group="${groupId}"]`);
+  await expect(group).toContainText("Dryer");
+  await expect(group).toContainText("20 occurrences");
+  await group.click();
+  expect(collectionRequests).toBe(1);
+
+  const occurrence = audit.locator('[data-nilm-ambiguity-occurrence="ambiguous-2"]');
+  await expect(occurrence).toBeVisible();
+  await expect(occurrence).toContainText("EV charger");
+  await expect(occurrence.locator("[data-nilm-ambiguity-open-graph]")).toBeVisible();
+  await expect(occurrence.locator("[data-nilm-ambiguity-create-interval]")).toBeVisible();
+  await expect(occurrence.locator("[data-nilm-apply-decision], [data-nilm-session-action]")).toHaveCount(0);
+
+  const boundaryGroup = audit.locator(`[data-nilm-ambiguity-group="${boundaryGroupId}"]`);
+  await boundaryGroup.click();
+  await expect(audit.locator('[data-nilm-ambiguity-occurrence="ambiguous-boundary"]')).toBeVisible();
+  await expect.poll(() => collectionRequests).toBe(2);
+
+  const openOnGraph = occurrence.locator("[data-nilm-ambiguity-open-graph]");
+  await openOnGraph.click();
+  await expect(panel.locator("[data-nilm-interval-editor]")).toHaveCount(0);
+  await expect(occurrence).toHaveAttribute("data-nilm-selected", "true");
+  await expect(panel.locator('[data-nilm-ambiguity-open-graph][data-nilm-ambiguity-session-id="ambiguous-2"]')).toBeFocused();
+  await expect(panel.locator('.nilm-session-band[data-nilm-selected="true"]')).toHaveAttribute(
+    "data-nilm-session-start",
+    "2026-07-13T17:00:00Z",
+  );
+  await occurrence.locator("[data-nilm-ambiguity-create-interval]").click();
+  await expect(panel.locator("[data-nilm-interval-editor]")).toBeVisible();
+  await expect(panel.locator('[data-nilm-label-interval-input="start"]')).toHaveValue(/2026-07-13T17:00/);
+  expect(collectionRequests).toBe(2);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await audit.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await toHaveNoViolations(page);
+});
+
+
+test("NILM ambiguity audit reveals additional groups without moving keyboard focus", async ({ page }) => {
+  const collectionPath = "/api/circuitsetup_energy_analyzer/nilm_workspace/collection";
+  const groupIds = [
+    "amb-group-one",
+    "amb-group-two",
+    "amb-group-three",
+    "amb-group-four",
+  ];
+  const fourthGroupId = groupIds[3];
+  let groupSummaryRequests = 0;
+  let fourthGroupRequests = 0;
+  const groups = groupIds.map((groupId, index) => ({
+    group_id: groupId,
+    category: "assignment_candidate_conflict",
+    candidate_labels: [`Candidate ${index + 1}`],
+    occurrence_count: 1,
+    latest_at: `2026-07-13T${String(17 - index).padStart(2, "0")}:00:00Z`,
+  }));
+  const item = (sessionId, groupId) => ({
+    session_id: sessionId,
+    group_id: groupId,
+    start: "2026-07-13T16:00:00Z",
+    end: "2026-07-13T16:20:00Z",
+    duration_seconds: 1200,
+    median_power_w: 900,
+    ambiguous: true,
+    ambiguity_category: "assignment_candidate_conflict",
+    ambiguity_reason_codes: ["assignment_candidate_conflict"],
+    candidate_explanations: [],
+    safe_actions: ["open_on_graph", "create_manual_interval"],
+  });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname === collectionPath) {
+      if (url.searchParams.get("view") === "groups") {
+        groupSummaryRequests += 1;
+        expect(url.searchParams.get("cursor")).toBeNull();
+        await route.fulfill({ json: {
+          status: "ok",
+          items: [],
+          groups,
+          total_count: 5,
+          returned_count: groups.length,
+          truncated: true,
+          next_cursor: "groups-next-page",
+        } });
+        return true;
+      }
+      if (url.searchParams.get("group_id") === fourthGroupId) {
+        fourthGroupRequests += 1;
+        await route.fulfill({ json: {
+          status: "ok",
+          total_count: 1,
+          returned_count: 1,
+          truncated: false,
+          next_cursor: null,
+          items: [item("fourth-group-session", fourthGroupId)],
+        } });
+        return true;
+      }
+      expect(url.searchParams.get("group_id")).toBeNull();
+      await route.fulfill({ json: {
+        status: "ok",
+        total_count: 5,
+        returned_count: 1,
+        truncated: true,
+        next_cursor: "global-next-page",
+        items: [item("first-group-session", groupIds[0])],
+      } });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.ambiguity_audit = {
+      total_count: 5,
+      requires_action: false,
+      collapsed_by_default: true,
+      group_count: 5,
+      group_preview: groups.slice(0, 3),
+      group_preview_truncated: true,
+      fetch_path: `${collectionPath}?collection=ambiguous_sessions&circuit_id=mains`,
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  const audit = panel.locator("[data-nilm-ambiguity-audit]");
+  await audit.locator("[data-nilm-ambiguity-toggle]").click();
+  await expect(audit.locator("[data-nilm-ambiguity-group]")).toHaveCount(3);
+
+  const loadGroups = audit.locator("[data-nilm-ambiguity-load-groups]");
+  await loadGroups.focus();
+  await loadGroups.press("Enter");
+  await expect.poll(() => groupSummaryRequests).toBe(1);
+  await expect(audit.locator(`[data-nilm-ambiguity-group="${fourthGroupId}"]`)).toBeVisible();
+  await expect(loadGroups).toContainText("Load more uncertainty groups");
+  await expect(loadGroups).toBeFocused();
+
+  await audit.locator(`[data-nilm-ambiguity-group="${fourthGroupId}"]`).click();
+  await expect.poll(() => fourthGroupRequests).toBe(1);
+  await expect(audit.locator('[data-nilm-ambiguity-occurrence="fourth-group-session"]')).toBeVisible();
+});
+
+
+test("NILM ambiguity audit clears an in-flight group-summary fetch when collapsed", async ({ page }) => {
+  const collectionPath = "/api/circuitsetup_energy_analyzer/nilm_workspace/collection";
+  let groupSummaryStarted = false;
+  let releaseGroupSummary;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname === collectionPath) {
+      if (url.searchParams.get("view") === "groups") {
+        groupSummaryStarted = true;
+        await new Promise((resolve) => {
+          releaseGroupSummary = async () => {
+            await route.fulfill({ json: {
+              status: "ok",
+              items: [],
+              groups: [],
+              total_count: 4,
+              returned_count: 0,
+              truncated: false,
+              next_cursor: null,
+            } });
+            resolve();
+          };
+        });
+        return true;
+      }
+      await route.fulfill({ json: {
+        status: "ok",
+        total_count: 4,
+        returned_count: 1,
+        truncated: true,
+        next_cursor: "global-next-page",
+        items: [{
+          session_id: "first-group-session",
+          group_id: "amb-group-one",
+          start: "2026-07-13T16:00:00Z",
+          end: "2026-07-13T16:20:00Z",
+          ambiguous: true,
+          safe_actions: ["open_on_graph", "create_manual_interval"],
+        }],
+      } });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.ambiguity_audit = {
+      total_count: 4,
+      requires_action: false,
+      collapsed_by_default: true,
+      group_count: 4,
+      group_preview: [
+        "one",
+        "two",
+        "three",
+      ].map((suffix, index) => ({
+        group_id: `amb-group-${suffix}`,
+        category: "assignment_candidate_conflict",
+        candidate_labels: [],
+        occurrence_count: 1,
+        latest_at: `2026-07-13T${String(17 - index).padStart(2, "0")}:00:00Z`,
+      })),
+      group_preview_truncated: true,
+      fetch_path: `${collectionPath}?collection=ambiguous_sessions&circuit_id=mains`,
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  const audit = panel.locator("[data-nilm-ambiguity-audit]");
+  const toggle = audit.locator("[data-nilm-ambiguity-toggle]");
+  await toggle.click();
+  await audit.locator("[data-nilm-ambiguity-load-groups]").click();
+  await expect.poll(() => groupSummaryStarted).toBe(true);
+
+  await toggle.click();
+  await expect(audit.locator("[data-nilm-ambiguity-content]")).toBeHidden();
+  await releaseGroupSummary();
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
+  await expect.poll(() => page.evaluate(() => (
+    window.__panel._nilmAmbiguityAuditGroupSummariesLoading
+  ))).toBe(false);
+
+  await toggle.click();
+  await expect(audit.locator("[data-nilm-ambiguity-load-groups]")).toBeEnabled();
+});
+
+
+test("NILM ambiguity audit clears an in-flight occurrence fetch when its group closes", async ({ page }) => {
+  const collectionPath = "/api/circuitsetup_energy_analyzer/nilm_workspace/collection";
+  const groupId = "amb-group-delayed-close";
+  let groupRequests = 0;
+  let releaseFirstGroupRequest;
+  const item = {
+    session_id: "fresh-after-close",
+    group_id: groupId,
+    start: "2026-07-13T16:00:00Z",
+    end: "2026-07-13T16:20:00Z",
+    ambiguous: true,
+    safe_actions: ["open_on_graph", "create_manual_interval"],
+  };
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname === collectionPath) {
+      if (url.searchParams.get("group_id") === groupId) {
+        groupRequests += 1;
+        if (groupRequests === 1) {
+          await new Promise((resolve) => {
+            releaseFirstGroupRequest = async () => {
+              await route.fulfill({ json: {
+                status: "ok",
+                total_count: 1,
+                returned_count: 1,
+                truncated: false,
+                next_cursor: null,
+                items: [item],
+              } });
+              resolve();
+            };
+          });
+          return true;
+        }
+        await route.fulfill({ json: {
+          status: "ok",
+          total_count: 1,
+          returned_count: 1,
+          truncated: false,
+          next_cursor: null,
+          items: [item],
+        } });
+        return true;
+      }
+      await route.fulfill({ json: {
+        status: "ok",
+        total_count: 1,
+        returned_count: 0,
+        truncated: true,
+        next_cursor: "global-next-page",
+        items: [],
+      } });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.ambiguity_audit = {
+      total_count: 1,
+      requires_action: false,
+      collapsed_by_default: true,
+      group_count: 1,
+      group_preview: [{
+        group_id: groupId,
+        category: "assignment_candidate_conflict",
+        candidate_labels: [],
+        occurrence_count: 1,
+        latest_at: "2026-07-13T16:20:00Z",
+      }],
+      group_preview_truncated: false,
+      fetch_path: `${collectionPath}?collection=ambiguous_sessions&circuit_id=mains`,
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  const audit = panel.locator("[data-nilm-ambiguity-audit]");
+  await audit.locator("[data-nilm-ambiguity-toggle]").click();
+  const group = audit.locator(`[data-nilm-ambiguity-group="${groupId}"]`);
+  await group.click();
+  await expect.poll(() => groupRequests).toBe(1);
+
+  await group.click();
+  await releaseFirstGroupRequest();
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
+  await expect.poll(() => page.evaluate(() => Boolean(
+    window.__panel._nilmAmbiguityAuditGroupResults.get("amb-group-delayed-close")?.loading,
+  ))).toBe(false);
+
+  await group.click();
+  await expect.poll(() => groupRequests).toBe(2);
+  await expect(audit.locator('[data-nilm-ambiguity-occurrence="fresh-after-close"]')).toBeVisible();
+});
+
+
+test("NILM ambiguity audit loads further bounded occurrence pages", async ({ page }) => {
+  const collectionPath = "/api/circuitsetup_energy_analyzer/nilm_workspace/collection";
+  const groupId = "amb-group-paged";
+  let groupPageRequests = 0;
+  const item = (index) => ({
+    session_id: `paged-session-${index}`,
+    group_id: groupId,
+    start: "2026-07-13T16:00:00Z",
+    end: "2026-07-13T16:20:00Z",
+    duration_seconds: 1200,
+    median_power_w: 900,
+    ambiguous: true,
+    ambiguity_category: "assignment_candidate_conflict",
+    ambiguity_reason_codes: ["assignment_candidate_conflict"],
+    candidate_explanations: [],
+    safe_actions: ["open_on_graph", "create_manual_interval"],
+  });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname === collectionPath) {
+      if (url.searchParams.get("group_id") === groupId) {
+        groupPageRequests += 1;
+        const cursor = url.searchParams.get("cursor");
+        expect(cursor).toBe(groupPageRequests === 1 ? null : "group-page-two");
+        const items = groupPageRequests === 1
+          ? Array.from({ length: 20 }, (_, index) => item(index))
+          : [item(20)];
+        await route.fulfill({ json: {
+          status: "ok",
+          total_count: 21,
+          returned_count: items.length,
+          truncated: groupPageRequests === 1,
+          next_cursor: groupPageRequests === 1 ? "group-page-two" : null,
+          items,
+        } });
+        return true;
+      }
+      await route.fulfill({ json: {
+        status: "ok",
+        total_count: 21,
+        returned_count: 1,
+        truncated: true,
+        next_cursor: "global-next-page",
+        items: [item(0)],
+      } });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.ambiguity_audit = {
+      total_count: 21,
+      requires_action: false,
+      collapsed_by_default: true,
+      group_count: 1,
+      group_preview: [{
+        group_id: groupId,
+        category: "assignment_candidate_conflict",
+        candidate_labels: ["Dryer", "EV charger"],
+        occurrence_count: 21,
+        latest_at: "2026-07-13T16:20:00Z",
+      }],
+      group_preview_truncated: false,
+      fetch_path: `${collectionPath}?collection=ambiguous_sessions&circuit_id=mains`,
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  const audit = panel.locator("[data-nilm-ambiguity-audit]");
+  await audit.locator("[data-nilm-ambiguity-toggle]").click();
+  await audit.locator(`[data-nilm-ambiguity-group="${groupId}"]`).click();
+  await expect.poll(() => groupPageRequests).toBe(1);
+
+  const loadOccurrences = audit.locator(`[data-nilm-ambiguity-load-occurrences="${groupId}"]`);
+  await expect(loadOccurrences).toBeVisible();
+  await loadOccurrences.click();
+  await expect.poll(() => groupPageRequests).toBe(2);
+  await expect(audit.locator('[data-nilm-ambiguity-occurrence="paged-session-20"]')).toBeVisible();
+  await expect(loadOccurrences).toHaveCount(0);
+});
+
+
+test("NILM ambiguity audit drops a stale group response after a route change", async ({ page }) => {
+  const collectionPath = "/api/circuitsetup_energy_analyzer/nilm_workspace/collection";
+  const loadedGroupId = "amb-group-loaded";
+  const delayedGroupId = "amb-group-delayed";
+  let delayedGroupStarted = false;
+  let releaseDelayedGroup;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname === collectionPath) {
+      if (url.searchParams.get("group_id") === delayedGroupId) {
+        delayedGroupStarted = true;
+        await new Promise((resolve) => {
+          releaseDelayedGroup = async () => {
+            await route.fulfill({ json: {
+              status: "ok",
+              total_count: 1,
+              returned_count: 1,
+              truncated: false,
+              next_cursor: null,
+              items: [{
+                session_id: "stale-group-session",
+                group_id: delayedGroupId,
+                start: "2026-07-13T16:00:00Z",
+                end: "2026-07-13T16:20:00Z",
+                ambiguous: true,
+                safe_actions: ["open_on_graph", "create_manual_interval"],
+              }],
+            } });
+            resolve();
+          };
+        });
+        return true;
+      }
+      await route.fulfill({ json: {
+        status: "ok",
+        total_count: 2,
+        returned_count: 1,
+        truncated: true,
+        next_cursor: "opaque-cursor",
+        items: [{
+          session_id: "loaded-group-session",
+          group_id: loadedGroupId,
+          start: "2026-07-13T17:00:00Z",
+          end: "2026-07-13T17:25:00Z",
+          ambiguous: true,
+          safe_actions: ["open_on_graph", "create_manual_interval"],
+        }],
+      } });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.ambiguity_audit = {
+      total_count: 2,
+      requires_action: false,
+      collapsed_by_default: true,
+      group_count: 2,
+      group_preview: [
+        {
+          group_id: loadedGroupId,
+          category: "assignment_candidate_conflict",
+          occurrence_count: 1,
+          latest_at: "2026-07-13T17:25:00Z",
+        },
+        {
+          group_id: delayedGroupId,
+          category: "stop_boundary_conflict",
+          occurrence_count: 1,
+          latest_at: "2026-07-13T16:20:00Z",
+        },
+      ],
+      group_preview_truncated: false,
+      fetch_path: `${collectionPath}?collection=ambiguous_sessions&circuit_id=mains`,
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-ambiguity-toggle]").click();
+  await expect(panel.locator(`[data-nilm-ambiguity-group="${delayedGroupId}"]`)).toBeVisible();
+  await panel.locator(`[data-nilm-ambiguity-group="${delayedGroupId}"]`).click();
+  await expect.poll(() => delayedGroupStarted).toBe(true);
+
+  await page.evaluate(() => {
+    history.pushState({}, "", `${location.pathname}?nilm_workspace=1&circuit_id=secondary`);
+  });
+  await expect.poll(() => page.evaluate(() => window.__panel._loadedRouteKey)).toContain("circuit_id=secondary");
+
+  await releaseDelayedGroup();
+  await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  }));
+  await expect.poll(() => page.evaluate(() => Boolean(
+    window.__panel._nilmAmbiguityAuditGroupResults.get("amb-group-delayed")?.fetched,
+  ))).toBe(false);
+  await expect(panel.locator('[data-nilm-ambiguity-occurrence="stale-group-session"]')).toHaveCount(0);
+});
+
+
+test("NILM ambiguity audit coalesces a refresh that arrives during its reload", async ({ page }) => {
+  const collectionPath = "/api/circuitsetup_energy_analyzer/nilm_workspace/collection";
+  const initialGroupId = "amb-group-initial";
+  const refreshedGroupId = "amb-group-refreshed";
+  const latestGroupId = "amb-group-latest";
+  let workspaceRequests = 0;
+  let collectionRequests = 0;
+  let delayedRefreshCollectionStarted = false;
+  let releaseDelayedRefreshCollection;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname === collectionPath) {
+      collectionRequests += 1;
+      if (collectionRequests === 2) {
+        delayedRefreshCollectionStarted = true;
+        await new Promise((resolve) => {
+          releaseDelayedRefreshCollection = async () => {
+            await route.fulfill({ json: {
+              status: "ok",
+              total_count: 1,
+              returned_count: 1,
+              truncated: false,
+              next_cursor: null,
+              items: [],
+            } });
+            resolve();
+          };
+        });
+        return true;
+      }
+      await route.fulfill({ json: {
+        status: "ok",
+        total_count: 1,
+        returned_count: 1,
+        truncated: false,
+        next_cursor: null,
+        items: [],
+      } });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    workspaceRequests += 1;
+    const groupId = workspaceRequests > 2
+      ? latestGroupId
+      : workspaceRequests > 1
+        ? refreshedGroupId
+        : initialGroupId;
+    payload.ambiguity_audit = {
+      total_count: workspaceRequests > 2 ? 2 : 1,
+      requires_action: false,
+      collapsed_by_default: true,
+      group_count: 1,
+      group_preview: [{
+        group_id: groupId,
+        category: "assignment_candidate_conflict",
+        occurrence_count: workspaceRequests > 2 ? 2 : 1,
+        latest_at: "2026-07-13T17:25:00Z",
+      }],
+      group_preview_truncated: false,
+      fetch_path: `${collectionPath}?collection=ambiguous_sessions&circuit_id=mains`,
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  const audit = panel.locator("[data-nilm-ambiguity-audit]");
+  await audit.locator("[data-nilm-ambiguity-toggle]").click();
+  await expect.poll(() => collectionRequests).toBe(1);
+
+  const firstRefresh = page.evaluate(() => window.__panel._refreshNilmWorkspaceData());
+  await expect.poll(() => delayedRefreshCollectionStarted).toBe(true);
+  const secondRefresh = page.evaluate(() => window.__panel._refreshNilmWorkspaceData());
+  await expect.poll(() => page.evaluate(() => (
+    window.__panel._nilmWorkspaceRefreshCycle?.requested
+  ))).toBe(2);
+  await releaseDelayedRefreshCollection();
+  await Promise.all([firstRefresh, secondRefresh]);
+
+  await expect.poll(() => workspaceRequests).toBe(3);
+  await expect.poll(() => collectionRequests).toBe(3);
+  await expect.poll(() => page.evaluate(() => (
+    window.__panel._nilmWorkspace.ambiguity_audit.group_preview[0].group_id
+  ))).toBe(latestGroupId);
+  await expect(audit).toContainText("2 events could not be identified confidently");
+});
+
+
+test("NILM ambiguity audit refreshes cached evidence after an accepted workspace refresh", async ({ page }) => {
+  const collectionPath = "/api/circuitsetup_energy_analyzer/nilm_workspace/collection";
+  const groupId = "amb-group-refresh";
+  let collectionRequests = 0;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname === collectionPath) {
+      collectionRequests += 1;
+      const refreshed = collectionRequests > 1;
+      await route.fulfill({ json: {
+        status: "ok",
+        total_count: 1,
+        returned_count: 1,
+        truncated: false,
+        next_cursor: null,
+        items: [{
+          session_id: refreshed ? "current-ambiguous-session" : "stale-ambiguous-session",
+          group_id: groupId,
+          start: "2026-07-13T17:00:00Z",
+          end: "2026-07-13T17:25:00Z",
+          ambiguous: true,
+          safe_actions: ["open_on_graph", "create_manual_interval"],
+        }],
+      } });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.ambiguity_audit = {
+      total_count: 1,
+      requires_action: false,
+      collapsed_by_default: true,
+      group_count: 1,
+      group_preview: [{
+        group_id: groupId,
+        category: "assignment_candidate_conflict",
+        occurrence_count: 1,
+        latest_at: "2026-07-13T17:25:00Z",
+      }],
+      group_preview_truncated: false,
+      fetch_path: `${collectionPath}?collection=ambiguous_sessions&circuit_id=mains`,
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  const audit = panel.locator("[data-nilm-ambiguity-audit]");
+  await audit.locator("[data-nilm-ambiguity-toggle]").click();
+  const group = audit.locator(`[data-nilm-ambiguity-group="${groupId}"]`);
+  await group.click();
+  await expect(audit.locator('[data-nilm-ambiguity-occurrence="stale-ambiguous-session"]')).toBeVisible();
+
+  await page.evaluate(async () => {
+    await window.__panel._refreshNilmWorkspaceData();
+  });
+
+  await expect.poll(() => collectionRequests).toBe(2);
+  await expect(audit.locator('[data-nilm-ambiguity-occurrence="stale-ambiguous-session"]')).toHaveCount(0);
+  await group.click();
+  await expect(audit.locator('[data-nilm-ambiguity-occurrence="current-ambiguous-session"]')).toBeVisible();
+});
+
+
+test("NILM ambiguity audit drops a stale collection response after a route change", async ({ page }) => {
+  const collectionPath = "/api/circuitsetup_energy_analyzer/nilm_workspace/collection";
+  let collectionStarted = false;
+  let releaseCollection;
+  let workspaceRequests = 0;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname === collectionPath) {
+      collectionStarted = true;
+      await new Promise((resolve) => {
+        releaseCollection = async () => {
+          await route.fulfill({ json: {
+            status: "ok",
+            total_count: 1,
+            returned_count: 1,
+            truncated: false,
+            next_cursor: null,
+            items: [{
+              session_id: "stale-ambiguous-session",
+              group_id: "amb-group-stale",
+              start: "2026-07-13T17:00:00Z",
+              end: "2026-07-13T17:25:00Z",
+              ambiguous: true,
+              safe_actions: ["open_on_graph", "create_manual_interval"],
+            }],
+          } });
+          resolve();
+        };
+      });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    workspaceRequests += 1;
+    if (workspaceRequests === 1) {
+      payload.ambiguity_audit = {
+        total_count: 1,
+        requires_action: false,
+        collapsed_by_default: true,
+        group_count: 1,
+        group_preview: [{
+          group_id: "amb-group-stale",
+          category: "assignment_candidate_conflict",
+          occurrence_count: 1,
+          latest_at: "2026-07-13T17:25:00Z",
+        }],
+        group_preview_truncated: false,
+        fetch_path: `${collectionPath}?collection=ambiguous_sessions&circuit_id=mains`,
+      };
+    }
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-ambiguity-toggle]").click();
+  await expect.poll(() => collectionStarted).toBe(true);
+  await page.evaluate(() => {
+    history.pushState({}, "", `${location.pathname}?nilm_workspace=1&circuit_id=secondary`);
+  });
+  await expect.poll(() => page.evaluate(() => window.__panel._loadedRouteKey)).toContain("circuit_id=secondary");
+
+  await releaseCollection();
+  await expect.poll(() => page.evaluate(() => window.__panel._nilmAmbiguityAuditItems)).toEqual([]);
+  await expect(panel.locator("[data-nilm-ambiguity-audit]")).toHaveCount(0);
+});
+
+
 test("NILM workspace uses Home Assistant surfaces", async ({ page }) => {
   await mockPanelApi(page);
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import sys
 from datetime import UTC, date, datetime, timedelta
@@ -456,7 +457,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260811-2"
+    assert PANEL_MODULE_VERSION == "20260812-1"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -2671,6 +2672,26 @@ def test_nilm_workspace_ambiguous_session_is_not_assignable() -> None:
     assert "assign" not in payload.get("actions", {})
 
 
+def test_nilm_workspace_ambiguous_session_has_no_validation_actions() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_session_payload_with_actions,
+    )
+
+    payload = _nilm_session_payload_with_actions(
+        {
+            "session_id": "session-ambiguous-assigned",
+            "mains_circuit_id": "mains",
+            "signature_fingerprint": "direction=on|watts=800-900",
+            "assignment_id": "assignment-dryer",
+            "start": "2026-08-11T12:00:00+00:00",
+            "end": "2026-08-11T12:30:00+00:00",
+            "ambiguous": True,
+        }
+    )
+
+    assert "actions" not in payload
+
+
 def test_nilm_workspace_open_session_is_not_assignable() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         _nilm_session_payload_with_actions,
@@ -2746,6 +2767,374 @@ def test_nilm_workspace_visible_sessions_exclude_ambiguous_evidence() -> None:
     )
 
     assert [session["session_id"] for session in sessions] == ["clean"]
+
+
+def test_nilm_workspace_ambiguity_audit_is_separate_grouped_and_bounded() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        DEFAULT_NILM_WORKSPACE_COLLECTION_LIMIT,
+        MAX_NILM_WORKSPACE_COLLECTION_LIMIT,
+        _nilm_workspace_collection_limit,
+        nilm_workspace_collection_payload,
+        nilm_workspace_payload,
+    )
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="Mains",
+        entity_id="sensor.mains_power",
+    )
+    start = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+
+    def session(
+        session_id: str,
+        *,
+        minutes: int,
+        candidates: list[dict[str, object]],
+        signature_fingerprint: str = "signature-visible",
+        assignment_id: str | None = None,
+        end: str | None = None,
+    ) -> dict[str, object]:
+        session_start = start + timedelta(minutes=minutes)
+        return {
+            "session_id": session_id,
+            "mains_circuit_id": "mains",
+            "signature_fingerprint": signature_fingerprint,
+            "assignment_id": assignment_id,
+            "on_edge_id": f"on-{session_id}",
+            "off_edge_id": f"off-{session_id}",
+            "start": session_start.isoformat(),
+            "end": end
+            if end is not None
+            else (session_start + timedelta(minutes=5)).isoformat(),
+            "duration_seconds": 300.0,
+            "median_power_w": 500.0,
+            "estimated_energy_kwh": 0.042,
+            "confidence": 0.8,
+            "ambiguous": True,
+            "ambiguity_candidates": candidates,
+        }
+
+    assignment_candidates = [
+        {
+            "candidate_id": "assignment-a",
+            "candidate_kind": "assignment",
+            "signature_fingerprint": "signature-a",
+            "assignment_id": "assignment-a",
+            "edge_id": None,
+            "total_score": 0.93,
+            "score_margin_from_best": 0.0,
+            "reason_code": "assignment_candidate_conflict",
+        },
+        {
+            "candidate_id": "assignment-b",
+            "candidate_kind": "assignment",
+            "signature_fingerprint": "signature-b",
+            "assignment_id": "assignment-b",
+            "edge_id": None,
+            "total_score": 0.91,
+            "score_margin_from_best": 0.02,
+            "reason_code": "assignment_candidate_conflict",
+        },
+    ]
+    boundary_candidates = [
+        {
+            "candidate_id": "boundary-early",
+            "candidate_kind": "stop_boundary",
+            "signature_fingerprint": "signature-boundary",
+            "assignment_id": None,
+            "edge_id": "off-early",
+            "total_score": 0.9,
+            "score_margin_from_best": 0.0,
+            "reason_code": "stop_boundary_conflict",
+        },
+        {
+            "candidate_id": "boundary-late",
+            "candidate_kind": "stop_boundary",
+            "signature_fingerprint": "signature-boundary",
+            "assignment_id": None,
+            "edge_id": "off-late",
+            "total_score": 0.86,
+            "score_margin_from_best": 0.04,
+            "reason_code": "stop_boundary_conflict",
+        },
+    ]
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "retired-assignment",
+                "lifecycle_state": "retired",
+                "signature_fingerprints": ["signature-hidden"],
+            }
+        ]
+    }
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [
+            *(
+                session(
+                    f"assignment-{index}",
+                    minutes=100 + index,
+                    candidates=assignment_candidates,
+                )
+                for index in range(4)
+            ),
+            *(
+                session(
+                    f"boundary-{index}",
+                    minutes=10 + index,
+                    candidates=boundary_candidates,
+                    signature_fingerprint="signature-boundary",
+                )
+                for index in range(2)
+            ),
+            session(
+                "open-ambiguous",
+                minutes=200,
+                candidates=assignment_candidates,
+                end="",
+            ),
+            session(
+                "malformed-ambiguous",
+                minutes=300,
+                candidates=assignment_candidates,
+                end=(start + timedelta(minutes=299)).isoformat(),
+            ),
+            session(
+                "hidden-ambiguous",
+                minutes=400,
+                candidates=assignment_candidates,
+                signature_fingerprint="signature-hidden",
+                assignment_id="retired-assignment",
+            ),
+            {
+                "session_id": "clean",
+                "mains_circuit_id": "mains",
+                "signature_fingerprint": "signature-clean",
+                "on_edge_id": "on-clean",
+                "off_edge_id": "off-clean",
+                "start": start.isoformat(),
+                "end": (start + timedelta(minutes=5)).isoformat(),
+                "ambiguous": False,
+            },
+        ]
+    }
+    before = json.dumps(coordinator.store_data.nilm_session_history_by_circuit)
+
+    payload = nilm_workspace_payload(
+        [coordinator], circuit_id="mains", entry_id="entry-1"
+    )
+
+    assert [item["session_id"] for item in payload["sessions"]] == ["clean"]
+    assert payload["session_count"] == 1
+    assert payload["lane_counts"]["needs_review"] == 1
+    assert "ambiguous_sessions" not in payload
+    assert json.dumps(coordinator.store_data.nilm_session_history_by_circuit) == before
+    audit = payload["ambiguity_audit"]
+    assert audit["total_count"] == 6
+    assert audit["requires_action"] is False
+    assert audit["collapsed_by_default"] is True
+    assert audit["group_count"] == 2
+    assert [group["occurrence_count"] for group in audit["group_preview"]] == [4, 2]
+    assert len(audit["group_preview"]) <= 3
+    assert audit["fetch_path"].startswith(
+        "/api/circuitsetup_energy_analyzer/nilm_workspace/collection?"
+    )
+    assert _nilm_workspace_collection_limit(None) == (
+        DEFAULT_NILM_WORKSPACE_COLLECTION_LIMIT
+    )
+    assert _nilm_workspace_collection_limit("999") == (
+        MAX_NILM_WORKSPACE_COLLECTION_LIMIT
+    )
+    assert nilm_workspace_collection_payload(
+        [coordinator],
+        collection="unexpected_collection",
+        circuit_id="mains",
+        entry_id="entry-1",
+    )["status"] == "invalid_collection"
+    assert nilm_workspace_collection_payload(
+        [coordinator],
+        collection="ambiguous_sessions",
+        circuit_id="mains",
+        entry_id="other-entry",
+    )["status"] == "not_found"
+
+    first_page = nilm_workspace_collection_payload(
+        [coordinator],
+        collection="ambiguous_sessions",
+        circuit_id="mains",
+        entry_id="entry-1",
+        limit="2",
+    )
+
+    assert first_page["total_count"] == 6
+    assert first_page["returned_count"] == 2
+    assert first_page["truncated"] is True
+    assert first_page["items"][0]["session_id"] == "assignment-3"
+    assert first_page["items"][0]["safe_actions"] == [
+        "open_on_graph",
+        "create_manual_interval",
+    ]
+    assert "actions" not in first_page["items"][0]
+    assert len(first_page["items"][0]["candidate_explanations"]) <= 3
+    assert first_page["next_cursor"]
+
+    second_page = nilm_workspace_collection_payload(
+        [coordinator],
+        collection="ambiguous_sessions",
+        circuit_id="mains",
+        entry_id="entry-1",
+        cursor=first_page["next_cursor"],
+        limit=2,
+    )
+
+    assert second_page["items"]
+    assert second_page["total_count"] == 6
+    assert {item["session_id"] for item in first_page["items"]}.isdisjoint(
+        item["session_id"] for item in second_page["items"]
+    )
+    cursor_version, raw_cursor, cursor_signature = first_page["next_cursor"].split(
+        "."
+    )
+    cursor_payload = json.loads(
+        base64.urlsafe_b64decode(raw_cursor + "===").decode()
+    )
+    cursor_payload[-1] = "untrusted-session"
+    forged_cursor = ".".join(
+        (
+            cursor_version,
+            base64.urlsafe_b64encode(
+                json.dumps(cursor_payload, separators=(",", ":")).encode()
+            )
+            .decode()
+            .rstrip("="),
+            cursor_signature,
+        )
+    )
+    forged_page = nilm_workspace_collection_payload(
+        [coordinator],
+        collection="ambiguous_sessions",
+        circuit_id="mains",
+        entry_id="entry-1",
+        cursor=forged_cursor,
+        limit=2,
+    )
+    assert forged_page["status"] == "invalid_cursor"
+    mismatched_scope = nilm_workspace_collection_payload(
+        [coordinator],
+        collection="ambiguous_sessions",
+        circuit_id="mains",
+        entry_id="entry-1",
+        group_id=audit["group_preview"][0]["group_id"],
+        cursor=first_page["next_cursor"],
+        limit=2,
+    )
+    assert mismatched_scope["status"] == "invalid_cursor"
+    grouped = nilm_workspace_collection_payload(
+        [coordinator],
+        collection="ambiguous_sessions",
+        circuit_id="mains",
+        entry_id="entry-1",
+        group_id=audit["group_preview"][0]["group_id"],
+    )
+    assert grouped["total_count"] == 4
+    assert {item["session_id"] for item in grouped["items"]} == {
+        "assignment-0",
+        "assignment-1",
+        "assignment-2",
+        "assignment-3",
+    }
+    group_page = nilm_workspace_collection_payload(
+        [coordinator],
+        collection="ambiguous_sessions",
+        circuit_id="mains",
+        entry_id="entry-1",
+        view="groups",
+        limit=1,
+    )
+    assert group_page["status"] == "ok"
+    assert group_page["items"] == []
+    assert group_page["total_count"] == 2
+    assert group_page["returned_count"] == 1
+    assert group_page["truncated"] is True
+    assert len(group_page["groups"]) == 1
+    assert group_page["groups"][0]["occurrence_count"] == 4
+    assert group_page["next_cursor"]
+    next_group_page = nilm_workspace_collection_payload(
+        [coordinator],
+        collection="ambiguous_sessions",
+        circuit_id="mains",
+        entry_id="entry-1",
+        view="groups",
+        cursor=group_page["next_cursor"],
+        limit=1,
+    )
+    assert next_group_page["status"] == "ok"
+    assert {group["group_id"] for group in group_page["groups"]}.isdisjoint(
+        group["group_id"] for group in next_group_page["groups"]
+    )
+
+
+def test_nilm_workspace_omits_empty_ambiguity_audit() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="Mains",
+        entity_id="sensor.mains_power",
+    )
+
+    payload = nilm_workspace_payload(
+        [coordinator], circuit_id="mains", entry_id="entry-1"
+    )
+
+    assert "ambiguity_audit" not in payload
+
+
+def test_nilm_ambiguity_audit_summary_counts_before_group_preview_slice() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_workspace_ambiguity_audit_summary,
+    )
+
+    start = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    sessions = [
+        {
+            "session_id": f"ambiguous-{index}",
+            "signature_fingerprint": f"signature-{index}",
+            "start": start.isoformat(),
+            "end": (start + timedelta(minutes=index)).isoformat(),
+            "ambiguity_candidates": [
+                {
+                    "candidate_id": f"candidate-{index}",
+                    "candidate_kind": "assignment",
+                    "signature_fingerprint": f"signature-{index}",
+                    "assignment_id": f"assignment-{index}",
+                    "edge_id": None,
+                    "total_score": 0.9,
+                    "score_margin_from_best": 0.0,
+                    "reason_code": "assignment_candidate_conflict",
+                }
+            ],
+        }
+        for index in range(1, 5)
+    ]
+
+    summary = _nilm_workspace_ambiguity_audit_summary(
+        sessions,
+        {},
+        circuit_id="mains",
+        entry_id="entry-1",
+    )
+
+    assert summary is not None
+    assert summary["total_count"] == 4
+    assert summary["group_count"] == 4
+    assert summary["group_preview_truncated"] is True
+    assert len(summary["group_preview"]) == 3
+    assert [group["latest_at"] for group in summary["group_preview"]] == [
+        (start + timedelta(minutes=index)).isoformat()
+        for index in (4, 3, 2)
+    ]
 
 
 def test_recurring_placeholder_sessions_promote_three_reviewable_components() -> None:
@@ -4449,6 +4838,53 @@ async def test_nilm_workspace_view_forwards_requested_entry_id(
     payload = await panel.NilmWorkspaceView().get(request)
 
     assert payload["circuit"]["name"] == "Second Mains"
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_collection_view_forwards_bounded_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel, panel_nilm
+
+    captured: dict[str, object] = {}
+
+    def collection_payload(_coordinators, **kwargs):
+        captured.update(kwargs)
+        return {"status": "ok", "items": []}
+
+    request = SimpleNamespace(
+        app={panel.KEY_HASS: SimpleNamespace()},
+        query={
+            "collection": "ambiguous_sessions",
+            "circuit_id": "mains",
+            "entry_id": "entry-2",
+            "group_id": "amb-group-1",
+            "cursor": "opaque-cursor",
+            "limit": "10",
+            "view": "groups",
+        },
+    )
+    monkeypatch.setattr(
+        panel_nilm,
+        "nilm_workspace_collection_payload",
+        collection_payload,
+    )
+    monkeypatch.setattr(panel, "_loaded_coordinators", lambda _hass: ())
+    monkeypatch.setattr(panel.web, "json_response", lambda payload: payload)
+
+    payload = await panel.NilmWorkspaceCollectionView().get(request)
+
+    assert panel.NilmWorkspaceCollectionView.requires_auth is True
+    assert payload == {"status": "ok", "items": []}
+    assert captured == {
+        "collection": "ambiguous_sessions",
+        "circuit_id": "mains",
+        "entry_id": "entry-2",
+        "group_id": "amb-group-1",
+        "cursor": "opaque-cursor",
+        "limit": "10",
+        "view": "groups",
+    }
 
 
 @pytest.mark.asyncio
@@ -6701,6 +7137,7 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
         HVAC_ASSOCIATIONS_API_PATH,
         NILM_INTERVAL_EVIDENCE_API_PATH,
         NILM_WORKSPACE_API_PATH,
+        NILM_WORKSPACE_COLLECTION_API_PATH,
         NILM_WORKSPACE_HISTORY_API_PATH,
         SETUP_HEALTH_API_PATH,
     )
@@ -6751,6 +7188,7 @@ async def test_panel_setup_registers_static_api_and_panel_once() -> None:
         APPLIANCE_INSIGHTS_API_PATH,
         SETUP_HEALTH_API_PATH,
         NILM_WORKSPACE_API_PATH,
+        NILM_WORKSPACE_COLLECTION_API_PATH,
         NILM_WORKSPACE_HISTORY_API_PATH,
         NILM_INTERVAL_EVIDENCE_API_PATH,
     ]
@@ -6914,7 +7352,7 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
 
     assert panel_custom.panels[0]["frontend_url_path"] == PANEL_URL_PATH
     assert len(http.static_paths) == 1
-    assert len(http.views) == 8
+    assert len(http.views) == 9
     assert resource_updates == [
         (
             "dashboard-graph-module",

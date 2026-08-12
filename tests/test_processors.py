@@ -11048,6 +11048,18 @@ def test_nilm_duration_reopen_uses_bounded_shared_id_and_restores_alias() -> Non
         "confidence": 0.8,
         "ambiguous": False,
         "alternate_match_count": 0,
+        "ambiguity_candidates": [
+            {
+                "candidate_id": "stop-boundary-early",
+                "candidate_kind": "stop_boundary",
+                "signature_fingerprint": fingerprint,
+                "assignment_id": "dryer",
+                "edge_id": "off-edge",
+                "total_score": 0.9,
+                "score_margin_from_best": 0.0,
+                "reason_code": "stop_boundary_conflict",
+            }
+        ],
     }
 
     reopened = _reconcile_nilm_session_duration_bounds(
@@ -11062,6 +11074,18 @@ def test_nilm_duration_reopen_uses_bounded_shared_id_and_restores_alias() -> Non
     assert len(expected_open_id.encode("utf-8")) <= 256
     assert assignment["rejected_session_ids"] == [expected_open_id]
     assert reopened[0]["_duration_bound_close"]["session_id"] == legacy_closed_id
+    assert reopened[0]["_duration_bound_close"]["ambiguity_candidates"] == [
+        {
+            "candidate_id": "stop-boundary-early",
+            "candidate_kind": "stop_boundary",
+            "signature_fingerprint": fingerprint,
+            "assignment_id": "dryer",
+            "edge_id": "off-edge",
+            "total_score": 0.9,
+            "score_margin_from_best": 0.0,
+            "reason_code": "stop_boundary_conflict",
+        }
+    ]
 
     assignment["max_duration_seconds"] = 600.0
     restored = _reconcile_nilm_session_duration_bounds(
@@ -11069,6 +11093,7 @@ def test_nilm_duration_reopen_uses_bounded_shared_id_and_restores_alias() -> Non
     )
     assert restored[0]["session_id"] == legacy_closed_id
     assert assignment["rejected_session_ids"] == [legacy_closed_id]
+    assert restored[0]["ambiguity_candidates"] == closed["ambiguity_candidates"]
 
 
 def test_nilm_duration_reopen_rejects_malformed_identity_inputs() -> None:

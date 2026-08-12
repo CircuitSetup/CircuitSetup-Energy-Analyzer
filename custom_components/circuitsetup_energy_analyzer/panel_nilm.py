@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import math
 from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
+from hmac import compare_digest
+from hmac import new as hmac_new
+from secrets import token_bytes
 from statistics import fmean, median
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -55,6 +61,7 @@ from .panel_common import (
 from .panel_contracts import (
     APPLIANCE_DETAIL_API_PATH,
     NILM_WORKSPACE_API_PATH,
+    NILM_WORKSPACE_COLLECTION_API_PATH,
     NILM_WORKSPACE_HISTORY_API_PATH,
     PANEL_URL_PATH,
 )
@@ -172,6 +179,23 @@ MAX_NILM_WORKSPACE_KNOWN_LOADS = 8
 MAX_NILM_WORKSPACE_EDGES = 40
 MAX_NILM_WORKSPACE_SESSIONS = 20
 MAX_NILM_WORKSPACE_LABEL_INTERVALS = 40
+MAX_NILM_AMBIGUITY_AUDIT_GROUP_PREVIEW = 3
+DEFAULT_NILM_WORKSPACE_COLLECTION_LIMIT = 20
+MAX_NILM_WORKSPACE_COLLECTION_LIMIT = 50
+MAX_NILM_AMBIGUITY_CANDIDATE_EXPLANATIONS = 3
+_NILM_AMBIGUITY_CURSOR_VERSION = "v1"
+_NILM_AMBIGUITY_CURSOR_SECRET = token_bytes(32)
+_NILM_AMBIGUITY_COLLECTION_VIEWS = frozenset({"occurrences", "groups"})
+_NILM_AMBIGUITY_CANDIDATE_KINDS = frozenset(
+    {"assignment", "signature", "stop_boundary"}
+)
+_NILM_AMBIGUITY_REASON_CODES = frozenset(
+    {
+        "assignment_candidate_conflict",
+        "signature_candidate_conflict",
+        "stop_boundary_conflict",
+    }
+)
 
 
 def nilm_workspace_payload(
@@ -250,10 +274,24 @@ def nilm_workspace_payload(
         reviewed_session_ids=reviewed_session_ids,
         limit=None,
     )
+    merged_sessions = _merge_nilm_session_payloads(
+        all_generated_sessions,
+        stored_sessions,
+    )
     all_sessions = _nilm_workspace_visible_sessions(
-        _merge_nilm_session_payloads(all_generated_sessions, stored_sessions),
+        merged_sessions,
         signatures,
         assignments,
+    )
+    ambiguity_audit = _nilm_workspace_ambiguity_audit_summary(
+        _nilm_workspace_ambiguous_sessions(
+            merged_sessions,
+            signatures,
+            assignments,
+        ),
+        session_display_labels,
+        circuit_id=config.circuit_id,
+        entry_id=selected_entry_id,
     )
     all_sessions = _add_nilm_session_display_labels(
         all_sessions,
@@ -355,9 +393,226 @@ def nilm_workspace_payload(
         "sessions": sessions,
         "session_count": len(all_sessions),
     }
+    if ambiguity_audit is not None:
+        payload["ambiguity_audit"] = ambiguity_audit
     if configured_primary is not None:
         payload["configured_primary"] = configured_primary
     return _scope_nilm_actions(payload, selected_entry_id)
+
+
+def nilm_workspace_collection_payload(
+    coordinators: Iterable[Any],
+    *,
+    collection: str | None = None,
+    circuit_id: str | None = None,
+    entry_id: str | None = None,
+    group_id: str | None = None,
+    cursor: str | None = None,
+    limit: Any = None,
+    view: str | None = None,
+) -> dict[str, Any]:
+    """Return one explicitly whitelisted, read-only NILM audit collection."""
+
+    if collection != "ambiguous_sessions":
+        return {
+            "status": "invalid_collection",
+            "items": [],
+            "total_count": 0,
+            "returned_count": 0,
+            "truncated": False,
+            "next_cursor": None,
+        }
+    target = _nilm_workspace_target(
+        tuple(coordinators),
+        circuit_id,
+        entry_id=entry_id,
+    )
+    if target is None:
+        return {
+            "status": "not_found",
+            "items": [],
+            "total_count": 0,
+            "returned_count": 0,
+            "truncated": False,
+            "next_cursor": None,
+        }
+
+    coordinator, config, _sources = target
+    selected_entry_id = str(getattr(coordinator, "entry_id", "") or "")
+    signatures = _nilm_workspace_signatures(
+        coordinator,
+        config.circuit_id,
+        config=config,
+    )
+    all_label_intervals = _nilm_label_intervals_for_circuit(
+        coordinator,
+        config.circuit_id,
+        limit=None,
+    )
+    assignments = _nilm_assignments_for_circuit(
+        coordinator,
+        config.circuit_id,
+        label_intervals=all_label_intervals,
+    )
+    reviewed_session_ids = _nilm_reviewed_session_ids_by_assignment(assignments)
+    sessions = _nilm_workspace_ambiguous_sessions(
+        _merge_nilm_session_payloads(
+            _nilm_workspace_sessions(
+                _nilm_edges_for_circuit(coordinator, config.circuit_id),
+                config.circuit_id,
+                signatures=signatures,
+                assignments=assignments,
+                reviewed_session_ids=reviewed_session_ids,
+                limit=None,
+            ),
+            _nilm_session_history_for_circuit(
+                coordinator,
+                config.circuit_id,
+                reviewed_session_ids=reviewed_session_ids,
+            ),
+        ),
+        signatures,
+        assignments,
+    )
+    session_labels = _nilm_session_display_labels(signatures, assignments)
+    normalized_view = str(view or "occurrences").strip().lower()
+    if normalized_view not in _NILM_AMBIGUITY_COLLECTION_VIEWS:
+        return {
+            "status": "invalid_view",
+            "items": [],
+            "groups": [],
+            "total_count": 0,
+            "returned_count": 0,
+            "truncated": False,
+            "next_cursor": None,
+        }
+    page_limit = _nilm_workspace_collection_limit(limit)
+    if normalized_view == "groups":
+        if group_id is not None:
+            return {
+                "status": "invalid_scope",
+                "items": [],
+                "groups": [],
+                "total_count": 0,
+                "returned_count": 0,
+                "truncated": False,
+                "next_cursor": None,
+            }
+        groups = _nilm_workspace_ambiguity_groups(
+            sessions,
+            session_labels,
+            circuit_id=config.circuit_id,
+        )
+        total_count = len(groups)
+        cursor_key = _nilm_ambiguity_group_collection_cursor_key(
+            cursor,
+            circuit_id=config.circuit_id,
+            entry_id=selected_entry_id,
+        )
+        if cursor is not None and cursor_key is None:
+            return {
+                "status": "invalid_cursor",
+                "items": [],
+                "groups": [],
+                "total_count": total_count,
+                "returned_count": 0,
+                "truncated": False,
+                "next_cursor": None,
+            }
+        if cursor_key is not None:
+            groups = [
+                group
+                for group in groups
+                if _nilm_ambiguity_group_sort_key(group) > cursor_key
+            ]
+        page = groups[:page_limit]
+        truncated = len(groups) > len(page)
+        return {
+            "status": "ok",
+            "items": [],
+            "groups": page,
+            "total_count": total_count,
+            "returned_count": len(page),
+            "truncated": truncated,
+            "next_cursor": (
+                _nilm_ambiguity_group_collection_cursor(
+                    page[-1],
+                    circuit_id=config.circuit_id,
+                    entry_id=selected_entry_id,
+                )
+                if truncated and page
+                else None
+            ),
+        }
+    normalized_group_id = _nilm_ambiguity_text(group_id)
+    if group_id is not None and normalized_group_id is None:
+        sessions = []
+    elif normalized_group_id:
+        sessions = [
+            session
+            for session in sessions
+            if _nilm_session_ambiguity_group_id(session, config.circuit_id)
+            == normalized_group_id
+        ]
+    ordered = sorted(sessions, key=_nilm_ambiguity_session_sort_key)
+    total_count = len(ordered)
+    cursor_key = _nilm_ambiguity_collection_cursor_key(
+        cursor,
+        circuit_id=config.circuit_id,
+        entry_id=selected_entry_id,
+        group_id=normalized_group_id,
+    )
+    if cursor is not None and cursor_key is None:
+        return {
+            "status": "invalid_cursor",
+            "items": [],
+            "total_count": len(ordered),
+            "returned_count": 0,
+            "truncated": False,
+            "next_cursor": None,
+        }
+    if cursor_key is not None:
+        ordered = [
+            session
+            for session in ordered
+            if _nilm_ambiguity_session_sort_key(session) > cursor_key
+        ]
+    page = ordered[:page_limit]
+    truncated = len(ordered) > len(page)
+    return {
+        "status": "ok",
+        "items": [
+            _nilm_ambiguity_audit_item(
+                session,
+                session_labels,
+                circuit_id=config.circuit_id,
+            )
+            for session in page
+        ],
+        "total_count": total_count,
+        "returned_count": len(page),
+        "truncated": truncated,
+        "next_cursor": (
+            _nilm_ambiguity_collection_cursor(
+                page[-1],
+                circuit_id=config.circuit_id,
+                entry_id=selected_entry_id,
+                group_id=normalized_group_id,
+            )
+            if truncated and page
+            else None
+        ),
+    }
+
+
+def _nilm_workspace_collection_limit(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_NILM_WORKSPACE_COLLECTION_LIMIT
+    if parsed <= 0:
+        return DEFAULT_NILM_WORKSPACE_COLLECTION_LIMIT
+    return min(parsed, MAX_NILM_WORKSPACE_COLLECTION_LIMIT)
 
 
 def _nilm_workspace_sensitivity(
@@ -3067,6 +3322,56 @@ def _nilm_workspace_visible_sessions(
     signatures: Iterable[Mapping[str, Any]],
     assignments: Iterable[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
+    hidden_assignment_ids, hidden_fingerprints = _nilm_workspace_session_filters(
+        signatures,
+        assignments,
+    )
+    return [
+        dict(session)
+        for session in sessions
+        if not bool(session.get("ambiguous"))
+        and _nilm_workspace_session_is_visible(
+            session,
+            hidden_assignment_ids,
+            hidden_fingerprints,
+        )
+    ]
+
+
+def _nilm_workspace_ambiguous_sessions(
+    sessions: Iterable[Mapping[str, Any]],
+    signatures: Iterable[Mapping[str, Any]],
+    assignments: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return completed, visible ambiguous evidence for the read-only audit."""
+
+    hidden_assignment_ids, hidden_fingerprints = _nilm_workspace_session_filters(
+        signatures,
+        assignments,
+    )
+    eligible: list[dict[str, Any]] = []
+    for session in sessions:
+        if (
+            not bool(session.get("ambiguous"))
+            or not _nilm_workspace_session_is_visible(
+                session,
+                hidden_assignment_ids,
+                hidden_fingerprints,
+            )
+        ):
+            continue
+        start = _datetime_from_iso(session.get("start"))
+        end = _datetime_from_iso(session.get("end"))
+        if start is None or end is None or end <= start:
+            continue
+        eligible.append(dict(session))
+    return eligible
+
+
+def _nilm_workspace_session_filters(
+    signatures: Iterable[Mapping[str, Any]],
+    assignments: Iterable[Mapping[str, Any]],
+) -> tuple[set[str], set[str]]:
     hidden_assignment_ids = {
         str(assignment.get(ATTR_ASSIGNMENT_ID) or "").strip()
         for assignment in assignments
@@ -3095,15 +3400,509 @@ def _nilm_workspace_visible_sessions(
         if str(signature.get("review_state") or "").strip().lower() != "merged"
         or fingerprint not in visible_assignment_fingerprints
     )
-    return [
-        dict(session)
-        for session in sessions
-        if not bool(session.get("ambiguous"))
-        and str(session.get(ATTR_ASSIGNMENT_ID) or "").strip()
+    return hidden_assignment_ids, hidden_fingerprints
+
+
+def _nilm_workspace_session_is_visible(
+    session: Mapping[str, Any],
+    hidden_assignment_ids: set[str],
+    hidden_fingerprints: set[str],
+) -> bool:
+    return (
+        str(session.get(ATTR_ASSIGNMENT_ID) or "").strip()
         not in hidden_assignment_ids
         and str(session.get("signature_fingerprint") or "").strip()
         not in hidden_fingerprints
+    )
+
+
+def _nilm_ambiguity_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text if text and len(text) <= 256 else None
+
+
+def _nilm_ambiguity_score(value: Any) -> float | None:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    score = float(value)
+    if not math.isfinite(score) or not 0.0 <= score <= 1.0:
+        return None
+    return round(score, 3)
+
+
+def _nilm_session_ambiguity_candidates(
+    session: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Normalize the retained top-three pairing explanations for presentation."""
+
+    raw_candidates = session.get("ambiguity_candidates")
+    if not isinstance(raw_candidates, (list, tuple)):
+        return []
+    candidates: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    for raw_candidate in raw_candidates[:MAX_NILM_AMBIGUITY_CANDIDATE_EXPLANATIONS]:
+        if not isinstance(raw_candidate, Mapping):
+            continue
+        candidate_id = _nilm_ambiguity_text(raw_candidate.get("candidate_id"))
+        candidate_kind = _nilm_ambiguity_text(raw_candidate.get("candidate_kind"))
+        reason_code = _nilm_ambiguity_text(raw_candidate.get("reason_code"))
+        if (
+            candidate_id is None
+            or candidate_id in seen_ids
+            or candidate_kind not in _NILM_AMBIGUITY_CANDIDATE_KINDS
+            or reason_code not in _NILM_AMBIGUITY_REASON_CODES
+        ):
+            continue
+        candidate: dict[str, Any] = {
+            "candidate_id": candidate_id,
+            "candidate_kind": candidate_kind,
+            "signature_fingerprint": _nilm_ambiguity_text(
+                raw_candidate.get("signature_fingerprint")
+            ),
+            "assignment_id": _nilm_ambiguity_text(
+                raw_candidate.get("assignment_id")
+            ),
+            "edge_id": _nilm_ambiguity_text(raw_candidate.get("edge_id")),
+            "total_score": _nilm_ambiguity_score(raw_candidate.get("total_score")),
+            "score_margin_from_best": _nilm_ambiguity_score(
+                raw_candidate.get("score_margin_from_best")
+            ),
+            "reason_code": reason_code,
+        }
+        candidates.append(candidate)
+        seen_ids.add(candidate_id)
+    return sorted(
+        candidates,
+        key=lambda candidate: (
+            -(
+                candidate["total_score"]
+                if candidate["total_score"] is not None
+                else -1.0
+            ),
+            candidate["candidate_id"],
+        ),
+    )
+
+
+def _nilm_session_ambiguity_detail(
+    session: Mapping[str, Any],
+) -> tuple[str, list[str], list[dict[str, Any]], list[str]]:
+    """Return the supported category and stable identity inputs for one row."""
+
+    candidates = _nilm_session_ambiguity_candidates(session)
+    reason_codes = sorted(
+        {candidate["reason_code"] for candidate in candidates}
+    )
+    if "assignment_candidate_conflict" in reason_codes:
+        category = "assignment_candidate_conflict"
+    elif "signature_candidate_conflict" in reason_codes:
+        category = "signature_candidate_conflict"
+    elif "stop_boundary_conflict" in reason_codes:
+        category = "stop_boundary_conflict"
+    else:
+        category = "other"
+    identifiers = {
+        f"signature:{value}"
+        for value in (
+            _nilm_ambiguity_text(session.get("signature_fingerprint")),
+            *(
+                candidate.get("signature_fingerprint") for candidate in candidates
+            ),
+        )
+        if value
+    }
+    identifiers.update(
+        f"assignment:{candidate['assignment_id']}"
+        for candidate in candidates
+        if candidate.get("assignment_id")
+    )
+    return category, reason_codes, candidates, sorted(identifiers)
+
+
+def _nilm_ambiguity_group_id(
+    circuit_id: str,
+    category: str,
+    identifiers: Iterable[str],
+    reason_codes: Iterable[str],
+) -> str:
+    identity = json.dumps(
+        {
+            "circuit_id": circuit_id,
+            "category": category,
+            "identifiers": sorted(set(identifiers)),
+            "reason_codes": sorted(set(reason_codes)),
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return f"amb-group-{sha256(identity.encode('utf-8')).hexdigest()[:20]}"
+
+
+def _nilm_ambiguity_candidate_labels(
+    candidates: Iterable[Mapping[str, Any]],
+    labels: Mapping[str, str],
+) -> list[str]:
+    return _unique_strings(
+        labels[key]
+        for candidate in candidates
+        for key in (
+            str(candidate.get("assignment_id") or "").strip(),
+            str(candidate.get("signature_fingerprint") or "").strip(),
+        )
+        if key in labels and str(labels[key] or "").strip()
+    )[:MAX_NILM_AMBIGUITY_CANDIDATE_EXPLANATIONS]
+
+
+def _nilm_ambiguity_group_sort_key(
+    group: Mapping[str, Any],
+) -> tuple[int, float, str]:
+    """Return the deterministic newest group order used by audit cursors."""
+
+    count = group.get("occurrence_count")
+    occurrence_count = (
+        int(count)
+        if isinstance(count, int) and not isinstance(count, bool) and count >= 0
+        else 0
+    )
+    latest_at = group.get("latest_at")
+    latest = (
+        latest_at
+        if isinstance(latest_at, datetime)
+        else _datetime_from_iso(latest_at)
+    )
+    group_id = str(group.get("group_id") or "").strip()
+    return (
+        -occurrence_count,
+        -(latest.timestamp() if latest is not None else float("-inf")),
+        group_id,
+    )
+
+
+def _nilm_workspace_ambiguity_groups(
+    sessions: Iterable[Mapping[str, Any]],
+    labels: Mapping[str, str],
+    *,
+    circuit_id: str,
+) -> list[dict[str, Any]]:
+    groups: dict[str, dict[str, Any]] = {}
+    for session in sessions:
+        category, reason_codes, candidates, identifiers = (
+            _nilm_session_ambiguity_detail(session)
+        )
+        group_id = _nilm_ambiguity_group_id(
+            circuit_id,
+            category,
+            identifiers,
+            reason_codes,
+        )
+        latest_at = _datetime_from_iso(session.get("end"))
+        if latest_at is None:
+            continue
+        group = groups.setdefault(
+            group_id,
+            {
+                "group_id": group_id,
+                "category": category,
+                "reason_codes": reason_codes,
+                "candidate_labels": set(),
+                "occurrence_count": 0,
+                "latest_at": latest_at,
+            },
+        )
+        group["occurrence_count"] += 1
+        group["latest_at"] = max(group["latest_at"], latest_at)
+        group["candidate_labels"].update(
+            _nilm_ambiguity_candidate_labels(candidates, labels)
+        )
+    ordered = sorted(groups.values(), key=_nilm_ambiguity_group_sort_key)
+    return [
+        {
+            "group_id": group["group_id"],
+            "category": group["category"],
+            "reason_codes": group["reason_codes"],
+            "candidate_labels": sorted(group["candidate_labels"])[
+                :MAX_NILM_AMBIGUITY_CANDIDATE_EXPLANATIONS
+            ],
+            "occurrence_count": group["occurrence_count"],
+            "latest_at": group["latest_at"].isoformat(),
+        }
+        for group in ordered
     ]
+
+
+def _nilm_ambiguity_audit_fetch_path(circuit_id: str, entry_id: str) -> str:
+    query = {"collection": "ambiguous_sessions", "circuit_id": circuit_id}
+    if entry_id:
+        query[ATTR_ENTRY_ID] = entry_id
+    return f"{NILM_WORKSPACE_COLLECTION_API_PATH}?{urlencode(query)}"
+
+
+def _nilm_workspace_ambiguity_audit_summary(
+    sessions: Iterable[Mapping[str, Any]],
+    labels: Mapping[str, str],
+    *,
+    circuit_id: str,
+    entry_id: str,
+) -> dict[str, Any] | None:
+    sessions = tuple(sessions)
+    if not sessions:
+        return None
+    groups = _nilm_workspace_ambiguity_groups(
+        sessions,
+        labels,
+        circuit_id=circuit_id,
+    )
+    return {
+        "total_count": len(sessions),
+        "requires_action": False,
+        "collapsed_by_default": True,
+        "group_count": len(groups),
+        "group_preview": groups[:MAX_NILM_AMBIGUITY_AUDIT_GROUP_PREVIEW],
+        "group_preview_truncated": len(groups)
+        > MAX_NILM_AMBIGUITY_AUDIT_GROUP_PREVIEW,
+        "fetch_path": _nilm_ambiguity_audit_fetch_path(circuit_id, entry_id),
+    }
+
+
+def _nilm_session_ambiguity_group_id(
+    session: Mapping[str, Any],
+    circuit_id: str,
+) -> str:
+    category, reason_codes, _candidates, identifiers = _nilm_session_ambiguity_detail(
+        session
+    )
+    return _nilm_ambiguity_group_id(
+        circuit_id,
+        category,
+        identifiers,
+        reason_codes,
+    )
+
+
+def _nilm_ambiguity_session_sort_key(
+    session: Mapping[str, Any],
+) -> tuple[float, str]:
+    end = _datetime_from_iso(session.get("end"))
+    session_id = str(session.get("session_id") or "").strip()
+    return (
+        -(end.timestamp() if end is not None else float("-inf")),
+        session_id,
+    )
+
+
+def _nilm_ambiguity_cursor_token(value: list[Any]) -> str:
+    """Return a signed opaque token for one bounded ambiguity-audit page."""
+
+    raw = json.dumps(value, separators=(",", ":")).encode("utf-8")
+    payload = base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+    signature = base64.urlsafe_b64encode(
+        hmac_new(
+            _NILM_AMBIGUITY_CURSOR_SECRET,
+            payload.encode("ascii"),
+            sha256,
+        ).digest()
+    ).decode("ascii").rstrip("=")
+    return f"{_NILM_AMBIGUITY_CURSOR_VERSION}.{payload}.{signature}"
+
+
+def _nilm_ambiguity_cursor_value(cursor: Any) -> list[Any] | None:
+    """Read a valid signed ambiguity-audit cursor without trusting its data."""
+
+    if not isinstance(cursor, str) or not cursor or len(cursor) > 1024:
+        return None
+    try:
+        version, payload, signature = cursor.split(".")
+        if version != _NILM_AMBIGUITY_CURSOR_VERSION:
+            return None
+        expected_signature = base64.urlsafe_b64encode(
+            hmac_new(
+                _NILM_AMBIGUITY_CURSOR_SECRET,
+                payload.encode("ascii"),
+                sha256,
+            ).digest()
+        ).decode("ascii").rstrip("=")
+        if not compare_digest(signature, expected_signature):
+            return None
+        padding = "=" * (-len(payload) % 4)
+        decoded = base64.b64decode(
+            payload + padding,
+            altchars=b"-_",
+            validate=True,
+        )
+        value = json.loads(decoded.decode("utf-8"))
+    except (UnicodeError, ValueError):
+        return None
+    return value if isinstance(value, list) else None
+
+
+def _nilm_ambiguity_collection_cursor(
+    session: Mapping[str, Any],
+    *,
+    circuit_id: str,
+    entry_id: str,
+    group_id: str | None,
+) -> str:
+    """Return a signed, scope-bound occurrence cursor."""
+
+    end = _datetime_from_iso(session.get("end"))
+    session_id = str(session.get("session_id") or "").strip()
+    if end is None or not session_id:
+        return ""
+    return _nilm_ambiguity_cursor_token(
+        [
+            "occurrences",
+            str(circuit_id or ""),
+            str(entry_id or ""),
+            str(group_id or ""),
+            end.isoformat(),
+            session_id,
+        ]
+    )
+
+
+def _nilm_ambiguity_collection_cursor_key(
+    cursor: Any,
+    *,
+    circuit_id: str,
+    entry_id: str,
+    group_id: str | None,
+) -> tuple[float, str] | None:
+    value = _nilm_ambiguity_cursor_value(cursor)
+    if not isinstance(value, list) or len(value) != 6:
+        return None
+    view = value[0]
+    cursor_circuit_id = _nilm_ambiguity_text(value[1])
+    cursor_entry_id = str(value[2] or "") if isinstance(value[2], str) else None
+    cursor_group_id = str(value[3] or "") if isinstance(value[3], str) else None
+    if (
+        view != "occurrences"
+        or cursor_circuit_id != str(circuit_id or "")
+        or cursor_entry_id != str(entry_id or "")
+        or cursor_group_id != str(group_id or "")
+    ):
+        return None
+    end = _datetime_from_iso(value[4])
+    session_id = _nilm_ambiguity_text(value[5])
+    if end is None or session_id is None:
+        return None
+    return -end.timestamp(), session_id
+
+
+def _nilm_ambiguity_group_collection_cursor(
+    group: Mapping[str, Any],
+    *,
+    circuit_id: str,
+    entry_id: str,
+) -> str:
+    """Return a signed, scope-bound group-summary cursor."""
+
+    occurrence_count = group.get("occurrence_count")
+    latest_at = _datetime_from_iso(group.get("latest_at"))
+    group_id = _nilm_ambiguity_text(group.get("group_id"))
+    if (
+        not isinstance(occurrence_count, int)
+        or isinstance(occurrence_count, bool)
+        or occurrence_count < 0
+        or latest_at is None
+        or group_id is None
+    ):
+        return ""
+    return _nilm_ambiguity_cursor_token(
+        [
+            "groups",
+            str(circuit_id or ""),
+            str(entry_id or ""),
+            occurrence_count,
+            latest_at.isoformat(),
+            group_id,
+        ]
+    )
+
+
+def _nilm_ambiguity_group_collection_cursor_key(
+    cursor: Any,
+    *,
+    circuit_id: str,
+    entry_id: str,
+) -> tuple[int, float, str] | None:
+    value = _nilm_ambiguity_cursor_value(cursor)
+    if not isinstance(value, list) or len(value) != 6:
+        return None
+    view = value[0]
+    cursor_circuit_id = _nilm_ambiguity_text(value[1])
+    cursor_entry_id = str(value[2] or "") if isinstance(value[2], str) else None
+    occurrence_count = value[3]
+    latest_at = _datetime_from_iso(value[4])
+    group_id = _nilm_ambiguity_text(value[5])
+    if (
+        view != "groups"
+        or cursor_circuit_id != str(circuit_id or "")
+        or cursor_entry_id != str(entry_id or "")
+        or not isinstance(occurrence_count, int)
+        or isinstance(occurrence_count, bool)
+        or occurrence_count < 0
+        or latest_at is None
+        or group_id is None
+    ):
+        return None
+    return -occurrence_count, -latest_at.timestamp(), group_id
+
+
+def _nilm_ambiguity_audit_number(value: Any) -> float | None:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    number = float(value)
+    if not math.isfinite(number) or abs(number) > 1_000_000_000:
+        return None
+    return round(number, 6)
+
+
+def _nilm_ambiguity_audit_item(
+    session: Mapping[str, Any],
+    labels: Mapping[str, str],
+    *,
+    circuit_id: str,
+) -> dict[str, Any]:
+    category, reason_codes, candidates, _identifiers = (
+        _nilm_session_ambiguity_detail(session)
+    )
+    explanations: list[dict[str, Any]] = []
+    for candidate in candidates[:MAX_NILM_AMBIGUITY_CANDIDATE_EXPLANATIONS]:
+        explanation = dict(candidate)
+        for key in (
+            str(candidate.get("assignment_id") or "").strip(),
+            str(candidate.get("signature_fingerprint") or "").strip(),
+        ):
+            if key in labels and str(labels[key] or "").strip():
+                explanation["display_label"] = labels[key]
+                break
+        explanations.append(explanation)
+    start = _datetime_from_iso(session.get("start"))
+    end = _datetime_from_iso(session.get("end"))
+    return {
+        "session_id": str(session.get("session_id") or "").strip(),
+        "group_id": _nilm_session_ambiguity_group_id(session, circuit_id),
+        "start": start.isoformat() if start is not None else None,
+        "end": end.isoformat() if end is not None else None,
+        "on_edge_id": _nilm_ambiguity_text(session.get("on_edge_id")),
+        "off_edge_id": _nilm_ambiguity_text(session.get("off_edge_id")),
+        "duration_seconds": _nilm_ambiguity_audit_number(
+            session.get("duration_seconds")
+        ),
+        "median_power_w": _nilm_ambiguity_audit_number(
+            session.get("median_power_w")
+        ),
+        "estimated_energy_kwh": _nilm_ambiguity_audit_number(
+            session.get("estimated_energy_kwh")
+        ),
+        "ambiguous": True,
+        "ambiguity_category": category,
+        "ambiguity_reason_codes": reason_codes,
+        "candidate_explanations": explanations,
+        "safe_actions": ["open_on_graph", "create_manual_interval"],
+    }
 
 
 def _nilm_signature_lookup_keys(signature: Mapping[str, Any]) -> list[str]:
@@ -3286,11 +4085,19 @@ def _nilm_session_payload_with_actions(
                 "data": data,
                 "requires": [ATTR_LABEL],
             }
-        if payload.get("end") and assignment_id and (
-            reviewed_session_ids is None
-            or (
-                assignment_id in reviewed_session_ids
-                and all(session_id not in ids for ids in reviewed_session_ids.values())
+        if (
+            payload.get("end")
+            and assignment_id
+            and not bool(payload.get("ambiguous"))
+            and (
+                reviewed_session_ids is None
+                or (
+                    assignment_id in reviewed_session_ids
+                    and all(
+                        session_id not in ids
+                        for ids in reviewed_session_ids.values()
+                    )
+                )
             )
         ):
             action_data = {

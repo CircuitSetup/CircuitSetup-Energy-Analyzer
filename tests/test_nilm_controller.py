@@ -20,6 +20,7 @@ from custom_components.circuitsetup_energy_analyzer.managers.store_persistence i
     StorePersistenceManager,
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
+    AlertEvidence,
     ApplianceProfile,
     CircuitConfig,
     CircuitEvent,
@@ -28,6 +29,7 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     EventType,
     NilmSourceKind,
     PowerFlowMode,
+    Severity,
 )
 from custom_components.circuitsetup_energy_analyzer.nilm import (
     build_nilm_assignment_model,
@@ -103,6 +105,149 @@ async def test_synthetic_unassigned_session_cannot_be_assigned() -> None:
             label="Pump",
             signature_fingerprint="unassigned",
         )
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_session_cannot_be_assigned_or_validated() -> None:
+    """Direct service calls cannot turn read-only ambiguity into feedback."""
+    controller = _nilm_controller(
+        SimpleNamespace(
+            store_data=FeatureStoreData(
+                nilm_appliance_assignments_by_circuit={
+                    "mains": [
+                        {
+                            "assignment_id": "assignment-pump",
+                            "session_ids": ["session-ambiguous"],
+                        }
+                    ]
+                },
+                nilm_session_history_by_circuit={
+                    "mains": [
+                        {
+                            "session_id": "session-ambiguous",
+                            "ambiguous": True,
+                        }
+                    ]
+                },
+            )
+        )
+    )
+
+    with pytest.raises(ValueError, match="(?i)ambiguous"):
+        await controller.async_assign_nilm_session(
+            "mains",
+            "session-ambiguous",
+            label="Pump",
+        )
+    with pytest.raises(ValueError, match="(?i)ambiguous"):
+        await controller.async_validate_nilm_session(
+            "mains",
+            "session-ambiguous",
+            assignment_id="assignment-pump",
+        )
+
+
+def test_ambiguous_finished_alert_feedback_is_rejected() -> None:
+    """A stale ambiguous finished alert cannot mutate its assignment."""
+    assignment = {
+        "assignment_id": "assignment-pump",
+        "confidence": 0.8,
+    }
+    controller = _nilm_controller(
+        SimpleNamespace(
+            store_data=FeatureStoreData(
+                nilm_appliance_assignments_by_circuit={"mains": [assignment]},
+                nilm_session_history_by_circuit={
+                    "mains": [{
+                        "session_id": "session-ambiguous",
+                        "assignment_id": "assignment-pump",
+                        "ambiguous": True,
+                    }]
+                },
+            )
+        )
+    )
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 8, 12, 12, 0, tzinfo=UTC),
+        circuit_id="mains",
+        severity=Severity.INFO,
+        message="Pump: a detected estimated run ended.",
+        feature="nilm_appliance_finished",
+        features={
+            "source": "nilm",
+            "assignment_id": "assignment-pump",
+            "notification_key": "assignment-pump:session-ambiguous",
+        },
+    )
+
+    with pytest.raises(ValueError, match="(?i)ambiguous"):
+        controller.apply_alert_feedback(
+            alert,
+            "correct",
+            datetime(2026, 8, 12, 12, 5, tzinfo=UTC),
+        )
+
+    assert assignment == {"assignment_id": "assignment-pump", "confidence": 0.8}
+
+
+@pytest.mark.asyncio
+async def test_history_validation_rejects_ambiguous_session_only() -> None:
+    """Bulk validation cannot turn ambiguity into assignment feedback."""
+    now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+    assignment = {
+        "assignment_id": "assignment-pump",
+        "session_ids": ["session-ambiguous"],
+    }
+    store_data = FeatureStoreData(
+        nilm_appliance_assignments_by_circuit={"mains": [assignment]},
+        nilm_label_intervals_by_circuit={
+            "mains": [
+                {
+                    "interval_id": "interval-pump",
+                    "assignment_id": "assignment-pump",
+                    "ground_truth_entity_id": "sensor.pump_power",
+                    "start": now.isoformat(),
+                    "end": (now + timedelta(minutes=10)).isoformat(),
+                }
+            ]
+        },
+        nilm_session_history_by_circuit={
+            "mains": [
+                {
+                    "session_id": "session-ambiguous",
+                    "assignment_id": "assignment-pump",
+                    "start": now.isoformat(),
+                    "end": (now + timedelta(minutes=10)).isoformat(),
+                    "ambiguous": True,
+                }
+            ]
+        },
+    )
+    coordinator = SimpleNamespace(
+        current_time=lambda: now,
+        store_data=store_data,
+        state=SimpleNamespace(),
+        async_set_updated_data=lambda _state: None,
+        store_persistence=SimpleNamespace(
+            mark_dirty=lambda: None,
+            async_save_if_dirty=AsyncMock(),
+        ),
+    )
+    controller = NilmController(
+        coordinator,
+        label_interval_max_items=10,
+        assignment_max_items=10,
+    )
+    before = deepcopy(store_data)
+
+    with pytest.raises(ValueError, match="(?i)non-ambiguous"):
+        await controller.async_validate_nilm_assignment_history(
+            "mains", "assignment-pump"
+        )
+
+    assert store_data == before
+    assert "confirmed_session_ids" not in assignment
+    assert "rejected_session_ids" not in assignment
 
 
 def test_nilm_controller_filters_known_load_events_from_registry() -> None:
