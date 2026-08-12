@@ -77,6 +77,7 @@ from .panel_views import (
     ApplianceInsightsView,
     HvacAssociationsView,
     NilmIntervalEvidenceView,
+    NilmWorkspaceCollectionView,
     NilmWorkspaceHistoryView,
     NilmWorkspaceView,
     SetupHealthView,
@@ -2436,6 +2437,7 @@ def _register_view(hass: Any) -> None:
         register_view(ApplianceInsightsView())
         register_view(SetupHealthView())
         register_view(NilmWorkspaceView())
+        register_view(NilmWorkspaceCollectionView())
         register_view(NilmWorkspaceHistoryView())
         register_view(NilmIntervalEvidenceView())
 

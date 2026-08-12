@@ -605,6 +605,7 @@ export class PanelShellMethods {
         .nilm-decision-option:has(input:focus-visible),
         .nilm-lane:focus-visible,
         .nilm-review-card:focus-visible,
+        .nilm-ambiguity-group-toggle:focus-visible,
         .nilm-review-card[aria-pressed="true"]:focus-visible {
           box-shadow:
             0 0 0 2px var(--card-background-color, #fff),
@@ -1333,6 +1334,67 @@ export class PanelShellMethods {
           min-height: 44px;
           padding: 12px 0;
         }
+        .nilm-ambiguity-audit {
+          border-color: var(--divider-color, #d8dde6);
+        }
+        .nilm-ambiguity-audit > h2,
+        .nilm-ambiguity-audit > p {
+          margin: 0;
+        }
+        .nilm-ambiguity-groups,
+        .nilm-ambiguity-occurrence-list {
+          display: grid;
+          gap: 10px;
+          min-width: 0;
+        }
+        .nilm-ambiguity-group,
+        .nilm-ambiguity-occurrence {
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color));
+          border-radius: var(--ha-card-border-radius, 12px);
+          display: grid;
+          gap: 8px;
+          min-width: 0;
+          padding: 10px;
+        }
+        .nilm-ambiguity-occurrence[data-nilm-selected="true"] {
+          border-color: var(--primary-color, #03a9f4);
+          box-shadow: 0 0 0 1px var(--primary-color, #03a9f4);
+        }
+        .nilm-ambiguity-group > p,
+        .nilm-ambiguity-occurrence > p,
+        .nilm-ambiguity-occurrence details > p {
+          margin: 0;
+          overflow-wrap: anywhere;
+        }
+        .nilm-ambiguity-group-toggle {
+          align-items: center;
+          display: flex;
+          justify-content: space-between;
+          min-width: 0;
+          text-align: left;
+          width: 100%;
+        }
+        .nilm-ambiguity-group-toggle > span {
+          overflow-wrap: anywhere;
+        }
+        .nilm-ambiguity-occurrence details {
+          min-width: 0;
+        }
+        .nilm-ambiguity-occurrence ul {
+          margin: 0;
+          overflow-wrap: anywhere;
+          padding-inline-start: 20px;
+        }
+        .sr-only {
+          height: 1px;
+          margin: -1px;
+          overflow: hidden;
+          padding: 0;
+          position: absolute;
+          width: 1px;
+          clip: rect(0, 0, 0, 0);
+          white-space: nowrap;
+        }
         .icon-button,
         .nilm-graph-controls button {
           height: 44px;
@@ -1643,6 +1705,61 @@ export class PanelShellMethods {
           reviewItem,
           { scroll: false },
         );
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-ambiguity-toggle]")) {
+      button.addEventListener("click", () => {
+        const focus = this._nilmFocusState(button);
+        void this._toggleNilmAmbiguityAudit().finally(() => this._restoreNilmFocus(focus));
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-ambiguity-group]")) {
+      button.addEventListener("click", () => {
+        const focus = this._nilmFocusState(button);
+        void this._toggleNilmAmbiguityGroup(
+          button.dataset.nilmAmbiguityGroup,
+        ).finally(() => this._restoreNilmFocus(focus));
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-ambiguity-load-groups]")) {
+      button.addEventListener("click", () => {
+        const focus = this._nilmFocusState(button);
+        void this._loadNilmAmbiguityAuditGroupSummaries(
+          this._nilmAmbiguityAudit(),
+          { append: button.dataset.nilmAmbiguityAppend === "true" },
+        ).finally(() => this._restoreNilmFocus(focus));
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-ambiguity-load-occurrences]")) {
+      button.addEventListener("click", () => {
+        const focus = this._nilmFocusState(button);
+        const audit = this._nilmAmbiguityAudit();
+        const group = this._nilmAmbiguityAuditGroup(
+          audit,
+          button.dataset.nilmAmbiguityLoadOccurrences,
+        );
+        if (group) {
+          void this._loadNilmAmbiguityAuditGroup(
+            audit,
+            group,
+            { append: true },
+          ).finally(() => this._restoreNilmFocus(focus));
+        }
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-ambiguity-open-graph]")) {
+      button.addEventListener("click", () => {
+        const item = this._nilmAmbiguityAuditItem(button.dataset.nilmAmbiguitySessionId);
+        const focus = this._nilmFocusState(button);
+        if (item) {
+          void this._focusNilmAmbiguityOccurrence(item).finally(() => this._restoreNilmFocus(focus));
+        }
+      });
+    }
+    for (const button of this.shadowRoot.querySelectorAll("[data-nilm-ambiguity-create-interval]")) {
+      button.addEventListener("click", () => {
+        const item = this._nilmAmbiguityAuditItem(button.dataset.nilmAmbiguitySessionId);
+        if (item) void this._createNilmAmbiguityManualInterval(item);
       });
     }
     for (const button of this.shadowRoot.querySelectorAll("[data-nilm-occurrence-step]")) {

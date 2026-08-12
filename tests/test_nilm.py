@@ -5811,6 +5811,80 @@ def test_global_session_pairing_marks_alternate_off_edge_ambiguity() -> None:
     assert ambiguous.ambiguous is True
     assert ambiguous.alternate_match_count == 1
     assert ambiguous.confidence < simple.confidence
+    assert [
+        candidate.candidate_kind for candidate in ambiguous.ambiguity_candidates
+    ] == ["stop_boundary", "stop_boundary"]
+    assert [
+        candidate.reason_code for candidate in ambiguous.ambiguity_candidates
+    ] == ["stop_boundary_conflict", "stop_boundary_conflict"]
+    assert all(candidate.edge_id for candidate in ambiguous.ambiguity_candidates)
+    assert all(
+        candidate.total_score is not None
+        for candidate in ambiguous.ambiguity_candidates
+    )
+    assert ambiguous.ambiguity_candidates[0].score_margin_from_best == 0.0
+
+
+def test_global_session_pairing_retains_bounded_assignment_conflict_evidence() -> None:
+    specs = [
+        {
+            "signature_fingerprint": "load-a",
+            "typical_watts": 500.0,
+            "assignment_id": "assignment-a",
+        },
+        {
+            "signature_fingerprint": "load-b",
+            "typical_watts": 500.0,
+            "assignment_id": "assignment-b",
+        },
+        {
+            "signature_fingerprint": "load-c",
+            "typical_watts": 500.0,
+            "assignment_id": "assignment-c",
+        },
+        {
+            "signature_fingerprint": "load-d",
+            "typical_watts": 500.0,
+            "assignment_id": "assignment-d",
+        },
+    ]
+
+    session = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(300, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=specs,
+    )[0]
+    repeated = pair_nilm_sessions_for_signatures(
+        [edge(0, 500.0), edge(300, -500.0)],
+        mains_circuit_id="mains",
+        signature_specs=specs,
+    )[0]
+
+    assert session.ambiguous is True
+    assert session.assignment_id is None
+    assert len(session.ambiguity_candidates) == 3
+    assert {candidate.assignment_id for candidate in session.ambiguity_candidates} == {
+        "assignment-a",
+        "assignment-b",
+        "assignment-c",
+    }
+    assert {candidate.candidate_kind for candidate in session.ambiguity_candidates} == {
+        "assignment"
+    }
+    assert {candidate.reason_code for candidate in session.ambiguity_candidates} == {
+        "assignment_candidate_conflict"
+    }
+    assert all(
+        candidate.total_score is not None
+        for candidate in session.ambiguity_candidates
+    )
+    assert all(
+        candidate.score_margin_from_best is not None
+        for candidate in session.ambiguity_candidates
+    )
+    assert [candidate.candidate_id for candidate in session.ambiguity_candidates] == [
+        candidate.candidate_id for candidate in repeated.ambiguity_candidates
+    ]
 
 
 def test_global_session_pairing_clears_owner_across_assignment_alternates() -> None:

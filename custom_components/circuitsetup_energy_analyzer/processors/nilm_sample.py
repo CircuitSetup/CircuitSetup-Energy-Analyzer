@@ -4726,7 +4726,7 @@ def _reconcile_nilm_session_duration_bounds(
                 or not 0 <= alternate_match_count <= NILM_SESSION_HISTORY_COUNT_MAX
             ):
                 alternate_match_count = 0
-            payload["_duration_bound_close"] = {
+            close_snapshot = {
                 key: payload.get(key)
                 for key in (
                     "session_id",
@@ -4737,12 +4737,16 @@ def _reconcile_nilm_session_duration_bounds(
                     "confidence",
                 )
             }
-            payload["_duration_bound_close"].update(
+            ambiguity_candidates = payload.get("ambiguity_candidates")
+            if isinstance(ambiguity_candidates, (list, tuple)):
+                close_snapshot["ambiguity_candidates"] = ambiguity_candidates
+            close_snapshot.update(
                 {
                     "ambiguous": payload.get("ambiguous") is True,
                     "alternate_match_count": alternate_match_count,
                 }
             )
+            payload["_duration_bound_close"] = close_snapshot
             _replace_nilm_assignment_rejection(
                 assignment,
                 old_session_id=closed_session_id,

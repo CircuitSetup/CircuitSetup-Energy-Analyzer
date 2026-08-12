@@ -439,7 +439,7 @@ def _nilm_virtual_appliance_state(
     derived_sessions = [
         session
         for session in circuit_sessions
-        if session.assignment_id == assignment_id
+        if session.assignment_id == assignment_id and not session.ambiguous
     ] if component_eligible else []
     session_payloads = _merged_assignment_session_payloads(
         coordinator,
@@ -781,7 +781,7 @@ def _merged_assignment_session_payloads(
     stored = histories.get(circuit_id, ()) if isinstance(histories, Mapping) else ()
     merged: dict[str, dict[str, Any]] = {}
     for session in _iter_items(stored):
-        if not isinstance(session, Mapping):
+        if not isinstance(session, Mapping) or bool(session.get("ambiguous")):
             continue
         session_fingerprint = str(
             session.get("signature_fingerprint") or ""
@@ -811,6 +811,8 @@ def _merged_assignment_session_payloads(
         merged[session_id] = dict(session)
     owned_starts = {str(session.get("start") or "") for session in merged.values()}
     for session in derived_sessions:
+        if session.ambiguous:
+            continue
         if session.start.isoformat() not in owned_starts:
             merged.setdefault(session.session_id, nilm_session_to_dict(session))
     return sorted(

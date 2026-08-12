@@ -2026,6 +2026,7 @@ class NilmController:
             raise ValueError(
                 "Assign a complete detected component, not a raw edge session."
             )
+        self._assert_nilm_session_is_actionable(circuit_id, session_id_text)
         coordinator = self._coordinator
         assignment = self.upsert_assignment(
             circuit_id,
@@ -2280,12 +2281,31 @@ class NilmController:
                 (),
             )
             if isinstance(session, Mapping)
+            and not bool(session.get("ambiguous"))
             and _nilm_session_assignment_matches(
                 session,
                 assignment_id=assignment_id_text,
                 session_ids=assignment_session_ids,
             )
         ]
+        has_ambiguous_sessions = any(
+            isinstance(session, Mapping)
+            and bool(session.get("ambiguous"))
+            and _nilm_session_assignment_matches(
+                session,
+                assignment_id=assignment_id_text,
+                session_ids=assignment_session_ids,
+            )
+            for session in coordinator.store_data.nilm_session_history_by_circuit.get(
+                circuit_id,
+                (),
+            )
+        )
+        if not sessions and has_ambiguous_sessions:
+            raise ValueError(
+                "No non-ambiguous NILM sessions are available for history "
+                "validation."
+            )
         result = match_nilm_validation_intervals(
             sessions,
             intervals,
@@ -2681,6 +2701,7 @@ class NilmController:
     ) -> dict[str, Any]:
         """Apply one user validation decision to a NILM appliance assignment."""
         session_id_text = str(session_id or "").strip()
+        self._assert_nilm_session_is_actionable(circuit_id, session_id_text)
         assignment = self.assignment_for_session(
             circuit_id,
             session_id_text,
@@ -3067,6 +3088,8 @@ class NilmController:
             notification_key_parts = notification_key.split(":", 1)
             if len(notification_key_parts) == 2:
                 session_id = notification_key_parts[1].strip()
+        if session_id:
+            self._assert_nilm_session_is_actionable(alert.circuit_id, session_id)
         confirmed = self._clean_string_list(assignment.get("confirmed_session_ids"))
         rejected = self._clean_string_list(assignment.get("rejected_session_ids"))
         if action == "correct":
@@ -3133,6 +3156,32 @@ class NilmController:
             f"Assign NILM session '{session_id_text}' to an appliance before "
             "validating it."
         )
+
+    def _assert_nilm_session_is_actionable(
+        self,
+        circuit_id: str,
+        session_id: str,
+    ) -> None:
+        """Reject feedback or assignment for retained ambiguous evidence."""
+        store_data = getattr(self._coordinator, "store_data", None)
+        history_by_circuit = getattr(
+            store_data,
+            "nilm_session_history_by_circuit",
+            {},
+        )
+        for session in history_by_circuit.get(
+            circuit_id,
+            (),
+        ):
+            if (
+                isinstance(session, Mapping)
+                and str(session.get("session_id") or "").strip() == session_id
+                and bool(session.get("ambiguous"))
+            ):
+                raise ValueError(
+                    "Ambiguous NILM evidence is read-only; create a manual "
+                    "interval before assigning or validating it."
+                )
 
     async def async_ignore_nilm_signature(
         self,

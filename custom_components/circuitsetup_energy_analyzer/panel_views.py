@@ -13,6 +13,7 @@ from .panel_contracts import (
     HVAC_ASSOCIATIONS_API_PATH,
     NILM_INTERVAL_EVIDENCE_API_PATH,
     NILM_WORKSPACE_API_PATH,
+    NILM_WORKSPACE_COLLECTION_API_PATH,
     NILM_WORKSPACE_HISTORY_API_PATH,
     SETUP_HEALTH_API_PATH,
 )
@@ -190,6 +191,32 @@ class NilmWorkspaceView(HomeAssistantView):
             circuit_id=request.query.get("circuit_id"),
             hours=request.query.get("hours"),
             entry_id=request.query.get(panel.ATTR_ENTRY_ID),
+        )
+        return panel.web.json_response(payload)
+
+
+class NilmWorkspaceCollectionView(HomeAssistantView):
+    """Authenticated bounded, read-only NILM collection endpoint."""
+
+    url = NILM_WORKSPACE_COLLECTION_API_PATH
+    name = f"api:{DOMAIN}:nilm_workspace_collection"
+    requires_auth = True
+
+    async def get(self, request: Any) -> Any:
+        """Return an explicitly whitelisted NILM collection."""
+        from . import panel
+        from .panel_nilm import nilm_workspace_collection_payload
+
+        hass = request.app[panel.KEY_HASS]
+        payload = nilm_workspace_collection_payload(
+            panel._loaded_coordinators(hass),
+            collection=request.query.get("collection"),
+            circuit_id=request.query.get("circuit_id"),
+            entry_id=request.query.get(panel.ATTR_ENTRY_ID),
+            group_id=request.query.get("group_id"),
+            cursor=request.query.get("cursor"),
+            limit=request.query.get("limit"),
+            view=request.query.get("view"),
         )
         return panel.web.json_response(payload)
 
