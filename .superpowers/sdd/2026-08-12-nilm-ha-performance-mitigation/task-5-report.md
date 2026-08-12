@@ -172,3 +172,56 @@ Additional changed files in this review round:
 
 - `custom_components/circuitsetup_energy_analyzer/panel_views.py`
 - `scripts/benchmark_nilm_performance.py`
+
+## Review fix round 2
+
+Async collection and item reads now retain an event-loop-owned source identity
+across snapshot construction and executor execution. The identity is derived
+without comparing retained-history contents: it uses coordinator/config/data
+object identity plus selected collection container identity, length, and tail
+identity. It also covers configured helper-assignment containers and the small
+set of referenced HA state rows used by assignment payloads.
+
+The shared async read loop performs three event-loop checks:
+
+1. capture identity;
+2. build the detached immutable snapshot and revalidate before dispatch;
+3. await the pure executor builder and revalidate before returning.
+
+If either revalidation fails, the stale snapshot/payload is discarded and the
+read retries from current live state. The executor continues to receive only a
+detached snapshot and never accesses live coordinator or HA objects. Await
+cancellation still propagates before any view can call `json_response`.
+
+RED evidence:
+
+```text
+rtk pytest tests/test_panel.py -q -k "async_read_retries_stale_snapshot"
+Pytest: 0 passed, 1 failed
+assert hass.executor_calls == 2
+E assert 1 == 2
+```
+
+The failure proved the previous implementation returned the first completed
+executor payload even after retained history advanced while it was pending.
+
+GREEN and verification evidence:
+
+```text
+rtk pytest tests/test_panel.py -q -k "async_read_retries_stale_snapshot or detached_snapshot or cancelled_nilm_collection"
+Pytest: 3 passed
+
+rtk ruff check custom_components/circuitsetup_energy_analyzer/panel_nilm.py tests/test_panel.py
+Ruff: No issues found
+
+rtk pytest tests/test_panel.py tests/e2e -q
+Pytest: 203 passed
+
+rtk git diff --check
+exit 0
+```
+
+The stale-result regression test advances retained session identity after the
+first executor payload is built. It proves the first payload is not returned,
+the builder is dispatched a second time, and the public response contains both
+current sessions.

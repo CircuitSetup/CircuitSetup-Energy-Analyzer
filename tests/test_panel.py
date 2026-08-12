@@ -5359,7 +5359,6 @@ async def test_nilm_workspace_collection_async_read_uses_detached_snapshot() -> 
 
         async def async_add_executor_job(self, job):
             self.executor_calls += 1
-            coordinator.store_data.nilm_session_history_by_circuit["mains"].clear()
             return job()
 
     hass = Hass()
@@ -5376,6 +5375,62 @@ async def test_nilm_workspace_collection_async_read_uses_detached_snapshot() -> 
     assert payload["status"] == "ok"
     assert payload["total_count"] == 1
     assert payload["items"][0]["session_id"] == "session-1"
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_async_read_retries_stale_snapshot() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        async_nilm_workspace_collection_payload,
+    )
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="Mains",
+        entity_id="sensor.mains_power",
+    )
+    history = [
+        {
+            "session_id": "session-1",
+            "signature_fingerprint": "signature-1",
+            "start": "2026-08-12T12:00:00+00:00",
+            "end": "2026-08-12T12:05:00+00:00",
+        }
+    ]
+    coordinator.store_data.nilm_session_history_by_circuit = {"mains": history}
+
+    class Hass:
+        executor_calls = 0
+
+        async def async_add_executor_job(self, job):
+            self.executor_calls += 1
+            payload = job()
+            if self.executor_calls == 1:
+                history.append(
+                    {
+                        "session_id": "session-2",
+                        "signature_fingerprint": "signature-1",
+                        "start": "2026-08-12T13:00:00+00:00",
+                        "end": "2026-08-12T13:05:00+00:00",
+                    }
+                )
+            return payload
+
+    hass = Hass()
+    payload = await async_nilm_workspace_collection_payload(
+        hass,
+        [coordinator],
+        collection="sessions",
+        circuit_id="mains",
+        entry_id="entry-1",
+        limit=50,
+    )
+
+    assert hass.executor_calls == 2
+    assert payload["total_count"] == 2
+    assert {item["session_id"] for item in payload["items"]} == {
+        "session-1",
+        "session-2",
+    }
 
 
 @pytest.mark.asyncio

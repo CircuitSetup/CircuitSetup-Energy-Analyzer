@@ -354,6 +354,125 @@ def _nilm_workspace_read_snapshot(
     )
 
 
+def _nilm_workspace_read_identity(
+    coordinators: Iterable[Any],
+    *,
+    circuit_id: str | None,
+    entry_id: str | None,
+) -> tuple[Any, ...]:
+    """Return an O(1) identity token for selected live NILM read inputs."""
+
+    target = _nilm_workspace_target(tuple(coordinators), circuit_id, entry_id=entry_id)
+    if target is None:
+        return ("not_found",)
+    coordinator, config, _sources = target
+    selected_circuit_id = config.circuit_id
+    store = getattr(coordinator, "store_data", None)
+
+    def marker(value: Any) -> tuple[int, int, int, int]:
+        if isinstance(value, Mapping):
+            selected = value.get(selected_circuit_id)
+        else:
+            selected = None
+        if isinstance(selected, (list, tuple)):
+            return (
+                id(value),
+                id(selected),
+                len(selected),
+                id(selected[-1]) if selected else 0,
+            )
+        return (id(value), id(selected), 0, 0)
+
+    assignments = getattr(store, "nilm_appliance_assignments_by_circuit", None)
+    configured_ids = tuple(
+        str(getattr(item, "circuit_id", "") or "")
+        for item in getattr(coordinator, "circuit_configs", ()) or ()
+        if str(getattr(item, "circuit_id", "") or "")
+    )
+    assignment_markers = tuple(
+        (
+            configured_id,
+            id(rows),
+            len(rows) if isinstance(rows, (list, tuple)) else 0,
+            id(rows[-1]) if isinstance(rows, (list, tuple)) and rows else 0,
+        )
+        for configured_id in configured_ids
+        for rows in (
+            assignments.get(configured_id)
+            if isinstance(assignments, Mapping)
+            else None,
+        )
+    )
+    selected_assignments = (
+        assignments.get(selected_circuit_id, ())
+        if isinstance(assignments, Mapping)
+        else ()
+    )
+    live_states = getattr(getattr(coordinator, "hass", None), "states", None)
+    get_state = getattr(live_states, "get", None)
+    reference_state_markers = tuple(
+        (
+            entity_id,
+            id(row),
+            getattr(row, "state", None),
+            getattr(row, "last_updated", None),
+        )
+        for item in _iter_items(selected_assignments)
+        if isinstance(item, Mapping)
+        for field in ("reference_state_entity_id", "reference_power_entity_id")
+        if (entity_id := str(item.get(field) or "").strip())
+        for row in (get_state(entity_id) if callable(get_state) else None,)
+    )
+    state = getattr(coordinator, "state", None)
+    return (
+        id(coordinator),
+        id(getattr(coordinator, "data", None)),
+        id(getattr(coordinator, "circuit_configs", None)),
+        marker(getattr(store, "nilm_signatures", None)),
+        marker(getattr(store, "nilm_session_history_by_circuit", None)),
+        marker(getattr(store, "nilm_label_intervals_by_circuit", None)),
+        marker(getattr(store, "nilm_appliance_assignments_by_circuit", None)),
+        marker(getattr(store, "nilm_known_load_attributions_by_circuit", None)),
+        marker(getattr(state, "nilm_unknown_loads_by_circuit", None)),
+        marker(getattr(coordinator, "_nilm_unmatched_edges", None)),
+        assignment_markers,
+        reference_state_markers,
+    )
+
+
+async def _async_nilm_workspace_read(
+    hass: Any,
+    coordinators: Iterable[Any],
+    builder: Any,
+    kwargs: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Retry executor reads until their event-loop source identity is current."""
+
+    live_coordinators = tuple(coordinators)
+    identity_kwargs = {
+        "circuit_id": kwargs.get("circuit_id"),
+        "entry_id": kwargs.get("entry_id"),
+    }
+    while True:
+        identity = _nilm_workspace_read_identity(
+            live_coordinators, **identity_kwargs
+        )
+        snapshot = _nilm_workspace_read_snapshot(
+            live_coordinators, **identity_kwargs
+        )
+        if identity != _nilm_workspace_read_identity(
+            live_coordinators, **identity_kwargs
+        ):
+            continue
+        payload = await hass.async_add_executor_job(
+            partial(builder, snapshot, **kwargs)
+        )
+        if identity == _nilm_workspace_read_identity(
+            live_coordinators, **identity_kwargs
+        ):
+            return payload
+
+
 async def async_nilm_workspace_collection_payload(
     hass: Any,
     coordinators: Iterable[Any],
@@ -361,13 +480,8 @@ async def async_nilm_workspace_collection_payload(
 ) -> dict[str, Any]:
     """Build a collection payload from an event-loop-captured snapshot."""
 
-    snapshot = _nilm_workspace_read_snapshot(
-        coordinators,
-        circuit_id=kwargs.get("circuit_id"),
-        entry_id=kwargs.get("entry_id"),
-    )
-    return await hass.async_add_executor_job(
-        partial(nilm_workspace_collection_payload, snapshot, **kwargs)
+    return await _async_nilm_workspace_read(
+        hass, coordinators, nilm_workspace_collection_payload, kwargs
     )
 
 
@@ -378,13 +492,8 @@ async def async_nilm_workspace_item_payload(
 ) -> dict[str, Any]:
     """Build an exact-item payload from an event-loop-captured snapshot."""
 
-    snapshot = _nilm_workspace_read_snapshot(
-        coordinators,
-        circuit_id=kwargs.get("circuit_id"),
-        entry_id=kwargs.get("entry_id"),
-    )
-    return await hass.async_add_executor_job(
-        partial(nilm_workspace_item_payload, snapshot, **kwargs)
+    return await _async_nilm_workspace_read(
+        hass, coordinators, nilm_workspace_item_payload, kwargs
     )
 
 
