@@ -47,7 +47,6 @@ def build_markdown_report(
     *,
     generated_at: datetime | None = None,
 ) -> str:
-    generated_at = generated_at or datetime.now(UTC)
     passed = sum(1 for metrics in metrics_list if not metrics.expectation_failures)
     failed = len(metrics_list) - passed
     true_positive_alerts = sum(metrics.true_positive_alerts for metrics in metrics_list)
@@ -74,8 +73,6 @@ def build_markdown_report(
     lines = [
         "# Confidence Calibration Report",
         "",
-        f"Generated: {generated_at.isoformat()}",
-        "",
         "## Summary",
         "",
         "| Metric | Value |",
@@ -88,12 +85,18 @@ def build_markdown_report(
         f"| Median detection latency seconds | {_format_metric(median_latency)} |",
         f"| False positives | {false_positive_alerts} |",
         f"| False negatives | {false_negative_alerts} |",
+        "| Stale subtraction incidents | "
+        f"{sum(metrics.stale_subtraction_incidents for metrics in metrics_list)} |",
         "",
         "## Fixtures",
         "",
-        "| Fixture | TP | FP | FN | Precision | Recall | Latency seconds |",
-        "|---|---:|---:|---:|---:|---:|---:|",
+        "| Fixture | TP | FP | FN | Precision | Recall | Latency seconds | "
+        "Trace plateau MAE W | Session energy MAE kWh | Stale prevented | "
+        "Measured/partial/fallback (%) | Replay work units |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
+    if generated_at is not None:
+        lines[2:2] = [f"Generated: {generated_at.astimezone(UTC).isoformat()}", ""]
     lines.extend(
         (
             "| "
@@ -103,7 +106,14 @@ def build_markdown_report(
             f"{metrics.false_negative_alerts} | "
             f"{_format_metric(metrics.precision)} | "
             f"{_format_metric(metrics.recall)} | "
-            f"{_format_metric(metrics.detection_latency_seconds)} |"
+            f"{_format_metric(metrics.detection_latency_seconds)} | "
+            f"{_format_metric(metrics.residual_plateau_mae_w)} | "
+            f"{_format_metric(metrics.session_energy_mae_kwh)} | "
+            f"{metrics.stale_subtraction_incidents} | "
+            f"{_format_percent(metrics.measured_session_percentage)}/"
+            f"{_format_percent(metrics.partial_session_percentage)}/"
+            f"{_format_percent(metrics.fallback_session_percentage)} | "
+            f"{metrics.replay_processing_work_units} |"
         )
         for metrics in metrics_list
     )
@@ -298,6 +308,11 @@ def _format_metric(value: float | None) -> str:
     if value is None:
         return "n/a"
     return f"{value:g}"
+
+
+def _format_percent(value: float | None) -> str:
+    """Format an optional percentage without inventing a no-session value."""
+    return "n/a" if value is None else f"{value:.1f}%"
 
 
 if __name__ == "__main__":

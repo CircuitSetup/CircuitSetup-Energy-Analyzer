@@ -53,6 +53,16 @@ NILM_VALIDATION_MIN_DISTINCT_DAYS = 3
 NILM_VALIDATION_PRIOR_CORRECT = 2.0
 NILM_VALIDATION_PRIOR_WRONG = 2.0
 NILM_VALIDATION_MAX_REPLAY_WINDOW = timedelta(days=31)
+NILM_SESSION_MAX_DURATION = timedelta(hours=12)
+NILM_RESIDUAL_TRACE_PRE_CONTEXT = timedelta(seconds=30)
+NILM_RESIDUAL_TRACE_POST_CONTEXT = timedelta(seconds=30)
+NILM_RESIDUAL_TRACE_SAFETY_MARGIN = timedelta(minutes=5)
+NILM_RESIDUAL_TRACE_REQUIRED_HORIZON = (
+    NILM_SESSION_MAX_DURATION
+    + NILM_RESIDUAL_TRACE_PRE_CONTEXT
+    + NILM_RESIDUAL_TRACE_POST_CONTEXT
+    + NILM_RESIDUAL_TRACE_SAFETY_MARGIN
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -3498,6 +3508,40 @@ class _NilmEdgeCluster:
 
 
 @dataclass(frozen=True, slots=True)
+class NilmResidualPowerPoint:
+    """One source-quality-bearing mains residual observation."""
+
+    timestamp: datetime
+    mains_power_w: float
+    explained_known_power_w: float
+    residual_power_w: float
+    contributing_known_circuit_ids: tuple[str, ...]
+    stale_known_circuit_ids: tuple[str, ...]
+    unavailable_known_circuit_ids: tuple[str, ...]
+    missing_known_circuit_ids: tuple[str, ...]
+    expected_known_circuit_count: int
+    fresh_known_circuit_count: int
+    known_source_coverage: float
+    subtraction_complete: bool
+    quality_flags: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class NilmResidualTraceMetadata:
+    """Retention state plus bounded lifetime diagnostics for one trace."""
+
+    configured_horizon_seconds: float
+    point_cap: int
+    point_cap_truncated: bool = False
+    oldest_point_at: datetime | None = None
+    newest_point_at: datetime | None = None
+    stale_subtraction_prevented_count: int = 0
+    partial_residual_point_count: int = 0
+    negative_residual_point_count: int = 0
+    trace_point_cap_truncation_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class NilmSession:
     """Probable appliance run reconstructed from compatible NILM edges."""
 
@@ -3526,6 +3570,22 @@ class NilmSession:
     measured_energy_kwh: float | None = None
     power_coverage: float | None = None
     intermediate_transition_count: int = 0
+    partial_energy_kwh: float | None = None
+    energy_source: str = "unavailable"
+    energy_estimate_confidence: float | None = None
+    covered_duration_seconds: float | None = None
+    longest_trace_gap_seconds: float | None = None
+    pre_context_coverage: bool | None = None
+    post_context_coverage: bool | None = None
+    known_source_coverage_min: float | None = None
+    known_source_coverage_time_weighted: float | None = None
+    trace_point_cap_truncated: bool = False
+    trace_started_at: datetime | None = None
+    trace_ended_at: datetime | None = None
+    stale_subtraction_prevented_count: int = 0
+    partial_residual_point_count: int = 0
+    negative_residual_point_count: int = 0
+    trace_point_cap_truncation_count: int = 0
 
 
 def nilm_session_to_dict(session: NilmSession) -> dict[str, Any]:
@@ -3556,6 +3616,36 @@ def nilm_session_to_dict(session: NilmSession) -> dict[str, Any]:
         "measured_energy_kwh": session.measured_energy_kwh,
         "power_coverage": session.power_coverage,
         "intermediate_transition_count": session.intermediate_transition_count,
+        "partial_energy_kwh": session.partial_energy_kwh,
+        "energy_source": session.energy_source,
+        "energy_estimate_confidence": session.energy_estimate_confidence,
+        "covered_duration_seconds": session.covered_duration_seconds,
+        "longest_trace_gap_seconds": session.longest_trace_gap_seconds,
+        "pre_context_coverage": session.pre_context_coverage,
+        "post_context_coverage": session.post_context_coverage,
+        "known_source_coverage_min": session.known_source_coverage_min,
+        "known_source_coverage_time_weighted": (
+            session.known_source_coverage_time_weighted
+        ),
+        "trace_point_cap_truncated": session.trace_point_cap_truncated,
+        "trace_started_at": (
+            session.trace_started_at.isoformat()
+            if session.trace_started_at is not None
+            else None
+        ),
+        "trace_ended_at": (
+            session.trace_ended_at.isoformat()
+            if session.trace_ended_at is not None
+            else None
+        ),
+        "stale_subtraction_prevented_count": (
+            session.stale_subtraction_prevented_count
+        ),
+        "partial_residual_point_count": session.partial_residual_point_count,
+        "negative_residual_point_count": session.negative_residual_point_count,
+        "trace_point_cap_truncation_count": (
+            session.trace_point_cap_truncation_count
+        ),
     }
 
 
@@ -5801,8 +5891,25 @@ class _NilmSessionTraceEvidence:
 
     plateau_power_w: float | None
     measured_energy_kwh: float | None
+    partial_energy_kwh: float | None
     power_coverage: float
+    covered_duration_seconds: float
+    longest_gap_seconds: float
+    pre_context_coverage: bool
+    post_context_coverage: bool
+    known_source_coverage_min: float
+    known_source_coverage_time_weighted: float
+    point_cap_truncated: bool
+    trace_started_at: datetime | None
+    trace_ended_at: datetime | None
     intermediate_transition_count: int
+    energy_source: str
+    energy_estimate_confidence: float | None
+    stale_subtraction_prevented_count: int
+    partial_residual_point_count: int
+    negative_residual_point_count: int
+    trace_point_cap_truncation_count: int
+    matching_eligible: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -5984,10 +6091,11 @@ def pair_nilm_sessions_for_signatures(
     mains_circuit_id: str,
     signature_specs: Iterable[Mapping[str, Any]],
     min_duration: timedelta = timedelta(seconds=30),
-    max_duration: timedelta = timedelta(hours=12),
+    max_duration: timedelta = NILM_SESSION_MAX_DURATION,
     min_confidence: float = 0.5,
     ambiguity_margin: float = 0.08,
-    power_trace: Iterable[tuple[datetime, float]] = (),
+    power_trace: Iterable[NilmResidualPowerPoint | tuple[datetime, float]] = (),
+    trace_metadata: NilmResidualTraceMetadata | None = None,
 ) -> list[NilmSession]:
     """Pair NILM sessions once across all competing signatures."""
 
@@ -6140,10 +6248,19 @@ def pair_nilm_sessions_for_signatures(
         candidate_off_indices_by_on[on_index].add(off_index)
     trace_pairs = set(candidate_pairs[:NILM_SESSION_TRACE_PAIR_MAX_ITEMS])
     trace_evidence_by_pair = {
-        pair: _nilm_session_trace_evidence(
-            on_edges[pair[0]],
-            off_edges[pair[1]],
-            normalized_trace,
+        pair: (
+            _nilm_session_trace_evidence(
+                on_edges[pair[0]],
+                off_edges[pair[1]],
+                normalized_trace,
+                trace_metadata=trace_metadata,
+            )
+            if trace_metadata is not None
+            else _nilm_session_trace_evidence(
+                on_edges[pair[0]],
+                off_edges[pair[1]],
+                normalized_trace,
+            )
         )
         for pair in trace_pairs
     }
@@ -6937,10 +7054,25 @@ def _closed_nilm_session(
         and trace_evidence.measured_energy_kwh is not None
         else None
     )
+    fallback_energy_kwh = round(
+        (edge_derived_power_w * duration_seconds) / 3_600_000.0,
+        3,
+    )
     estimated_energy_kwh = (
         measured_energy_kwh
         if measured_energy_kwh is not None
-        else round((median_power_w * duration_seconds) / 3_600_000.0, 3)
+        else fallback_energy_kwh
+    )
+    energy_source = (
+        trace_evidence.energy_source
+        if trace_evidence is not None and trace_evidence.energy_source != "unavailable"
+        else "transition_fallback"
+    )
+    energy_estimate_confidence = (
+        trace_evidence.energy_estimate_confidence
+        if trace_evidence is not None
+        and trace_evidence.energy_estimate_confidence is not None
+        else round(_clamp(confidence * 0.65), 3)
     )
     return NilmSession(
         session_id=_nilm_session_id(
@@ -6980,6 +7112,76 @@ def _closed_nilm_session(
         ),
         intermediate_transition_count=(
             trace_evidence.intermediate_transition_count
+            if trace_evidence is not None
+            else 0
+        ),
+        partial_energy_kwh=(
+            round(trace_evidence.partial_energy_kwh, 6)
+            if trace_evidence is not None
+            and trace_evidence.partial_energy_kwh is not None
+            and measured_energy_kwh is None
+            else None
+        ),
+        energy_source=energy_source,
+        energy_estimate_confidence=energy_estimate_confidence,
+        covered_duration_seconds=(
+            round(trace_evidence.covered_duration_seconds, 3)
+            if trace_evidence is not None
+            else None
+        ),
+        longest_trace_gap_seconds=(
+            round(trace_evidence.longest_gap_seconds, 3)
+            if trace_evidence is not None
+            else None
+        ),
+        pre_context_coverage=(
+            trace_evidence.pre_context_coverage
+            if trace_evidence is not None
+            else None
+        ),
+        post_context_coverage=(
+            trace_evidence.post_context_coverage
+            if trace_evidence is not None
+            else None
+        ),
+        known_source_coverage_min=(
+            round(trace_evidence.known_source_coverage_min, 3)
+            if trace_evidence is not None
+            else None
+        ),
+        known_source_coverage_time_weighted=(
+            round(trace_evidence.known_source_coverage_time_weighted, 3)
+            if trace_evidence is not None
+            else None
+        ),
+        trace_point_cap_truncated=(
+            trace_evidence.point_cap_truncated
+            if trace_evidence is not None
+            else False
+        ),
+        trace_started_at=(
+            trace_evidence.trace_started_at if trace_evidence is not None else None
+        ),
+        trace_ended_at=(
+            trace_evidence.trace_ended_at if trace_evidence is not None else None
+        ),
+        stale_subtraction_prevented_count=(
+            trace_evidence.stale_subtraction_prevented_count
+            if trace_evidence is not None
+            else 0
+        ),
+        partial_residual_point_count=(
+            trace_evidence.partial_residual_point_count
+            if trace_evidence is not None
+            else 0
+        ),
+        negative_residual_point_count=(
+            trace_evidence.negative_residual_point_count
+            if trace_evidence is not None
+            else 0
+        ),
+        trace_point_cap_truncation_count=(
+            trace_evidence.trace_point_cap_truncation_count
             if trace_evidence is not None
             else 0
         ),
@@ -7043,6 +7245,7 @@ def _nilm_session_pair_score(
 
     if (
         trace_evidence is not None
+        and trace_evidence.matching_eligible
         and trace_evidence.power_coverage >= 0.75
         and trace_evidence.plateau_power_w is not None
     ):
@@ -7056,6 +7259,7 @@ def _nilm_session_pair_score(
             scores.append(plateau_score)
     if (
         trace_evidence is not None
+        and trace_evidence.matching_eligible
         and trace_evidence.power_coverage >= 0.75
         and trace_evidence.measured_energy_kwh is not None
         and (
@@ -7148,88 +7352,400 @@ def _nilm_session_energy_likelihood(
 
 
 def _nilm_normalized_power_trace(
-    power_trace: Iterable[tuple[datetime, float]],
-) -> tuple[tuple[datetime, float], ...]:
-    """Return finite trace points ordered by timestamp with deterministic ties."""
-    points: dict[datetime, float] = {}
-    for timestamp, power_w in power_trace:
-        if not isinstance(timestamp, datetime):
+    power_trace: Iterable[NilmResidualPowerPoint | tuple[datetime, float]],
+) -> tuple[NilmResidualPowerPoint, ...]:
+    """Normalize typed/legacy trace points without losing signed residuals."""
+    points: dict[datetime, NilmResidualPowerPoint] = {}
+    for raw_point in power_trace:
+        point = _nilm_residual_trace_point_from_value(raw_point)
+        if point is None:
             continue
-        if timestamp.tzinfo is None:
-            timestamp = timestamp.replace(tzinfo=UTC)
-        power = _nilm_number(power_w)
-        if power is not None:
-            points[timestamp] = power
-    return tuple(sorted(points.items()))
+        existing = points.get(point.timestamp)
+        if existing is None or _nilm_residual_point_quality_key(point) > (
+            _nilm_residual_point_quality_key(existing)
+        ):
+            points[point.timestamp] = point
+    return tuple(points[timestamp] for timestamp in sorted(points))
+
+
+def _nilm_residual_trace_point_from_value(
+    value: NilmResidualPowerPoint | tuple[datetime, float],
+) -> NilmResidualPowerPoint | None:
+    """Adapt historical tuple callers while preferring structured evidence."""
+    if isinstance(value, NilmResidualPowerPoint):
+        timestamp = _nilm_trace_timestamp(value.timestamp)
+        mains_power_w = _nilm_number(value.mains_power_w)
+        explained_power_w = _nilm_number(value.explained_known_power_w)
+        residual_power_w = _nilm_number(value.residual_power_w)
+        if (
+            timestamp is None
+            or mains_power_w is None
+            or explained_power_w is None
+            or residual_power_w is None
+        ):
+            return None
+        return replace(
+            value,
+            timestamp=timestamp,
+            mains_power_w=mains_power_w,
+            explained_known_power_w=explained_power_w,
+            residual_power_w=residual_power_w,
+            contributing_known_circuit_ids=tuple(
+                sorted(set(value.contributing_known_circuit_ids))
+            ),
+            stale_known_circuit_ids=tuple(sorted(set(value.stale_known_circuit_ids))),
+            unavailable_known_circuit_ids=tuple(
+                sorted(set(value.unavailable_known_circuit_ids))
+            ),
+            missing_known_circuit_ids=tuple(sorted(set(value.missing_known_circuit_ids))),
+            known_source_coverage=_nilm_unit(value.known_source_coverage),
+            quality_flags=tuple(sorted(set(value.quality_flags))),
+        )
+    try:
+        timestamp, power_w = value
+    except (TypeError, ValueError):
+        return None
+    timestamp = _nilm_trace_timestamp(timestamp)
+    power_w = _nilm_number(power_w)
+    if timestamp is None or power_w is None:
+        return None
+    # Tuples are retained only for additive compatibility with callers that
+    # predate source-quality trace evidence. They remain complete so existing
+    # recorded trace tests retain their historical semantics.
+    return NilmResidualPowerPoint(
+        timestamp=timestamp,
+        mains_power_w=power_w,
+        explained_known_power_w=0.0,
+        residual_power_w=power_w,
+        contributing_known_circuit_ids=(),
+        stale_known_circuit_ids=(),
+        unavailable_known_circuit_ids=(),
+        missing_known_circuit_ids=(),
+        expected_known_circuit_count=0,
+        fresh_known_circuit_count=0,
+        known_source_coverage=1.0,
+        subtraction_complete=True,
+        quality_flags=(),
+    )
+
+
+def _nilm_trace_timestamp(value: Any) -> datetime | None:
+    """Return a normalized trace instant without fabricating source time."""
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def _nilm_residual_point_quality_key(
+    point: NilmResidualPowerPoint,
+) -> tuple[object, ...]:
+    """Choose one deterministic duplicate timestamp without favoring stale data."""
+    return (
+        int(point.subtraction_complete),
+        point.known_source_coverage,
+        point.fresh_known_circuit_count,
+        -len(point.quality_flags),
+        point.residual_power_w,
+        point.explained_known_power_w,
+        point.contributing_known_circuit_ids,
+        point.stale_known_circuit_ids,
+        point.unavailable_known_circuit_ids,
+        point.missing_known_circuit_ids,
+        point.quality_flags,
+    )
 
 
 def _nilm_session_trace_evidence(
     on_edge: NilmEdge,
     off_edge: NilmEdge,
-    power_trace: Iterable[tuple[datetime, float]],
+    power_trace: Iterable[NilmResidualPowerPoint],
+    *,
+    trace_metadata: NilmResidualTraceMetadata | None = None,
 ) -> _NilmSessionTraceEvidence | None:
-    """Calculate bounded plateau, energy, coverage, and state-change evidence."""
+    """Calculate trace energy only when coverage and subtraction are proven."""
     duration_seconds = (off_edge.timestamp - on_edge.timestamp).total_seconds()
     if duration_seconds <= 0.0:
         return None
     points = tuple(power_trace)
+    if not points:
+        return None
     in_session = tuple(
         point
         for point in points
-        if on_edge.timestamp <= point[0] <= off_edge.timestamp
+        if on_edge.timestamp <= point.timestamp <= off_edge.timestamp
     )
-    if len(in_session) < 2:
+    if not in_session:
         return None
+    pre_points = tuple(point for point in points if point.timestamp < on_edge.timestamp)
+    post_points = tuple(
+        point for point in points if point.timestamp >= off_edge.timestamp
+    )
     gaps = [
-        (right[0] - left[0]).total_seconds()
+        (right.timestamp - left.timestamp).total_seconds()
         for left, right in zip(in_session, in_session[1:], strict=False)
-        if right[0] > left[0]
+        if right.timestamp > left.timestamp
     ]
-    if not gaps:
-        return None
-    cadence_seconds = median(gaps)
-    covered_seconds = min(
+    allowable_gap_seconds = _nilm_trace_allowable_gap_seconds(gaps)
+    covered_duration_seconds = min(
         duration_seconds,
-        sum(min(gap, max(30.0, 3.0 * cadence_seconds)) for gap in gaps),
+        sum(min(gap, allowable_gap_seconds) for gap in gaps),
     )
-    coverage = _nilm_unit(covered_seconds / duration_seconds)
-    pre_event = [power for timestamp, power in points if timestamp < on_edge.timestamp]
-    if not pre_event:
-        return _NilmSessionTraceEvidence(None, None, coverage, 0)
-    baseline_power_w = median(pre_event[-3:])
-    plateau_values = [
-        power - baseline_power_w
-        for timestamp, power in in_session
-        if on_edge.timestamp < timestamp < off_edge.timestamp
-    ]
-    if len(plateau_values) < 2 or coverage < 0.5:
-        return _NilmSessionTraceEvidence(None, None, coverage, 0)
-    plateau_power_w = median(plateau_values)
-    if plateau_power_w <= 0.0:
-        return _NilmSessionTraceEvidence(None, None, coverage, 0)
-    energy_watt_seconds = sum(
-        max(0.0, ((left[1] - baseline_power_w) + (right[1] - baseline_power_w)) / 2)
-        * (right[0] - left[0]).total_seconds()
-        for left, right in zip(in_session, in_session[1:], strict=False)
+    power_coverage = _nilm_unit(covered_duration_seconds / duration_seconds)
+    longest_gap_seconds = max(gaps, default=0.0)
+    pre_context_points = tuple(
+        point
+        for point in pre_points
+        if on_edge.timestamp - point.timestamp <= NILM_RESIDUAL_TRACE_PRE_CONTEXT
+    )
+    post_context_points = tuple(
+        point
+        for point in post_points
+        if point.timestamp - off_edge.timestamp <= NILM_RESIDUAL_TRACE_POST_CONTEXT
+    )
+    raw_baseline_points = pre_context_points[-3:] or tuple(
+        point
+        for point in in_session
+        if point.timestamp == on_edge.timestamp
+    )[:1]
+    baseline_points = tuple(
+        point for point in raw_baseline_points if point.subtraction_complete
+    )
+    baseline_subtraction_complete = bool(raw_baseline_points) and len(
+        baseline_points
+    ) == len(raw_baseline_points)
+    pre_context_coverage = bool(
+        pre_context_points and pre_context_points[-1].subtraction_complete
+    )
+    post_context_coverage = bool(
+        post_context_points and post_context_points[0].subtraction_complete
+    )
+    known_source_coverage_min = min(
+        (point.known_source_coverage for point in in_session),
+        default=0.0,
+    )
+    known_source_coverage_time_weighted = _nilm_trace_weighted_coverage(
+        in_session,
+        allowable_gap_seconds,
+        covered_duration_seconds,
+    )
+    required_trace_start = on_edge.timestamp - NILM_RESIDUAL_TRACE_PRE_CONTEXT
+    point_cap_truncated = bool(
+        trace_metadata is not None
+        and trace_metadata.point_cap_truncated
+        and (
+            trace_metadata.oldest_point_at is None
+            or trace_metadata.oldest_point_at > required_trace_start
+        )
+    )
+    relevant_points = (*raw_baseline_points, *in_session)
+    provenance_points = tuple(
+        point
+        for point in (*pre_context_points, *in_session, *post_context_points)
+        if on_edge.timestamp - NILM_RESIDUAL_TRACE_PRE_CONTEXT
+        <= point.timestamp
+        <= off_edge.timestamp + NILM_RESIDUAL_TRACE_POST_CONTEXT
+    )
+    blocking_subtraction = (
+        not baseline_subtraction_complete
+        or any(
+            not point.subtraction_complete
+            or point.stale_known_circuit_ids
+            or point.unavailable_known_circuit_ids
+            or point.missing_known_circuit_ids
+            for point in relevant_points
+        )
+    )
+    baseline_power_w = (
+        float(median(point.residual_power_w for point in baseline_points))
+        if baseline_points
+        else None
+    )
+    plateau_values = (
+        [
+            point.residual_power_w - baseline_power_w
+            for point in in_session
+            if on_edge.timestamp < point.timestamp < off_edge.timestamp
+            and point.subtraction_complete
+        ]
+        if baseline_power_w is not None
+        else []
+    )
+    plateau_power_w = (
+        float(median(plateau_values))
+        if len(plateau_values) >= 2 and power_coverage >= 0.5
+        else None
+    )
+    partial_energy_kwh = _nilm_trace_partial_energy_kwh(
+        in_session,
+        baseline_power_w,
+        allowable_gap_seconds,
     )
     intermediate_threshold = max(25.0, 0.20 * abs(on_edge.delta_w))
-    intermediate_changes = sum(
+    intermediate_transition_count = sum(
         abs(right - left) >= intermediate_threshold
         for left, right in zip(plateau_values, plateau_values[1:], strict=False)
     )
+    measured = (
+        partial_energy_kwh is not None
+        and plateau_power_w is not None
+        and plateau_power_w > 0.0
+        and power_coverage >= DEFAULT_THRESHOLDS.complete_energy_coverage
+        and longest_gap_seconds <= allowable_gap_seconds
+        and pre_context_coverage
+        and post_context_coverage
+        and known_source_coverage_min >= 1.0
+        and known_source_coverage_time_weighted >= 1.0
+        and not point_cap_truncated
+        and not blocking_subtraction
+    )
+    energy_source = (
+        "residual_trace_measured"
+        if measured
+        else "residual_trace_partial"
+        if partial_energy_kwh is not None
+        else "unavailable"
+    )
+    energy_estimate_confidence = (
+        _nilm_unit(power_coverage * known_source_coverage_time_weighted)
+        if measured
+        else _nilm_unit(
+            0.5 * power_coverage * known_source_coverage_time_weighted
+        )
+        if partial_energy_kwh is not None
+        else None
+    )
     return _NilmSessionTraceEvidence(
-        plateau_power_w=round(float(plateau_power_w), 3),
-        # A partially observed trace can still establish a plateau, but its
-        # trapezoid is not a measured run energy.  Keep that distinction so
-        # missing spans cannot bias learned energy profiles downward.
-        measured_energy_kwh=(
-            round(energy_watt_seconds / 3_600_000.0, 6)
-            if coverage >= DEFAULT_THRESHOLDS.complete_energy_coverage
+        plateau_power_w=(
+            round(plateau_power_w, 3)
+            if plateau_power_w is not None and plateau_power_w > 0.0
             else None
         ),
-        power_coverage=coverage,
-        intermediate_transition_count=intermediate_changes,
+        measured_energy_kwh=(
+            round(partial_energy_kwh, 6) if measured else None
+        ),
+        partial_energy_kwh=(
+            round(partial_energy_kwh, 6) if partial_energy_kwh is not None else None
+        ),
+        power_coverage=power_coverage,
+        covered_duration_seconds=covered_duration_seconds,
+        longest_gap_seconds=longest_gap_seconds,
+        pre_context_coverage=pre_context_coverage,
+        post_context_coverage=post_context_coverage,
+        known_source_coverage_min=known_source_coverage_min,
+        known_source_coverage_time_weighted=known_source_coverage_time_weighted,
+        point_cap_truncated=point_cap_truncated,
+        trace_started_at=(
+            provenance_points[0].timestamp if provenance_points else None
+        ),
+        trace_ended_at=(
+            provenance_points[-1].timestamp if provenance_points else None
+        ),
+        intermediate_transition_count=intermediate_transition_count,
+        energy_source=energy_source,
+        energy_estimate_confidence=energy_estimate_confidence,
+        stale_subtraction_prevented_count=_nilm_trace_diagnostic_count(
+            None,
+            "stale_subtraction_prevented_count",
+            sum(
+                "stale_subtraction_prevented" in point.quality_flags
+                for point in relevant_points
+            ),
+        ),
+        partial_residual_point_count=_nilm_trace_diagnostic_count(
+            None,
+            "partial_residual_point_count",
+            sum(not point.subtraction_complete for point in relevant_points),
+        ),
+        negative_residual_point_count=_nilm_trace_diagnostic_count(
+            None,
+            "negative_residual_point_count",
+            sum(point.residual_power_w < 0.0 for point in relevant_points),
+        ),
+        trace_point_cap_truncation_count=(
+            _nilm_trace_diagnostic_count(
+                trace_metadata,
+                "trace_point_cap_truncation_count",
+                1,
+            )
+            if point_cap_truncated
+            else 0
+        ),
+        matching_eligible=measured,
     )
+
+
+def _nilm_trace_weighted_coverage(
+    points: tuple[NilmResidualPowerPoint, ...],
+    allowable_gap_seconds: float,
+    covered_duration_seconds: float,
+) -> float:
+    """Return bounded duration-weighted known-source coverage for a session."""
+    if covered_duration_seconds <= 0.0:
+        return 0.0
+    weighted_coverage = 0.0
+    for left, right in zip(points, points[1:], strict=False):
+        gap_seconds = (right.timestamp - left.timestamp).total_seconds()
+        if gap_seconds <= 0.0:
+            continue
+        weight = min(gap_seconds, allowable_gap_seconds)
+        weighted_coverage += (
+            (left.known_source_coverage + right.known_source_coverage)
+            / 2.0
+            * weight
+        )
+    return _nilm_unit(weighted_coverage / covered_duration_seconds)
+
+
+def _nilm_trace_allowable_gap_seconds(gaps: Iterable[float]) -> float:
+    """Derive a conservative gap allowance without letting an outage set it."""
+    positive_gaps = sorted(gap for gap in gaps if gap > 0.0)
+    if not positive_gaps:
+        return 30.0
+    # The lower half is a robust nominal cadence: an isolated long outage is
+    # excluded before it can inflate the allowance used to assess itself.
+    lower_half = positive_gaps[: max(1, (len(positive_gaps) + 1) // 2)]
+    return max(30.0, 4.0 * float(median(lower_half)))
+
+
+def _nilm_trace_partial_energy_kwh(
+    points: tuple[NilmResidualPowerPoint, ...],
+    baseline_power_w: float | None,
+    allowable_gap_seconds: float,
+) -> float | None:
+    """Integrate only contiguous, complete residual evidence without clipping sign."""
+    if baseline_power_w is None:
+        return None
+    energy_watt_seconds = 0.0
+    segment_count = 0
+    for left, right in zip(points, points[1:], strict=False):
+        gap_seconds = (right.timestamp - left.timestamp).total_seconds()
+        if (
+            gap_seconds <= 0.0
+            or gap_seconds > allowable_gap_seconds
+            or not left.subtraction_complete
+            or not right.subtraction_complete
+        ):
+            continue
+        energy_watt_seconds += (
+            ((left.residual_power_w - baseline_power_w)
+            + (right.residual_power_w - baseline_power_w))
+            / 2.0
+            * gap_seconds
+        )
+        segment_count += 1
+    return energy_watt_seconds / 3_600_000.0 if segment_count else None
+
+
+def _nilm_trace_diagnostic_count(
+    metadata: NilmResidualTraceMetadata | None,
+    field: str,
+    fallback: int,
+) -> int:
+    """Keep persisted trace diagnostics finite regardless of caller input."""
+    value = getattr(metadata, field, fallback) if metadata is not None else fallback
+    return min(max(int(value), 0), 1_000_000)
 
 
 def _nilm_pair_topology_compatible(on_edge: NilmEdge, off_edge: NilmEdge) -> bool:

@@ -3992,7 +3992,7 @@ def _source_scoped_coordinator(
             return SimpleNamespace(
                 state=str(value),
                 attributes={"unit_of_measurement": "W"},
-                last_updated=now_holder["value"],
+                last_updated=now_holder.get(entity_id, now_holder["value"]),
             )
 
     circuits = [
@@ -4430,6 +4430,44 @@ async def test_source_update_includes_mains_nilm_when_known_load_changes() -> No
     assert calls["pipeline"] == ["mains", "fridge"]
     assert calls["nilm"] == ["mains", "fridge"]
     assert calls["cross_samples"] == [["mains", "fridge", "hvac", "well_pump"]]
+
+
+@pytest.mark.asyncio
+async def test_direct_update_does_not_append_residual_trace_without_mains_update(
+) -> None:
+    """The coordinator must not relabel an unchanged mains sample as current."""
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    now_holder = {
+        "value": now,
+        "sensor.mains_power": now,
+        "sensor.fridge_power": now,
+    }
+    coordinator = _source_scoped_coordinator(
+        coordinator_module,
+        now_holder,
+        include_mains_nilm=True,
+    )
+
+    await coordinator.async_process_update(
+        changed_entities=("sensor.mains_power",),
+    )
+    processor = coordinator.nilm_controller._sample_processor  # noqa: SLF001
+    trace = processor._residual_power_trace_by_circuit["mains"]  # noqa: SLF001
+    assert len(trace) == 1
+    first_point = trace[0]
+
+    now_holder["value"] = now + timedelta(seconds=10)
+    now_holder["sensor.fridge_power"] = now_holder["value"]
+    await coordinator.async_process_update(
+        changed_entities=("sensor.fridge_power",),
+    )
+
+    trace = processor._residual_power_trace_by_circuit["mains"]  # noqa: SLF001
+    assert tuple(trace) == (first_point,)
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,124 @@
+schema_version: 1
+id: nilm_residual_trace_freshness
+description: Deterministic freshness and coverage replay cases for the NILM residual trace.
+scenario_type: normal
+source_kind: mains
+start_time: 2026-08-11T00:00:00Z
+min_delta_w: 100
+circuits:
+  - &mains
+    circuit_id: mains
+    name: Mains NILM
+    appliance_profile: mains_nilm
+    circuit_mode: mains_nilm
+    power_flow: mains_net
+    sources: {power: sensor.mains}
+  - &direct_a
+    circuit_id: direct_a
+    name: Direct A
+    appliance_profile: resistive_load
+    circuit_mode: single_phase
+    sources: {power: sensor.direct_a}
+  - &direct_b
+    circuit_id: direct_b
+    name: Direct B
+    appliance_profile: motor_load
+    circuit_mode: single_phase
+    sources: {power: sensor.direct_b}
+samples: [{t: 0, states: {sensor.mains: 0, sensor.direct_a: 0}}]
+labels: {}
+calibration_expectations: {}
+
+scenarios:
+  - id: mains_1s_direct_10s
+    circuits: [*mains, *direct_a]
+    samples:
+      - {t: 0, states: {sensor.mains: 1000, sensor.direct_a: 1000}}
+      - {t: 1, states: {sensor.mains: 1120, sensor.direct_a: {state: 1000, last_updated_offset_seconds: -1}}}
+      - {t: 10, states: {sensor.mains: 1120, sensor.direct_a: 1000}}
+      - {t: 11, states: {sensor.mains: 1120, sensor.direct_a: {state: 1000, last_updated_offset_seconds: -1}}}
+      - {t: 31, states: {sensor.mains: 1120, sensor.direct_a: {state: 1000, last_updated_offset_seconds: -21}}}
+
+  - id: mains_10s_direct_1s
+    circuits: [*mains, *direct_a]
+    samples:
+      - {t: 0, states: {sensor.mains: 1000, sensor.direct_a: 1000}}
+      - {t: 1, states: {sensor.mains: {state: 1000, last_updated_offset_seconds: -1}, sensor.direct_a: 1000}}
+      - {t: 10, states: {sensor.mains: 1120, sensor.direct_a: {state: 1000, last_updated_offset_seconds: -9}}}
+      - {t: 11, states: {sensor.mains: {state: 1120, last_updated_offset_seconds: -1}, sensor.direct_a: 1000}}
+      - {t: 20, states: {sensor.mains: 1120, sensor.direct_a: {state: 1000, last_updated_offset_seconds: -9}}}
+
+  - id: delayed_direct_updates
+    circuits: [*mains, *direct_a]
+    samples:
+      - {t: 0, states: {sensor.mains: 1000, sensor.direct_a: 1000}}
+      - {t: 10, states: {sensor.mains: 1120, sensor.direct_a: 1000}}
+      - {t: 40, states: {sensor.mains: 1120, sensor.direct_a: {state: 1000, last_updated_offset_seconds: -30}}}
+      - {t: 41, states: {sensor.mains: 1120, sensor.direct_a: 1000}}
+
+  - id: unavailable_stale_nonzero
+    circuits: [*mains, *direct_a]
+    samples:
+      - {t: 0, states: {sensor.mains: 1000, sensor.direct_a: 1000}}
+      - {t: 10, states: {sensor.mains: 1120, sensor.direct_a: unavailable}}
+      - {t: 20, states: {sensor.mains: 1120, sensor.direct_a: unavailable}}
+
+  - id: unequal_direct_cadences
+    circuits: [*mains, *direct_a, *direct_b]
+    samples:
+      - {t: 0, states: {sensor.mains: 1250, sensor.direct_a: 1000, sensor.direct_b: 250}}
+      - {t: 5, states: {sensor.mains: {state: 1250, last_updated_offset_seconds: -5}, sensor.direct_b: 250}}
+      - {t: 30, states: {sensor.mains: {state: 1250, last_updated_offset_seconds: -30}, sensor.direct_a: 1000, sensor.direct_b: 250}}
+      - {t: 35, states: {sensor.mains: {state: 1250, last_updated_offset_seconds: -35}, sensor.direct_b: 250}}
+      - {t: 46, states: {sensor.mains: 1370, sensor.direct_a: {state: 1000, last_updated_offset_seconds: -16}, sensor.direct_b: {state: 250, last_updated_offset_seconds: -11}}}
+
+  - id: direct_source_recovery
+    circuits: [*mains, *direct_a]
+    samples:
+      - {t: 0, states: {sensor.mains: 1000, sensor.direct_a: 1000}}
+      - {t: 10, states: {sensor.mains: 1120, sensor.direct_a: 1000}}
+      - {t: 31, states: {sensor.mains: 1120, sensor.direct_a: {state: 1000, last_updated_offset_seconds: -21}}}
+      - {t: 32, states: {sensor.mains: 1120, sensor.direct_a: 1000}}
+
+  - id: long_session_beyond_retained_context
+    circuits: [*mains, *direct_a]
+    samples:
+      - {t: 0, states: {sensor.mains: 1000, sensor.direct_a: 1000}}
+      - {t: 10, states: {sensor.mains: 1120, sensor.direct_a: 1000}}
+      - {t: 43861, states: {sensor.mains: 1120, sensor.direct_a: 1000}}
+      - {t: 43871, states: {sensor.mains: 1000, sensor.direct_a: 1000}}
+
+  - id: restart_mid_session
+    circuits: [*mains, *direct_a]
+    samples:
+      - {t: 0, states: {sensor.mains: 1000, sensor.direct_a: 1000}}
+      - {t: 10, states: {sensor.mains: 1120, sensor.direct_a: 1000}}
+      - {t: 20, restart: true, states: {sensor.mains: 1120, sensor.direct_a: {state: 1000, last_updated_offset_seconds: -10}}}
+      - {t: 30, states: {sensor.mains: 1000, sensor.direct_a: 1000}}
+
+  - id: negative_residual_misalignment
+    circuits: [*mains, *direct_a]
+    samples:
+      - {t: 0, states: {sensor.mains: 500, sensor.direct_a: 1000}}
+      - {t: 10, states: {sensor.mains: 500, sensor.direct_a: 1000}}
+
+  - id: complete_aligned_trace_baseline
+    circuits: [*mains, *direct_a]
+    samples:
+      - {t: 0, states: {sensor.mains: 1000, sensor.direct_a: 1000}}
+      - {t: 10, states: {sensor.mains: 1120, sensor.direct_a: 1000}}
+      - {t: 20, states: {sensor.mains: 1120, sensor.direct_a: 1000}}
+      - {t: 30, states: {sensor.mains: 1120, sensor.direct_a: 1000}}
+      - {t: 40, states: {sensor.mains: 1000, sensor.direct_a: 1000}}
+      - {t: 50, states: {sensor.mains: 1000, sensor.direct_a: 1000}}
+      - {t: 60, states: {sensor.mains: 1120, sensor.direct_a: 1000}}
+      - {t: 70, states: {sensor.mains: 1120, sensor.direct_a: 1000}}
+      - {t: 80, states: {sensor.mains: 1120, sensor.direct_a: 1000}}
+      - {t: 90, states: {sensor.mains: 1000, sensor.direct_a: 1000}}
+      - {t: 100, states: {sensor.mains: 1000, sensor.direct_a: 1000}}
+      - {t: 110, states: {sensor.mains: 1120, sensor.direct_a: 1000}}
+      - {t: 120, states: {sensor.mains: 1120, sensor.direct_a: 1000}}
+      - {t: 130, states: {sensor.mains: 1120, sensor.direct_a: 1000}}
+      - {t: 140, states: {sensor.mains: 1120, sensor.direct_a: 1000}}
+      - {t: 150, states: {sensor.mains: 1000, sensor.direct_a: 1000}}
+      - {t: 160, states: {sensor.mains: 1000, sensor.direct_a: 1000}}

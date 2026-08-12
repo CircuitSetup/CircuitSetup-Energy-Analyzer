@@ -10,17 +10,26 @@ from math import isfinite
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from ..models import AlertEvidence, CircuitConfig, CircuitEvent
+from ..models import (
+    AlertEvidence,
+    CircuitConfig,
+    CircuitEvent,
+    NilmSourceKind,
+    SensorRole,
+)
 from ..nilm import (
     NILM_DURATION_MAX_CENTRAL_RATIO,
     NILM_DURATION_MIN_DISTINCT_DAYS,
     NILM_DURATION_MIN_EFFECTIVE_SUPPORT,
+    NILM_RESIDUAL_TRACE_REQUIRED_HORIZON,
     KnownLoadTopology,
     NilmAssignmentModel,
     NilmComponentStatus,
     NilmEdge,
     NilmEdgeDetector,
     NilmReconciliationResult,
+    NilmResidualPowerPoint,
+    NilmResidualTraceMetadata,
     NilmScoreBreakdown,
     NilmSignature,
     NilmTransitionPrototype,
@@ -47,6 +56,8 @@ from ..nilm import (
     unmatched_load_percentage,
 )
 from ..normalize import NormalizedCircuitSample
+from ..profiles import nilm_source_kind
+from ..state import LatestCircuitPowerObservation
 from ..unknown_loads import (
     _NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
     _NILM_SESSION_HISTORY_MAX_UNKNOWN_FIELDS,
@@ -197,27 +208,185 @@ def _nilm_inventory_time_context(
     )
 
 
-def _nilm_residual_trace_power(
+_NILM_RESIDUAL_FRESHNESS_MULTIPLIER = 2.0
+_NILM_RESIDUAL_FRESHNESS_MIN_SECONDS = 5.0
+_NILM_RESIDUAL_FRESHNESS_MAX_SECONDS = 120.0
+_NILM_RESIDUAL_FRESHNESS_FALLBACK_SECONDS = 30.0
+
+
+def _nilm_residual_trace_point(
     circuit_id: str,
     sample: NormalizedCircuitSample,
     context: ProcessingContext,
-) -> float | None:
-    """Remove currently measured known loads before retaining mains trace evidence."""
+    *,
+    trace_timestamp: datetime,
+    subtract_known_loads: bool = True,
+) -> NilmResidualPowerPoint | None:
+    """Build one signed trace point; subtract direct loads only for mains."""
     mains_power_w = _finite_float(sample.real_power)
     if mains_power_w is None:
         return None
-    known_power_w = sum(
-        max(power_w, 0.0)
-        for known_circuit_id in context.known_load_circuit_ids
-        if known_circuit_id != circuit_id
-        if (
-            power_w := _finite_float(
-                context.state.latest_real_power_w_by_circuit.get(known_circuit_id)
+    observations = getattr(
+        context.state,
+        "latest_real_power_observation_by_circuit",
+        {},
+    )
+    if not isinstance(observations, Mapping):
+        observations = {}
+    known_circuit_ids = (
+        tuple(
+            sorted(
+                {
+                    str(known_circuit_id)
+                    for known_circuit_id in context.known_load_circuit_ids
+                    if str(known_circuit_id) and str(known_circuit_id) != circuit_id
+                }
             )
         )
-        is not None
+        if subtract_known_loads
+        else ()
     )
-    return mains_power_w - known_power_w
+    contributing: list[str] = []
+    stale: list[str] = []
+    unavailable: list[str] = []
+    missing: list[str] = []
+    quality_flags: set[str] = set()
+    explained_known_power_w = 0.0
+    for known_circuit_id in known_circuit_ids:
+        observation = observations.get(known_circuit_id)
+        if not isinstance(observation, LatestCircuitPowerObservation):
+            missing.append(known_circuit_id)
+            quality_flags.add("missing_known_source")
+            continue
+        if not observation.available or _finite_float(observation.power_w) is None:
+            unavailable.append(known_circuit_id)
+            quality_flags.add("unavailable_known_source")
+            continue
+        fresh, freshness_flags = _nilm_residual_observation_is_fresh(
+            observation,
+            trace_timestamp,
+        )
+        if not fresh:
+            stale.append(known_circuit_id)
+            quality_flags.update(freshness_flags)
+            if _finite_float(observation.power_w) is not None:
+                quality_flags.add("stale_subtraction_prevented")
+            continue
+        power_w = _finite_float(observation.power_w)
+        if power_w is None:
+            unavailable.append(known_circuit_id)
+            quality_flags.add("unavailable_known_source")
+            continue
+        contributing.append(known_circuit_id)
+        explained_known_power_w += max(power_w, 0.0)
+        quality_flags.update(
+            flag
+            for flag in observation.quality_flags
+            if flag in {"cadence_fallback", "cadence_low_evidence"}
+        )
+    expected_count = len(known_circuit_ids)
+    fresh_count = len(contributing)
+    known_source_coverage = (
+        1.0 if expected_count == 0 else fresh_count / expected_count
+    )
+    subtraction_complete = fresh_count == expected_count
+    if not subtraction_complete:
+        quality_flags.add("partial_known_source_coverage")
+    residual_power_w = mains_power_w - explained_known_power_w
+    if residual_power_w < 0.0:
+        quality_flags.add("negative_residual")
+    return NilmResidualPowerPoint(
+        timestamp=trace_timestamp,
+        mains_power_w=mains_power_w,
+        explained_known_power_w=explained_known_power_w,
+        residual_power_w=residual_power_w,
+        contributing_known_circuit_ids=tuple(contributing),
+        stale_known_circuit_ids=tuple(stale),
+        unavailable_known_circuit_ids=tuple(unavailable),
+        missing_known_circuit_ids=tuple(missing),
+        expected_known_circuit_count=expected_count,
+        fresh_known_circuit_count=fresh_count,
+        known_source_coverage=known_source_coverage,
+        subtraction_complete=subtraction_complete,
+        quality_flags=tuple(sorted(quality_flags)),
+    )
+
+
+def _nilm_residual_observation_is_fresh(
+    observation: LatestCircuitPowerObservation,
+    sample_timestamp: datetime,
+) -> tuple[bool, tuple[str, ...]]:
+    """Apply a source-specific cadence allowance without future backfilling."""
+    source_updated_at = observation.source_updated_at
+    if source_updated_at is None:
+        return False, ("missing_known_source_timestamp",)
+    source_updated_at = _nilm_residual_utc_timestamp(source_updated_at)
+    sample_timestamp = _nilm_residual_utc_timestamp(sample_timestamp)
+    if source_updated_at > sample_timestamp:
+        return False, ("future_known_observation",)
+    cadence_s = _finite_float(observation.expected_cadence_s)
+    allowance_s = min(
+        max(
+            (
+                cadence_s * _NILM_RESIDUAL_FRESHNESS_MULTIPLIER
+                if cadence_s is not None and cadence_s > 0.0
+                else _NILM_RESIDUAL_FRESHNESS_FALLBACK_SECONDS
+            ),
+            _NILM_RESIDUAL_FRESHNESS_MIN_SECONDS,
+        ),
+        _NILM_RESIDUAL_FRESHNESS_MAX_SECONDS,
+    )
+    if (sample_timestamp - source_updated_at).total_seconds() <= allowance_s:
+        return True, ()
+    return False, ("stale_known_source",)
+
+
+def _nilm_residual_real_power_source_timestamp(
+    sample: NormalizedCircuitSample,
+) -> datetime | None:
+    """Return the actual real-power source update instant, if trustworthy."""
+    for role, source_updated_at in sample.source_updated_at_by_role:
+        if role is not SensorRole.REAL_POWER and role != SensorRole.REAL_POWER.value:
+            continue
+        if (
+            not isinstance(source_updated_at, datetime)
+            or source_updated_at.tzinfo is None
+            or source_updated_at.tzinfo.utcoffset(source_updated_at) is None
+        ):
+            return None
+        timestamp = source_updated_at.astimezone(UTC)
+        sample_timestamp = _nilm_residual_utc_timestamp(sample.timestamp)
+        return timestamp if timestamp <= sample_timestamp else None
+    return None
+
+
+def _nilm_residual_utc_timestamp(value: datetime) -> datetime:
+    """Normalize trace instants to UTC; normalized samples are normally aware."""
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _nilm_residual_point_replacement_key(
+    point: NilmResidualPowerPoint,
+) -> tuple[object, ...]:
+    """Resolve identical timestamps deterministically without changing order."""
+    return (
+        int(point.subtraction_complete),
+        point.known_source_coverage,
+        -len(point.quality_flags),
+        point.quality_flags,
+        point.residual_power_w,
+        point.explained_known_power_w,
+    )
+
+
+def _nilm_residual_diagnostic_total(
+    metadata: NilmResidualTraceMetadata | None,
+    field: str,
+    increment: bool,
+) -> int:
+    """Bound diagnostic totals without retaining a second unbounded history."""
+    previous = int(getattr(metadata, field, 0)) if metadata is not None else 0
+    return min(max(previous, 0) + int(increment), 1_000_000)
 
 
 @dataclass(frozen=True, slots=True)
@@ -255,6 +424,8 @@ class NilmSampleProcessor:
         helper_candidate_events: HelperCandidateEventsProvider | None = None,
         unmatched_edges_max_items: int = 512,
         session_history_max_items: int = 2000,
+        residual_power_trace_horizon: timedelta | None = None,
+        residual_power_trace_max_items: int | None = None,
     ) -> None:
         self._nilm_enabled = nilm_enabled
         self._seed_demo_nilm_state = seed_demo_nilm_state
@@ -297,10 +468,98 @@ class NilmSampleProcessor:
         ] = {}
         self._inventory_context_by_circuit: dict[str, object] = {}
         self._residual_power_trace_by_circuit: dict[
-            str, deque[tuple[datetime, float]]
+            str, deque[NilmResidualPowerPoint]
         ] = {}
+        self._residual_trace_metadata_by_circuit: dict[
+            str, NilmResidualTraceMetadata
+        ] = {}
+        self._residual_trace_source_updated_at_by_circuit: dict[str, datetime] = {}
+        self._residual_power_trace_horizon = (
+            residual_power_trace_horizon
+            if isinstance(residual_power_trace_horizon, timedelta)
+            and residual_power_trace_horizon.total_seconds() > 0.0
+            else NILM_RESIDUAL_TRACE_REQUIRED_HORIZON
+        )
+        configured_trace_cap = (
+            residual_power_trace_max_items
+            if isinstance(residual_power_trace_max_items, int)
+            and not isinstance(residual_power_trace_max_items, bool)
+            else 4_096
+        )
         self._residual_power_trace_max_items = min(
-            max(self._session_history_max_items, 256), 4_096
+            max(configured_trace_cap, 1),
+            4_096,
+        )
+
+    def _append_residual_trace_point(
+        self,
+        circuit_id: str,
+        point: NilmResidualPowerPoint,
+    ) -> None:
+        """Retain a sorted bounded trace and disclose every cap truncation."""
+        trace = self._residual_power_trace_by_circuit.setdefault(circuit_id, deque())
+        points_by_timestamp = {existing.timestamp: existing for existing in trace}
+        existing = points_by_timestamp.get(point.timestamp)
+        accepted_point = existing is None or (
+            _nilm_residual_point_replacement_key(point)
+            >= _nilm_residual_point_replacement_key(existing)
+        )
+        if accepted_point:
+            points_by_timestamp[point.timestamp] = point
+        ordered = [
+            points_by_timestamp[timestamp] for timestamp in sorted(points_by_timestamp)
+        ]
+        newest_timestamp = ordered[-1].timestamp
+        cutoff = newest_timestamp - self._residual_power_trace_horizon
+        retained = [
+            item for item in ordered if item.timestamp >= cutoff
+        ]
+        cap_removed = max(0, len(retained) - self._residual_power_trace_max_items)
+        if cap_removed:
+            retained = retained[-self._residual_power_trace_max_items :]
+        trace.clear()
+        trace.extend(retained)
+        previous = self._residual_trace_metadata_by_circuit.get(circuit_id)
+        point_retained = accepted_point and point != existing and any(
+            item.timestamp == point.timestamp for item in retained
+        )
+        truncation_count = min(
+            (previous.trace_point_cap_truncation_count if previous else 0)
+            + int(cap_removed > 0),
+            1_000_000,
+        )
+        self._residual_trace_metadata_by_circuit[circuit_id] = (
+            NilmResidualTraceMetadata(
+                configured_horizon_seconds=self._residual_power_trace_horizon.total_seconds(),
+                point_cap=self._residual_power_trace_max_items,
+                point_cap_truncated=(
+                    cap_removed > 0
+                    or (
+                        previous is not None
+                        and previous.point_cap_truncated
+                        and len(retained) == self._residual_power_trace_max_items
+                    )
+                ),
+                oldest_point_at=retained[0].timestamp if retained else None,
+                newest_point_at=retained[-1].timestamp if retained else None,
+                stale_subtraction_prevented_count=_nilm_residual_diagnostic_total(
+                    previous,
+                    "stale_subtraction_prevented_count",
+                    point_retained
+                    and "stale_subtraction_prevented" in point.quality_flags,
+                ),
+                partial_residual_point_count=_nilm_residual_diagnostic_total(
+                    previous,
+                    "partial_residual_point_count",
+                    point_retained and not point.subtraction_complete,
+                ),
+                negative_residual_point_count=_nilm_residual_diagnostic_total(
+                    previous,
+                    "negative_residual_point_count",
+                    point_retained and point.residual_power_w < 0.0,
+                ),
+                trace_point_cap_truncation_count=truncation_count,
+            )
         )
 
     def process(
@@ -320,21 +579,29 @@ class NilmSampleProcessor:
 
         self._seed_demo_nilm_state(circuit_config, sample.timestamp)
 
+        source_kind = nilm_source_kind(circuit_config)
+        trace_timestamp = _nilm_residual_real_power_source_timestamp(sample)
+        last_trace_timestamp = self._residual_trace_source_updated_at_by_circuit.get(
+            circuit_id
+        )
         if (
-            residual_power_w := _nilm_residual_trace_power(
-                circuit_id,
-                sample,
-                context,
+            source_kind is NilmSourceKind.MAINS
+            and trace_timestamp is not None
+            and (last_trace_timestamp is None or trace_timestamp > last_trace_timestamp)
+            and (
+                residual_point := _nilm_residual_trace_point(
+                    circuit_id,
+                    sample,
+                    context,
+                    trace_timestamp=trace_timestamp,
+                    subtract_known_loads=True,
+                )
+            ) is not None
+        ):
+            self._append_residual_trace_point(circuit_id, residual_point)
+            self._residual_trace_source_updated_at_by_circuit[circuit_id] = (
+                trace_timestamp
             )
-        ) is not None:
-            trace = self._residual_power_trace_by_circuit.setdefault(
-                circuit_id,
-                deque(maxlen=self._residual_power_trace_max_items),
-            )
-            if trace and trace[-1][0] == sample.timestamp:
-                trace[-1] = (sample.timestamp, residual_power_w)
-            else:
-                trace.append((sample.timestamp, residual_power_w))
 
         min_delta_w = self._min_delta_w_for_circuit(circuit_id)
         detector = self.detectors.setdefault(
@@ -743,6 +1010,7 @@ class NilmSampleProcessor:
             store_data.nilm_signatures.get(circuit_id, []),
             assignments,
             power_trace=self._residual_power_trace_by_circuit.get(circuit_id, ()),
+            trace_metadata=self._residual_trace_metadata_by_circuit.get(circuit_id),
         )
         if session_payloads:
             next_sessions = _merge_nilm_session_history(
@@ -3782,7 +4050,8 @@ def _nilm_session_history_payloads(
     signatures: list[dict[str, Any]],
     assignments: Iterable[Any],
     *,
-    power_trace: Iterable[tuple[datetime, float]] = (),
+    power_trace: Iterable[NilmResidualPowerPoint | tuple[datetime, float]] = (),
+    trace_metadata: NilmResidualTraceMetadata | None = None,
 ) -> list[dict[str, Any]]:
     edge_list = list(edges)
     if not edge_list:
@@ -3824,6 +4093,7 @@ def _nilm_session_history_payloads(
             mains_circuit_id=circuit_id,
             signature_specs=matcher_specs,
             power_trace=power_trace,
+            trace_metadata=trace_metadata,
         )
     ]
 
@@ -3970,6 +4240,17 @@ def _merge_nilm_session_history(
                     )[1],
                     new_session_id=session_id,
                 )
+        if (
+            existing_session is not None
+            and _nilm_session_history_same_closed_interval(
+                existing_session,
+                payload,
+            )
+        ):
+            payload = _nilm_session_history_prefer_trace_evidence(
+                existing_session,
+                payload,
+            )
         _remove_replaced_nilm_sessions(
             merged,
             on_edge_id=on_edge_id,
@@ -3980,6 +4261,95 @@ def _merge_nilm_session_history(
         key=lambda session: str(session.get("end") or session.get("start") or ""),
         reverse=True,
     )
+
+
+_NILM_TRACE_ENERGY_SOURCE_RANK = {
+    "unavailable": 0,
+    "transition_fallback": 1,
+    "residual_trace_partial": 2,
+    "residual_trace_measured": 3,
+}
+
+
+def _nilm_session_history_same_closed_interval(
+    existing: Mapping[str, Any],
+    update: Mapping[str, Any],
+) -> bool:
+    """Return whether two history rows describe the same closed edge pair."""
+    existing_on = _nilm_session_history_identity_alias(
+        "on_edge",
+        existing.get("on_edge_id"),
+    )
+    update_on = _nilm_session_history_identity_alias(
+        "on_edge",
+        update.get("on_edge_id"),
+    )
+    existing_off = _nilm_session_history_text(existing.get("off_edge_id"))
+    update_off = _nilm_session_history_text(update.get("off_edge_id"))
+    return (
+        existing_on is not None
+        and existing_on == update_on
+        and existing_off is not None
+        and existing_off == update_off
+    )
+
+
+def _nilm_session_history_prefer_trace_evidence(
+    existing: Mapping[str, Any],
+    update: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Keep stronger persisted trace evidence when a later refresh lacks it."""
+    existing_source = str(existing.get("energy_source") or "unavailable").casefold()
+    update_source = str(update.get("energy_source") or "unavailable").casefold()
+    if _NILM_TRACE_ENERGY_SOURCE_RANK.get(existing_source, 0) <= (
+        _NILM_TRACE_ENERGY_SOURCE_RANK.get(update_source, 0)
+    ):
+        return dict(update)
+
+    merged = dict(update)
+    for key in (
+        "partial_energy_kwh",
+        "energy_source",
+        "energy_estimate_confidence",
+        "covered_duration_seconds",
+        "longest_trace_gap_seconds",
+        "pre_context_coverage",
+        "post_context_coverage",
+        "known_source_coverage_min",
+        "known_source_coverage_time_weighted",
+        "trace_point_cap_truncated",
+        "trace_started_at",
+        "trace_ended_at",
+        "stale_subtraction_prevented_count",
+        "partial_residual_point_count",
+        "negative_residual_point_count",
+        "trace_point_cap_truncation_count",
+    ):
+        if key in existing:
+            merged[key] = existing[key]
+        else:
+            merged.pop(key, None)
+    if existing_source in {
+        "residual_trace_measured",
+        "residual_trace_partial",
+    }:
+        for key in (
+            "median_power_w",
+            "plateau_power_w",
+            "power_coverage",
+            "intermediate_transition_count",
+        ):
+            if key in existing:
+                merged[key] = existing[key]
+            else:
+                merged.pop(key, None)
+    if existing_source == "residual_trace_measured":
+        for key in ("measured_energy_kwh", "estimated_energy_kwh"):
+            if key in existing:
+                merged[key] = existing[key]
+            else:
+                merged.pop(key, None)
+    return merged
 
 
 def _deduplicate_nilm_session_history(
