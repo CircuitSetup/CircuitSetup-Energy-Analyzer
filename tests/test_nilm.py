@@ -1881,6 +1881,92 @@ def edge(
     )
 
 
+def electrical_edge(
+    seconds: int,
+    delta_w: float,
+    *,
+    delta_var: float | None = None,
+    leg_a_delta_w: float | None = None,
+    leg_b_delta_w: float | None = None,
+) -> NilmEdge:
+    statuses = tuple(
+        (dimension, "measured")
+        for dimension, value in (
+            ("var", delta_var),
+            ("leg_a_w", leg_a_delta_w),
+            ("leg_b_w", leg_b_delta_w),
+        )
+        if value is not None
+    )
+    return NilmEdge(
+        timestamp=BASE_TIME + timedelta(seconds=seconds),
+        delta_w=delta_w,
+        delta_var=delta_var,
+        direction="on" if delta_w > 0 else "off",
+        leg_a_delta_w=leg_a_delta_w,
+        leg_b_delta_w=leg_b_delta_w,
+        electrical_evidence_version=1,
+        electrical_dimension_statuses=statuses,
+    )
+
+
+def electrical_transition_event(
+    seconds: int,
+    circuit_id: str,
+    delta_w: float,
+    *,
+    delta_var: float | None = None,
+    var_alignment_status: str | None = "aligned",
+    var_convention: str = "signed_var_v1",
+    leg_a_delta_w: float | None = None,
+    leg_b_delta_w: float | None = None,
+) -> CircuitEvent:
+    timestamp = BASE_TIME + timedelta(seconds=seconds)
+    features: dict[str, object] = {
+        "transition_delta_w": delta_w,
+        "transition_window_start": timestamp.isoformat(),
+        "transition_window_end": timestamp.isoformat(),
+    }
+    if var_alignment_status is not None:
+        features.update(
+            {
+                "transition_electrical_evidence_version": 1,
+                "transition_delta_var": delta_var,
+                "transition_var_coverage": 1.0,
+                "transition_var_window_start": timestamp.isoformat(),
+                "transition_var_window_end": timestamp.isoformat(),
+                "transition_var_support_oldest": timestamp.isoformat(),
+                "transition_var_support_newest": timestamp.isoformat(),
+                "transition_var_alignment_status": var_alignment_status,
+                "transition_var_convention": var_convention,
+            }
+        )
+    for dimension, value in (
+        ("leg_a_w", leg_a_delta_w),
+        ("leg_b_w", leg_b_delta_w),
+    ):
+        if value is None:
+            continue
+        features.update(
+            {
+                f"transition_delta_{dimension}": value,
+                f"transition_{dimension}_coverage": 1.0,
+                f"transition_{dimension}_window_start": timestamp.isoformat(),
+                f"transition_{dimension}_window_end": timestamp.isoformat(),
+                f"transition_{dimension}_support_oldest": timestamp.isoformat(),
+                f"transition_{dimension}_support_newest": timestamp.isoformat(),
+                f"transition_{dimension}_alignment_status": "aligned",
+                f"transition_{dimension}_convention": "signed_real_power_w_v1",
+            }
+        )
+    return CircuitEvent(
+        timestamp=timestamp,
+        circuit_id=circuit_id,
+        event_type=EventType.POWER_TRANSITION,
+        features=features,
+    )
+
+
 def transition(
     assignment_id: str,
     delta_w: float,
@@ -3033,6 +3119,8 @@ def test_edge_detector_keeps_missing_auxiliary_evidence_unavailable() -> None:
     assert edges[0].delta_var is None
     assert edges[0].delta_va is None
     assert edges[0].delta_pf is None
+    assert edges[0].electrical_evidence_version == 0
+    assert edges[0].electrical_dimension_statuses == ()
 
 
 def test_edge_detector_preserves_measured_zero_auxiliary_delta() -> None:
@@ -3946,6 +4034,181 @@ def test_attribute_known_loads_consumes_aggregate_and_emits_conserving_residual(
     assert (residual.leg_a_delta_w, residual.leg_b_delta_w) == (None, None)
     assert residual.split_phase_type == "unknown"
     assert residual.dominant_leg is None
+
+
+@pytest.mark.parametrize(
+    (
+        "aggregate_w",
+        "known_w",
+        "aggregate_var",
+        "known_var",
+        "expected_residual_w",
+        "expected_residual_var",
+        "expected_residual_va",
+    ),
+    (
+        (1200.0, 1000.0, 260.0, 200.0, 200.0, 60.0, 208.806),
+        (-1200.0, -1000.0, -260.0, -200.0, -200.0, -60.0, -208.806),
+    ),
+)
+def test_attribute_known_loads_conserves_signed_var_and_recomputes_va_pf(
+    aggregate_w: float,
+    known_w: float,
+    aggregate_var: float,
+    known_var: float,
+    expected_residual_w: float,
+    expected_residual_var: float,
+    expected_residual_va: float,
+) -> None:
+    aggregate = electrical_edge(
+        10,
+        aggregate_w,
+        delta_var=aggregate_var,
+    )
+    event = electrical_transition_event(
+        10,
+        "heat_pump",
+        known_w,
+        delta_var=known_var,
+    )
+
+    result = attribute_known_loads([aggregate], [event], residual_min_delta_w=100.0)
+
+    residual = result.residual_edges[0]
+    assert residual.delta_w == expected_residual_w
+    assert residual.delta_var == expected_residual_var
+    assert residual.delta_va == pytest.approx(expected_residual_va, abs=1e-6)
+    assert residual.delta_pf == pytest.approx(0.958, abs=1e-9)
+    assert dict(residual.electrical_dimension_statuses) == {
+        "var": "measured_subtraction",
+        "va": "recomputed",
+        "pf": "recomputed",
+        "leg_a_w": "missing_aggregate",
+        "leg_b_w": "missing_aggregate",
+    }
+    record = known_load_attribution_records([aggregate], result)[0]
+    assert dict(record.electrical_dimension_statuses) == dict(
+        residual.electrical_dimension_statuses
+    )
+    assert nilm_domain.nilm_known_load_attribution_to_dict(record)[
+        "electrical_dimension_statuses"
+    ] == dict(residual.electrical_dimension_statuses)
+
+
+@pytest.mark.parametrize(
+    ("event", "expected_status"),
+    (
+        (
+            electrical_transition_event(
+                10,
+                "heat_pump",
+                1000.0,
+                var_alignment_status=None,
+            ),
+            "missing_known",
+        ),
+        (
+            electrical_transition_event(
+                10,
+                "heat_pump",
+                1000.0,
+                delta_var=200.0,
+                var_alignment_status="stale",
+            ),
+            "stale_known",
+        ),
+        (
+            electrical_transition_event(
+                10,
+                "heat_pump",
+                1000.0,
+                delta_var=200.0,
+                var_alignment_status="misaligned",
+            ),
+            "misaligned_known",
+        ),
+        (
+            electrical_transition_event(
+                10,
+                "heat_pump",
+                1000.0,
+                delta_var=200.0,
+                var_convention="opposite_reactive_sign_v1",
+            ),
+            "convention_incompatible",
+        ),
+    ),
+)
+def test_attribute_known_loads_keeps_incompatible_known_var_explicitly_unknown(
+    event: CircuitEvent,
+    expected_status: str,
+) -> None:
+    aggregate = electrical_edge(10, 1200.0, delta_var=260.0)
+
+    result = attribute_known_loads([aggregate], [event], residual_min_delta_w=100.0)
+
+    residual = result.residual_edges[0]
+    assert residual.delta_var is None
+    assert dict(residual.electrical_dimension_statuses)["var"] == expected_status
+    assert residual.delta_va is None
+    assert residual.delta_pf is None
+
+
+def test_attribute_known_loads_conserves_legs_and_recomputes_topology() -> None:
+    aggregate = electrical_edge(
+        10,
+        1000.0,
+        leg_a_delta_w=600.0,
+        leg_b_delta_w=400.0,
+    )
+    event = electrical_transition_event(
+        10,
+        "range",
+        800.0,
+        leg_a_delta_w=500.0,
+        leg_b_delta_w=300.0,
+    )
+
+    result = attribute_known_loads([aggregate], [event], residual_min_delta_w=100.0)
+
+    residual = result.residual_edges[0]
+    assert residual.delta_w == 200.0
+    assert residual.leg_a_delta_w == 100.0
+    assert residual.leg_b_delta_w == 100.0
+    assert residual.leg_balance_ratio == 0.0
+    assert residual.dominant_leg == "balanced"
+    assert residual.split_phase_type == "balanced_240v"
+    assert dict(residual.electrical_dimension_statuses)["leg_a_w"] == (
+        "measured_subtraction"
+    )
+    assert dict(residual.electrical_dimension_statuses)["leg_b_w"] == (
+        "measured_subtraction"
+    )
+
+
+def test_compound_known_load_with_missing_var_keeps_var_partial() -> None:
+    aggregate = electrical_edge(10, 1400.0, delta_var=150.0)
+    events = (
+        electrical_transition_event(
+            10,
+            "dryer",
+            600.0,
+            delta_var=60.0,
+        ),
+        electrical_transition_event(
+            11,
+            "water_heater",
+            600.0,
+            var_alignment_status=None,
+        ),
+    )
+
+    result = attribute_known_loads([aggregate], events, residual_min_delta_w=100.0)
+
+    residual = result.residual_edges[0]
+    assert residual.delta_w == 200.0
+    assert residual.delta_var is None
+    assert dict(residual.electrical_dimension_statuses)["var"] == "partial_compound"
 
 
 def test_nilm_edge_id_distinguishes_known_load_residual_provenance() -> None:

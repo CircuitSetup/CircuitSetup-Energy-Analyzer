@@ -8329,6 +8329,66 @@ def test_nilm_edge_storage_round_trips_residual_provenance_and_legacy_defaults(
     assert restored_legacy[0].transition_kind == "step"
 
 
+def test_nilm_edge_storage_round_trips_electrical_dimension_statuses() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _nilm_edge_to_storage,
+        _nilm_edges_from_storage,
+    )
+
+    timestamp = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    residual = NilmEdge(
+        timestamp=timestamp,
+        delta_w=200.0,
+        delta_var=60.0,
+        delta_va=208.806130,
+        delta_pf=0.957826285,
+        direction="on",
+        leg_a_delta_w=100.0,
+        leg_b_delta_w=100.0,
+        leg_balance_ratio=0.0,
+        dominant_leg="balanced",
+        split_phase_type="balanced_240v",
+        origin="known_load_residual",
+        parent_edge_id="mains:2026-06-11T12:00:00+00:00:1200",
+        explained_known_circuit_ids=("heat_pump",),
+        electrical_evidence_version=1,
+        electrical_dimension_statuses=(
+            ("var", "measured_subtraction"),
+            ("va", "recomputed"),
+            ("pf", "recomputed"),
+            ("leg_a_w", "measured_subtraction"),
+            ("leg_b_w", "measured_subtraction"),
+        ),
+    )
+
+    payload = _nilm_edge_to_storage(residual)
+
+    assert payload is not None
+    assert payload["electrical_evidence_version"] == 1
+    assert payload["electrical_dimension_statuses"] == {
+        "var": "measured_subtraction",
+        "va": "recomputed",
+        "pf": "recomputed",
+        "leg_a_w": "measured_subtraction",
+        "leg_b_w": "measured_subtraction",
+    }
+    restored = _nilm_edges_from_storage([payload], max_items=10)
+    assert restored == [residual]
+    assert restored[0].electrical_evidence_version == 1
+    assert dict(restored[0].electrical_dimension_statuses) == payload[
+        "electrical_dimension_statuses"
+    ]
+
+    legacy = dict(payload)
+    legacy.pop("electrical_evidence_version")
+    legacy.pop("electrical_dimension_statuses")
+    restored_legacy = _nilm_edges_from_storage([legacy], max_items=10)
+
+    assert restored_legacy[0].electrical_evidence_version == 0
+    assert restored_legacy[0].electrical_dimension_statuses == ()
+
+
 def test_water_context_alert_processor_returns_flow_alert() -> None:
     from custom_components.circuitsetup_energy_analyzer import processors
     from custom_components.circuitsetup_energy_analyzer.coordinator import (

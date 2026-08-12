@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -10,6 +11,10 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     CircuitMode,
     CircuitSample,
     EventType,
+    SensorRole,
+)
+from custom_components.circuitsetup_energy_analyzer.normalize import (
+    NormalizedCircuitSample,
 )
 
 
@@ -31,6 +36,30 @@ def _sample(
         power_factor=1.0,
         frequency=60.0,
         energy=0.0,
+    )
+
+
+def _electrical_transition_sample(
+    seconds: int,
+    watts: float,
+    reactive_power: float | None,
+    leg_a_w: float,
+    leg_b_w: float,
+) -> NormalizedCircuitSample:
+    timestamp = datetime(2026, 6, 18, 12, 0, tzinfo=UTC) + timedelta(
+        seconds=seconds
+    )
+    return NormalizedCircuitSample(
+        timestamp=timestamp,
+        circuit_id="fridge",
+        real_power=watts,
+        reactive_power=reactive_power,
+        leg_a_real_power=leg_a_w,
+        leg_b_real_power=leg_b_w,
+        source_updated_at_by_role=(
+            (SensorRole.REAL_POWER, timestamp),
+            (SensorRole.REACTIVE_POWER, timestamp),
+        ),
     )
 
 
@@ -1100,6 +1129,86 @@ def test_confirmed_start_includes_synchronized_transition_evidence() -> None:
     assert start.features["transition_window_end"] == "2026-06-18T12:00:05+00:00"
     assert start.features["transition_timing_uncertainty_s"] == 5.0
     json.dumps(dict(start.features), allow_nan=False)
+
+
+def test_confirmed_start_with_w_only_samples_keeps_legacy_feature_shape() -> None:
+    machine = _machine()
+    machine.process(_sample(0, 20.0, circuit_id="fridge"))
+    machine.process(_sample(5, 120.0, circuit_id="fridge"))
+    start = machine.process(_sample(15, 120.0, circuit_id="fridge")).events[0]
+
+    assert "transition_electrical_evidence_version" not in start.features
+    assert not any(
+        key.startswith(
+            ("transition_var_", "transition_leg_a_w_", "transition_leg_b_w_")
+        )
+        or key
+        in {
+            "transition_delta_var",
+            "transition_delta_leg_a_w",
+            "transition_delta_leg_b_w",
+        }
+        for key in start.features
+    )
+
+
+def test_confirmed_start_includes_aligned_var_and_leg_transition_evidence() -> None:
+    machine = _machine()
+    machine.process(_electrical_transition_sample(0, 20.0, 10.0, 12.0, 8.0))
+    machine.process(_electrical_transition_sample(5, 120.0, 40.0, 72.0, 48.0))
+    start = machine.process(
+        _electrical_transition_sample(15, 120.0, 40.0, 72.0, 48.0)
+    ).events[0]
+
+    assert start.features["transition_electrical_evidence_version"] == 1
+    assert start.features["transition_delta_var"] == 30.0
+    assert start.features["transition_var_pre_median"] == 10.0
+    assert start.features["transition_var_post_median"] == 40.0
+    assert start.features["transition_var_coverage"] == 1.0
+    assert start.features["transition_var_alignment_status"] == "aligned"
+    assert start.features["transition_var_convention"] == "signed_var_v1"
+    assert start.features["transition_delta_leg_a_w"] == 60.0
+    assert start.features["transition_delta_leg_b_w"] == 40.0
+    assert start.features["transition_leg_a_w_coverage"] == 1.0
+    assert start.features["transition_leg_b_w_coverage"] == 1.0
+    assert start.features["transition_leg_a_w_alignment_status"] == "aligned"
+    assert start.features["transition_leg_b_w_alignment_status"] == "aligned"
+
+
+def test_confirmed_start_marks_missing_var_evidence_unknown() -> None:
+    machine = _machine()
+    machine.process(_electrical_transition_sample(0, 20.0, None, 12.0, 8.0))
+    machine.process(_electrical_transition_sample(5, 120.0, None, 72.0, 48.0))
+    start = machine.process(
+        _electrical_transition_sample(15, 120.0, None, 72.0, 48.0)
+    ).events[0]
+
+    assert start.features["transition_var_alignment_status"] == "missing"
+    assert "transition_delta_var" not in start.features
+
+
+def test_confirmed_start_does_not_treat_fresh_w_as_fresh_var() -> None:
+    def sample_with_stale_var(seconds: int, watts: float) -> NormalizedCircuitSample:
+        sample = _electrical_transition_sample(seconds, watts, 10.0, 12.0, 8.0)
+        return replace(
+            sample,
+            source_updated_at_by_role=(
+                (SensorRole.REAL_POWER, sample.timestamp),
+                (
+                    SensorRole.REACTIVE_POWER,
+                    sample.timestamp - timedelta(seconds=20),
+                ),
+            ),
+        )
+
+    machine = _machine()
+    machine.process(sample_with_stale_var(0, 20.0))
+    machine.process(sample_with_stale_var(5, 120.0))
+    start = machine.process(sample_with_stale_var(15, 120.0)).events[0]
+
+    assert start.features["transition_var_alignment_status"] == "stale"
+    assert "transition_delta_var" not in start.features
+    assert start.features["transition_delta_leg_a_w"] == 0.0
 
 
 def test_confirmed_start_uses_post_plateau_median_not_confirmation_power() -> None:

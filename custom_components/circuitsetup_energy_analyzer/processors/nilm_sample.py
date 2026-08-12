@@ -3939,6 +3939,12 @@ def _nilm_edge_to_storage(edge: NilmEdge) -> dict[str, Any] | None:
         payload["parent_edge_id"] = edge.parent_edge_id
     if edge.explained_known_circuit_ids:
         payload["explained_known_circuit_ids"] = list(edge.explained_known_circuit_ids)
+    if edge.electrical_evidence_version > 0:
+        payload["electrical_evidence_version"] = edge.electrical_evidence_version
+    if edge.electrical_dimension_statuses:
+        payload["electrical_dimension_statuses"] = dict(
+            edge.electrical_dimension_statuses
+        )
     return payload
 
 
@@ -3994,9 +4000,29 @@ def _nilm_edges_from_storage(
                     for circuit_id in value.get("explained_known_circuit_ids", ())
                     if str(circuit_id)
                 ),
+                electrical_evidence_version=_nonnegative_int(
+                    value.get("electrical_evidence_version")
+                ),
+                electrical_dimension_statuses=(
+                    _nilm_electrical_dimension_statuses(
+                        value.get("electrical_dimension_statuses")
+                    )
+                ),
             )
         )
     return _newest_nilm_edges(dict.fromkeys(edges), max_items)
+
+
+def _nilm_electrical_dimension_statuses(value: Any) -> tuple[tuple[str, str], ...]:
+    """Restore bounded, additive per-dimension evidence status metadata."""
+
+    if not isinstance(value, Mapping):
+        return ()
+    return tuple(
+        (dimension, status)
+        for dimension in ("var", "leg_a_w", "leg_b_w", "va", "pf")
+        if (status := str(value.get(dimension) or "").strip())
+    )
 
 
 def _confirmed_placeholder_owner(
