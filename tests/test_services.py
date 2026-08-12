@@ -328,9 +328,9 @@ def test_alert_notification_message_adds_nilm_source_and_confidence() -> None:
 
     assert message.startswith("**mains**\n\n")
     assert "Estimated from aggregate circuit power by NILM." in message
-    assert "Confidence: 82%." in message
+    assert "Legacy confidence (mixed semantics): 82%." in message
     assert "Estimated from aggregate circuit power by NILM." not in direct_message
-    assert "Confidence: 82%." not in direct_message
+    assert "Legacy confidence (mixed semantics): 82%." not in direct_message
 
 
 def test_alert_notification_message_explains_appliance_health_evidence() -> None:
@@ -441,7 +441,7 @@ def test_alert_notification_message_ignores_non_finite_nilm_confidence() -> None
     message = alert_notification_message(alert)
 
     assert "Estimated from aggregate circuit power by NILM." in message
-    assert "Confidence:" not in message
+    assert "Legacy confidence (mixed semantics):" not in message
 
 
 @pytest.mark.asyncio

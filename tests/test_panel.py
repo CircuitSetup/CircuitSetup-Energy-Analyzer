@@ -457,7 +457,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260812-2"
+    assert PANEL_MODULE_VERSION == "20260812-3"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -1562,7 +1562,8 @@ def test_alert_evidence_payload_includes_selectable_nilm_merge_targets() -> None
 
     merge_action = payload["nilm"]["signatures"][0]["actions"]["merge"]
     assert payload["nilm"]["signatures"][0]["display_label"] == (
-        "Motor-like load, 3.8 kW, confidence 72%, first seen 2026-06-10"
+        "Motor-like load, 3.8 kW, legacy confidence (mixed semantics) 72%, "
+        "first seen 2026-06-10"
     )
     assert merge_action["data"] == {
         "circuit_id": "mains",
@@ -1572,7 +1573,8 @@ def test_alert_evidence_payload_includes_selectable_nilm_merge_targets() -> None
         {
             "value": "signature_2",
             "label": (
-                "Pool pump-like load, 1.1 kW, confidence 65%, first seen 2026-06-09"
+                "Pool pump-like load, 1.1 kW, legacy confidence (mixed semantics) "
+                "65%, first seen 2026-06-09"
             ),
         }
     ]
@@ -2019,10 +2021,11 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
     ]
     assert {"value": "mixed", "label": "Mixed"} in change_profile["profile_options"]
     assert "convert_to_direct_meter" not in payload["assignments"][0]["actions"]
-    assert payload["assignments"][0]["actions"]["publish"] == {
-        "domain": DOMAIN,
-        "service": "publish_nilm_appliance_assignment",
-        "data": {"circuit_id": "mains", "assignment_id": "assignment-dishwasher"},
+    assert "publish" not in payload["assignments"][0]["actions"]
+    assert payload["assignments"][0]["publication"]["available"] is False
+    assert payload["assignments"][0]["publication_readiness"]["status"] in {
+        "learning",
+        "manual_review",
     }
     assert "unpublish" not in payload["assignments"][0]["actions"]
     assert payload["assignments"][0]["actions"]["retire"] == {
@@ -4096,10 +4099,9 @@ def test_nilm_workspace_hidden_items_restore_and_publish_blockers_are_explicit()
         "reason": "Assign at least one detected load before publishing.",
     }
     assert "publish" not in empty["actions"]
-    assert ready["publication"]["available"] is True
-    assert ready["actions"]["publish"]["service"] == (
-        "publish_nilm_appliance_assignment"
-    )
+    assert ready["publication"]["available"] is False
+    assert "publish" not in ready["actions"]
+    assert ready["publication_readiness"]["status"] in {"learning", "manual_review"}
     assert converted["actions"]["restore"] == {
         "domain": DOMAIN,
         "service": "restore_nilm_item",

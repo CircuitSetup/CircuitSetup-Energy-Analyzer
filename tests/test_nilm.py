@@ -4746,7 +4746,7 @@ def test_cluster_recurring_signatures_groups_similar_edges_conservatively() -> N
     assert signatures[0].occurrence_count == 3
     assert signatures[0].median_delta_w == 300.0
     assert signatures[0].median_delta_var == 35.0
-    assert signatures[0].confidence_kind == "evidence"
+    assert signatures[0].confidence_kind == "evidence_strength"
     assert 0.0 <= signatures[0].confidence <= 0.75
 
 
@@ -6519,3 +6519,144 @@ def test_nilm_today_vs_normal_enables_only_after_all_validation_thresholds() -> 
     assert readiness["confirmed_sessions"] == 5
     assert readiness["distinct_confirmed_days"] == 3
     assert readiness["false_positive_rate"] == 0.167
+
+
+def test_nilm_publication_gates_extend_the_validation_readiness_contract() -> None:
+    evaluate_readiness = _required_nilm_api("evaluate_nilm_validation_readiness")
+    session_ids = ["session-1", "session-2", "session-3"]
+    assignment = {
+        "assignment_id": "dishwasher",
+        "lifecycle_state": "validated",
+        "signature_fingerprints": ["direction=on|watts=800-900"],
+        "session_ids": session_ids,
+        "confirmed_session_ids": session_ids,
+        "rejected_session_ids": [],
+        "confidence": 0.8,
+        "feedback_evidence_score": 0.8,
+        "model_fit": 0.91,
+        "validation_evaluable_session_count": 3,
+        "validation_precision": 1.0,
+        "false_positive_rate": 0.0,
+    }
+    sessions = [
+        {
+            "session_id": session_id,
+            "assignment_id": "dishwasher",
+            "start": f"2026-07-0{index}T12:00:00+00:00",
+            "end": f"2026-07-0{index}T12:20:00+00:00",
+            "ambiguous": False,
+            "energy_source": "residual_trace_measured",
+            "energy_estimate_confidence": 0.9,
+            "known_source_coverage_min": 1.0,
+            "known_source_coverage_time_weighted": 1.0,
+            "stale_subtraction_prevented_count": 0,
+            "partial_residual_point_count": 0,
+            "negative_residual_point_count": 0,
+        }
+        for index, session_id in enumerate(session_ids, start=1)
+    ]
+
+    readiness = evaluate_readiness(
+        assignment,
+        sessions,
+        min_confirmed_sessions=3,
+        min_distinct_days=3,
+        max_false_positive_rate=0.2,
+        min_confidence=0.8,
+    )
+
+    assert readiness["ready"] is True
+    assert readiness["publication_readiness"] == {
+        "status": "ready",
+        "reasons": [],
+        "gates": {
+            "evidence": "pass",
+            "feedback_evidence": "pass",
+            "model_fit": "pass",
+            "validation": "pass",
+            "ambiguity": "pass",
+            "data_quality": "pass",
+            "energy_quality": "pass",
+        },
+        "semantics_version": 1,
+    }
+
+    blocked_sessions = [dict(session) for session in sessions]
+    blocked_sessions[0]["ambiguous"] = True
+    blocked_sessions[1]["energy_source"] = "transition_fallback"
+    blocked = evaluate_readiness(
+        assignment,
+        blocked_sessions,
+        min_confirmed_sessions=3,
+        min_distinct_days=3,
+        max_false_positive_rate=0.2,
+        min_confidence=0.8,
+    )["publication_readiness"]
+
+    assert blocked["status"] == "blocked"
+    assert blocked["reasons"] == [
+        "ambiguous_evidence_present",
+        "insufficient_energy_quality",
+    ]
+
+    partial_quality = [dict(session) for session in sessions]
+    partial_quality[0]["known_source_coverage_min"] = 0.5
+    quality_blocked = evaluate_readiness(
+        assignment,
+        partial_quality,
+        min_confirmed_sessions=3,
+        min_distinct_days=3,
+        max_false_positive_rate=0.2,
+        min_confidence=0.8,
+    )["publication_readiness"]
+
+    assert quality_blocked["status"] == "blocked"
+    assert quality_blocked["gates"]["data_quality"] == "fail"
+    assert "insufficient_source_quality" in quality_blocked["reasons"]
+
+    unavailable_quality = [
+        {
+            key: value
+            for key, value in session.items()
+            if key
+            not in {
+                "known_source_coverage_min",
+                "known_source_coverage_time_weighted",
+                "stale_subtraction_prevented_count",
+                "partial_residual_point_count",
+                "negative_residual_point_count",
+            }
+        }
+        for session in sessions
+    ]
+    unavailable_quality[0]["quality_flags"] = ["complete"]
+    quality_unavailable = evaluate_readiness(
+        assignment,
+        unavailable_quality,
+        min_confirmed_sessions=3,
+        min_distinct_days=3,
+        max_false_positive_rate=0.2,
+        min_confidence=0.8,
+    )["publication_readiness"]
+
+    assert quality_unavailable["status"] == "manual_review"
+    assert quality_unavailable["gates"]["data_quality"] == "unavailable"
+    assert "source_quality_unavailable" in quality_unavailable["reasons"]
+
+    legacy_only = dict(assignment)
+    legacy_only.pop("feedback_evidence_score")
+    legacy_publication = evaluate_readiness(
+        legacy_only,
+        sessions,
+        min_confirmed_sessions=3,
+        min_distinct_days=3,
+        max_false_positive_rate=0.2,
+        min_confidence=0.8,
+    )
+
+    assert legacy_publication["ready"] is True
+    assert legacy_publication["publication_readiness"]["status"] == "manual_review"
+    assert (
+        "feedback_evidence_unavailable"
+        in legacy_publication["publication_readiness"]["reasons"]
+    )

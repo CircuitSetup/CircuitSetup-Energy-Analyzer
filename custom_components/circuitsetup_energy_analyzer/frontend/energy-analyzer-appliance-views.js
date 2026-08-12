@@ -700,20 +700,35 @@ export function createApplianceViewMethods({
       <tbody>${items.map((item) => {
         const quality = item.source_quality || {};
         const readiness = item.learning_readiness || {};
-        const confidence = item.confidence !== null && item.confidence !== undefined
-          ? this._formatConfidence(item.confidence)
-          : "";
+        const confidence = this._applianceInsightConfidenceText(item);
         return `<tr>
           <td data-label="${this._escape(columns.appliance)}"><a href="${this._escape(item.detail_path)}" data-appliance-insights-detail-path="${this._escape(item.detail_path)}">${this._escape(item.display_name || item.appliance_key)}</a></td>
           <td data-label="${this._escape(columns.now)}">${this._escape(item.activity_state || this._panelText("common.unknown"))}${item.current_power_w !== null && item.current_power_w !== undefined ? `<small>${this._escape(this._formatPower(item.current_power_w))}</small>` : ""}</td>
           <td data-label="${this._escape(columns.energy)}">${this._escape(this._formatKwh(item.daily_energy_kwh))}</td>
           <td data-label="${this._escape(columns.change)}">${this._escape(this._formatChangePercent(item.today_vs_normal_percent))}${item.energy_change_explanation ? `<small>${this._escape(item.energy_change_explanation.explanation)}</small>` : ""}</td>
           <td data-label="${this._escape(columns.source)}"><a href="${this._escape(item.source_path)}" data-appliance-insights-source-path="${this._escape(item.source_path)}">${this._escape(this._sourceLabel(item.source_type))}</a><small>${this._escape(quality.label || this._friendlyFeature(quality.status || "unknown"))}</small></td>
-          <td data-label="${this._escape(columns.readiness)}">${this._escape(readiness.label || this._friendlyFeature(readiness.status || "unknown"))}${confidence ? `<small>${this._escape(this._panelTextFormat("appliance_insights.confidence", { confidence }))}</small>` : ""}</td>
+          <td data-label="${this._escape(columns.readiness)}">${this._escape(readiness.label || this._friendlyFeature(readiness.status || "unknown"))}${confidence ? `<small>${this._escape(confidence)}</small>` : ""}</td>
           <td data-label="${this._escape(columns.attention)}">${this._escape(this._panelText(item.needs_attention ? "appliance_insights.yes" : "appliance_insights.no"))}</td>
         </tr>`;
       }).join("")}</tbody>
     </table></div>`;
+  }
+
+  _applianceInsightConfidenceText(item) {
+    const confidence = item && item.confidence;
+    if (confidence === null || confidence === undefined) return "";
+    const value = this._formatConfidence(confidence);
+    if (item.source_type !== "nilm_estimate") {
+      return this._panelTextFormat("appliance_insights.confidence", { confidence: value });
+    }
+    const kind = String(item.confidence_kind || "").trim().toLowerCase();
+    if (kind === "feedback_evidence") {
+      return this._panelTextFormat("nilm_workspace.feedback_evidence_score", { value });
+    }
+    if (kind === "legacy_mixed") {
+      return this._panelTextFormat("nilm_workspace.legacy_mixed_confidence", { value });
+    }
+    return this._panelTextFormat("nilm_workspace.legacy_mixed_confidence", { value });
   }
 
   _renderApplianceDetailBody() {

@@ -119,6 +119,8 @@ export const applianceInsights = {
       daily_energy_kwh: 1.1,
       today_vs_normal_percent: 9,
       confidence: 0.81,
+      feedback_evidence_score: 0.81,
+      confidence_kind: "feedback_evidence",
       is_running: false,
       needs_attention: true,
       attention_reason: "One recent session needs validation.",
@@ -414,6 +416,8 @@ export const nilmWorkspace = {
         duration_seconds: 2700,
       },
       confidence: 0.76,
+      evidence_strength: 0.76,
+      confidence_kind: "evidence_strength",
       seen_count: 5,
       last_seen: "2026-07-13T19:30:00Z",
       review_state: "needs_review",
@@ -473,6 +477,8 @@ export const nilmWorkspace = {
       end: "2026-07-13T16:30:00Z",
       duration_seconds: 1800,
       confidence: 0.78,
+      pairing_confidence: 0.78,
+      confidence_kind: "pairing_confidence",
       on_delta_w: 900,
       off_delta_w: -900,
       signature_review: {
@@ -513,6 +519,8 @@ export const nilmWorkspace = {
       on_delta_w: 900,
       off_delta_w: -900,
       confidence: 0.82,
+      pairing_confidence: 0.82,
+      confidence_kind: "pairing_confidence",
       estimated_energy_kwh: 0.68,
       actions: {
         validate: {

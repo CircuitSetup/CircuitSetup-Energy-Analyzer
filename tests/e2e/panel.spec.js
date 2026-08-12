@@ -7260,7 +7260,17 @@ test("NILM ambiguity audit drops a stale collection response after a route chang
 
 
 test("NILM workspace uses Home Assistant surfaces", async ({ page }) => {
-  await mockPanelApi(page);
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    Object.assign(payload.assignments[0], {
+      confidence: 0.62,
+      confidence_kind: "legacy_mixed",
+      model_fit: null,
+    });
+    await route.fulfill({ json: payload });
+    return true;
+  });
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
   await page.evaluate(() => {
     const root = document.documentElement.style;
@@ -7285,6 +7295,8 @@ test("NILM workspace uses Home Assistant surfaces", async ({ page }) => {
   await expect(panel.locator('[data-nilm-lane][aria-selected="true"]')).toBeVisible();
   await expect(panel.locator(".nilm-review-inspector")).toBeVisible();
   await expect(panel.locator("[data-nilm-apply-decision]")).toBeEnabled();
+  await panel.locator('[data-nilm-lane="assigned"]').click();
+  await expect(panel.getByText("Legacy confidence (mixed semantics): 62%")).toHaveCount(2);
 });
 
 test("NILM workspace says when an edge has no dominant leg", async ({ page }) => {
@@ -7355,6 +7367,9 @@ test("NILM component graph focuses and navigates complete occurrences", async ({
   await expect(controls).toContainText("45m");
   await expect(panel.locator('.nilm-session-band[data-nilm-selected="true"]')).toHaveCount(1);
   await expect(panel.locator(".nilm-edge-marker")).toHaveCount(2);
+  await expect(panel.locator('.nilm-session-band[data-nilm-selected="true"] title')).toContainText(
+    "pairing confidence",
+  );
   await expect(controls.locator('[data-nilm-occurrence-step="1"]')).toBeDisabled();
 
   await controls.locator('[data-nilm-occurrence-step="-1"]').click();
@@ -8496,6 +8511,7 @@ test("Appliance Insights filters attention and NILM appliances", async ({ page, 
   await panel.locator('[data-appliance-insights-filter="nilm_estimated"]').check();
   await expect(panel.locator("tbody tr")).toHaveCount(1);
   await expect(panel.locator("tbody")).toContainText("Dishwasher Estimate");
+  await expect(panel.locator("tbody")).toContainText("Feedback evidence score: 81%");
 });
 
 test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile }) => {
@@ -8959,6 +8975,7 @@ test("NILM review supports decisions, validation, and interval labeling", async 
     };
     const completed = payload.sessions.find((session) => session.assignment_id === "dishwasher");
     completed.confidence = 0.7;
+    completed.pairing_confidence = 0.7;
     completed.ambiguous = true;
     payload.sessions.push(
       { ...completed, session_id: "nilm-session-alternate", start: "2026-07-13T17:00:00Z", end: "2026-07-13T17:20:00Z", ambiguous: false, alternate_match_count: 2 },
@@ -8994,7 +9011,7 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   await expect(card.locator("strong")).toContainText("Predicted");
   await expect(card.locator("[data-nilm-session-range]")).toBeVisible();
   const openCard = panel.locator('[data-nilm-session-validation-card][data-nilm-open="true"]');
-  await expect(openCard).toContainText("Provisional confidence");
+  await expect(openCard).toContainText("Pairing confidence");
   await expect(openCard.locator("[data-nilm-session-action]")).toHaveCount(0);
   await expect(openCard.locator("[data-nilm-session-interval-index]")).toHaveCount(0);
   const closedCards = panel.locator('[data-nilm-session-validation-card][data-nilm-open="false"]');
@@ -9003,10 +9020,10 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   await closedCard.locator("[data-nilm-session-interval-index]").click();
   await expect(panel.locator("[data-nilm-interval-editor]")).toBeVisible();
   await panel.locator("[data-nilm-cancel-interval-editor]").click();
-  await expect(panel.getByText("Confidence is lower because the session match is ambiguous.")).toBeVisible();
-  await expect(panel.getByText("Confidence is lower because other edge matches were plausible.")).toBeVisible();
-  await expect(panel.getByText("Confidence is lower because a competing session overlapped this run.")).toBeVisible();
-  await expect(panel.getByText("Confidence is lower because known-load activity affected this run.")).toBeVisible();
+  await expect(panel.getByText("Pairing confidence is lower because the session match is ambiguous.")).toBeVisible();
+  await expect(panel.getByText("Pairing confidence is lower because other edge matches were plausible.")).toBeVisible();
+  await expect(panel.getByText("Pairing confidence is lower because a competing session overlapped this run.")).toBeVisible();
+  await expect(panel.getByText("Pairing confidence is lower because known-load activity affected this run.")).toBeVisible();
 
   await expect(panel.getByText("This detection matches Unknown 900 W load; this decision applies to the signature and future matching detections.")).toBeVisible();
   await expect(panel.locator('[data-nilm-decision][value="mark_expected"]')).toHaveCount(0);

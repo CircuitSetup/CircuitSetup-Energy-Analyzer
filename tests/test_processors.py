@@ -14107,7 +14107,7 @@ def test_nilm_signature_payload_enriches_confidence_from_validation_precision() 
 
     assert payload["validated_precision"] == 0.9
     assert payload["confidence"] == 0.54
-    assert payload["confidence_kind"] == "evidence"
+    assert payload["confidence_kind"] == "evidence_strength"
 
 
 def test_assigned_signature_drives_w_var_component_runtime() -> None:

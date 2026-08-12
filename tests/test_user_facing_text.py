@@ -3592,7 +3592,7 @@ def test_nilm_lane_rendering_contracts() -> None:
         },
         index: 0,
       }, items, false);
-      for (const expected of ["--power-percent:25%", "<span>100%</span>", '<progress max="100" value="100"']) {
+      for (const expected of ["--power-percent:25%", "Legacy confidence (mixed semantics): 100%", '<progress max="100" value="100"']) {
         assert.ok(html.includes(expected));
       }
     }
@@ -3988,12 +3988,12 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
         "data-nilm-assignment-action",
         "data-nilm-appliance-detail-path",
         "Appliance Assignments",
-        "Confidence 80%",
+        "Legacy confidence (mixed semantics): 80%",
       ]) {
         assert.ok(!secondary.includes(duplicate));
       }
       assert.ok(html.includes("Dishwasher"));
-      assert.ok(html.includes("Confidence 80%"));
+      assert.ok(html.includes("Legacy confidence (mixed semantics): 80%"));
     }
 
     const validationSession = {
@@ -4018,7 +4018,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       const html = panel._renderNilmWorkspaceBody();
       for (const expected of [
         "Session Validation", "Predicted Dishwasher", "2026-06-24", "51m",
-        "Estimated by NILM", "Confidence 82%", "Correct", "Wrong appliance",
+        "Estimated by NILM", "Legacy confidence (mixed semantics): 82%", "Correct", "Wrong appliance",
         "Adjust Interval", 'data-nilm-session-action="validate"',
         'data-nilm-session-action="reject"', 'data-nilm-session-interval-index="0"',
       ]) assert.ok(html.includes(expected), expected);
@@ -4066,7 +4066,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       ]];
       const html = panel._renderNilmWorkspaceBody();
       for (const expected of [
-        "Estimated by NILM", "Low confidence", "Confidence 70%",
+        "Estimated by NILM", "Low pairing confidence", "Legacy confidence (mixed semantics): 70%",
         'data-nilm-session-confidence="0.70"', 'data-nilm-low-confidence="true"',
       ]) assert.ok(html.includes(expected), expected);
     }
@@ -6817,7 +6817,7 @@ assert.equal(reviewItems.map((item) => item.kind).join(","), "assignment,session
 const sessionItem = reviewItems.find((item) => item.kind === "session");
 assert.equal(panel._nilmReviewKey(sessionItem), "session:session-review");
 const sessionHtml = panel._renderNilmReviewInspector(sessionItem);
-assert.ok(sessionHtml.includes("Confidence 67%"), sessionHtml);
+assert.ok(sessionHtml.includes("Legacy confidence (mixed semantics): 67%"), sessionHtml);
 assert.ok(sessionHtml.includes("Ambiguous"), sessionHtml);
 assert.ok(sessionHtml.includes('data-nilm-session-action="assign"'), sessionHtml);
 await panel._callNilmWorkspaceItemAction("sessions", 0, "assign");

@@ -167,6 +167,43 @@ def _spy_mixed_transition(coordinator):
     return calls
 
 
+def _nilm_publication_ready_fields() -> dict[str, object]:
+    session_ids = [
+        "publication-session-1",
+        "publication-session-2",
+        "publication-session-3",
+    ]
+    return {
+        "session_ids": session_ids,
+        "confirmed_session_ids": session_ids,
+        "rejected_session_ids": [],
+        "feedback_evidence_score": 0.9,
+        "model_fit": 0.9,
+        "validation_evaluable_session_count": 3,
+        "validation_precision": 1.0,
+        "false_positive_rate": 0.0,
+    }
+
+
+def _nilm_publication_ready_sessions(assignment_id: str) -> list[dict[str, object]]:
+    return [
+        {
+            "session_id": f"publication-session-{index}",
+            "assignment_id": assignment_id,
+            "start": f"2026-05-{28 + index:02d}T12:00:00+00:00",
+            "end": f"2026-05-{28 + index:02d}T12:20:00+00:00",
+            "ambiguous": False,
+            "energy_source": "residual_trace_measured",
+            "known_source_coverage_min": 1.0,
+            "known_source_coverage_time_weighted": 1.0,
+            "stale_subtraction_prevented_count": 0,
+            "partial_residual_point_count": 0,
+            "negative_residual_point_count": 0,
+        }
+        for index in range(1, 4)
+    ]
+
+
 @pytest.mark.asyncio
 async def test_mark_already_mixed_cleans_saves_and_reloads_without_write() -> None:
     coordinator = _mixed_transition_coordinator("mixed")
@@ -9614,7 +9651,7 @@ async def test_nilm_assignment_publish_unpublish_and_retire_lifecycle() -> None:
                         "appliance_profile": "dishwasher",
                         "mains_circuit_id": "mains",
                         "signature_fingerprints": ["signature_1"],
-                        "session_ids": [],
+                        **_nilm_publication_ready_fields(),
                         "label_interval_ids": [],
                         "lifecycle_state": "validated",
                         "confidence": 0.92,
@@ -9624,6 +9661,9 @@ async def test_nilm_assignment_publish_unpublish_and_retire_lifecycle() -> None:
                         "publish_entities": False,
                     }
                 ]
+            },
+            nilm_session_history_by_circuit={
+                "mains": _nilm_publication_ready_sessions("assignment-dishwasher")
             },
         ),
         now_fn=lambda: datetime(2026, 6, 2, 14, 0, tzinfo=UTC),
@@ -9705,11 +9745,15 @@ async def test_nilm_publish_waits_for_entities_added_after_reload() -> None:
                         "display_name": "Dishwasher",
                         "lifecycle_state": "validated",
                         "signature_fingerprints": ["dishwasher-signature"],
+                        **_nilm_publication_ready_fields(),
                         "confidence": 0.9,
                         "publish_entities": False,
                     }
                 ]
-            }
+            },
+            nilm_session_history_by_circuit={
+                "mains": _nilm_publication_ready_sessions("assignment-dishwasher")
+            },
         ),
     )
 
@@ -9755,11 +9799,15 @@ async def test_nilm_publish_rolls_back_without_home_assistant_entities() -> None
                         "display_name": "Dishwasher",
                         "lifecycle_state": "validated",
                         "signature_fingerprints": ["dishwasher-signature"],
+                        **_nilm_publication_ready_fields(),
                         "confidence": 0.9,
                         "publish_entities": False,
                     }
                 ]
-            }
+            },
+            nilm_session_history_by_circuit={
+                "mains": _nilm_publication_ready_sessions("assignment-dishwasher")
+            },
         ),
     )
 
@@ -9806,7 +9854,7 @@ def test_nilm_virtual_alert_builders_gate_confidence_and_repeated_evidence() -> 
     assert finished_alert.baseline_value == pytest.approx(0.8)
     assert "a detected estimated run ended" in finished_alert.message
     assert "completed on/off run" in finished_alert.message
-    assert "Confidence: 82%" in finished_alert.message
+    assert "Legacy confidence (mixed semantics): 82%" in finished_alert.message
     assert finished_alert.features["source_type"] == "nilm_estimate"
     assert finished_alert.features["estimated"] is True
     assert finished_alert.features["confidence"] == pytest.approx(0.82)
@@ -9895,6 +9943,42 @@ def test_nilm_virtual_alert_builders_gate_confidence_and_repeated_evidence() -> 
     assert "Estimated from aggregate circuit power by NILM" in energy_alert.message
     assert energy_alert.features["source_type"] == "nilm_estimate"
     assert energy_alert.features["confidence"] == pytest.approx(0.82)
+
+
+def test_nilm_virtual_alerts_use_typed_feedback_evidence_when_available() -> None:
+    from custom_components.circuitsetup_energy_analyzer import nilm_virtual
+
+    now = datetime(2026, 6, 2, 13, 0, tzinfo=UTC)
+    state = SimpleNamespace(
+        assignment_id="assignment-dishwasher",
+        display_name="Dishwasher",
+        is_running=False,
+        estimated_energy_kwh_today=0.45,
+        confidence=0.9,
+        feedback_evidence_score=0.6,
+        confidence_kind="feedback_evidence",
+        last_seen=now - timedelta(minutes=5),
+        active_session_id=None,
+        latest_session_id="session-1",
+        model_status="published",
+        mains_circuit_id="mains",
+    )
+
+    low_alert = nilm_virtual.nilm_virtual_low_confidence_alert(state, now=now)
+    assert low_alert is not None
+    assert low_alert.observed_value == pytest.approx(0.6)
+    assert "Feedback evidence score: 60%" in low_alert.message
+    assert low_alert.features["confidence"] == pytest.approx(0.6)
+    assert low_alert.features["feedback_evidence_score"] == pytest.approx(0.6)
+    assert nilm_virtual.nilm_virtual_finished_alert(state, now=now) is None
+    assert (
+        nilm_virtual.nilm_virtual_unusual_energy_alert(
+            state,
+            {"expected_daily_energy_kwh": 0.3, "unusual_energy_repeated_count": 2},
+            now=now,
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio
