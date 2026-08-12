@@ -4409,32 +4409,15 @@ class NilmEdgeDetector:
         confirmation_window = self.confirmation_max_interval
         previous_real_time = _source_updated_at(previous, SensorRole.REAL_POWER)
         sample_real_time = _source_updated_at(sample, SensorRole.REAL_POWER)
-        delta_var, var_status = _aligned_dimension_delta(
-            sample.reactive_power,
-            previous.reactive_power,
-            _source_updated_at(sample, SensorRole.REACTIVE_POWER),
-            _source_updated_at(previous, SensorRole.REACTIVE_POWER),
-            sample_real_time,
-            previous_real_time,
-            confirmation_window,
-        )
-        leg_a_delta, leg_a_status = _aligned_dimension_delta(
+        previous_var_time = _source_updated_at(previous, SensorRole.REACTIVE_POWER)
+        sample_var_time = _source_updated_at(sample, SensorRole.REACTIVE_POWER)
+        leg_a_delta = _optional_delta(
             getattr(sample, "leg_a_real_power", None),
             getattr(previous, "leg_a_real_power", None),
-            sample_real_time,
-            previous_real_time,
-            sample_real_time,
-            previous_real_time,
-            confirmation_window,
         )
-        leg_b_delta, leg_b_status = _aligned_dimension_delta(
+        leg_b_delta = _optional_delta(
             getattr(sample, "leg_b_real_power", None),
             getattr(previous, "leg_b_real_power", None),
-            sample_real_time,
-            previous_real_time,
-            sample_real_time,
-            previous_real_time,
-            confirmation_window,
         )
         topology = _split_phase_topology(leg_a_delta, leg_b_delta)
         previous_va, previous_pf = _nilm_electrical_features(
@@ -4445,6 +4428,45 @@ class NilmEdgeDetector:
         sample_va, sample_pf = _nilm_electrical_features(
             sample,
             sample_real_time,
+            confirmation_window,
+        )
+        previous_evidence_real_time = _recorded_source_updated_at(
+            previous, SensorRole.REAL_POWER
+        )
+        sample_evidence_real_time = _recorded_source_updated_at(
+            sample, SensorRole.REAL_POWER
+        )
+        var_status = _electrical_dimension_status(
+            sample.reactive_power,
+            previous.reactive_power,
+            _recorded_source_updated_at(sample, SensorRole.REACTIVE_POWER),
+            _recorded_source_updated_at(previous, SensorRole.REACTIVE_POWER),
+            sample_evidence_real_time,
+            previous_evidence_real_time,
+            sample.timestamp,
+            previous.timestamp,
+            confirmation_window,
+        )
+        leg_a_status = _electrical_dimension_status(
+            getattr(sample, "leg_a_real_power", None),
+            getattr(previous, "leg_a_real_power", None),
+            sample_evidence_real_time,
+            previous_evidence_real_time,
+            sample_evidence_real_time,
+            previous_evidence_real_time,
+            sample.timestamp,
+            previous.timestamp,
+            confirmation_window,
+        )
+        leg_b_status = _electrical_dimension_status(
+            getattr(sample, "leg_b_real_power", None),
+            getattr(previous, "leg_b_real_power", None),
+            sample_evidence_real_time,
+            previous_evidence_real_time,
+            sample_evidence_real_time,
+            previous_evidence_real_time,
+            sample.timestamp,
+            previous.timestamp,
             confirmation_window,
         )
         electrical_dimension_statuses = (
@@ -4458,7 +4480,15 @@ class NilmEdgeDetector:
         return NilmEdge(
             timestamp=sample.timestamp,
             delta_w=delta_w,
-            delta_var=delta_var,
+            delta_var=_aligned_optional_delta(
+                sample.reactive_power,
+                previous.reactive_power,
+                sample_var_time,
+                previous_var_time,
+                sample_real_time,
+                previous_real_time,
+                confirmation_window,
+            ),
             delta_va=_aligned_optional_delta(
                 sample_va[0],
                 previous_va[0],
@@ -4563,6 +4593,18 @@ def _source_updated_at(sample: CircuitSample, role: SensorRole) -> datetime:
     return sample.timestamp
 
 
+def _recorded_source_updated_at(
+    sample: CircuitSample,
+    role: SensorRole,
+) -> datetime | None:
+    """Return only a source timestamp actually carried by the sample."""
+
+    for source_role, timestamp in getattr(sample, "source_updated_at_by_role", ()):
+        if source_role is role or str(source_role) == role.value:
+            return timestamp if isinstance(timestamp, datetime) else None
+    return None
+
+
 def _aligned_source_updated_at(
     sample: CircuitSample,
     roles: tuple[SensorRole, ...],
@@ -4600,28 +4642,42 @@ def _aligned_optional_delta(
     return float(current) - float(previous)
 
 
-def _aligned_dimension_delta(
+def _electrical_dimension_status(
     current: float | None,
     previous: float | None,
     current_updated_at: datetime | None,
     previous_updated_at: datetime | None,
-    current_real_updated_at: datetime,
-    previous_real_updated_at: datetime,
+    current_real_updated_at: datetime | None,
+    previous_real_updated_at: datetime | None,
+    current_timestamp: datetime,
+    previous_timestamp: datetime,
     max_interval: timedelta | None,
-) -> tuple[float | None, str]:
-    """Return a signed delta with its dimension-specific evidence status."""
+) -> str:
+    """Classify explicit per-dimension evidence without changing edge values."""
 
-    if current is None or previous is None:
-        return None, "missing"
+    if (
+        current is None
+        or previous is None
+        or current_updated_at is None
+        or previous_updated_at is None
+        or current_real_updated_at is None
+        or previous_real_updated_at is None
+    ):
+        return "missing"
     if max_interval is not None:
-        if current_updated_at is None or previous_updated_at is None:
-            return None, "missing"
+        if (
+            abs(current_updated_at - current_timestamp) > max_interval
+            or abs(previous_updated_at - previous_timestamp) > max_interval
+            or abs(current_real_updated_at - current_timestamp) > max_interval
+            or abs(previous_real_updated_at - previous_timestamp) > max_interval
+        ):
+            return "stale"
         if (
             abs(current_updated_at - current_real_updated_at) > max_interval
             or abs(previous_updated_at - previous_real_updated_at) > max_interval
         ):
-            return None, "misaligned"
-    return float(current) - float(previous), "measured"
+            return "misaligned"
+    return "measured"
 
 
 @dataclass(frozen=True, slots=True)
@@ -5909,6 +5965,8 @@ def _aggregate_electrical_dimension_status(edge: NilmEdge, dimension: str) -> st
         return "measured"
     if status == "missing":
         return "missing_aggregate"
+    if status == "stale":
+        return "stale_aggregate"
     if status == "misaligned":
         return "misaligned_aggregate"
     return "unsupported"

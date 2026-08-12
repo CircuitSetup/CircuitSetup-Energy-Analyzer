@@ -545,11 +545,7 @@ def _transition_sample(
 ) -> _TransitionSample:
     """Capture only direct, timestamp-aligned values already on a sample."""
 
-    real_updated_at = _sample_source_updated_at(
-        sample,
-        SensorRole.REAL_POWER,
-        fallback_to_sample_timestamp=True,
-    )
+    real_updated_at = _sample_source_updated_at(sample, SensorRole.REAL_POWER)
     # Aggregated leg samples retain the oldest real-power source timestamp, so
     # this is evidence for both legs only when both underlying legs are fresh.
     return _TransitionSample(
@@ -570,13 +566,11 @@ def _transition_sample(
 def _sample_source_updated_at(
     sample: NormalizedCircuitSample,
     role: SensorRole,
-    *,
-    fallback_to_sample_timestamp: bool = False,
 ) -> datetime | None:
     for source_role, timestamp in getattr(sample, "source_updated_at_by_role", ()):
         if source_role is role or str(source_role) == role.value:
             return timestamp if isinstance(timestamp, datetime) else None
-    return sample.timestamp if fallback_to_sample_timestamp else None
+    return None
 
 
 def resolve_operating_detection(

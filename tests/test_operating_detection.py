@@ -1211,6 +1211,32 @@ def test_confirmed_start_does_not_treat_fresh_w_as_fresh_var() -> None:
     assert start.features["transition_delta_leg_a_w"] == 0.0
 
 
+def test_confirmed_start_requires_explicit_real_source_time_for_leg_evidence() -> None:
+    def sample_without_source_times(
+        seconds: int,
+        watts: float,
+    ) -> NormalizedCircuitSample:
+        return replace(
+            _electrical_transition_sample(
+                seconds,
+                watts,
+                None,
+                watts * 0.6,
+                watts * 0.4,
+            ),
+            source_updated_at_by_role=(),
+        )
+
+    machine = _machine()
+    machine.process(sample_without_source_times(0, 20.0))
+    machine.process(sample_without_source_times(5, 120.0))
+    start = machine.process(sample_without_source_times(15, 120.0)).events[0]
+
+    assert "transition_electrical_evidence_version" not in start.features
+    assert "transition_delta_leg_a_w" not in start.features
+    assert "transition_delta_leg_b_w" not in start.features
+
+
 def test_confirmed_start_uses_post_plateau_median_not_confirmation_power() -> None:
     machine = _machine()
     machine.process(_sample(0, 20.0, circuit_id="fridge"))

@@ -3123,6 +3123,40 @@ def test_edge_detector_keeps_missing_auxiliary_evidence_unavailable() -> None:
     assert edges[0].electrical_dimension_statuses == ()
 
 
+def test_edge_detector_requires_explicit_source_times_for_residual_evidence() -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=100.0,
+        confirmation_max_interval=timedelta(seconds=15),
+    )
+
+    edges = detector.process_many(
+        [
+            NormalizedCircuitSample(
+                timestamp=BASE_TIME,
+                circuit_id="mains",
+                real_power=0.0,
+                reactive_power=10.0,
+                leg_a_real_power=0.0,
+                leg_b_real_power=0.0,
+            ),
+            NormalizedCircuitSample(
+                timestamp=BASE_TIME + timedelta(seconds=10),
+                circuit_id="mains",
+                real_power=220.0,
+                reactive_power=50.0,
+                leg_a_real_power=130.0,
+                leg_b_real_power=90.0,
+            ),
+        ]
+    )
+
+    assert len(edges) == 1
+    assert edges[0].delta_var == 40.0
+    assert (edges[0].leg_a_delta_w, edges[0].leg_b_delta_w) == (130.0, 90.0)
+    assert edges[0].electrical_evidence_version == 0
+    assert edges[0].electrical_dimension_statuses == ()
+
+
 def test_edge_detector_preserves_measured_zero_auxiliary_delta() -> None:
     detector = NilmEdgeDetector(min_delta_w=100.0)
 
