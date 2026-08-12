@@ -334,6 +334,25 @@ def _nilm_collection_boundary(value: object) -> tuple[int, int, int, int]:
     )
 
 
+def ensure_nilm_tracked_collection(mapping: Any, key: str) -> Any:
+    """Install and return the exact runtime mutation wrapper for one source."""
+
+    if not isinstance(mapping, Mapping) or key not in mapping:
+        return None
+    value = mapping.get(key)
+    if isinstance(value, _NilmTrackedList):
+        return value
+    tracked = _NilmTrackedList(value if isinstance(value, (list, tuple)) else ())
+    mapping[key] = tracked
+    return tracked
+
+
+def nilm_tracked_collection_revision(value: Any) -> int | None:
+    """Return an exact mutation revision, or None for an uncertain source."""
+
+    return value.mutation_revision if isinstance(value, _NilmTrackedList) else None
+
+
 def _nilm_stable_snapshot(value: Any) -> object:
     """Return a deterministic, comparison-safe snapshot of stored NILM inputs."""
     if isinstance(value, Mapping):

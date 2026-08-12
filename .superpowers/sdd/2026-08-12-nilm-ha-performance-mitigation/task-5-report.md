@@ -225,3 +225,62 @@ The stale-result regression test advances retained session identity after the
 first executor payload is built. It proves the first payload is not returned,
 the builder is dispatched a second time, and the public response contains both
 current sessions.
+
+## Review fix round 3
+
+The endpoint/tail identity heuristic was replaced with Task 2's exact tracked
+collection revisions. `processors/nilm_sample.py` now exposes two small runtime
+helpers: one installs the existing tracked-list/tracked-dictionary wrapper at a
+collection boundary, and the other reads its exact O(1) mutation revision.
+
+Before snapshot capture, the panel event loop installs tracking for the selected
+circuit's session history, signatures, label intervals, known-load
+attributions, unknown-load inventory rows, and unmatched edges, plus assignment
+collections for configured helper circuits. Nested dictionaries and lists use
+Task 2's existing forwarding wrappers, so in-place scalar edits and non-tail
+replacements increment the same collection-local revision.
+
+Identity revalidation now uses collection object identity and exact mutation
+revision, not retained row scanning, hashing, length, or endpoint sampling. If a
+tracked source is externally replaced by a plain list while the executor runs,
+its revision becomes `None`; this uncertain identity cannot match the captured
+tracked revision. The stale payload is discarded, and the next event-loop retry
+installs tracking on the replacement before snapshotting. Snapshot conversion
+copies tracked runtime values into detached plain dictionaries/lists, keeping
+the executor pure and preventing live coordinator/HA access.
+
+RED evidence:
+
+```text
+rtk pytest tests/test_panel.py -q -k "retries_exact_tracked_mutations"
+Pytest: 0 passed, 2 failed
+assert hass.executor_calls == 2
+E assert 1 == 2
+```
+
+The two failures covered an in-place `median_power_w` edit on the first retained
+row and replacement of that same non-tail row. Both previously returned the
+first stale executor payload.
+
+GREEN and verification evidence:
+
+```text
+rtk pytest tests/test_panel.py -q -k "retries_exact_tracked_mutations or retries_stale_snapshot or detached_snapshot or cancelled_nilm_collection"
+Pytest: 5 passed
+
+rtk pytest tests/test_panel.py tests/e2e -q
+Pytest: 205 passed
+
+rtk pytest tests/test_processors.py -q -k "unchanged_session_history_does_not_resanitize_ingress or nilm_input_row_mutations_invalidate_session_rebuild"
+Pytest: 2 passed
+
+rtk ruff check custom_components/circuitsetup_energy_analyzer/processors/nilm_sample.py custom_components/circuitsetup_energy_analyzer/panel_nilm.py tests/test_panel.py
+Ruff: No issues found
+
+rtk git diff --check
+exit 0
+```
+
+Cancellation behavior and public collection/item response contracts remain
+unchanged. No persisted revision, cache, writer, worker, or executor-side live
+read was introduced.

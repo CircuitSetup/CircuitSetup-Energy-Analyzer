@@ -5405,7 +5405,9 @@ async def test_nilm_workspace_async_read_retries_stale_snapshot() -> None:
             self.executor_calls += 1
             payload = job()
             if self.executor_calls == 1:
-                history.append(
+                coordinator.store_data.nilm_session_history_by_circuit[
+                    "mains"
+                ].append(
                     {
                         "session_id": "session-2",
                         "signature_fingerprint": "signature-1",
@@ -5431,6 +5433,64 @@ async def test_nilm_workspace_async_read_retries_stale_snapshot() -> None:
         "session-1",
         "session-2",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", ["in_place", "non_tail_replacement"])
+async def test_nilm_workspace_async_read_retries_exact_tracked_mutations(
+    mutation: str,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        async_nilm_workspace_collection_payload,
+    )
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="Mains",
+        entity_id="sensor.mains_power",
+    )
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [
+            {
+                "session_id": f"session-{index}",
+                "signature_fingerprint": "signature-1",
+                "start": f"2026-08-12T1{index}:00:00+00:00",
+                "end": f"2026-08-12T1{index}:05:00+00:00",
+                "median_power_w": 100.0,
+            }
+            for index in range(3)
+        ]
+    }
+
+    class Hass:
+        executor_calls = 0
+
+        async def async_add_executor_job(self, job):
+            self.executor_calls += 1
+            payload = job()
+            if self.executor_calls == 1:
+                rows = coordinator.store_data.nilm_session_history_by_circuit["mains"]
+                if mutation == "in_place":
+                    rows[0]["median_power_w"] = 250.0
+                else:
+                    rows[0] = {**rows[0], "median_power_w": 300.0}
+            return payload
+
+    hass = Hass()
+    payload = await async_nilm_workspace_collection_payload(
+        hass,
+        [coordinator],
+        collection="sessions",
+        circuit_id="mains",
+        entry_id="entry-1",
+        limit=50,
+    )
+
+    assert hass.executor_calls == 2
+    by_id = {item["session_id"]: item for item in payload["items"]}
+    assert by_id["session-0"]["median_power_w"] == (
+        250.0 if mutation == "in_place" else 300.0
+    )
 
 
 @pytest.mark.asyncio

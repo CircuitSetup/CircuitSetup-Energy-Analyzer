@@ -68,6 +68,10 @@ from .panel_contracts import (
     NILM_WORKSPACE_HISTORY_API_PATH,
     PANEL_URL_PATH,
 )
+from .processors.nilm_sample import (
+    ensure_nilm_tracked_collection,
+    nilm_tracked_collection_revision,
+)
 from .profiles import nilm_source_kind
 from .services import (
     ATTR_APPLIANCE_PROFILE,
@@ -246,6 +250,18 @@ _NILM_ESTIMATE_QUALITY_WINDOWS = (
 )
 
 
+def _nilm_workspace_snapshot_value(value: Any) -> Any:
+    """Detach tracked runtime values into plain immutable-worker inputs."""
+
+    if isinstance(value, Mapping):
+        return {
+            key: _nilm_workspace_snapshot_value(item) for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_nilm_workspace_snapshot_value(item) for item in value]
+    return deepcopy(value)
+
+
 def _nilm_workspace_read_snapshot(
     coordinators: Iterable[Any],
     *,
@@ -266,7 +282,9 @@ def _nilm_workspace_read_snapshot(
         if not isinstance(value, Mapping):
             return {}
         return {
-            selected_circuit_id: deepcopy(value.get(selected_circuit_id, []))
+            selected_circuit_id: _nilm_workspace_snapshot_value(
+                value.get(selected_circuit_id, [])
+            )
         }
 
     assignments_by_circuit = getattr(
@@ -279,7 +297,7 @@ def _nilm_workspace_read_snapshot(
     }
     snapshot_assignments = (
         {
-            key: deepcopy(value)
+            key: _nilm_workspace_snapshot_value(value)
             for key, value in assignments_by_circuit.items()
             if key in configured_circuit_ids
         }
@@ -326,7 +344,9 @@ def _nilm_workspace_read_snapshot(
     )
     snapshot_state = SimpleNamespace(
         nilm_unknown_loads_by_circuit={
-            selected_circuit_id: deepcopy(inventory.get(selected_circuit_id, {}))
+            selected_circuit_id: _nilm_workspace_snapshot_value(
+                inventory.get(selected_circuit_id, {})
+            )
         }
         if isinstance(inventory, Mapping)
         else {}
@@ -340,7 +360,7 @@ def _nilm_workspace_read_snapshot(
             store_data=snapshot_store,
             state=snapshot_state,
             _nilm_unmatched_edges={
-                selected_circuit_id: deepcopy(
+                selected_circuit_id: _nilm_workspace_snapshot_value(
                     getattr(coordinator, "_nilm_unmatched_edges", {}).get(
                         selected_circuit_id, ()
                     )
@@ -351,6 +371,45 @@ def _nilm_workspace_read_snapshot(
                 _nilm_reference_options(coordinator)
             ),
         ),
+    )
+
+
+def _nilm_workspace_prepare_revision_sources(
+    coordinators: Iterable[Any],
+    *,
+    circuit_id: str | None,
+    entry_id: str | None,
+) -> None:
+    """Install Task 2 exact mutation tracking on every retained read source."""
+
+    target = _nilm_workspace_target(tuple(coordinators), circuit_id, entry_id=entry_id)
+    if target is None:
+        return
+    coordinator, config, _sources = target
+    selected_circuit_id = config.circuit_id
+    store = getattr(coordinator, "store_data", None)
+    for name in (
+        "nilm_signatures",
+        "nilm_session_history_by_circuit",
+        "nilm_label_intervals_by_circuit",
+        "nilm_known_load_attributions_by_circuit",
+    ):
+        ensure_nilm_tracked_collection(getattr(store, name, None), selected_circuit_id)
+    assignments = getattr(store, "nilm_appliance_assignments_by_circuit", None)
+    for item in getattr(coordinator, "circuit_configs", ()) or ():
+        configured_id = str(getattr(item, "circuit_id", "") or "")
+        if configured_id:
+            ensure_nilm_tracked_collection(assignments, configured_id)
+    inventory = getattr(
+        getattr(coordinator, "state", None), "nilm_unknown_loads_by_circuit", None
+    )
+    selected_inventory = (
+        inventory.get(selected_circuit_id) if isinstance(inventory, Mapping) else None
+    )
+    if isinstance(selected_inventory, Mapping):
+        ensure_nilm_tracked_collection(selected_inventory, "unknown_loads")
+    ensure_nilm_tracked_collection(
+        getattr(coordinator, "_nilm_unmatched_edges", None), selected_circuit_id
     )
 
 
@@ -369,19 +428,16 @@ def _nilm_workspace_read_identity(
     selected_circuit_id = config.circuit_id
     store = getattr(coordinator, "store_data", None)
 
-    def marker(value: Any) -> tuple[int, int, int, int]:
+    def marker(value: Any) -> tuple[int, int, int | None]:
         if isinstance(value, Mapping):
             selected = value.get(selected_circuit_id)
         else:
             selected = None
-        if isinstance(selected, (list, tuple)):
-            return (
-                id(value),
-                id(selected),
-                len(selected),
-                id(selected[-1]) if selected else 0,
-            )
-        return (id(value), id(selected), 0, 0)
+        return (
+            id(value),
+            id(selected),
+            nilm_tracked_collection_revision(selected),
+        )
 
     assignments = getattr(store, "nilm_appliance_assignments_by_circuit", None)
     configured_ids = tuple(
@@ -393,8 +449,7 @@ def _nilm_workspace_read_identity(
         (
             configured_id,
             id(rows),
-            len(rows) if isinstance(rows, (list, tuple)) else 0,
-            id(rows[-1]) if isinstance(rows, (list, tuple)) and rows else 0,
+            nilm_tracked_collection_revision(rows),
         )
         for configured_id in configured_ids
         for rows in (
@@ -424,6 +479,15 @@ def _nilm_workspace_read_identity(
         for row in (get_state(entity_id) if callable(get_state) else None,)
     )
     state = getattr(coordinator, "state", None)
+    inventory = getattr(state, "nilm_unknown_loads_by_circuit", None)
+    selected_inventory = (
+        inventory.get(selected_circuit_id) if isinstance(inventory, Mapping) else None
+    )
+    unknown_loads = (
+        selected_inventory.get("unknown_loads")
+        if isinstance(selected_inventory, Mapping)
+        else None
+    )
     return (
         id(coordinator),
         id(getattr(coordinator, "data", None)),
@@ -436,6 +500,11 @@ def _nilm_workspace_read_identity(
         marker(getattr(state, "nilm_unknown_loads_by_circuit", None)),
         marker(getattr(coordinator, "_nilm_unmatched_edges", None)),
         assignment_markers,
+        (
+            id(selected_inventory),
+            id(unknown_loads),
+            nilm_tracked_collection_revision(unknown_loads),
+        ),
         reference_state_markers,
     )
 
@@ -454,6 +523,9 @@ async def _async_nilm_workspace_read(
         "entry_id": kwargs.get("entry_id"),
     }
     while True:
+        _nilm_workspace_prepare_revision_sources(
+            live_coordinators, **identity_kwargs
+        )
         identity = _nilm_workspace_read_identity(
             live_coordinators, **identity_kwargs
         )
