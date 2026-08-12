@@ -110,6 +110,29 @@ class _NilmSessionHistoryIngressFacts:
     duration_bound_close_incomplete: bool
 
 
+@dataclass(slots=True)
+class _NilmCircuitRevisions:
+    """Runtime-only revisions for inputs used by derived NILM caches."""
+
+    session_history: int = 0
+    signatures: int = 0
+    assignments: int = 0
+    unmatched_edges: int = 0
+    residual_trace: int = 0
+
+
+def _nilm_collection_boundary(value: object) -> tuple[int, int, int, int]:
+    """Return an O(1) token for conservative external collection changes."""
+    if not isinstance(value, (list, tuple)):
+        return (id(value), -1, 0, 0)
+    return (
+        id(value),
+        len(value),
+        id(value[0]) if value else 0,
+        id(value[-1]) if value else 0,
+    )
+
+
 def _nilm_stable_snapshot(value: Any) -> object:
     """Return a deterministic, comparison-safe snapshot of stored NILM inputs."""
     if isinstance(value, Mapping):
@@ -462,6 +485,16 @@ class NilmSampleProcessor:
         self._helper_events_max_items = min(self._unmatched_edges_max_items, 512)
         self._hydrated_unmatched_edge_circuits: set[str] = set()
         self._evaluated_signature_circuits: set[str] = set()
+        self._revisions_by_circuit: dict[str, _NilmCircuitRevisions] = {}
+        self._session_history_boundary_by_circuit: dict[
+            str, tuple[int, int, int, int]
+        ] = {}
+        self._signature_boundary_by_circuit: dict[
+            str, tuple[int, int, int, int]
+        ] = {}
+        self._assignment_boundary_by_circuit: dict[
+            str, tuple[int, int, int, int]
+        ] = {}
         self._session_history_context_by_circuit: dict[str, object] = {}
         self._session_history_coverage_by_circuit: dict[
             str, NilmSessionHistoryCoverage
@@ -493,6 +526,52 @@ class NilmSampleProcessor:
             max(configured_trace_cap, 1),
             4_096,
         )
+
+    def _revisions(self, circuit_id: str) -> _NilmCircuitRevisions:
+        return self._revisions_by_circuit.setdefault(
+            circuit_id, _NilmCircuitRevisions()
+        )
+
+    def _replace_session_history(
+        self,
+        circuit_id: str,
+        store_data: Any,
+        rows: list[dict[str, Any]],
+    ) -> bool:
+        histories = store_data.nilm_session_history_by_circuit
+        if rows == histories.get(circuit_id, []):
+            self._session_history_boundary_by_circuit[circuit_id] = (
+                _nilm_collection_boundary(histories.get(circuit_id, ()))
+            )
+            return False
+        histories[circuit_id] = rows
+        self._revisions(circuit_id).session_history += 1
+        self._session_history_boundary_by_circuit[circuit_id] = (
+            _nilm_collection_boundary(rows)
+        )
+        return True
+
+    def _sync_input_revisions(self, circuit_id: str, store_data: Any) -> None:
+        revisions = self._revisions(circuit_id)
+        for values, boundaries, attribute in (
+            (
+                store_data.nilm_signatures.get(circuit_id, ()),
+                self._signature_boundary_by_circuit,
+                "signatures",
+            ),
+            (
+                store_data.nilm_appliance_assignments_by_circuit.get(
+                    circuit_id, ()
+                ),
+                self._assignment_boundary_by_circuit,
+                "assignments",
+            ),
+        ):
+            boundary = _nilm_collection_boundary(values)
+            prior = boundaries.get(circuit_id)
+            if prior is not None and prior != boundary:
+                setattr(revisions, attribute, getattr(revisions, attribute) + 1)
+            boundaries[circuit_id] = boundary
 
     def _append_residual_trace_point(
         self,
@@ -579,6 +658,7 @@ class NilmSampleProcessor:
             return FeatureResult()
 
         self._bound_session_history_ingress(circuit_id, context.store_data)
+        self._sync_input_revisions(circuit_id, context.store_data)
 
         self._seed_demo_nilm_state(circuit_config, sample.timestamp)
 
@@ -828,8 +908,8 @@ class NilmSampleProcessor:
                 edge for edge in next_unmatched if id(edge) not in accepted_ids
             ]
             if completed_sessions:
-                history = (
-                    context.store_data.nilm_session_history_by_circuit.setdefault(
+                history = list(
+                    context.store_data.nilm_session_history_by_circuit.get(
                         circuit_id, []
                     )
                 )
@@ -843,6 +923,13 @@ class NilmSampleProcessor:
                     reverse=True,
                 )
                 del history[self._session_history_max_items :]
+                rows, _ = _sanitize_nilm_session_history_ingress(
+                    history,
+                    max_source_rows=self._session_history_max_items,
+                )
+                self._replace_session_history(
+                    circuit_id, context.store_data, rows
+                )
                 store_dirty = True
 
         next_unmatched = _newest_nilm_edges(
@@ -891,6 +978,10 @@ class NilmSampleProcessor:
                 self._helper_links_dirty = False
             if payloads != context.store_data.nilm_signatures.get(circuit_id, []):
                 context.store_data.nilm_signatures[circuit_id] = payloads
+                self._revisions(circuit_id).signatures += 1
+                self._signature_boundary_by_circuit[circuit_id] = (
+                    _nilm_collection_boundary(payloads)
+                )
                 store_dirty = True
         session_history_changed = False
         session_context = self._session_history_context(
@@ -1062,7 +1153,7 @@ class NilmSampleProcessor:
                 self._session_history_context(circuit_id, store_data)
             )
             return coverage != persisted_coverage
-        store_data.nilm_session_history_by_circuit[circuit_id] = next_sessions
+        self._replace_session_history(circuit_id, store_data, next_sessions)
         self._session_history_context_by_circuit[circuit_id] = (
             self._session_history_context(circuit_id, store_data)
         )
@@ -1076,8 +1167,15 @@ class NilmSampleProcessor:
         """Install one deterministic bounded copy before any history consumer."""
 
         histories = store_data.nilm_session_history_by_circuit
+        current = histories.get(circuit_id, ())
+        boundary = _nilm_collection_boundary(current)
+        if (
+            self._session_history_boundary_by_circuit.get(circuit_id) == boundary
+            and circuit_id in self._session_history_ingress_by_circuit
+        ):
+            return self._session_history_ingress_by_circuit[circuit_id]
         rows, raw_facts = _sanitize_nilm_session_history_ingress(
-            histories.get(circuit_id, ()),
+            current,
             max_source_rows=self._session_history_max_items,
         )
         ingress_by_circuit = getattr(
@@ -1165,7 +1263,11 @@ class NilmSampleProcessor:
                 )
             ),
         )
-        histories[circuit_id] = rows
+        replaced = self._replace_session_history(circuit_id, store_data, rows)
+        if not replaced and circuit_id not in self._session_history_boundary_by_circuit:
+            self._session_history_boundary_by_circuit[circuit_id] = (
+                _nilm_collection_boundary(current)
+            )
         ingress_store = getattr(
             store_data, "nilm_session_history_ingress_by_circuit", None
         )
@@ -1186,18 +1288,18 @@ class NilmSampleProcessor:
         self._session_history_ingress_by_circuit[circuit_id] = facts
         return facts
 
-    @staticmethod
-    def _session_history_context(circuit_id: str, store_data: Any) -> object:
+    def _session_history_context(self, circuit_id: str, store_data: Any) -> object:
         """Return the assignment and signature inputs that affect pairing."""
-        return _nilm_stable_snapshot(
-            (
-                store_data.nilm_signatures.get(circuit_id, ()),
-                store_data.nilm_appliance_assignments_by_circuit.get(circuit_id, ()),
-            )
+        revisions = self._revisions(circuit_id)
+        return (
+            revisions.signatures,
+            revisions.assignments,
+            revisions.unmatched_edges,
+            revisions.residual_trace,
         )
 
-    @staticmethod
     def _inventory_context(
+        self,
         circuit_id: str,
         store_data: Any,
         *,
@@ -1206,17 +1308,16 @@ class NilmSampleProcessor:
         time_zone: str,
     ) -> object:
         """Return derived-session inputs that affect unknown-load inventory."""
-        return _nilm_stable_snapshot(
-            (
-                store_data.nilm_signatures.get(circuit_id, ()),
+        revisions = self._revisions(circuit_id)
+        return (
+            revisions.signatures,
+            revisions.session_history,
+            _nilm_inventory_time_context(
                 store_data.nilm_session_history_by_circuit.get(circuit_id, ()),
-                _nilm_inventory_time_context(
-                    store_data.nilm_session_history_by_circuit.get(circuit_id, ()),
-                    existing_inventory,
-                    now=now,
-                    time_zone=time_zone,
-                ),
-            )
+                existing_inventory,
+                now=now,
+                time_zone=time_zone,
+            ),
         )
 
     def refresh_state(

@@ -9532,6 +9532,8 @@ def test_nilm_processor_does_not_recluster_an_empty_signature_revision(
 
 def test_nilm_inventory_cache_tracks_open_sessions_and_window_boundaries() -> None:
     """Keep dynamic inventory fields fresh without rebuilding stable history."""
+    from collections import defaultdict
+
     from custom_components.circuitsetup_energy_analyzer import processors
 
     now = datetime(2026, 6, 11, 23, 55, tzinfo=UTC)
@@ -9544,14 +9546,26 @@ def test_nilm_inventory_cache_tracks_open_sessions_and_window_boundaries() -> No
             "signature_fingerprint": "open-signature",
         }
     ]
-    first_open_context = processors.NilmSampleProcessor._inventory_context(
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _: True,
+        seed_demo_nilm_state=lambda *_: None,
+        min_delta_w_for_circuit=lambda _: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda *_: (),
+        observe_topology=lambda *_: [],
+    )
+    processor._bound_session_history_ingress("mains", store_data)
+    first_open_context = processor._inventory_context(
         "mains",
         store_data,
         existing_inventory={"active_unknown_load_count": 1},
         now=now,
         time_zone="UTC",
     )
-    later_open_context = processors.NilmSampleProcessor._inventory_context(
+    later_open_context = processor._inventory_context(
         "mains",
         store_data,
         existing_inventory={"active_unknown_load_count": 1},
@@ -9568,14 +9582,15 @@ def test_nilm_inventory_cache_tracks_open_sessions_and_window_boundaries() -> No
             "signature_fingerprint": "closed-signature",
         }
     ]
-    before_midnight = processors.NilmSampleProcessor._inventory_context(
+    processor._bound_session_history_ingress("mains", store_data)
+    before_midnight = processor._inventory_context(
         "mains",
         store_data,
         existing_inventory={"active_unknown_load_count": 0},
         now=now,
         time_zone="UTC",
     )
-    after_midnight = processors.NilmSampleProcessor._inventory_context(
+    after_midnight = processor._inventory_context(
         "mains",
         store_data,
         existing_inventory={"active_unknown_load_count": 0},
