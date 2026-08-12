@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -219,20 +219,30 @@ def test_nilm_processor_never_subtracts_unavailable_legacy_power() -> None:
 
 
 def test_monotonic_residual_trace_append_never_uses_slow_rebuild(
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Appending newer points must not reconstruct the retained trace."""
+    """Appending a newer point must not iterate the complete retained trace."""
     processor = _processor()
 
-    def fail_if_called(*_args: object, **_kwargs: object) -> None:
-        raise AssertionError("monotonic trace append rebuilt the full trace")
+    class IterationCountingDeque(deque[NilmResidualPowerPoint]):
+        def __init__(self, points: list[NilmResidualPowerPoint]) -> None:
+            super().__init__(points)
+            self.iteration_count = 0
 
-    monkeypatch.setattr(processor, "_rebuild_residual_trace", fail_if_called)
+        def __iter__(self):  # type: ignore[no-untyped-def]
+            self.iteration_count += 1
+            return super().__iter__()
 
-    processor._append_residual_trace_point("mains", _point(BASE_TIME, 100.0))
+    trace = IterationCountingDeque([_point(BASE_TIME, 100.0)])
+    processor._residual_power_trace_by_circuit["mains"] = trace  # noqa: SLF001
     processor._append_residual_trace_point(
         "mains", _point(BASE_TIME + timedelta(seconds=1), 101.0)
     )
+
+    assert trace.iteration_count == 0
+    assert [point.timestamp for point in trace] == [
+        BASE_TIME,
+        BASE_TIME + timedelta(seconds=1),
+    ]
 
 
 def test_residual_trace_is_collected_only_for_mains_nilm() -> None:

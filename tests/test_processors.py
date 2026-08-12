@@ -9127,10 +9127,14 @@ def test_nilm_processor_refresh_preserves_persisted_measured_trace_after_restart
 def test_unchanged_session_history_does_not_resanitize_ingress(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A repeated source update must reuse its already-bounded history."""
+    """Steady samples reuse ingress, but a persisted history mutation invalidates it."""
     from collections import defaultdict
 
     from custom_components.circuitsetup_energy_analyzer.processors import nilm_sample
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.state import AnalyzerState
 
     processor = nilm_sample.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
@@ -9143,7 +9147,40 @@ def test_unchanged_session_history_does_not_resanitize_ingress(
         known_load_events=lambda *_args: (),
         observe_topology=lambda *_args: [],
     )
-    store = FeatureStoreData(nilm_session_history_by_circuit={"mains": []})
+    now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+    store = FeatureStoreData(
+        nilm_session_history_by_circuit={
+            "mains": [
+                {
+                    "session_id": "session-1",
+                    "signature_fingerprint": "pump",
+                    "on_edge_id": "on-1",
+                    "start": now.isoformat(),
+                }
+            ]
+        }
+    )
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    sample = NormalizedCircuitSample(
+        timestamp=now,
+        circuit_id="mains",
+        real_power=100.0,
+    )
     calls = 0
     sanitize = nilm_sample._sanitize_nilm_session_history_ingress
 
@@ -9156,10 +9193,23 @@ def test_unchanged_session_history_does_not_resanitize_ingress(
         nilm_sample, "_sanitize_nilm_session_history_ingress", count_sanitize
     )
 
-    processor._bound_session_history_ingress("mains", store)
-    processor._bound_session_history_ingress("mains", store)
+    processor.process(sample, config, context, events=())
+    processor.process(sample, config, context, events=())
 
     assert calls == 1
+
+    store.nilm_session_history_by_circuit["mains"].append(
+        {
+            "session_id": "session-2",
+            "signature_fingerprint": "pump",
+            "on_edge_id": "on-2",
+            "start": (now + timedelta(minutes=1)).isoformat(),
+        }
+    )
+
+    processor.process(sample, config, context, events=())
+
+    assert calls == 2
 
 
 def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> None:

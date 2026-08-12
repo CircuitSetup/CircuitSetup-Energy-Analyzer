@@ -104,16 +104,24 @@ def test_pairing_builds_one_trace_index(
     monkeypatch.setattr(nilm_domain, "_nilm_trace_index", count_trace_index)
 
     sessions = pair_nilm_sessions_for_signatures(
-        [edge(0, 150.0), edge(300, -150.0)],
+        [
+            edge(0, 150.0),
+            edge(300, -150.0),
+            edge(600, 250.0),
+            edge(900, -250.0),
+        ],
         mains_circuit_id="mains",
-        signature_specs=[{"signature_fingerprint": "pump", "median_delta_w": 150.0}],
+        signature_specs=[
+            {"signature_fingerprint": "pump", "median_delta_w": 150.0},
+            {"signature_fingerprint": "fan", "median_delta_w": 250.0},
+        ],
         power_trace=[
             (BASE_TIME + timedelta(seconds=index * 30), 150.0)
-            for index in range(12)
+            for index in range(32)
         ],
     )
 
-    assert sessions
+    assert {session.signature_fingerprint for session in sessions} == {"fan", "pump"}
     assert calls == 1
 
 
