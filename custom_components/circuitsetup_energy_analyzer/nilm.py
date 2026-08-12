@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from collections import defaultdict, deque
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
@@ -3804,6 +3805,30 @@ class NilmResidualPowerPoint:
 
 
 @dataclass(frozen=True, slots=True)
+class _NilmTraceIndex:
+    """One-refresh timestamp index for bounded residual-trace windows."""
+
+    points: tuple[NilmResidualPowerPoint, ...]
+    timestamps: tuple[datetime, ...]
+
+    def window(
+        self,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[NilmResidualPowerPoint, ...]:
+        """Return the evidence interval with its required context."""
+        left = bisect_left(
+            self.timestamps,
+            start - NILM_RESIDUAL_TRACE_PRE_CONTEXT,
+        )
+        right = bisect_right(
+            self.timestamps,
+            end + NILM_RESIDUAL_TRACE_POST_CONTEXT,
+        )
+        return self.points[left:right]
+
+
+@dataclass(frozen=True, slots=True)
 class NilmResidualTraceMetadata:
     """Retention state plus bounded lifetime diagnostics for one trace."""
 
@@ -7133,6 +7158,7 @@ def pair_nilm_sessions_for_signatures(
 
     ordered_edges = sorted(edges, key=lambda edge: edge.timestamp)
     normalized_trace = _nilm_normalized_power_trace(power_trace)
+    trace_index = _nilm_trace_index(normalized_trace)
     # Session pairing runs synchronously during a Home Assistant source
     # update.  Bound candidate extraction before any cross-product or trace
     # scan; older retained edges remain visible as open evidence instead of
@@ -7265,23 +7291,29 @@ def pair_nilm_sessions_for_signatures(
     for on_index, off_index in candidate_pairs:
         candidate_off_indices_by_on[on_index].add(off_index)
     trace_pairs = set(candidate_pairs[:NILM_SESSION_TRACE_PAIR_MAX_ITEMS])
-    trace_evidence_by_pair = {
-        pair: (
-            _nilm_session_trace_evidence(
-                on_edges[pair[0]],
-                off_edges[pair[1]],
-                normalized_trace,
-                trace_metadata=trace_metadata,
+    trace_evidence_cache: dict[
+        tuple[NilmEdge, NilmEdge, NilmResidualTraceMetadata | None],
+        _NilmSessionTraceEvidence | None,
+    ] = {}
+    trace_evidence_by_pair: dict[
+        tuple[int, int], _NilmSessionTraceEvidence | None
+    ] = {}
+    for pair in trace_pairs:
+        on_edge = on_edges[pair[0]]
+        off_edge = off_edges[pair[1]]
+        evidence_key = (on_edge, off_edge, trace_metadata)
+        if evidence_key not in trace_evidence_cache:
+            trace_evidence_cache[evidence_key] = (
+                _nilm_session_trace_evidence(
+                    on_edge,
+                    off_edge,
+                    trace_index,
+                    trace_metadata=trace_metadata,
+                )
+                if trace_metadata is not None
+                else _nilm_session_trace_evidence(on_edge, off_edge, trace_index)
             )
-            if trace_metadata is not None
-            else _nilm_session_trace_evidence(
-                on_edges[pair[0]],
-                off_edges[pair[1]],
-                normalized_trace,
-            )
-        )
-        for pair in trace_pairs
-    }
+        trace_evidence_by_pair[pair] = trace_evidence_cache[evidence_key]
     candidates: list[_NilmSessionCandidate] = []
     for on_index, off_index in candidate_pairs:
         pair = (on_index, off_index)
@@ -8412,6 +8444,16 @@ def _nilm_normalized_power_trace(
     return tuple(points[timestamp] for timestamp in sorted(points))
 
 
+def _nilm_trace_index(
+    points: tuple[NilmResidualPowerPoint, ...],
+) -> _NilmTraceIndex:
+    """Build one timestamp index from an already-normalized trace."""
+    return _NilmTraceIndex(
+        points=points,
+        timestamps=tuple(point.timestamp for point in points),
+    )
+
+
 def _nilm_residual_trace_point_from_value(
     value: NilmResidualPowerPoint | tuple[datetime, float],
 ) -> NilmResidualPowerPoint | None:
@@ -8504,7 +8546,7 @@ def nilm_residual_point_quality_key(
 def _nilm_session_trace_evidence(
     on_edge: NilmEdge,
     off_edge: NilmEdge,
-    power_trace: Iterable[NilmResidualPowerPoint],
+    power_trace: _NilmTraceIndex | Iterable[NilmResidualPowerPoint],
     *,
     trace_metadata: NilmResidualTraceMetadata | None = None,
 ) -> _NilmSessionTraceEvidence | None:
@@ -8512,7 +8554,11 @@ def _nilm_session_trace_evidence(
     duration_seconds = (off_edge.timestamp - on_edge.timestamp).total_seconds()
     if duration_seconds <= 0.0:
         return None
-    points = tuple(power_trace)
+    points = (
+        power_trace.window(on_edge.timestamp, off_edge.timestamp)
+        if isinstance(power_trace, _NilmTraceIndex)
+        else tuple(power_trace)
+    )
     if not points:
         return None
     in_session = tuple(

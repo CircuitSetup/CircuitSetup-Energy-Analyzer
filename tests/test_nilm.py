@@ -5976,6 +5976,42 @@ def test_session_pairing_memoizes_and_bounds_trace_evidence(
     assert len(set(trace_pairs)) == len(trace_pairs)
 
 
+def test_session_pairing_reuses_trace_evidence_for_shared_interval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+    original_trace_evidence = nilm_domain._nilm_session_trace_evidence
+
+    def trace_evidence(*args: object, **kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        return original_trace_evidence(*args, **kwargs)
+
+    monkeypatch.setattr(nilm_domain, "_nilm_session_trace_evidence", trace_evidence)
+    pair_nilm_sessions_for_signatures(
+        [
+            edge(0, 100.0),
+            edge(0, 100.0),
+            edge(600, -100.0),
+            edge(600, -100.0),
+        ],
+        mains_circuit_id="mains",
+        signature_specs=[
+            {"signature_fingerprint": "load-a", "typical_watts": 100.0},
+            {"signature_fingerprint": "load-b", "typical_watts": 100.0},
+        ],
+        power_trace=[
+            (BASE_TIME - timedelta(seconds=30), 0.0),
+            (BASE_TIME, 0.0),
+            (BASE_TIME + timedelta(seconds=300), 100.0),
+            (BASE_TIME + timedelta(seconds=600), 0.0),
+            (BASE_TIME + timedelta(seconds=630), 0.0),
+        ],
+    )
+
+    assert calls == 1
+
+
 def test_session_pairing_reuses_scores_for_identical_profiles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
