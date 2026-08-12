@@ -325,14 +325,15 @@ def _nilm_detail(
     validation_ready = bool(
         state.validation_readiness and state.validation_readiness.get("ready")
     )
+    contextual_confidence = _nilm_contextual_confidence(state)
     review_needed = (
-        state.confidence < NILM_FINISHED_CONFIDENCE_THRESHOLD
+        contextual_confidence < NILM_FINISHED_CONFIDENCE_THRESHOLD
         or state.model_status in NILM_REVIEW_MODEL_STATES
         or not validation_ready
     )
     needs_history = (
         not validation_ready
-        and state.confidence >= NILM_FINISHED_CONFIDENCE_THRESHOLD
+        and contextual_confidence >= NILM_FINISHED_CONFIDENCE_THRESHOLD
         and state.model_status not in NILM_REVIEW_MODEL_STATES
     )
     comparisons = _nilm_metric_comparisons(coordinator, state)
@@ -341,7 +342,7 @@ def _nilm_detail(
         display_name=state.display_name,
         appliance_profile=state.appliance_profile or "nilm_virtual",
         source_type="nilm_estimate",
-        confidence=state.confidence,
+        confidence=contextual_confidence,
         model_status=state.model_status,
         activity_state="Estimated Running" if state.is_running else "Idle",
         health_state="Needs validation" if review_needed else "Estimated",
@@ -380,7 +381,9 @@ def _nilm_detail(
             if needs_history
             else ("Validate this estimated appliance before relying on alerts.",)
             if review_needed
-            else ("Review NILM confidence before acting on appliance alerts.",)
+            else (
+                "Review NILM model fit and evidence before acting on appliance alerts.",
+            )
         ),
         evidence_path=evidence_path,
         source_quality={
@@ -427,7 +430,18 @@ def _nilm_detail(
                 ).get(state.mains_circuit_id, {})
             ),
         ),
+        confidence_kind=state.confidence_kind,
     )
+
+
+def _nilm_contextual_confidence(state: NilmVirtualApplianceState) -> float:
+    """Return the value that matches the NILM confidence label in this view."""
+    if (
+        state.confidence_kind == "feedback_evidence"
+        and state.feedback_evidence_score is not None
+    ):
+        return state.feedback_evidence_score
+    return state.confidence
 
 
 def _nilm_metric_comparisons(
@@ -1375,17 +1389,30 @@ def _nilm_expectations(
     evidence_path: str,
     comparisons: tuple[MetricComparison, ...] = (),
 ) -> tuple[ApplianceExpectation, ...]:
+    contextual_confidence = _nilm_contextual_confidence(state)
+    confidence_label = (
+        "Feedback evidence score"
+        if (
+            state.confidence_kind == "feedback_evidence"
+            and state.feedback_evidence_score is not None
+        )
+        else "Legacy confidence (mixed semantics)"
+    )
     if review_needed:
         status: ExpectationStatus = "watch"
         observed = (
-            f"NILM confidence is {round(state.confidence * 100)}% and status is "
+            f"{confidence_label} is {round(contextual_confidence * 100)}% "
+            "and status is "
             f"{state.model_status}."
         )
         title = "NILM assignment needs validation"
         first_check = "Validate this estimated appliance before relying on alerts."
     else:
         status = "ok"
-        observed = "The NILM assignment is validated with sufficient confidence."
+        observed = (
+            "The NILM assignment is validated with sufficient "
+            f"{confidence_label.lower()}."
+        )
         title = "NILM estimate is validated"
         first_check = "No validation action is needed right now."
     candidates = [
@@ -1395,7 +1422,7 @@ def _nilm_expectations(
             title=title,
             status=status,
             source_type="nilm_estimate",
-            confidence=state.confidence,
+            confidence=contextual_confidence,
             observed=observed,
             expected="Estimated appliances should be validated before alerts.",
             why_it_matters=(
@@ -1415,7 +1442,7 @@ def _nilm_expectations(
                 title="Estimated energy is above normal",
                 status="watch",
                 source_type="nilm_estimate",
-                confidence=state.confidence,
+                confidence=contextual_confidence,
                 observed="Estimated energy is above the validated learned range.",
                 expected=_normal_range_text(energy),
                 why_it_matters="This estimate should be reviewed with its sessions.",

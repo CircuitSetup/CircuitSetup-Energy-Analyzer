@@ -53,6 +53,7 @@ _NILM_SESSION_HISTORY_ROW_TEXT_FIELDS = (
     "off_edge_id",
     "assignment_id",
     "energy_source",
+    "confidence_kind",
 )
 _NILM_SESSION_HISTORY_ROW_TIMESTAMP_FIELDS = (
     "start",
@@ -65,6 +66,7 @@ _NILM_SESSION_HISTORY_ROW_NUMBER_FIELDS = (
     "median_power_w",
     "estimated_energy_kwh",
     "confidence",
+    "pairing_confidence",
     "known_load_confidence",
     "on_delta_w",
     "off_delta_w",
@@ -88,6 +90,7 @@ _NILM_SESSION_HISTORY_ROW_COUNT_FIELDS = (
     "partial_residual_point_count",
     "negative_residual_point_count",
     "trace_point_cap_truncation_count",
+    "confidence_semantics_version",
 )
 _NILM_SESSION_HISTORY_ROW_BOOLEAN_FIELDS = (
     "ambiguous",
@@ -137,6 +140,9 @@ _NILM_SESSION_HISTORY_ROW_OUTPUT_FIELDS = (
     "median_power_w",
     "estimated_energy_kwh",
     "confidence",
+    "pairing_confidence",
+    "confidence_kind",
+    "confidence_semantics_version",
     "overlap_count",
     "ambiguous",
     "alternate_match_count",
@@ -680,6 +686,7 @@ def _canonical_nilm_session_history_row(
         ("off_edge_id", None, True),
         ("assignment_id", None, True),
         ("energy_source", None, False),
+        ("confidence_kind", None, False),
     ):
         value = values[key]
         if value is _NILM_SESSION_HISTORY_MISSING:
@@ -756,6 +763,7 @@ def _canonical_nilm_session_history_row(
         "power_coverage",
         "partial_energy_kwh",
         "energy_estimate_confidence",
+        "pairing_confidence",
         "covered_duration_seconds",
         "longest_trace_gap_seconds",
         "known_source_coverage_min",
@@ -788,6 +796,7 @@ def _canonical_nilm_session_history_row(
             value,
             unit_interval=key in {
                 "confidence",
+                "pairing_confidence",
                 "known_load_confidence",
                 "power_coverage",
                 "energy_estimate_confidence",
@@ -1139,6 +1148,7 @@ def _coverage_for_supplied_sessions(
 def estimate_unknown_load(signature: NilmSignature) -> dict[str, Any]:
     """Return a conservative user-facing estimate for an unknown NILM signature."""
 
+    evidence_strength = signature.evidence_strength or signature.confidence
     typical_watts = _rounded_abs(signature.median_delta_w)
     typical_var = _rounded_abs(signature.median_delta_var)
     typical_va = _rounded_abs(signature.median_delta_va)
@@ -1165,6 +1175,10 @@ def estimate_unknown_load(signature: NilmSignature) -> dict[str, Any]:
         "typical_va": typical_va,
         "typical_power_factor": typical_power_factor,
         "confidence": signature.confidence,
+        "evidence_strength": evidence_strength,
+        "model_fit": signature.model_fit,
+        "confidence_kind": signature.confidence_kind,
+        "confidence_semantics_version": signature.confidence_semantics_version,
         "occurrence_count": signature.occurrence_count,
         "evidence": _evidence(
             signature,
@@ -3445,10 +3459,11 @@ def _evidence(
     typical_va: float | None,
     typical_power_factor: float | None,
 ) -> list[str]:
+    evidence_strength = signature.evidence_strength or signature.confidence
     evidence = [
         (
             f"Estimated from {signature.occurrence_count} recurring unmatched events "
-            f"with confidence {signature.confidence:.2f}."
+            f"with evidence strength {evidence_strength:.2f}."
         ),
         (
             "Split-phase evidence suggests "

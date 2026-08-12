@@ -705,13 +705,46 @@ async def test_config_entry_setup_registers_published_nilm_device(
                 "appliance_profile": "washer",
                 "mains_circuit_id": "mains",
                 "signature_fingerprints": ["washer-signature"],
-                "session_ids": [],
+                "session_ids": [
+                    "published-session-1",
+                    "published-session-2",
+                    "published-session-3",
+                ],
+                "confirmed_session_ids": [
+                    "published-session-1",
+                    "published-session-2",
+                    "published-session-3",
+                ],
+                "rejected_session_ids": [],
                 "label_interval_ids": [],
                 "lifecycle_state": "published",
                 "confidence": 0.9,
+                "feedback_evidence_score": 0.9,
+                "model_fit": 0.9,
+                "validation_evaluable_session_count": 3,
+                "validation_precision": 1.0,
+                "false_positive_rate": 0.0,
                 "created_device": True,
                 "publish_entities": True,
             }
+        ]
+    }
+    store.data.nilm_session_history_by_circuit = {
+        "mains": [
+            {
+                "session_id": f"published-session-{index}",
+                "assignment_id": "assignment-washer",
+                "start": f"2026-07-0{index}T12:00:00+00:00",
+                "end": f"2026-07-0{index}T12:20:00+00:00",
+                "ambiguous": False,
+                "energy_source": "residual_trace_measured",
+                "known_source_coverage_min": 1.0,
+                "known_source_coverage_time_weighted": 1.0,
+                "stale_subtraction_prevented_count": 0,
+                "partial_residual_point_count": 0,
+                "negative_residual_point_count": 0,
+            }
+            for index in range(1, 4)
         ]
     }
     await store.async_save()

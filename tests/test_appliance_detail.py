@@ -1281,6 +1281,7 @@ def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
     assert "aggregate circuit power" in detail["expectations"][0]["why_it_matters"]
     assert payload["daily_totals"] == []
     assert detail["confidence"] == 0.72
+    assert detail["confidence_kind"] == "legacy_mixed"
     assert detail["model_status"] == "needs_validation"
     assert detail["activity_state"] == "Idle"
     assert detail["health_state"] == "Needs validation"
@@ -1322,6 +1323,32 @@ def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
     assert payload["history"]["entities"] == [
         "sensor.dishwasher_estimated_power",
     ]
+
+
+def test_nilm_appliance_detail_uses_typed_feedback_score_with_its_label() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    coordinator = _nilm_coordinator()
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ][0]
+    assignment.update(
+        {
+            "confidence": 0.9,
+            "feedback_evidence_score": 0.6,
+            "confidence_kind": "feedback_evidence",
+        }
+    )
+
+    detail = appliance_detail_payload(
+        [coordinator], assignment_id="assignment-dishwasher"
+    )["detail"]
+
+    assert detail["confidence"] == 0.6
+    assert detail["confidence_kind"] == "feedback_evidence"
+    assert "Feedback evidence score is 60%" in detail["expectations"][0]["observed"]
 
 
 def test_off_only_nilm_assignment_does_not_create_energy_or_history() -> None:

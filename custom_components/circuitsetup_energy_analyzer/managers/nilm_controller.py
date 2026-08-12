@@ -25,9 +25,14 @@ from ..nilm import (
     NilmEdge,
     build_nilm_assignment_model,
     build_nilm_validation_profile,
+    evaluate_nilm_validation_readiness,
     known_load_topology_for_config,
     nilm_signature_is_assignable,
     normalize_nilm_assignment_model,
+)
+from ..nilm_confidence import (
+    NILM_CONFIDENCE_SEMANTICS_VERSION,
+    apply_nilm_feedback_evidence,
 )
 from ..nilm_interval_evidence import NilmReferenceExtractionSettings
 from ..nilm_validation import (
@@ -132,53 +137,67 @@ def nilm_assignment_is_active(assignment: Mapping[str, Any]) -> bool:
 
 def nilm_assignment_publication_reason(
     assignment: Mapping[str, Any],
+    *,
+    sessions: Iterable[Mapping[str, Any]] | None = None,
+    time_zone: str = "UTC",
+    publication_readiness: Mapping[str, Any] | None = None,
 ) -> str | None:
-    """Return why an assignment cannot publish, or None when it can."""
-    state = str(assignment.get("lifecycle_state") or "").strip().lower()
-    if assignment.get("conversion_state") == "direct_meter":
-        return "A direct-meter conversion cannot republish duplicate NILM entities."
-    if state in {"ignored", "retired"}:
-        return "Restore this hidden load before publishing."
-    fingerprints = _clean_string_list(assignment.get("signature_fingerprints"))
-    model_directions = {
-        str(prototype.get("direction") or "")
-        for prototype in normalize_nilm_assignment_model(assignment)[
-            "transition_prototypes"
-        ]
-    }
-    if (
-        fingerprints
-        and not any(map(nilm_signature_is_assignable, fingerprints))
-        and model_directions != {"on", "off"}
-    ):
-        return (
+    """Render the canonical readiness decision for existing publication callers."""
+    readiness = publication_readiness or evaluate_nilm_validation_readiness(
+        assignment,
+        sessions or (),
+        min_confirmed_sessions=3,
+        min_distinct_days=3,
+        max_false_positive_rate=0.2,
+        min_confidence=0.8,
+        time_zone=time_zone,
+    )["publication_readiness"]
+    if readiness["status"] == "ready":
+        return None
+    reason_codes = [
+        str(reason).strip()
+        for reason in readiness.get("reasons", ())
+        if str(reason).strip()
+    ]
+    messages = {
+        "direct_meter_conversion": (
+            "A direct-meter conversion cannot republish duplicate NILM entities."
+        ),
+        "lifecycle_not_publishable": "Restore this hidden load before publishing.",
+        "lifecycle_not_validated": "Validate this assignment before publishing.",
+        "incomplete_appliance_run": (
             "A complete appliance run is still missing. Confirm one session with "
             "both the power-on and matching power-off transition so NILM can track "
             "state and energy before publishing."
-        )
-    if assignment.get("publish_entities") is True or state == "published":
-        return None
-    if state not in {"assigned", "validated", "ready_to_publish"}:
-        return "Validate this assignment before publishing."
-    assignment_id = str(assignment.get("assignment_id") or "").strip()
-    if (
-        assignment.get("role") == "primary"
-        or assignment_id.endswith("-configured-primary")
-    ) and not _clean_string_list(assignment.get("signature_fingerprints")):
-        return "Bind the configured primary signature before publishing."
-    if not any(
-        _clean_string_list(assignment.get(key))
-        for key in ("signature_fingerprints", "session_ids", "label_interval_ids")
-    ):
-        return "Assign at least one detected load before publishing."
-    if (
-        assignment.get("helper_required") is True
-        or assignment.get("requires_helper") is True
-    ) and not _clean_string_list(assignment.get("helper_links")):
-        return "Confirm a qualifying helper circuit before publishing."
-    if _nonnegative_float_value(assignment.get("confidence"), default=0.0) < 0.8:
-        return "Confirm more matching cycles until confidence reaches 80%."
-    return None
+        ),
+        "primary_signature_unconfirmed": (
+            "Bind the configured primary signature before publishing."
+        ),
+        "no_detected_load_assigned": (
+            "Assign at least one detected load before publishing."
+        ),
+        "helper_confirmation_required": (
+            "Confirm a qualifying helper circuit before publishing."
+        ),
+        "insufficient_independent_evidence": (
+            "Confirm more independent NILM sessions before publishing."
+        ),
+        "insufficient_unique_days": (
+            "Confirm NILM sessions on more distinct days before publishing."
+        ),
+        "insufficient_feedback_evidence": (
+            "Confirm more matching cycles until feedback evidence reaches 80%."
+        ),
+    }
+    if reason_codes and (message := messages.get(reason_codes[0])):
+        return message
+    status = str(readiness.get("status") or "needs review").replace("_", " ")
+    detail = (
+        reason_codes[0].replace("_", " ")
+        if reason_codes
+        else "additional evidence"
+    )
+    return f"Publication readiness is {status}: {detail}."
 
 
 class NilmController:
@@ -572,17 +591,25 @@ class NilmController:
     def _rebuild_assignment_model(
         self, circuit_id: str, assignment: dict[str, Any]
     ) -> None:
-        assignment.update(
-            build_nilm_assignment_model(
-                assignment,
-                self._coordinator.store_data.nilm_session_history_by_circuit.get(
-                    circuit_id, ()
-                ),
-                label_intervals=self._coordinator.store_data.nilm_label_intervals_by_circuit.get(
-                    circuit_id, ()
-                ),
-                time_zone=self._nilm_model_time_zone(),
-            )
+        model = build_nilm_assignment_model(
+            assignment,
+            self._coordinator.store_data.nilm_session_history_by_circuit.get(
+                circuit_id, ()
+            ),
+            label_intervals=self._coordinator.store_data.nilm_label_intervals_by_circuit.get(
+                circuit_id, ()
+            ),
+            time_zone=self._nilm_model_time_zone(),
+        )
+        assignment.update(model)
+        assignment["model_fit"] = self._nonnegative_float_value(
+            model.get("model_confidence"),
+            default=0.0,
+        )
+        assignment.setdefault("confidence_kind", "legacy_mixed")
+        assignment.setdefault(
+            "confidence_semantics_version",
+            NILM_CONFIDENCE_SEMANTICS_VERSION,
         )
 
     def _nilm_model_time_zone(self) -> str | None:
@@ -659,6 +686,8 @@ class NilmController:
                 "label_interval_ids": [],
                 "lifecycle_state": lifecycle_state,
                 "confidence": 0.0,
+                "confidence_kind": "legacy_mixed",
+                "confidence_semantics_version": NILM_CONFIDENCE_SEMANTICS_VERSION,
                 "created_at": now,
                 "updated_at": now,
                 "created_device": False,
@@ -667,6 +696,7 @@ class NilmController:
                 "power_states_w": [],
                 "transition_prototypes": [],
                 "model_confidence": 0.0,
+                "model_fit": 0.0,
                 "model_revision": 0,
             }
             assignment["appliance_key"] = f"nilm:{assignment['assignment_id']}"
@@ -699,6 +729,11 @@ class NilmController:
         assignment["confidence"] = max(
             float(assignment.get("confidence") or 0.0),
             max(min(confidence_value, 1.0), 0.0),
+        )
+        assignment.setdefault("confidence_kind", "legacy_mixed")
+        assignment.setdefault(
+            "confidence_semantics_version",
+            NILM_CONFIDENCE_SEMANTICS_VERSION,
         )
         del assignments[: -self._assignment_max_items]
         return assignment
@@ -2430,17 +2465,20 @@ class NilmController:
 
         now_dt = coordinator.current_time()
         now = now_dt.isoformat()
-        current_confidence = self._nonnegative_float_value(
-            assignment.get("confidence"),
-            default=0.0,
-        )
-        confidence = min(
-            1.0,
-            round(current_confidence + (0.05 * len(newly_confirmed)), 3),
-        )
-        if newly_rejected:
-            confidence = max(0.0, round(confidence - (0.15 * len(newly_rejected)), 3))
-        assignment["confidence"] = confidence
+        for session_id in newly_confirmed:
+            apply_nilm_feedback_evidence(
+                assignment,
+                feedback_id=f"session:{session_id}",
+                correct=True,
+                timestamp=now,
+            )
+        for session_id in newly_rejected:
+            apply_nilm_feedback_evidence(
+                assignment,
+                feedback_id=f"session:{session_id}",
+                correct=False,
+                timestamp=now,
+            )
         assignment["confirmed_session_ids"] = confirmed
         assignment["rejected_session_ids"] = rejected
         evaluated_history_session_ids = [
@@ -2707,38 +2745,41 @@ class NilmController:
             session_id_text,
             assignment_id=assignment_id,
         )
+        previous_session_ids = list(assignment.get("session_ids", ()))
         self._append_unique(assignment.setdefault("session_ids", []), session_id_text)
+        session_ids_changed = assignment.get("session_ids", ()) != previous_session_ids
         confirmed = self._clean_string_list(assignment.get("confirmed_session_ids"))
         rejected = self._clean_string_list(assignment.get("rejected_session_ids"))
-        current_confidence = self._nonnegative_float_value(
-            assignment.get("confidence"),
-            default=0.0,
-        )
+        previous_confirmed = list(confirmed)
+        previous_rejected = list(rejected)
         coordinator = self._coordinator
         now_dt = coordinator.current_time()
         now = now_dt.isoformat()
+        feedback_changed = apply_nilm_feedback_evidence(
+            assignment,
+            feedback_id=f"session:{session_id_text}",
+            correct=correct,
+            timestamp=now,
+        )
         if correct:
-            already_confirmed = session_id_text in confirmed
             self._append_unique(confirmed, session_id_text)
             rejected = [value for value in rejected if value != session_id_text]
-            if not already_confirmed:
-                assignment["confidence"] = min(
-                    1.0,
-                    round(current_confidence + 0.05, 3),
-                )
+        else:
+            self._append_unique(rejected, session_id_text)
+            confirmed = [value for value in confirmed if value != session_id_text]
+        if (
+            not feedback_changed
+            and not session_ids_changed
+            and confirmed == previous_confirmed
+            and rejected == previous_rejected
+        ):
+            return dict(assignment)
+        if correct:
             if assignment.get("lifecycle_state") not in {"published", "retired"}:
                 assignment["lifecycle_state"] = "validated"
             assignment["last_validation"] = "correct"
             assignment["last_validated_at"] = now
         else:
-            already_rejected = session_id_text in rejected
-            self._append_unique(rejected, session_id_text)
-            confirmed = [value for value in confirmed if value != session_id_text]
-            if not already_rejected:
-                assignment["confidence"] = max(
-                    0.0,
-                    round(current_confidence - 0.15, 3),
-                )
             if assignment.get("lifecycle_state") != "retired":
                 assignment["lifecycle_state"] = "needs_validation"
             assignment["last_validation"] = "wrong_appliance"
@@ -3078,13 +3119,9 @@ class NilmController:
             assignment = self.assignment_for_id(alert.circuit_id, assignment_id)
         except ValueError:
             return
-        current_confidence = self._nonnegative_float_value(
-            assignment.get("confidence"),
-            default=0.0,
-        )
         session_id = ""
+        notification_key = str(alert.features.get("notification_key") or "").strip()
         if _alert_feature(alert) == "nilm_appliance_finished":
-            notification_key = str(alert.features.get("notification_key") or "").strip()
             notification_key_parts = notification_key.split(":", 1)
             if len(notification_key_parts) == 2:
                 session_id = notification_key_parts[1].strip()
@@ -3092,21 +3129,44 @@ class NilmController:
             self._assert_nilm_session_is_actionable(alert.circuit_id, session_id)
         confirmed = self._clean_string_list(assignment.get("confirmed_session_ids"))
         rejected = self._clean_string_list(assignment.get("rejected_session_ids"))
+        original_confirmed = list(confirmed)
+        original_rejected = list(rejected)
+        correct = action == "correct"
+        if action not in {"correct", "wrong_appliance"}:
+            return
+        feedback_id = (
+            f"session:{session_id}"
+            if session_id
+            else (
+                f"alert:{alert.circuit_id}:{assignment_id}:"
+                f"{notification_key or alert.timestamp.isoformat()}"
+            )
+        )
+        feedback_changed = apply_nilm_feedback_evidence(
+            assignment,
+            feedback_id=feedback_id,
+            correct=correct,
+            timestamp=now.isoformat(),
+        )
         if action == "correct":
-            assignment["confidence"] = min(1.0, round(current_confidence + 0.05, 3))
-            assignment["last_validation"] = "correct"
             if session_id:
                 self._append_unique(confirmed, session_id)
                 rejected = [value for value in rejected if value != session_id]
-        elif action == "wrong_appliance":
-            assignment["confidence"] = max(0.0, round(current_confidence - 0.15, 3))
-            assignment["last_validation"] = "wrong_appliance"
-            assignment["lifecycle_state"] = "needs_validation"
+        else:
             if session_id:
                 self._append_unique(rejected, session_id)
                 confirmed = [value for value in confirmed if value != session_id]
-        else:
+        if (
+            not feedback_changed
+            and confirmed == original_confirmed
+            and rejected == original_rejected
+        ):
             return
+        assignment["last_validation"] = (
+            "correct" if action == "correct" else "wrong_appliance"
+        )
+        if action == "wrong_appliance":
+            assignment["lifecycle_state"] = "needs_validation"
         assignment["confirmed_session_ids"] = confirmed
         assignment["rejected_session_ids"] = rejected
         self._update_assignment_duration_bounds(alert.circuit_id, assignment)
@@ -3137,12 +3197,7 @@ class NilmController:
             raise ValueError("Missing session_id.")
         assignment_id_text = str(assignment_id or "").strip()
         if assignment_id_text:
-            assignment = self.assignment_for_id(circuit_id, assignment_id_text)
-            self._append_unique(
-                assignment.setdefault("session_ids", []),
-                session_id_text,
-            )
-            return assignment
+            return self.assignment_for_id(circuit_id, assignment_id_text)
         assignments = (
             self._coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
                 circuit_id,
@@ -3972,7 +4027,11 @@ class NilmController:
     ) -> dict[str, Any]:
         """Publish estimated HA entities for a NILM assignment."""
         assignment = self.assignment_for_id(circuit_id, assignment_id)
-        blocked_reason = nilm_assignment_publication_reason(assignment)
+        blocked_reason = nilm_assignment_publication_reason(
+            assignment,
+            sessions=self.assignment_session_history(circuit_id, assignment_id),
+            time_zone=self._nilm_model_time_zone() or "UTC",
+        )
         if blocked_reason is not None:
             raise ValueError(blocked_reason)
         previous = dict(assignment)

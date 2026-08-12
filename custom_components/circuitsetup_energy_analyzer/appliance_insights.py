@@ -65,6 +65,7 @@ class ApplianceInsight:
     source_quality: dict[str, Any]
     learning_readiness: dict[str, Any]
     confidence: float | None
+    confidence_kind: str | None
     needs_attention: bool
     is_running: bool
     is_learning: bool
@@ -75,7 +76,10 @@ class ApplianceInsight:
     energy_change_explanation: EnergyChangeExplanation | None
 
     def as_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        if not self.is_nilm or self.confidence_kind is None:
+            payload.pop("confidence_kind", None)
+        return payload
 
 
 def energy_change_explanation(
@@ -99,8 +103,8 @@ def energy_change_explanation(
     if confidence < NILM_EXPLANATION_CONFIDENCE_THRESHOLD:
         is_nilm = str(getattr(detail, "source_type", "")) == "nilm_estimate"
         reason = (
-            "This is an estimated NILM change; confidence is not high enough "
-            "to separate the causes."
+            "This is an estimated NILM change; validated evidence is not yet "
+            "enough to separate the causes."
             if is_nilm
             else "Baseline confidence is not high enough to separate the causes."
         )
@@ -294,6 +298,9 @@ def _append_insight(
             source_quality=source_quality,
             learning_readiness=readiness,
             confidence=_number_or_none(getattr(detail, "confidence", None)),
+            confidence_kind=(
+                str(getattr(detail, "confidence_kind", "") or "") or None
+            ),
             needs_attention=identity in attention_keys,
             is_running="running" in activity_state.casefold(),
             is_learning=_is_learning(readiness, detail),

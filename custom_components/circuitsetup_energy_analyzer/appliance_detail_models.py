@@ -137,6 +137,7 @@ class ApplianceDetail:
     current_session: dict[str, Any] | None = None
     last_matched_session: dict[str, Any] | None = None
     session_timeline: tuple[ApplianceTimelineSession, ...] = ()
+    confidence_kind: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         """Return JSON-friendly data."""
@@ -145,6 +146,9 @@ class ApplianceDetail:
             payload.pop("hvac_efficiency", None)
         if self.water_flow_context is None:
             payload.pop("water_flow_context", None)
+        if self.source_type != "nilm_estimate" or self.confidence_kind is None:
+            for field in ("confidence_kind",):
+                payload.pop(field, None)
         return payload
 
 

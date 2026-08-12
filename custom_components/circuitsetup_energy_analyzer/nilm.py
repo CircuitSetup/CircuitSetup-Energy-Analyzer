@@ -23,6 +23,7 @@ from .models import (
     EventType,
     SensorRole,
 )
+from .nilm_confidence import NILM_CONFIDENCE_SEMANTICS_VERSION
 from .nilm_interval_evidence import DEFAULT_THRESHOLDS
 
 _LEGACY_INTERVAL_CONFIDENCE_CAP = 0.25
@@ -97,7 +98,12 @@ def build_nilm_assignment_model(
     label_intervals: Iterable[Mapping[str, Any]] = (),
     time_zone: str | None = None,
 ) -> dict[str, Any]:
-    """Build a deterministic schema-v2 binary model and legacy projection."""
+    """Build a deterministic binary, variable-envelope, multi-state model.
+
+    The normalized model retains a compatibility projection for older consumers
+    while describing learned on/off transitions, variable envelopes, and the
+    bounded active-state representation used by current NILM processing.
+    """
     assignment_id = str(assignment.get("assignment_id") or "").strip()
     session_items = tuple(sessions)
     local_day_key = _nilm_local_day_key(time_zone)
@@ -1967,7 +1973,15 @@ def evaluate_nilm_validation_readiness(
     min_confidence: float = 0.75,
     time_zone: str = "UTC",
 ) -> dict[str, Any]:
-    """Gate NILM comparisons until all validation thresholds are met."""
+    """Gate NILM comparisons and publication with established validation rules.
+
+    The top-level result is the long-standing today-vs-normal contract.  The
+    nested ``publication_readiness`` result explains the same evidence in
+    context-specific gates; it is not a second scoring or readiness engine.
+    """
+    session_records = tuple(
+        session for session in sessions if isinstance(session, Mapping)
+    )
     confirmed_ids = {
         str(value).strip()
         for value in _nilm_list(assignment.get("confirmed_session_ids"))
@@ -1981,7 +1995,7 @@ def evaluate_nilm_validation_readiness(
     zone = _nilm_zone(time_zone)
     confirmed_days = {
         start.astimezone(zone).date()
-        for session in sessions
+        for session in session_records
         if str(session.get("session_id") or "").strip() in confirmed_ids
         and (start := _nilm_datetime(session.get("start"))) is not None
     }
@@ -1994,13 +2008,235 @@ def evaluate_nilm_validation_readiness(
         if validation_total
         else 0.0
     )
-    confidence = _nilm_number(assignment.get("confidence")) or 0.0
+    # The long-standing top-level validation contract remains compatible with
+    # legacy confidence. The nested publication gate below requires typed,
+    # auditable feedback evidence instead of relabeling that legacy value.
+    feedback_evidence_score = _nilm_number(assignment.get("feedback_evidence_score"))
+    compatibility_confidence = (
+        feedback_evidence_score
+        if feedback_evidence_score is not None
+        else _nilm_number(assignment.get("confidence")) or 0.0
+    )
     ready = (
         len(confirmed_ids) >= max(min_confirmed_sessions, 0)
         and len(confirmed_days) >= max(min_distinct_days, 0)
         and false_positive_rate <= max_false_positive_rate
-        and confidence >= min_confidence
+        and compatibility_confidence >= min_confidence
     )
+    assignment_id = str(assignment.get("assignment_id") or "").strip()
+    assigned_session_ids = {
+        str(value).strip()
+        for value in _nilm_list(assignment.get("session_ids"))
+        if str(value).strip()
+    }
+    matching_sessions = tuple(
+        session
+        for session in session_records
+        if _nilm_session_owned_by_assignment(
+            session,
+            assignment_id=assignment_id,
+            assigned_session_ids=assigned_session_ids,
+        )
+    )
+    reasons: list[str] = []
+    evidence_reasons: list[str] = []
+    gates: dict[str, str] = {}
+
+    lifecycle_state = str(assignment.get("lifecycle_state") or "").strip().lower()
+    if assignment.get("conversion_state") == "direct_meter":
+        evidence_reasons.append("direct_meter_conversion")
+    if lifecycle_state in {"ignored", "retired", "deleted"}:
+        evidence_reasons.append("lifecycle_not_publishable")
+    elif lifecycle_state not in {
+        "assigned",
+        "validated",
+        "ready_to_publish",
+        "published",
+    }:
+        evidence_reasons.append("lifecycle_not_validated")
+    fingerprints = {
+        str(value).strip()
+        for value in _nilm_list(assignment.get("signature_fingerprints"))
+        if str(value).strip()
+    }
+    model = assignment.get("model")
+    transition_prototypes = assignment.get("transition_prototypes")
+    if not transition_prototypes and isinstance(model, Mapping):
+        transition_prototypes = model.get("transition_prototypes")
+    model_directions = {
+        str(prototype.get("direction") or "").strip()
+        for prototype in _nilm_list(transition_prototypes)
+        if isinstance(prototype, Mapping)
+        and str(prototype.get("direction") or "").strip()
+    }
+    if (
+        fingerprints
+        and not any(map(nilm_signature_is_assignable, fingerprints))
+        and model_directions != {"on", "off"}
+    ):
+        evidence_reasons.append("incomplete_appliance_run")
+    if (
+        assignment.get("role") == "primary"
+        or assignment_id.endswith("-configured-primary")
+    ) and not fingerprints:
+        evidence_reasons.append("primary_signature_unconfirmed")
+    if not any(
+        _nilm_list(assignment.get(key))
+        for key in ("signature_fingerprints", "session_ids", "label_interval_ids")
+    ):
+        evidence_reasons.append("no_detected_load_assigned")
+    if (
+        assignment.get("helper_required") is True
+        or assignment.get("requires_helper") is True
+    ) and not _nilm_list(assignment.get("helper_links")):
+        evidence_reasons.append("helper_confirmation_required")
+    if len(confirmed_ids) < max(min_confirmed_sessions, 0):
+        evidence_reasons.append("insufficient_independent_evidence")
+    if len(confirmed_days) < max(min_distinct_days, 0):
+        evidence_reasons.append("insufficient_unique_days")
+    reasons.extend(evidence_reasons)
+    gates["evidence"] = "fail" if evidence_reasons else "pass"
+
+    if feedback_evidence_score is None:
+        gates["feedback_evidence"] = "unavailable"
+        reasons.append("feedback_evidence_unavailable")
+    elif feedback_evidence_score < min_confidence:
+        gates["feedback_evidence"] = "fail"
+        reasons.append("insufficient_feedback_evidence")
+    else:
+        gates["feedback_evidence"] = "pass"
+
+    model_fit = _nilm_number(
+        assignment.get("model_fit", assignment.get("model_confidence"))
+    )
+    if model_fit is None or model_fit <= 0.0:
+        gates["model_fit"] = "unavailable"
+        reasons.append("model_fit_unavailable")
+    else:
+        gates["model_fit"] = "pass"
+
+    validation_status = str(assignment.get("validation_status") or "").strip().lower()
+    if validation_status == "conflict" or false_positive_rate > max_false_positive_rate:
+        gates["validation"] = "fail"
+        reasons.append("validation_false_positive_rate_exceeded")
+    elif (
+        _nilm_number(assignment.get("validation_evaluable_session_count")) is None
+        or _nilm_number(assignment.get("validation_precision")) is None
+    ):
+        gates["validation"] = "unavailable"
+        reasons.append("held_out_validation_unavailable")
+    else:
+        gates["validation"] = "pass"
+
+    if any(bool(session.get("ambiguous")) for session in matching_sessions):
+        gates["ambiguity"] = "fail"
+        reasons.append("ambiguous_evidence_present")
+    else:
+        gates["ambiguity"] = "pass"
+
+    poor_quality_values = {"blocked", "failed", "poor", "unavailable", "invalid"}
+    poor_data_quality = any(
+        str(assignment.get(key) or "").strip().lower() in poor_quality_values
+        for key in ("data_quality", "data_quality_status", "source_quality")
+    )
+    # Persisted session rows retain these exact coverage and diagnostic values;
+    # an unretained positive quality label is not enough to pass publication.
+    quality_observed = False
+    for session in matching_sessions:
+        flags = {
+            str(flag).strip().lower()
+            for flag in _nilm_list(session.get("quality_flags"))
+            if str(flag).strip()
+        }
+        if any(
+            flag in poor_quality_values
+            or any(
+                fragment in flag
+                for fragment in (
+                    "stale",
+                    "partial",
+                    "negative_residual",
+                    "missing_known_source",
+                    "unavailable_known_source",
+                )
+            )
+            for flag in flags
+        ):
+            poor_data_quality = True
+        for key in (
+            "known_source_coverage_min",
+            "known_source_coverage_time_weighted",
+        ):
+            value = _nilm_number(session.get(key))
+            if value is not None:
+                quality_observed = True
+                if value != 1.0:
+                    poor_data_quality = True
+        for key in (
+            "stale_subtraction_prevented_count",
+            "partial_residual_point_count",
+            "negative_residual_point_count",
+        ):
+            value = _nilm_number(session.get(key))
+            if value is not None:
+                quality_observed = True
+                if value != 0.0:
+                    poor_data_quality = True
+    if poor_data_quality:
+        gates["data_quality"] = "fail"
+        reasons.append("insufficient_source_quality")
+    elif not quality_observed:
+        gates["data_quality"] = "unavailable"
+        reasons.append("source_quality_unavailable")
+    else:
+        gates["data_quality"] = "pass"
+
+    completed_sessions = tuple(
+        session for session in matching_sessions if session.get("end")
+    )
+    if not completed_sessions:
+        gates["energy_quality"] = "not_required"
+    elif any(
+        str(session.get("energy_source") or "").strip().lower()
+        in {"unavailable", "transition_fallback"}
+        for session in completed_sessions
+    ):
+        gates["energy_quality"] = "fail"
+        reasons.append("insufficient_energy_quality")
+    else:
+        gates["energy_quality"] = "pass"
+
+    ordered_reasons = list(dict.fromkeys(reasons))
+    ordered_gates = {
+        name: gates[name]
+        for name in (
+            "evidence",
+            "feedback_evidence",
+            "model_fit",
+            "validation",
+            "ambiguity",
+            "data_quality",
+            "energy_quality",
+        )
+    }
+    failed = {name for name, status in ordered_gates.items() if status == "fail"}
+    unavailable = {
+        name for name, status in ordered_gates.items() if status == "unavailable"
+    }
+    if failed & {"ambiguity", "data_quality", "energy_quality"}:
+        publication_status = "blocked"
+    elif unavailable:
+        publication_status = "manual_review"
+    elif failed:
+        publication_status = "learning"
+    else:
+        publication_status = "ready"
+    publication_readiness = {
+        "status": publication_status,
+        "reasons": ordered_reasons,
+        "gates": ordered_gates,
+        "semantics_version": NILM_CONFIDENCE_SEMANTICS_VERSION,
+    }
     return {
         "ready": ready,
         "today_vs_normal_enabled": ready,
@@ -2008,7 +2244,8 @@ def evaluate_nilm_validation_readiness(
         "confirmed_sessions": len(confirmed_ids),
         "distinct_confirmed_days": len(confirmed_days),
         "false_positive_rate": round(false_positive_rate, 3),
-        "confidence": round(confidence, 3),
+        "confidence": round(compatibility_confidence, 3),
+        "publication_readiness": publication_readiness,
     }
 
 
@@ -3489,7 +3726,8 @@ class NilmSignature:
     model_fit: float = 0.0
     intrinsic_confidence: float = 0.0
     validated_precision: float | None = None
-    confidence_kind: str = "evidence"
+    confidence_kind: str = "evidence_strength"
+    confidence_semantics_version: int = NILM_CONFIDENCE_SEMANTICS_VERSION
 
 
 @dataclass(frozen=True, slots=True)
@@ -3601,6 +3839,9 @@ class NilmSession:
     median_power_w: float
     estimated_energy_kwh: float
     confidence: float
+    pairing_confidence: float | None = None
+    confidence_kind: str = "pairing_confidence"
+    confidence_semantics_version: int = NILM_CONFIDENCE_SEMANTICS_VERSION
     overlap_count: int = 0
     ambiguous: bool = False
     alternate_match_count: int = 0
@@ -3648,6 +3889,13 @@ def nilm_session_to_dict(session: NilmSession) -> dict[str, Any]:
         "median_power_w": session.median_power_w,
         "estimated_energy_kwh": session.estimated_energy_kwh,
         "confidence": session.confidence,
+        "pairing_confidence": (
+            session.pairing_confidence
+            if session.pairing_confidence is not None
+            else session.confidence
+        ),
+        "confidence_kind": session.confidence_kind,
+        "confidence_semantics_version": session.confidence_semantics_version,
         "overlap_count": session.overlap_count,
         "ambiguous": session.ambiguous,
         "alternate_match_count": session.alternate_match_count,
@@ -6124,7 +6372,7 @@ def _signature_from_cluster(
         evidence_strength=round(evidence_strength, 3),
         model_fit=round(model_fit, 3),
         intrinsic_confidence=round(intrinsic_confidence, 3),
-        confidence_kind="evidence",
+        confidence_kind="evidence_strength",
     )
 
 
@@ -7499,6 +7747,7 @@ def _open_nilm_session(
         median_power_w=round(abs(float(on_edge.delta_w)), 3),
         estimated_energy_kwh=0.0,
         confidence=round(confidence, 3),
+        pairing_confidence=round(confidence, 3),
         ambiguous=ambiguous,
         alternate_match_count=alternate_match_count,
         known_load_masked=known_load_masked,
@@ -7586,6 +7835,7 @@ def _closed_nilm_session(
         median_power_w=median_power_w,
         estimated_energy_kwh=estimated_energy_kwh,
         confidence=round(_clamp(confidence), 3),
+        pairing_confidence=round(_clamp(confidence), 3),
         ambiguous=ambiguous,
         alternate_match_count=alternate_match_count,
         ambiguity_candidates=ambiguity_candidates,

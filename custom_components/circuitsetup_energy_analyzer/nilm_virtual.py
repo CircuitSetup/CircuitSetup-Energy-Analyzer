@@ -64,6 +64,10 @@ class NilmVirtualApplianceState:
     last_matched_session_id: str | None = None
     latest_signature_id: str | None = None
     validation_readiness: dict[str, Any] | None = None
+    feedback_evidence_score: float | None = None
+    publication_readiness: dict[str, Any] | None = None
+    confidence_kind: str | None = None
+    confidence_semantics_version: int | None = None
     confirmed_session_ids: frozenset[str] = frozenset()
     rejected_session_ids: frozenset[str] = frozenset()
     adjusted_session_ids: frozenset[str] = frozenset()
@@ -209,7 +213,7 @@ def nilm_virtual_low_confidence_alert(
     now: datetime,
 ) -> AlertEvidence | None:
     """Return a validation prompt when a published NILM appliance is uncertain."""
-    confidence = _clamped_float(getattr(state, "confidence", None), upper=1.0)
+    confidence = _nilm_contextual_confidence(state)
     model_status = str(getattr(state, "model_status", "") or "").strip()
     low_confidence = confidence < NILM_FINISHED_CONFIDENCE_THRESHOLD
     needs_validation = model_status in NILM_REVIEW_MODEL_STATES
@@ -257,7 +261,7 @@ def nilm_virtual_finished_alert(
     now: datetime,
 ) -> AlertEvidence | None:
     """Return a finished-running notification for a confident NILM appliance."""
-    confidence = _clamped_float(getattr(state, "confidence", None), upper=1.0)
+    confidence = _nilm_contextual_confidence(state)
     session_id = str(getattr(state, "latest_session_id", "") or "").strip()
     model_status = str(getattr(state, "model_status", "") or "").strip()
     if (
@@ -324,7 +328,7 @@ def nilm_virtual_unusual_runtime_alert(
         or str(getattr(state, "latest_session_id", "") or "").strip()
         or "current"
     )
-    confidence = _clamped_float(getattr(state, "confidence", None), upper=1.0)
+    confidence = _nilm_contextual_confidence(state)
     return AlertEvidence(
         timestamp=now,
         circuit_id=str(getattr(state, "mains_circuit_id", "") or ""),
@@ -369,7 +373,7 @@ def nilm_virtual_unusual_energy_alert(
     ):
         return None
     assignment_id = str(getattr(state, "assignment_id", "") or "").strip()
-    confidence = _clamped_float(getattr(state, "confidence", None), upper=1.0)
+    confidence = _nilm_contextual_confidence(state)
     return AlertEvidence(
         timestamp=now,
         circuit_id=str(getattr(state, "mains_circuit_id", "") or ""),
@@ -396,7 +400,7 @@ def nilm_virtual_unusual_energy_alert(
 
 def nilm_virtual_attributes(state: NilmVirtualApplianceState) -> dict[str, Any]:
     """Return common attributes for estimated NILM entities."""
-    return {
+    attributes = {
         "estimated": True,
         "source": "nilm",
         "source_type": "nilm_estimate",
@@ -416,6 +420,15 @@ def nilm_virtual_attributes(state: NilmVirtualApplianceState) -> dict[str, Any]:
         "reference_source_entity_id": state.reference_source_entity_id,
         "reference_fallback_to_nilm": state.reference_fallback_to_nilm,
     }
+    if state.confidence_kind:
+        attributes["confidence_kind"] = state.confidence_kind
+    if state.confidence_semantics_version is not None:
+        attributes["confidence_semantics_version"] = state.confidence_semantics_version
+    if state.publication_readiness is not None:
+        attributes["publication_readiness"] = state.publication_readiness
+    if state.feedback_evidence_score is not None:
+        attributes["feedback_evidence_score"] = state.feedback_evidence_score
+    return attributes
 
 
 def _nilm_virtual_appliance_state(
@@ -455,6 +468,20 @@ def _nilm_virtual_appliance_state(
         now=now,
         time_zone=time_zone,
     )
+    store_data = getattr(coordinator, "store_data", None)
+    histories = getattr(store_data, "nilm_session_history_by_circuit", {})
+    readiness_sessions = (
+        histories.get(circuit_id, ()) if isinstance(histories, Mapping) else ()
+    )
+    publication_readiness = evaluate_nilm_validation_readiness(
+        assignment,
+        readiness_sessions,
+        min_confirmed_sessions=3,
+        min_distinct_days=3,
+        max_false_positive_rate=0.2,
+        min_confidence=NILM_FINISHED_CONFIDENCE_THRESHOLD,
+        time_zone=time_zone,
+    )["publication_readiness"]
     identity = build_nilm_appliance_identity(
         assignment,
         mains_source_entity_id=_mains_source_entity_id(coordinator, circuit_id),
@@ -492,6 +519,15 @@ def _nilm_virtual_appliance_state(
             if str(session.get("session_id") or "").strip() not in rejected_session_ids
         ]
     )
+    feedback_evidence_score = _nilm_optional_float(
+        assignment.get("feedback_evidence_score")
+    )
+    confidence_kind = str(assignment.get("confidence_kind") or "legacy_mixed").strip()
+    if (
+        confidence_kind.lower() == "feedback_evidence"
+        and feedback_evidence_score is None
+    ):
+        confidence_kind = "legacy_mixed"
     return NilmVirtualApplianceState(
         appliance_id=identity.appliance_id,
         assignment_id=assignment_id,
@@ -552,6 +588,12 @@ def _nilm_virtual_appliance_state(
             max_false_positive_rate=0.2,
             min_confidence=NILM_FINISHED_CONFIDENCE_THRESHOLD,
             time_zone=time_zone,
+        ),
+        feedback_evidence_score=feedback_evidence_score,
+        publication_readiness=publication_readiness,
+        confidence_kind=confidence_kind or None,
+        confidence_semantics_version=_nilm_optional_int(
+            assignment.get("confidence_semantics_version")
         ),
         confirmed_session_ids=frozenset(
             str(value or "").strip()
@@ -914,7 +956,7 @@ def _assignment_for_state(
 
 
 def _nilm_unusual_alert_allowed(state: Any) -> bool:
-    confidence = _clamped_float(getattr(state, "confidence", None), upper=1.0)
+    confidence = _nilm_contextual_confidence(state)
     model_status = str(getattr(state, "model_status", "") or "").strip()
     return (
         confidence >= NILM_UNUSUAL_CONFIDENCE_THRESHOLD
@@ -931,7 +973,7 @@ def _nilm_alert_message(
     return (
         f"{getattr(state, 'display_name', 'NILM appliance')} {phrase}. "
         "Estimated from aggregate circuit power by NILM. "
-        f"Confidence: {round(confidence * 100)}%."
+        f"{_nilm_confidence_label(state)}: {round(confidence * 100)}%."
     )
 
 
@@ -941,7 +983,17 @@ def _nilm_finished_message(state: Any, *, confidence: float) -> str:
         f"{getattr(state, 'display_name', 'NILM appliance')}: "
         "a detected estimated run ended. NILM matched a completed on/off run "
         "from aggregate circuit power. "
-        f"Confidence: {round(confidence * 100)}%."
+        f"{_nilm_confidence_label(state)}: {round(confidence * 100)}%."
+    )
+
+
+def _nilm_confidence_label(state: Any) -> str:
+    """Name the context-specific assignment percentage in notifications."""
+    kind = _nilm_confidence_kind(state)
+    return (
+        "Feedback evidence score"
+        if kind == "feedback_evidence"
+        else "Legacy confidence (mixed semantics)"
     )
 
 
@@ -985,11 +1037,21 @@ def _nilm_alert_features(
         session_id=session_id or None,
         signature_fingerprint=signature_fingerprint or None,
     )
+    confidence_kind = _nilm_confidence_kind(state)
+    feedback_evidence_score = _nilm_optional_float(
+        getattr(state, "feedback_evidence_score", None)
+    )
     return {
         "source": "nilm",
         "source_type": "nilm_estimate",
         "estimated": True,
         "confidence": confidence,
+        "confidence_kind": confidence_kind,
+        **(
+            {"feedback_evidence_score": feedback_evidence_score}
+            if feedback_evidence_score is not None
+            else {}
+        ),
         "primary_target": appliance_key,
         "appliance_key": appliance_key,
         "assignment_id": assignment_id,
@@ -1004,6 +1066,28 @@ def _nilm_alert_features(
         "notification_type": notification_type,
         "notification_key": notification_key,
     }
+
+
+def _nilm_confidence_kind(state: Any) -> str:
+    """Return a label kind only when its matching typed value is present."""
+    kind = str(getattr(state, "confidence_kind", "") or "legacy_mixed").strip()
+    feedback_evidence_score = _nilm_optional_float(
+        getattr(state, "feedback_evidence_score", None)
+    )
+    return (
+        "feedback_evidence"
+        if kind.lower() == "feedback_evidence" and feedback_evidence_score is not None
+        else "legacy_mixed"
+    )
+
+
+def _nilm_contextual_confidence(state: Any) -> float:
+    """Choose the numeric value that matches the confidence label and gate."""
+    if _nilm_confidence_kind(state) == "feedback_evidence":
+        return _clamped_float(
+            getattr(state, "feedback_evidence_score", None), upper=1.0
+        )
+    return _clamped_float(getattr(state, "confidence", None), upper=1.0)
 
 
 def _nilm_assignment_sessions(
@@ -1123,6 +1207,28 @@ def _clamped_float(value: Any, *, upper: float | None = None) -> float:
     if upper is not None:
         return min(number, upper)
     return number
+
+
+def _nilm_optional_float(value: Any) -> float | None:
+    """Return one finite typed evidence value without inventing a default."""
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if isfinite(number) else None
+
+
+def _nilm_optional_int(value: Any) -> int | None:
+    """Return a positive schema version without coercing booleans."""
+    if isinstance(value, bool):
+        return None
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
 
 
 def _optional_nonnegative_float(value: Any) -> float | None:

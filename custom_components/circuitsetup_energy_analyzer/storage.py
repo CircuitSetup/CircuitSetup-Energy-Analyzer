@@ -19,6 +19,7 @@ from .models import (
     RetentionMode,
     Severity,
 )
+from .nilm_confidence import migrate_nilm_confidence_semantics
 from .settings_advisor import (
     RecommendationDecision,
     SettingRecommendation,
@@ -482,7 +483,7 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
             raw.get("nilm_session_history_by_circuit", {})
         )
     )
-    return FeatureStoreData(
+    data = FeatureStoreData(
         events=_events_from_raw(raw.get("events", [])),
         baselines=_baselines_from_raw(raw.get("baselines", {})),
         learning_started_at_by_circuit={
@@ -636,6 +637,12 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         ),
         dashboard_status=_dict_of_jsonable_values(raw.get("dashboard_status", {})),
     )
+    migrate_nilm_confidence_semantics(
+        data.nilm_appliance_assignments_by_circuit,
+        data.nilm_signatures,
+        data.nilm_session_history_by_circuit,
+    )
+    return data
 
 
 def _copy_payload(value: Any) -> Any:

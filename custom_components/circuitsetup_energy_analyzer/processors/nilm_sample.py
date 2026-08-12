@@ -1319,6 +1319,9 @@ class NilmSampleProcessor:
                 "validated_precision": signature.validated_precision,
                 "confidence": signature.confidence,
                 "confidence_kind": signature.confidence_kind,
+                "confidence_semantics_version": (
+                    signature.confidence_semantics_version
+                ),
                 "classification": classify_signature(classified_signature),
                 "feedback_fingerprint": feedback_fingerprint,
                 "legacy_feedback_fingerprint": legacy_feedback_fingerprint,

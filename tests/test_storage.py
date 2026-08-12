@@ -15,6 +15,9 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     RetentionMode,
     Severity,
 )
+from custom_components.circuitsetup_energy_analyzer.nilm_confidence import (
+    NILM_CONFIDENCE_SEMANTICS_VERSION,
+)
 from custom_components.circuitsetup_energy_analyzer.storage import (
     FeatureStore,
     FeatureStoreData,
@@ -90,6 +93,51 @@ def test_feature_store_v10_payload_defaults_attribution_ledger() -> None:
         == "legacy-session"
     )
     assert restored.nilm_known_load_attributions_by_circuit == {}
+
+
+def test_feature_store_load_migrates_legacy_nilm_confidence_once() -> None:
+    restored = feature_store_data_from_dict(
+        {
+            "nilm_appliance_assignments_by_circuit": {
+                "mains": [
+                    {
+                        "assignment_id": "legacy-load",
+                        "lifecycle_state": "published",
+                        "confidence": 0.83,
+                    }
+                ]
+            },
+            "nilm_signatures": {
+                "mains": [{"signature_id": "legacy-signature", "confidence": 0.7}]
+            },
+            "nilm_session_history_by_circuit": {
+                "mains": [
+                    {
+                        "session_id": "legacy-session",
+                        "confidence": 0.62,
+                    }
+                ]
+            },
+        }
+    )
+
+    assignment = restored.nilm_appliance_assignments_by_circuit["mains"][0]
+    signature = restored.nilm_signatures["mains"][0]
+    session = restored.nilm_session_history_by_circuit["mains"][0]
+    assert assignment["lifecycle_state"] == "published"
+    assert "feedback_evidence_score" not in assignment
+    assert signature["evidence_strength"] == 0.7
+    assert session["pairing_confidence"] == 0.62
+    assert all(
+        value["confidence_semantics_version"] == NILM_CONFIDENCE_SEMANTICS_VERSION
+        for value in (assignment, signature, session)
+    )
+
+    serialized = feature_store_data_to_dict(restored)
+    assert (
+        feature_store_data_to_dict(feature_store_data_from_dict(serialized))
+        == serialized
+    )
 
 
 def test_feature_store_preserves_empty_nilm_unmatched_edge_marker() -> None:
@@ -1276,7 +1324,16 @@ def test_feature_store_round_trips_nilm_session_history() -> None:
     restored = feature_store_data_from_dict(raw)
 
     assert raw["nilm_session_history_by_circuit"] == {"mains": [session]}
-    assert restored.nilm_session_history_by_circuit == {"mains": [session]}
+    assert restored.nilm_session_history_by_circuit == {
+        "mains": [
+            {
+                **session,
+                "pairing_confidence": 0.9,
+                "confidence_kind": "pairing_confidence",
+                "confidence_semantics_version": NILM_CONFIDENCE_SEMANTICS_VERSION,
+            }
+        ]
+    }
 
 
 def test_feature_store_bounds_nilm_session_history_during_deserialization() -> None:
@@ -1621,7 +1678,13 @@ def test_feature_store_round_trips_nilm_appliance_assignments() -> None:
 
     assert raw["nilm_appliance_assignments_by_circuit"] == {"mains": [assignment]}
     assert restored.nilm_appliance_assignments_by_circuit == {
-        "mains": [assignment]
+        "mains": [
+            {
+                **assignment,
+                "confidence_kind": "legacy_mixed",
+                "confidence_semantics_version": NILM_CONFIDENCE_SEMANTICS_VERSION,
+            }
+        ]
     }
 
 

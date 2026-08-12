@@ -3782,7 +3782,7 @@ async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
     assert estimated_power.native_value is None
     assert estimated_daily_energy.native_value == 0.818
     assert running.is_on is None
-    assert estimated_power.extra_state_attributes == {
+    expected_attributes = {
         "estimated": True,
         "source": "nilm",
         "source_type": "nilm_estimate",
@@ -3802,6 +3802,13 @@ async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
         "reference_source_entity_id": None,
         "reference_fallback_to_nilm": True,
     }
+    attributes = estimated_power.extra_state_attributes
+    assert expected_attributes.items() <= attributes.items()
+    assert "feedback_evidence_score" not in attributes
+    assert attributes["confidence_kind"] == "legacy_mixed"
+    assert "model_fit" not in attributes
+    assert "calibrated_probability" not in attributes
+    assert attributes["publication_readiness"] is not None
     assert running.extra_state_attributes["estimated"] is True
     assert estimated_power.device_info == {
         "identifiers": {(DOMAIN, "entry-1_nilm_assignment-dishwasher")},

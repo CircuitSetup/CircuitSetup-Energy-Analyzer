@@ -235,12 +235,12 @@ def _nilm_source_lines(alert: AlertEvidence) -> list[str]:
         lines.append(nilm_estimated)
 
     confidence = _nilm_confidence(alert)
-    confidence_label = _notification_text("alert", "confidence")
+    confidence_label = _nilm_confidence_label(alert)
     if confidence is not None and f"{confidence_label}:" not in alert.message:
         lines.append(
             _notification_text_format(
                 "alert",
-                "confidence_line",
+                _nilm_confidence_translation_key(alert),
                 confidence=round(confidence * 100),
             )
         )
@@ -258,6 +258,22 @@ def _is_nilm_estimated_alert(alert: AlertEvidence) -> bool:
 
 def _nilm_confidence(alert: AlertEvidence) -> float | None:
     return _alert_confidence(alert)
+
+
+def _nilm_confidence_label(alert: AlertEvidence) -> str:
+    """Return the context-specific label for a NILM legacy percentage."""
+    return _notification_text("alert", _nilm_confidence_translation_key(alert)).split(
+        ":", 1
+    )[0]
+
+
+def _nilm_confidence_translation_key(alert: AlertEvidence) -> str:
+    kind = str(alert.features.get("confidence_kind") or "").strip().lower()
+    return (
+        "feedback_evidence_line"
+        if kind == "feedback_evidence"
+        else "legacy_nilm_confidence_line"
+    )
 
 
 def _alert_confidence(alert: AlertEvidence) -> float | None:

@@ -65,33 +65,32 @@ def test_off_only_nilm_assignment_cannot_publish() -> None:
     )
 
 
-def test_reviewed_on_off_model_can_publish_without_rebinding_signature() -> None:
-    assert (
-        nilm_assignment_publication_reason(
-            {
-                "assignment_id": "assignment-pump",
-                "lifecycle_state": "assigned",
-                "signature_fingerprints": ["direction=off|watts=0-100"],
-                "session_ids": ["session-complete"],
-                "confidence": 0.85,
-                "transition_prototypes": [
-                    {
-                        "direction": direction,
-                        "from_state_w": from_w,
-                        "to_state_w": to_w,
-                        "delta_w": delta_w,
-                        "spread_w": 0.0,
-                        "sample_count": 1,
-                    }
-                    for direction, from_w, to_w, delta_w in (
-                        ("on", 0.0, 82.0, 82.0),
-                        ("off", 82.0, 0.0, -82.0),
-                    )
-                ],
-            }
-        )
-        is None
+def test_reviewed_on_off_model_requires_canonical_readiness_before_publish() -> None:
+    reason = nilm_assignment_publication_reason(
+        {
+            "assignment_id": "assignment-pump",
+            "lifecycle_state": "assigned",
+            "signature_fingerprints": ["direction=off|watts=0-100"],
+            "session_ids": ["session-complete"],
+            "confidence": 0.85,
+            "transition_prototypes": [
+                {
+                    "direction": direction,
+                    "from_state_w": from_w,
+                    "to_state_w": to_w,
+                    "delta_w": delta_w,
+                    "spread_w": 0.0,
+                    "sample_count": 1,
+                }
+                for direction, from_w, to_w, delta_w in (
+                    ("on", 0.0, 82.0, 82.0),
+                    ("off", 82.0, 0.0, -82.0),
+                )
+            ],
+        }
     )
+
+    assert reason is not None
 
 
 @pytest.mark.asyncio
@@ -188,6 +187,59 @@ def test_ambiguous_finished_alert_feedback_is_rejected() -> None:
         )
 
     assert assignment == {"assignment_id": "assignment-pump", "confidence": 0.8}
+
+
+def test_duplicate_finished_alert_feedback_is_idempotent_and_auditable() -> None:
+    assignment = {
+        "assignment_id": "assignment-pump",
+        "confidence": 0.7,
+        "lifecycle_state": "validated",
+    }
+    controller = _nilm_controller(
+        SimpleNamespace(
+            store_data=FeatureStoreData(
+                nilm_appliance_assignments_by_circuit={"mains": [assignment]},
+                nilm_session_history_by_circuit={
+                    "mains": [
+                        {
+                            "session_id": "session-finished",
+                            "assignment_id": "assignment-pump",
+                            "ambiguous": False,
+                        }
+                    ]
+                },
+            )
+        )
+    )
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 8, 12, 12, 0, tzinfo=UTC),
+        circuit_id="mains",
+        severity=Severity.INFO,
+        message="Pump: a detected estimated run ended.",
+        feature="nilm_appliance_finished",
+        features={
+            "source": "nilm",
+            "assignment_id": "assignment-pump",
+            "notification_key": "assignment-pump:session-finished",
+        },
+    )
+
+    controller.apply_alert_feedback(alert, "correct", alert.timestamp)
+    controller.apply_alert_feedback(alert, "correct", alert.timestamp)
+
+    assert assignment["confidence"] == 0.75
+    assert assignment["feedback_evidence_score"] == 0.05
+    assert assignment["feedback_confirmed_count"] == 1
+    assert assignment["feedback_evidence_events"] == [
+        {
+            "feedback_id": "session:session-finished",
+            "outcome": "correct",
+            "delta": 0.05,
+            "timestamp": "2026-08-12T12:00:00+00:00",
+            "score_after": 0.05,
+            "legacy_confidence_after": 0.75,
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -574,6 +626,8 @@ def test_nilm_controller_owns_assignment_helper_behavior() -> None:
     assert updated["session_ids"] == ["session-1"]
     assert updated["label_interval_ids"] == ["interval-1"]
     assert updated["confidence"] == 0.82
+    assert "feedback_evidence_score" not in updated
+    assert updated["confidence_kind"] == "legacy_mixed"
     assert updated["role"] == "component"
 
 
@@ -2762,6 +2816,45 @@ async def test_configured_primary_uses_configured_identity_and_role() -> None:
         "session-1",
         assignment_id=assignment_id,
     )
+    stored_assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mixed"
+    ][0]
+    stored_assignment.update(
+        {
+            "session_ids": [
+                "publication-session-1",
+                "publication-session-2",
+                "publication-session-3",
+            ],
+            "confirmed_session_ids": [
+                "publication-session-1",
+                "publication-session-2",
+                "publication-session-3",
+            ],
+            "rejected_session_ids": [],
+            "feedback_evidence_score": 0.9,
+            "model_fit": 0.9,
+            "validation_evaluable_session_count": 3,
+            "validation_precision": 1.0,
+            "false_positive_rate": 0.0,
+        }
+    )
+    coordinator.store_data.nilm_session_history_by_circuit["mixed"] = [
+        {
+            "session_id": f"publication-session-{index}",
+            "assignment_id": assignment_id,
+            "start": f"2026-05-{28 + index:02d}T12:00:00+00:00",
+            "end": f"2026-05-{28 + index:02d}T12:20:00+00:00",
+            "ambiguous": False,
+            "energy_source": "residual_trace_measured",
+            "known_source_coverage_min": 1.0,
+            "known_source_coverage_time_weighted": 1.0,
+            "stale_subtraction_prevented_count": 0,
+            "partial_residual_point_count": 0,
+            "negative_residual_point_count": 0,
+        }
+        for index in range(1, 4)
+    ]
     published = await coordinator.async_publish_nilm_appliance_assignment(
         "mixed",
         assignment_id,
@@ -4595,6 +4688,57 @@ async def test_session_feedback_upserts_a_revision_matched_explicit_outcome() ->
             "timestamp": "2026-08-01T12:01:00+00:00",
             "model_revision": 7,
             "model_fingerprint": "model-seven",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_duplicate_direct_session_feedback_is_idempotent() -> None:
+    now = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+    session = {
+        "session_id": "session-1",
+        "assignment_id": "assignment-pump",
+        "start": now.isoformat(),
+        "end": (now + timedelta(minutes=10)).isoformat(),
+        "start_model_revision": 7,
+        "stop_model_revision": 7,
+        "start_model_fingerprint": "model-seven",
+        "stop_model_fingerprint": "model-seven",
+    }
+    assignment: dict[str, object] = {
+        "assignment_id": "assignment-pump",
+        "session_ids": ["session-1"],
+        "lifecycle_state": "validated",
+        "confidence": 0.7,
+        "model_revision": 7,
+        "model_fingerprint": "model-seven",
+    }
+    controller, assignment = _validation_feedback_controller(
+        [session],
+        now_values=[now, now + timedelta(minutes=1)],
+        assignment=assignment,
+    )
+
+    await controller.async_record_nilm_session_validation(
+        "mixed", "session-1", assignment_id="assignment-pump", correct=True
+    )
+    after_first_feedback = deepcopy(assignment)
+
+    await controller.async_record_nilm_session_validation(
+        "mixed", "session-1", assignment_id="assignment-pump", correct=True
+    )
+
+    assert assignment == after_first_feedback
+    assert assignment["confidence"] == 0.75
+    assert assignment["feedback_evidence_score"] == 0.05
+    assert assignment["feedback_evidence_events"] == [
+        {
+            "feedback_id": "session:session-1",
+            "outcome": "correct",
+            "delta": 0.05,
+            "timestamp": now.isoformat(),
+            "score_after": 0.05,
+            "legacy_confidence_after": 0.75,
         }
     ]
 

@@ -35,6 +35,7 @@ from .models import (
 from .nilm import (
     NilmEdge,
     NilmSession,
+    evaluate_nilm_validation_readiness,
     nilm_display_name,
     nilm_session_to_dict,
     nilm_signature_is_assignable,
@@ -138,6 +139,11 @@ NILM_SIGNATURE_PANEL_FIELDS = (
     "seen_count",
     "occurrence_count",
     "confidence",
+    "evidence_strength",
+    "model_fit",
+    "validated_precision",
+    "confidence_kind",
+    "confidence_semantics_version",
     "first_seen",
     "last_seen",
     "voltage_class",
@@ -1761,7 +1767,10 @@ def _add_nilm_component_occurrences(
         electrical_class = _nilm_signature_electrical_class(signature)
         if electrical_class != "unknown":
             signature["electrical_class"] = electrical_class
-            signature["electrical_class_confidence"] = signature.get("confidence")
+            signature["electrical_class_confidence"] = signature.get(
+                "evidence_strength",
+                signature.get("confidence"),
+            )
 
 
 def _nilm_session_signature_compatible(
@@ -1903,9 +1912,16 @@ def _nilm_signature_label(signature: Mapping[str, Any], fallback: str) -> str:
     typical_watts = signature.get("typical_watts")
     if isinstance(typical_watts, (int, float)) and typical_watts > 0:
         parts.append(_format_power_label(float(typical_watts)))
-    confidence = signature.get("confidence")
-    if isinstance(confidence, (int, float)):
-        parts.append(f"confidence {round(float(confidence) * 100):.0f}%")
+    evidence_strength = signature.get("evidence_strength")
+    if isinstance(evidence_strength, (int, float)):
+        parts.append(
+            f"evidence strength {round(float(evidence_strength) * 100):.0f}%"
+        )
+    elif isinstance(signature.get("confidence"), (int, float)):
+        parts.append(
+            "legacy confidence (mixed semantics) "
+            f"{round(float(signature['confidence']) * 100):.0f}%"
+        )
     first_seen = _format_first_seen_label(signature.get("first_seen"))
     if first_seen:
         parts.append(f"first seen {first_seen}")
@@ -2097,6 +2113,8 @@ def _nilm_assignments_for_circuit(
         for item in _iter_items(assignments_by_circuit.get(circuit_id, ()))
         if isinstance(item, dict)
     ]
+    histories = getattr(store_data, "nilm_session_history_by_circuit", {})
+    sessions = histories.get(circuit_id, ()) if isinstance(histories, Mapping) else ()
     configured_circuit_names = tuple(
         config.name
         for config in getattr(coordinator, "circuit_configs", ()) or ()
@@ -2109,6 +2127,7 @@ def _nilm_assignments_for_circuit(
             assignments,
             entry_id=str(getattr(coordinator, "entry_id", "") or ""),
             label_intervals=label_intervals,
+            sessions=sessions,
             configured_circuit_names=configured_circuit_names,
         )
         for item in assignments
@@ -2309,7 +2328,7 @@ def _nilm_configured_primary_payload(
             "confidence": confidence,
             "evidence_summary": (
                 f"{occurrences} recurring events around {watts:.0f} W "
-                f"with {confidence:.0%} confidence."
+                f"with {confidence:.0%} evidence strength."
             ),
             "action": {
                 "domain": DOMAIN,
@@ -2701,9 +2720,11 @@ def _nilm_assignment_payload(
     *,
     entry_id: str = "",
     label_intervals: Iterable[Mapping[str, Any]] = (),
+    sessions: Iterable[Mapping[str, Any]] = (),
     configured_circuit_names: Iterable[str] = (),
 ) -> dict[str, Any]:
     assignments = tuple(assignments)
+    sessions = tuple(sessions)
     payload = {
         str(key): value
         for key, value in assignment.items()
@@ -2769,7 +2790,20 @@ def _nilm_assignment_payload(
     state = str(payload.get("lifecycle_state") or "").strip().lower()
     action_data = {ATTR_CIRCUIT_ID: circuit_id, ATTR_ASSIGNMENT_ID: assignment_id}
     actions: dict[str, dict[str, Any]] = {}
-    publication_reason = nilm_assignment_publication_reason(payload)
+    publication_readiness = evaluate_nilm_validation_readiness(
+        payload,
+        sessions,
+        min_confirmed_sessions=3,
+        min_distinct_days=3,
+        max_false_positive_rate=0.2,
+        min_confidence=0.8,
+    )["publication_readiness"]
+    payload["publication_readiness"] = publication_readiness
+    publication_reason = nilm_assignment_publication_reason(
+        payload,
+        sessions=sessions,
+        publication_readiness=publication_readiness,
+    )
     payload["publication"] = {
         "available": publication_reason is None,
         **({"reason": publication_reason} if publication_reason else {}),
