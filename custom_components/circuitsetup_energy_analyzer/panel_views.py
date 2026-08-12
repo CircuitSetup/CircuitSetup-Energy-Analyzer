@@ -15,6 +15,7 @@ from .panel_contracts import (
     NILM_WORKSPACE_API_PATH,
     NILM_WORKSPACE_COLLECTION_API_PATH,
     NILM_WORKSPACE_HISTORY_API_PATH,
+    NILM_WORKSPACE_ITEM_API_PATH,
     SETUP_HEALTH_API_PATH,
 )
 
@@ -217,6 +218,29 @@ class NilmWorkspaceCollectionView(HomeAssistantView):
             cursor=request.query.get("cursor"),
             limit=request.query.get("limit"),
             view=request.query.get("view"),
+        )
+        return panel.web.json_response(payload)
+
+
+class NilmWorkspaceItemView(HomeAssistantView):
+    """Authenticated read-only exact-item NILM workspace endpoint."""
+
+    url = NILM_WORKSPACE_ITEM_API_PATH
+    name = f"api:{DOMAIN}:nilm_workspace_item"
+    requires_auth = True
+
+    async def get(self, request: Any) -> Any:
+        """Return one safe exact NILM item selected by stable ID."""
+        from . import panel
+        from .panel_nilm import nilm_workspace_item_payload
+
+        hass = request.app[panel.KEY_HASS]
+        payload = nilm_workspace_item_payload(
+            panel._loaded_coordinators(hass),
+            kind=request.query.get("kind"),
+            item_id=request.query.get("id"),
+            circuit_id=request.query.get("circuit_id"),
+            entry_id=request.query.get(panel.ATTR_ENTRY_ID),
         )
         return panel.web.json_response(payload)
 

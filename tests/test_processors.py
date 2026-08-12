@@ -14921,6 +14921,91 @@ def test_nilm_sample_processor_matches_confirmed_edge_to_known_event(
     )
 
 
+def test_nilm_sample_processor_persists_known_load_attribution_without_write_churn(
+) -> None:
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        AnalyzerState,
+    )
+    from custom_components.circuitsetup_energy_analyzer.models import (
+        CircuitEvent,
+        EventType,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    store_data = FeatureStoreData()
+    context = ProcessingContext(
+        now=now,
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=store_data,
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset({"fridge"}),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda _config, _now: None,
+        min_delta_w_for_circuit=lambda _circuit_id: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda _circuit_id, events: events,
+        observe_topology=lambda _config, _match, _context: [],
+    )
+
+    def sample(index: int, watts: float) -> NormalizedCircuitSample:
+        return NormalizedCircuitSample(
+            timestamp=now + timedelta(seconds=index * 5),
+            circuit_id="mains",
+            real_power=watts,
+            current=None,
+            voltage=None,
+            reactive_power=None,
+            apparent_power=None,
+            power_factor=None,
+            frequency=60.0,
+            energy=None,
+        )
+
+    processor.process(sample(0, 100.0), config, context, events=())
+    known_event = CircuitEvent(
+        timestamp=now + timedelta(seconds=5),
+        circuit_id="fridge",
+        event_type=EventType.START,
+        features={"startup_power_w": 320.0},
+    )
+    processor.process(sample(1, 420.0), config, context, events=(known_event,))
+    result = processor.process(sample(2, 420.0), config, context, events=())
+
+    records = store_data.nilm_known_load_attributions_by_circuit["mains"]
+    assert result.store_dirty is True
+    assert len(records) == 1
+    assert records[0]["known_circuit_ids"] == ["fridge"]
+    assert records[0]["aggregate_delta_w"] == (
+        records[0]["explained_delta_w"] + records[0]["residual_delta_w"]
+    )
+
+    before = [dict(record) for record in records]
+    quiet_result = processor.process(sample(3, 420.0), config, context, events=())
+
+    assert store_data.nilm_known_load_attributions_by_circuit["mains"] == before
+    assert quiet_result.store_dirty is False
+
+
 @pytest.mark.parametrize(
     ("observed_power_w", "known_power_w", "min_delta_w", "expected_residual_w"),
     [

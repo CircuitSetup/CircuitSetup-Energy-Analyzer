@@ -2,6 +2,7 @@ export function createNilmWorkspaceMethods({
   NILM_WORKSPACE_API_PATH,
   NILM_WORKSPACE_CALL_API_PATH,
   NILM_WORKSPACE_COLLECTION_API_PATH,
+  NILM_WORKSPACE_ITEM_API_PATH,
   NILM_INTERVAL_EVIDENCE_API_PATH,
   NILM_LOW_CONFIDENCE_THRESHOLD,
   EXPAND_NILM_QUERY_PARAM,
@@ -21,6 +22,8 @@ export function createNilmWorkspaceMethods({
 
     this._invalidateNilmFocusedHistoryRequests();
     this._invalidateNilmHelperHistoryRequests();
+    this._resetNilmSessionPagination();
+    this._resetNilmRouteItemRequest();
     this._nilmWorkspaceLoading = true;
     this._nilmWorkspaceError = "";
     this._nilmWorkspaceHistoryError = "";
@@ -76,6 +79,128 @@ export function createNilmWorkspaceMethods({
       apiPath: (nilm && nilm.workspace_call_api_path) || routeApiPath,
       fetchPath: (nilm && nilm.workspace_api_path) || `${NILM_WORKSPACE_API_PATH}?${query}`,
     };
+  }
+
+  _resetNilmSessionPagination() {
+    this._nilmSessionPageRequestToken = (this._nilmSessionPageRequestToken || 0) + 1;
+    this._nilmSessionPageLoading = false;
+    this._nilmSessionPageError = "";
+    this._nilmSessionPageLiveMessage = "";
+  }
+
+  _resetNilmRouteItemRequest() {
+    this._nilmWorkspaceItemRequestToken = (this._nilmWorkspaceItemRequestToken || 0) + 1;
+    this._nilmRouteItemError = "";
+  }
+
+  _nilmSessionCollectionMeta(workspace = this._nilmWorkspace) {
+    const meta = workspace && workspace.collection_meta && workspace.collection_meta.sessions;
+    const totalCount = Number(meta && meta.total_count);
+    const returnedCount = Number(meta && meta.returned_count);
+    const nextCursor = String(meta && meta.next_cursor || "").trim();
+    return {
+      totalCount: Number.isFinite(totalCount) ? Math.max(0, totalCount) : 0,
+      returnedCount: Number.isFinite(returnedCount) ? Math.max(0, returnedCount) : 0,
+      truncated: Boolean(meta && meta.truncated),
+      nextCursor: nextCursor || null,
+    };
+  }
+
+  _nilmWorkspaceCollectionRequestPaths(
+    collection,
+    cursor = null,
+    limit = 20,
+    routeKey = this._loadedRouteKey || this._routeKey(),
+  ) {
+    const routeUrl = new URL(routeKey, window.location.origin);
+    const workspaceCircuitId = this._nilmWorkspace?.circuit?.circuit_id;
+    const payloadCircuitId = this._payload?.circuit?.circuit_id;
+    const circuitId = workspaceCircuitId || payloadCircuitId || routeUrl.searchParams.get("circuit_id") || "";
+    const entryId = routeUrl.searchParams.get("entry_id") || "";
+    const params = new URLSearchParams({ collection: String(collection || "") });
+    if (circuitId) params.set("circuit_id", circuitId);
+    if (entryId) params.set("entry_id", entryId);
+    if (cursor) params.set("cursor", String(cursor));
+    params.set("limit", String(Math.max(1, Math.min(50, Number(limit) || 20))));
+    const fetchPath = `${NILM_WORKSPACE_COLLECTION_API_PATH}?${params.toString()}`;
+    return {
+      apiPath: fetchPath.replace(/^\/api\//, ""),
+      fetchPath,
+    };
+  }
+
+  _isCurrentNilmSessionPageRequest(token, requestId, routeKey, workspace) {
+    return token === this._nilmSessionPageRequestToken
+      && this._isCurrentRequest(requestId, routeKey);
+  }
+
+  async _loadMoreNilmSessions() {
+    const workspace = this._nilmWorkspace;
+    const meta = this._nilmSessionCollectionMeta(workspace);
+    if (!workspace || this._nilmSessionPageLoading || !meta.nextCursor) return false;
+    const token = (this._nilmSessionPageRequestToken || 0) + 1;
+    const requestId = this._evidenceRequestId;
+    const routeKey = this._loadedRouteKey || this._routeKey();
+    const { apiPath, fetchPath } = this._nilmWorkspaceCollectionRequestPaths(
+      "sessions",
+      meta.nextCursor,
+      20,
+      routeKey,
+    );
+    this._nilmSessionPageRequestToken = token;
+    this._nilmSessionPageLoading = true;
+    this._nilmSessionPageError = "";
+    this._nilmSessionPageLiveMessage = "";
+    this._render();
+    try {
+      const payload = await this._requestJson(apiPath, fetchPath);
+      if (!this._isCurrentNilmSessionPageRequest(token, requestId, routeKey, workspace)) {
+        return false;
+      }
+      const existing = Array.isArray(workspace.sessions) ? workspace.sessions : [];
+      const seen = new Set(existing.map((item) => String(item && item.session_id || "")).filter(Boolean));
+      const appended = (Array.isArray(payload && payload.items) ? payload.items : [])
+        .slice(0, 50)
+        .filter((item) => {
+          const id = String(item && item.session_id || "").trim();
+          if (!id || seen.has(id)) return false;
+          seen.add(id);
+          return true;
+        });
+      const returnedCount = Number(payload && payload.returned_count);
+      const totalCount = Number(payload && payload.total_count);
+      this._nilmWorkspace = {
+        ...workspace,
+        sessions: [...existing, ...appended],
+        collection_meta: {
+          ...(workspace.collection_meta || {}),
+          sessions: {
+            total_count: Number.isFinite(totalCount) ? Math.max(0, totalCount) : meta.totalCount,
+            returned_count: existing.length + appended.length,
+            truncated: Boolean(payload && payload.truncated),
+            next_cursor: payload && payload.next_cursor || null,
+            page_returned_count: Number.isFinite(returnedCount) ? Math.max(0, returnedCount) : appended.length,
+          },
+        },
+      };
+      this._nilmSessionPageLiveMessage = this._panelTextFormat(
+        "nilm_workspace.sessions_loaded",
+        { count: appended.length },
+      );
+      return true;
+    } catch (_error) {
+      if (!this._isCurrentNilmSessionPageRequest(token, requestId, routeKey, workspace)) {
+        return false;
+      }
+      this._nilmSessionPageError = this._panelText("nilm_workspace.sessions_load_failed");
+      this._nilmSessionPageLiveMessage = this._nilmSessionPageError;
+      return false;
+    } finally {
+      if (this._isCurrentNilmSessionPageRequest(token, requestId, routeKey, workspace)) {
+        this._nilmSessionPageLoading = false;
+        this._render();
+      }
+    }
   }
 
   _nilmAmbiguityAudit(workspace = this._nilmWorkspace) {
@@ -470,6 +595,8 @@ export function createNilmWorkspaceMethods({
               continue;
             }
             this._invalidateNilmFocusedHistoryRequests();
+            this._resetNilmSessionPagination();
+            this._resetNilmRouteItemRequest();
             this._nilmWorkspaceHistoryLoading = false;
             this._nilmWorkspaceHistoryError = "";
             this._nilmWorkspaceHistoryFailedRequest = null;
@@ -1321,6 +1448,7 @@ export function createNilmWorkspaceMethods({
       ["nilmAmbiguityLoadOccurrences", "[data-nilm-ambiguity-load-occurrences]", "nilmAmbiguityLoadOccurrences"],
       ["nilmAmbiguityOpenGraph", "[data-nilm-ambiguity-open-graph]", "nilmAmbiguitySessionId"],
       ["nilmAmbiguityOccurrence", "[data-nilm-ambiguity-occurrence]", "nilmAmbiguityOccurrence"],
+      ["nilmLoadMoreSessions", "[data-nilm-load-more-sessions]", "nilmLoadMoreSessions"],
       ["nilmBoundaryHandle", "[data-nilm-boundary-handle]", "nilmBoundaryHandle"],
     ];
     const control = controls.find(([flag]) => Object.prototype.hasOwnProperty.call(dataset, flag));
@@ -2414,6 +2542,7 @@ export function createNilmWorkspaceMethods({
       <details class="nilm-reference-advanced">
         <summary>${this._escape(this._panelText("nilm_workspace.reference_advanced_settings"))}</summary>
         <p class="muted">${this._escape(this._panelText("nilm_workspace.reference_unknown_explanation"))}</p>
+        <p class="muted">${this._escape(this._panelText("nilm_workspace.reference_advanced_help"))}</p>
         <div class="grid">
           <label class="nilm-label-field"><span class="muted">${this._escape(this._panelText("nilm_workspace.reference_on_dwell"))}</span><input type="number" min="0" step="0.1" data-nilm-reference-input="onDwellSeconds" data-nilm-reference-key="${this._escape(assignment.assignment_id || "")}" value="${this._escape(draft.onDwellSeconds)}" placeholder="${this._escape(this._panelText("nilm_workspace.reference_auto"))}"></label>
           <label class="nilm-label-field"><span class="muted">${this._escape(this._panelText("nilm_workspace.reference_off_dwell"))}</span><input type="number" min="0" step="0.1" data-nilm-reference-input="offDwellSeconds" data-nilm-reference-key="${this._escape(assignment.assignment_id || "")}" value="${this._escape(draft.offDwellSeconds)}" placeholder="${this._escape(this._panelText("nilm_workspace.reference_auto"))}"></label>
@@ -2751,6 +2880,7 @@ export function createNilmWorkspaceMethods({
     const intervalFeedback = this._renderNilmIntervalFeedback();
     return `
       <div class="nilm-workspace">
+        ${this._nilmRouteItemError ? `<p class="muted" data-nilm-deep-link-feedback role="status" aria-live="polite">${this._escape(this._nilmRouteItemError)}</p>` : ""}
         ${this._renderNilmWorkspaceSummary(workspace)}
         ${this._renderNilmConfiguredPrimary(workspace)}
         ${this._renderNilmModelEvidence()}
@@ -2759,6 +2889,7 @@ export function createNilmWorkspaceMethods({
         <section class="workspace-section section-surface">${this._renderNilmWorkspaceLanes(workspace)}</section>
         <section class="workspace-section section-surface">${this._renderNilmReviewLayout(workspace)}</section>
         ${this._renderNilmAmbiguityAudit(workspace)}
+        ${this._renderNilmEvidenceDetails(workspace)}
         ${this._renderNilmSecondaryCollections(workspace)}
       </div>
     `;
@@ -2859,6 +2990,230 @@ export function createNilmWorkspaceMethods({
     return `<section class="workspace-section section-surface" data-nilm-model-evidence>
       <h2>${this._escape(this._panelText("nilm_workspace.model_evidence"))}</h2>
       <p class="muted">${this._escape(this._panelText("nilm_workspace.workflow_guidance"))}</p>
+    </section>`;
+  }
+
+  _nilmFiniteNumber(value) {
+    if (value === null || value === undefined || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  _nilmFormatQuantity(value, unit) {
+    const number = this._nilmFiniteNumber(value);
+    return number === null
+      ? this._panelText("common.unknown")
+      : `${this._formatNumber(number)} ${unit}`;
+  }
+
+  _nilmFormatPercent(value) {
+    const number = this._nilmFiniteNumber(value);
+    if (number === null) return this._panelText("common.unknown");
+    const ratio = Math.abs(number) > 1 ? number / 100 : number;
+    return new Intl.NumberFormat(undefined, {
+      style: "percent",
+      maximumFractionDigits: 0,
+    }).format(ratio);
+  }
+
+  _nilmSignedWatts(value) {
+    const number = this._nilmFiniteNumber(value);
+    if (number === null) return this._panelText("common.unknown");
+    const sign = number > 0 ? "+" : number < 0 ? "−" : "";
+    return `${sign}${this._formatNumber(Math.abs(number))} W`;
+  }
+
+  _nilmEstimateStatus(status) {
+    const key = String(status || "legacy_unverified").trim().toLowerCase();
+    const labels = {
+      complete: "quality_complete",
+      partial_history: "quality_partial_history",
+      ambiguous: "quality_ambiguous",
+      legacy_unverified: "quality_legacy_estimate",
+    };
+    return this._panelText(`nilm_workspace.${labels[key] || labels.legacy_unverified}`);
+  }
+
+  _nilmQualityWindowLabel(window) {
+    const key = String(window || "").trim().toLowerCase();
+    const labels = {
+      today: "quality_window_today",
+      "7_days": "quality_window_7d",
+      "7d": "quality_window_7d",
+      "30_days": "quality_window_30d",
+      "30d": "quality_window_30d",
+    };
+    return this._panelText(`nilm_workspace.${labels[key] || "quality_window_unknown"}`);
+  }
+
+  _nilmEnergySourceLabel(source) {
+    const key = String(source || "").trim().toLowerCase();
+    const labels = {
+      measured: "energy_source_measured",
+      partial: "energy_source_partial",
+      fallback: "energy_source_fallback",
+      estimated: "energy_source_estimated",
+      transition_fallback: "energy_source_fallback",
+      residual_trace_measured: "energy_source_measured",
+      residual_trace_partial: "energy_source_partial",
+      derived_from_power: "energy_source_derived_from_power",
+      unavailable: "energy_source_unavailable",
+    };
+    return key
+      ? this._panelText(`nilm_workspace.${labels[key] || "energy_source_unknown"}`)
+      : this._panelText("common.unknown");
+  }
+
+  _nilmSelectionMethodLabel(value) {
+    const key = String(value || "unattributed").trim().toLowerCase();
+    const labels = {
+      global_assignment: "attribution_selection_global",
+      compound: "attribution_selection_compound",
+      greedy: "attribution_selection_greedy",
+      topology_rejected: "attribution_selection_topology_rejected",
+      unattributed: "attribution_selection_unattributed",
+    };
+    return this._panelText(`nilm_workspace.${labels[key] || "attribution_selection_unattributed"}`);
+  }
+
+  _nilmTopologyLabel(value) {
+    const key = String(value || "not_evaluated").trim().toLowerCase();
+    const labels = {
+      consistent: "attribution_topology_consistent",
+      unknown_topology: "attribution_topology_unknown",
+      not_evaluated: "attribution_topology_not_evaluated",
+      not_attributed: "attribution_topology_not_attributed",
+      topology_mismatch: "attribution_topology_mismatch",
+      leg_mismatch: "attribution_topology_leg_mismatch",
+      compound_unknown_topology: "attribution_topology_unknown",
+      rejected: "attribution_topology_rejected",
+      rejected_topology: "attribution_topology_rejected",
+    };
+    return this._panelText(`nilm_workspace.${labels[key] || "attribution_topology_not_evaluated"}`);
+  }
+
+  _renderNilmEstimateQualityRow(row) {
+    const status = String(row && row.status || "legacy_unverified").trim().toLowerCase();
+    const coverage = this._nilmFormatPercent(row && row.power_coverage);
+    const runtime = this._nilmFormatQuantity(row && row.runtime_minutes, "min");
+    const energy = this._nilmFormatQuantity(row && row.energy_kwh, "kWh");
+    const sessions = this._nilmFiniteNumber(row && row.included_session_count);
+    const excluded = this._nilmFiniteNumber(row && row.excluded_session_count);
+    const requestedRange = [row && row.requested_start, row && row.requested_end]
+      .filter(Boolean)
+      .map((value) => this._formatDateTime(value))
+      .join(" – ");
+    const coverageRange = [row && row.coverage_start, row && row.coverage_end]
+      .filter(Boolean)
+      .map((value) => this._formatDateTime(value))
+      .join(" – ");
+    const source = this._nilmEnergySourceLabel(row && row.energy_source);
+    const quality = this._nilmFiniteNumber(row && row.energy_quality);
+    const sourceDetail = quality === null
+      ? source
+      : `${source} · ${this._nilmFormatPercent(quality)}`;
+    const duration = this._nilmFiniteNumber(row && row.coverage_days);
+    const longestGap = this._nilmFiniteNumber(row && row.longest_trace_gap_seconds);
+    return `<article class="nilm-estimate-quality-row" data-nilm-estimate-quality-window="${this._escape(String(row && row.window || ""))}">
+      <div class="nilm-estimate-quality-heading">
+        <strong>${this._escape(this._nilmQualityWindowLabel(row && row.window))}</strong>
+        <span class="nilm-quality-chip nilm-quality-${this._escape(status)}">${this._escape(this._nilmEstimateStatus(status))}</span>
+      </div>
+      <dl class="nilm-evidence-facts">
+        <div><dt>${this._escape(this._panelText("nilm_workspace.quality_runtime"))}</dt><dd>${this._escape(runtime)}</dd></div>
+        <div><dt>${this._escape(this._panelText("nilm_workspace.quality_energy"))}</dt><dd>${this._escape(energy)}</dd></div>
+        <div><dt>${this._escape(this._panelText("nilm_workspace.quality_sessions"))}</dt><dd>${this._escape(sessions === null ? this._panelText("common.unknown") : this._formatNumber(sessions))}</dd></div>
+        <div><dt>${this._escape(this._panelText("nilm_workspace.quality_power_coverage"))}</dt><dd>${this._escape(coverage)}</dd></div>
+      </dl>
+      <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.quality_energy_source", { source: sourceDetail }))}</p>
+      <details>
+        <summary>${this._escape(this._panelText("nilm_workspace.quality_details"))}</summary>
+        <dl class="nilm-evidence-facts nilm-evidence-details-list">
+          <div><dt>${this._escape(this._panelText("nilm_workspace.quality_observation_start"))}</dt><dd>${this._escape(this._formatDateTime(row && row.observation_started_at))}</dd></div>
+          <div><dt>${this._escape(this._panelText("nilm_workspace.quality_requested_range"))}</dt><dd>${this._escape(requestedRange || this._panelText("common.unknown"))}</dd></div>
+          <div><dt>${this._escape(this._panelText("nilm_workspace.quality_actual_coverage_range"))}</dt><dd>${this._escape(coverageRange || this._panelText("common.unknown"))}</dd></div>
+          <div><dt>${this._escape(this._panelText("nilm_workspace.quality_covered_duration"))}</dt><dd>${this._escape(duration === null ? this._panelText("common.unknown") : this._nilmFormatQuantity(duration, this._panelText("nilm_workspace.quality_days_unit")))}</dd></div>
+          <div><dt>${this._escape(this._panelText("nilm_workspace.quality_excluded_evidence"))}</dt><dd>${this._escape(excluded === null ? this._panelText("common.unknown") : this._formatNumber(excluded))}</dd></div>
+          <div><dt>${this._escape(this._panelText("nilm_workspace.quality_longest_gap"))}</dt><dd>${this._escape(longestGap === null ? this._panelText("common.unknown") : this._nilmFormatQuantity(longestGap, "s"))}</dd></div>
+        </dl>
+        <p class="muted">${this._escape(this._panelText(row && row.retention_truncated ? "nilm_workspace.quality_retention_truncated" : "nilm_workspace.quality_retention_complete"))}</p>
+      </details>
+    </article>`;
+  }
+
+  _renderNilmKnownLoadAttribution(record) {
+    const knownLoads = Array.isArray(record && record.known_load_labels)
+      ? record.known_load_labels.filter(Boolean).slice(0, 8)
+      : Array.isArray(record && record.known_circuit_ids)
+        ? record.known_circuit_ids.filter(Boolean).slice(0, 8)
+        : [];
+    const offsets = Array.isArray(record && record.time_offsets_s)
+      ? record.time_offsets_s.map((value) => this._nilmFormatQuantity(value, "s")).join(", ")
+      : "";
+    const topology = Array.isArray(record && record.topology_statuses)
+      ? record.topology_statuses.filter(Boolean).map((value) => this._nilmTopologyLabel(value)).join(", ")
+      : "";
+    const rejected = Array.isArray(record && record.rejected_candidate_summaries)
+      ? record.rejected_candidate_summaries.slice(0, 4)
+      : [];
+    const scoreRows = [
+      ["attribution_magnitude_score", record && record.magnitude_score],
+      ["attribution_time_score", record && record.time_score],
+      ["attribution_topology_score", record && record.topology_score],
+      ["attribution_total_score", record && record.total_score],
+    ].filter(([, value]) => this._nilmFiniteNumber(value) !== null);
+    return `<article class="nilm-known-load-attribution" data-nilm-known-load-attribution="${this._escape(String(record && record.attribution_id || ""))}">
+      <h4>${this._escape(this._formatDateTime(record && record.timestamp))}</h4>
+      <dl class="nilm-evidence-facts">
+        <div><dt>${this._escape(this._panelText("nilm_workspace.attribution_aggregate_change"))}</dt><dd>${this._escape(this._nilmSignedWatts(record && record.aggregate_delta_w))}</dd></div>
+        <div><dt>${this._escape(this._panelText("nilm_workspace.attribution_known_explanation"))}</dt><dd>${this._escape(`${this._nilmSignedWatts(record && record.explained_delta_w)} — ${knownLoads.join(" · ") || this._panelText("nilm_workspace.attribution_no_known_explanation")}`)}</dd></div>
+        <div><dt>${this._escape(this._panelText("nilm_workspace.attribution_residual"))}</dt><dd>${this._escape(this._nilmSignedWatts(record && record.residual_delta_w))}</dd></div>
+        <div><dt>${this._escape(this._panelText("nilm_workspace.attribution_selection"))}</dt><dd>${this._escape(this._nilmSelectionMethodLabel(record && record.selection_method))}</dd></div>
+      </dl>
+      <p class="muted nilm-conservation-check" data-nilm-conservation-check>${this._escape(this._panelTextFormat("nilm_workspace.attribution_conservation", {
+        aggregate: this._nilmSignedWatts(record && record.aggregate_delta_w),
+        explained: this._nilmSignedWatts(record && record.explained_delta_w),
+        residual: this._nilmSignedWatts(record && record.residual_delta_w),
+      }))}</p>
+      <details>
+        <summary>${this._escape(this._panelText("nilm_workspace.attribution_details"))}</summary>
+        ${offsets ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.attribution_time_offset", { offsets }))}</p>` : ""}
+        ${topology ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.attribution_topology", { topology }))}</p>` : ""}
+        ${record && record.compound ? `<p class="muted">${this._escape(this._panelText("nilm_workspace.attribution_compound"))}</p>` : ""}
+        ${scoreRows.length ? `<dl class="nilm-evidence-facts nilm-evidence-details-list">${scoreRows.map(([label, value]) => `<div><dt>${this._escape(this._panelText(`nilm_workspace.${label}`))}</dt><dd>${this._escape(this._formatNumber(value))}</dd></div>`).join("")}</dl>` : ""}
+        ${rejected.length ? `<ul class="nilm-rejected-candidates">${rejected.map((candidate) => `<li>${this._escape(this._panelTextFormat("nilm_workspace.attribution_rejected_candidate", {
+          candidate: candidate.known_circuit_id || this._panelText("common.unknown"),
+          reason: this._nilmTopologyLabel(candidate.topology_status || candidate.selection_status),
+        }))}</li>`).join("")}</ul>` : ""}
+      </details>
+    </article>`;
+  }
+
+  _renderNilmEvidenceDetails(workspace) {
+    const quality = (Array.isArray(workspace && workspace.signatures) ? workspace.signatures : [])
+      .slice(0, 20)
+      .map((signature) => ({
+        label: signature.display_label || signature.signature_id || this._panelText("common.unknown"),
+        rows: Array.isArray(signature.estimate_quality) ? signature.estimate_quality.slice(0, 3) : [],
+      }))
+      .filter((item) => item.rows.length);
+    const attributions = (Array.isArray(workspace && workspace.known_load_attributions)
+      ? workspace.known_load_attributions
+      : []).slice(0, 20);
+    if (!quality.length && !attributions.length) return "";
+    return `<section class="workspace-section section-surface nilm-evidence-section" data-nilm-evidence-section>
+      <details class="nilm-evidence-details" data-nilm-evidence-details>
+        <summary>${this._escape(this._panelText("nilm_workspace.evidence_quality_title"))}</summary>
+        <p class="muted">${this._escape(this._panelText("nilm_workspace.evidence_quality_summary"))}</p>
+        ${quality.map((item) => `<section class="nilm-estimate-quality" data-nilm-estimate-quality>
+          <h3>${this._escape(this._panelTextFormat("nilm_workspace.quality_for", { name: item.label }))}</h3>
+          <div class="nilm-estimate-quality-rows">${item.rows.map((row) => this._renderNilmEstimateQualityRow(row)).join("")}</div>
+        </section>`).join("")}
+        ${attributions.length ? `<section class="nilm-known-load-attributions" data-nilm-known-load-attributions>
+          <h3>${this._escape(this._panelText("nilm_workspace.attribution_title"))}</h3>
+          ${attributions.map((record) => this._renderNilmKnownLoadAttribution(record)).join("")}
+        </section>` : ""}
+      </details>
     </section>`;
   }
 
@@ -3216,6 +3571,27 @@ export function createNilmWorkspaceMethods({
     return null;
   }
 
+  _renderNilmSessionPagination(workspace) {
+    const meta = this._nilmSessionCollectionMeta(workspace);
+    const shown = Array.isArray(workspace && workspace.sessions)
+      ? workspace.sessions.length
+      : 0;
+    if (!meta.totalCount && !meta.nextCursor) return "";
+    const summary = this._panelTextFormat("nilm_workspace.sessions_showing", {
+      shown: Math.min(shown, meta.totalCount),
+      total: meta.totalCount,
+    });
+    const loadMore = meta.nextCursor
+      ? `<button type="button" class="secondary" data-nilm-load-more-sessions ${this._nilmSessionPageLoading ? "disabled" : ""}>${this._escape(this._panelText("nilm_workspace.sessions_load_more"))}</button>`
+      : "";
+    return `<div class="nilm-session-pagination" data-nilm-session-pagination>
+      <p class="muted" data-nilm-session-page-status>${this._escape(summary)}</p>
+      <p class="sr-only" data-nilm-session-page-live aria-live="polite" aria-atomic="true">${this._escape(this._nilmSessionPageLiveMessage || this._nilmSessionPageError || "")}</p>
+      ${this._nilmSessionPageError ? `<p class="muted" data-nilm-session-page-error>${this._escape(this._nilmSessionPageError)}</p>` : ""}
+      ${loadMore}
+    </div>`;
+  }
+
   _renderNilmSecondaryCollections(workspace) {
     const unassignedSessions = (Array.isArray(workspace.sessions) ? workspace.sessions : [])
       .map((item, index) => ({ ...item, workspace_index: index }))
@@ -3257,6 +3633,7 @@ export function createNilmWorkspaceMethods({
           </div>` : ""}
         </div>
       `, this._panelText("nilm_workspace.sessions_description"))}
+        ${this._renderNilmSessionPagination(workspace)}
         ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.edges_title"), workspace.edges, this._panelText("nilm_workspace.edges_empty"), (item) => `
         <div class="metric">
           <span>${this._escape(item.timestamp || "")}</span>
@@ -3321,22 +3698,222 @@ export function createNilmWorkspaceMethods({
     this._nilmSyncHelperSelection(workspace);
   }
 
-  async _focusNilmRouteTarget(workspace, routeKey) {
+  _nilmRouteItemTarget(routeKey) {
     const params = new URL(routeKey, window.location.origin).searchParams;
-    const candidates = [
-      ["interval", "interval_id", workspace.label_intervals || [], "interval_id"],
-      ["session", "session_id", workspace.sessions || [], "session_id"],
-      ["assignment", "assignment_id", workspace.assignments || [], "assignment_id"],
-    ];
-    for (const [kind, parameter, items, idKey] of candidates) {
-      const id = params.get(parameter) || "";
-      const index = id ? items.findIndex((item) => item[idKey] === id) : -1;
-      if (index < 0) continue;
-      const reviewItem = { kind, item: items[index], index };
-      this._selectNilmReviewItemForFocus(workspace, reviewItem);
-      return this._focusNilmReviewItem(reviewItem, { scroll: false });
+    const validKinds = new Set([
+      "session",
+      "ambiguous_session",
+      "label_interval",
+      "assignment",
+      "signature",
+      "known_load_attribution",
+    ]);
+    const explicitKind = String(
+      params.get("nilm_item_kind") || params.get("item_kind") || "",
+    ).trim().toLowerCase();
+    const explicitId = String(
+      params.get("nilm_item_id") || params.get("item_id") || "",
+    ).trim();
+    if (validKinds.has(explicitKind) && explicitId) {
+      return { kind: explicitKind, id: explicitId };
     }
-    return false;
+    const candidates = [
+      ["label_interval", "interval_id"],
+      ["session", "session_id"],
+      ["ambiguous_session", "ambiguous_session_id"],
+      ["assignment", "assignment_id"],
+      ["signature", "signature_id"],
+      ["known_load_attribution", "known_load_attribution_id"],
+    ];
+    for (const [kind, parameter] of candidates) {
+      const id = String(params.get(parameter) || "").trim();
+      if (id) return { kind, id };
+    }
+    return null;
+  }
+
+  _nilmWorkspaceItemRequestPaths(target, routeKey) {
+    const routeUrl = new URL(routeKey, window.location.origin);
+    const workspaceCircuitId = this._nilmWorkspace?.circuit?.circuit_id;
+    const payloadCircuitId = this._payload?.circuit?.circuit_id;
+    const circuitId = workspaceCircuitId || payloadCircuitId || routeUrl.searchParams.get("circuit_id") || "";
+    const entryId = routeUrl.searchParams.get("entry_id") || "";
+    const params = new URLSearchParams({ kind: target.kind, id: target.id });
+    if (circuitId) params.set("circuit_id", circuitId);
+    if (entryId) params.set("entry_id", entryId);
+    const fetchPath = `${NILM_WORKSPACE_ITEM_API_PATH}?${params.toString()}`;
+    return {
+      apiPath: fetchPath.replace(/^\/api\//, ""),
+      fetchPath,
+    };
+  }
+
+  _isCurrentNilmWorkspaceItemRequest(token, requestId, routeKey) {
+    return token === this._nilmWorkspaceItemRequestToken
+      && this._isCurrentRequest(requestId, routeKey);
+  }
+
+  _nilmLoadedRouteItem(workspace, target) {
+    if (target.kind === "ambiguous_session") {
+      const item = this._nilmAmbiguityAuditItem(target.id);
+      return item ? { kind: "ambiguous_session", item, index: -1 } : null;
+    }
+    const collections = {
+      session: ["sessions", "session_id", "session"],
+      label_interval: ["label_intervals", "interval_id", "interval"],
+      assignment: ["assignments", "assignment_id", "assignment"],
+      signature: ["signatures", "signature_id", "signature"],
+      known_load_attribution: ["known_load_attributions", "attribution_id", "known_load_attribution"],
+    };
+    const definition = collections[target.kind];
+    if (!definition) return null;
+    const [collection, idKey, reviewKind] = definition;
+    const items = Array.isArray(workspace && workspace[collection]) ? workspace[collection] : [];
+    const index = items.findIndex((item) => String(item && item[idKey] || "") === target.id);
+    if (index < 0) return null;
+    const item = items[index];
+    if (target.kind === "session" && (!item.end || item.ambiguous)) return null;
+    return { kind: reviewKind, item, index };
+  }
+
+  async _fetchNilmWorkspaceExactItem(target, requestId, routeKey) {
+    const token = (this._nilmWorkspaceItemRequestToken || 0) + 1;
+    this._nilmWorkspaceItemRequestToken = token;
+    this._nilmRouteItemError = "";
+    const { apiPath, fetchPath } = this._nilmWorkspaceItemRequestPaths(target, routeKey);
+    try {
+      const payload = await this._requestJson(apiPath, fetchPath);
+      if (!this._isCurrentNilmWorkspaceItemRequest(token, requestId, routeKey)) {
+        return null;
+      }
+      if (!payload || !["ok", "retired"].includes(payload.status) || !payload.item) {
+        this._nilmRouteItemError = this._panelTextFormat(
+          "nilm_workspace.deep_link_not_found",
+          { item: this._friendlyFeature(target.kind) },
+        );
+        this._render();
+        return null;
+      }
+      return payload;
+    } catch (_error) {
+      if (!this._isCurrentNilmWorkspaceItemRequest(token, requestId, routeKey)) {
+        return null;
+      }
+      this._nilmRouteItemError = this._panelText("nilm_workspace.deep_link_load_failed");
+      this._render();
+      return null;
+    }
+  }
+
+  async _focusNilmExactItem(payload, target) {
+    const item = payload && payload.item;
+    if (!item) return false;
+    if (target.kind === "ambiguous_session") {
+      return this._focusNilmAmbiguityOccurrence(
+        this._showNilmExactAmbiguityItem(item),
+        { scroll: false },
+      );
+    }
+    if (target.kind === "known_load_attribution") {
+      return this._focusNilmExactItemRange(payload.focus, item);
+    }
+    const reviewKind = target.kind === "label_interval" ? "interval" : target.kind;
+    const reviewItem = { kind: reviewKind, item, index: -1 };
+    const focused = await this._focusNilmReviewItem(reviewItem, { scroll: false });
+    return focused || this._focusNilmExactItemRange(payload.focus, item);
+  }
+
+  async _focusNilmExactItemRange(focus, fallback) {
+    const interval = { ...fallback, ...(focus || {}) };
+    const start = Date.parse(interval.start || "");
+    const end = Date.parse(interval.end || "");
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return false;
+    this._beginNilmGraphIntent();
+    this._nilmFocusedSignature = "";
+    this._nilmFocusedOccurrenceIndex = -1;
+    this._nilmFocusedInterval = null;
+    return this._loadNilmIntervalOnGraph(interval, {
+      clearSignature: true,
+      edit: false,
+      scroll: false,
+    });
+  }
+
+  _showNilmExactAmbiguityItem(item) {
+    const sessionId = String(item && item.session_id || "").trim();
+    if (!sessionId) return item;
+    const auditItem = {
+      ...item,
+      // Do not trust a stale or malformed exact-item payload to surface an
+      // editor action. Deep links deliberately retain graph-only audit access.
+      safe_actions: ["open_on_graph"],
+    };
+    const groupId = String(auditItem.group_id || `exact-${sessionId}`).trim();
+    auditItem.group_id = groupId;
+    const groups = new Map(this._nilmAmbiguityAuditGroupSummaries || []);
+    if (!this._nilmAmbiguityAuditGroup(this._nilmAmbiguityAudit(), groupId)) {
+      const candidateLabels = Array.isArray(auditItem.candidate_explanations)
+        ? auditItem.candidate_explanations
+          .map((candidate) => candidate?.display_label || candidate?.assignment_id || candidate?.signature_fingerprint)
+          .filter(Boolean)
+          .slice(0, 3)
+        : [];
+      groups.set(groupId, {
+        group_id: groupId,
+        occurrence_count: 1,
+        latest_at: auditItem.start || auditItem.end || "",
+        candidate_labels: candidateLabels,
+        category: auditItem.ambiguity_category || "other",
+      });
+    }
+    this._nilmAmbiguityAuditGroupSummaries = groups;
+    this._nilmAmbiguityAuditExpanded = true;
+    this._nilmAmbiguityAuditExpandedGroups = new Set([
+      ...(this._nilmAmbiguityAuditExpandedGroups || []),
+      groupId,
+    ]);
+    const results = new Map(this._nilmAmbiguityAuditGroupResults || []);
+    const prior = results.get(groupId) || {};
+    const priorItems = Array.isArray(prior.items) ? prior.items : [];
+    results.set(groupId, {
+      ...prior,
+      fetched: true,
+      loading: false,
+      error: "",
+      items: [
+        auditItem,
+        ...priorItems.filter((candidate) => String(candidate?.session_id || "") !== sessionId),
+      ],
+    });
+    this._nilmAmbiguityAuditGroupResults = results;
+    this._render();
+    return auditItem;
+  }
+
+  async _focusNilmRouteTarget(workspace, routeKey) {
+    const target = this._nilmRouteItemTarget(routeKey);
+    if (!target) return false;
+    const loaded = this._nilmLoadedRouteItem(workspace, target);
+    if (loaded) {
+      if (loaded.kind === "ambiguous_session") {
+        return this._focusNilmAmbiguityOccurrence(
+          this._showNilmExactAmbiguityItem(loaded.item),
+          { scroll: false },
+        );
+      }
+      if (loaded.kind !== "known_load_attribution") {
+        this._selectNilmReviewItemForFocus(workspace, loaded);
+        return this._focusNilmReviewItem(loaded, { scroll: false });
+      }
+      return this._focusNilmExactItemRange(null, loaded.item);
+    }
+    const payload = await this._fetchNilmWorkspaceExactItem(
+      target,
+      this._evidenceRequestId,
+      routeKey,
+    );
+    if (!payload) return false;
+    return this._focusNilmExactItem(payload, target);
   }
 
   _nilmPowerPercent(reviewItem, reviewItems) {
@@ -3817,15 +4394,87 @@ export function createNilmWorkspaceMethods({
 
   _renderNilmIntervalEvidence(evidence) {
     if (!evidence) return "";
+    const metric = (label, value, unit = "", formatter = null) => {
+      const number = this._nilmFiniteNumber(value);
+      if (number === null) return null;
+      const formatted = formatter ? formatter(number) : `${this._formatNumber(number)}${unit ? ` ${unit}` : ""}`;
+      return `${this._panelText(`nilm_workspace.${label}`)}: ${formatted}`;
+    };
+    const measuredEnergy = this._nilmFiniteNumber(evidence.measured_energy_kwh);
+    const energyValue = measuredEnergy === null
+      ? evidence.partial_energy_kwh ?? evidence.estimated_energy_kwh
+      : evidence.measured_energy_kwh;
+    const energyLabel = measuredEnergy === null
+      ? "interval_estimated_energy"
+      : "interval_measured_energy";
+    const startEligible = evidence.start_transition_eligible;
+    const stopEligible = evidence.stop_transition_eligible;
+    const boundaryQuality = typeof startEligible === "boolean" || typeof stopEligible === "boolean"
+      ? startEligible && stopEligible
+        ? this._panelText("nilm_workspace.interval_quality_good")
+        : !startEligible && !stopEligible
+          ? this._panelText("nilm_workspace.interval_quality_both_uncertain")
+          : startEligible
+            ? this._panelText("nilm_workspace.interval_quality_stop_uncertain")
+            : this._panelText("nilm_workspace.interval_quality_start_uncertain")
+      : "";
+    const interiorTransitions = this._nilmFiniteNumber(evidence.interior_transition_count);
     const metrics = [
-      ["Start", evidence.start_transition_w, "W"], ["Stop", evidence.stop_transition_w, "W"],
-      ["Average", evidence.average_power_w, "W"], ["Median", evidence.median_power_w, "W"],
-      [Number.isFinite(Number(evidence.measured_energy_kwh)) ? "Measured energy" : "Partial energy", evidence.measured_energy_kwh ?? evidence.partial_energy_kwh, "kWh"],
-      ["Source coverage", evidence.source_coverage, ""], ["Power coverage", evidence.power_coverage, ""],
-    ].filter(([, value]) => Number.isFinite(Number(value)));
-    const warnings = Array.isArray(evidence.quality_flags) && evidence.quality_flags.length
-      ? `<p class="muted">Quality: ${this._escape(evidence.quality_flags.join(", "))}</p>` : "";
-    return `<div class="muted" data-nilm-interval-evidence>${metrics.map(([label, value, unit]) => `${this._escape(label)}: ${this._escape(this._formatNumber(value))}${unit ? ` ${unit}` : ""}`).join(" · ")}${warnings}</div>`;
+      metric("interval_start_transition", evidence.start_transition_w, "W"),
+      metric("interval_stop_transition", evidence.stop_transition_w, "W"),
+      metric("interval_average_power", evidence.average_power_w, "W"),
+      metric("interval_median_power", evidence.median_power_w, "W"),
+      metric(energyLabel, energyValue, "kWh"),
+      metric("interval_source_coverage", evidence.source_coverage, "", (value) => this._nilmFormatPercent(value)),
+      metric("interval_power_coverage", evidence.power_coverage, "", (value) => this._nilmFormatPercent(value)),
+      metric("interval_source_skew", evidence.source_skew_seconds, "s"),
+      boundaryQuality
+        ? `${this._panelText("nilm_workspace.interval_boundary_quality")}: ${boundaryQuality}`
+        : null,
+      interiorTransitions === null
+        ? null
+        : `${this._panelText("nilm_workspace.interval_interior_transitions")}: ${this._formatNumber(interiorTransitions)}`,
+    ].filter(Boolean);
+    const qualityFlags = Array.isArray(evidence.quality_flags)
+      ? evidence.quality_flags.map((flag) => this._nilmIntervalQualityMessage(flag))
+      : [];
+    const qualityText = qualityFlags.map((item) => item.text).filter(Boolean);
+    const warnings = qualityText.length
+      ? `<div class="nilm-interval-quality" data-nilm-interval-quality><strong>${this._escape(this._panelText("nilm_workspace.interval_quality"))}:</strong> ${qualityFlags.map((item) => `<span class="nilm-interval-quality-chip nilm-interval-quality-${this._escape(item.severity)}">${this._escape(item.text)}</span>`).join("")}</div>
+        <details><summary>${this._escape(this._panelText("nilm_workspace.interval_quality_raw_details"))}</summary><p class="muted">${this._escape((evidence.quality_flags || []).join(", "))}</p></details>`
+      : "";
+    const summary = this._panelTextFormat("nilm_workspace.interval_evidence_summary", {
+      metrics: metrics.join(" · ") || this._panelText("common.unknown"),
+      quality: qualityText.join(" · ") || this._panelText("nilm_workspace.interval_quality_good"),
+    });
+    return `<div class="muted" data-nilm-interval-evidence role="status" aria-live="polite" aria-label="${this._escape(summary)}">${metrics.map((value) => this._escape(value)).join(" · ")}${warnings}</div>`;
+  }
+
+  _nilmIntervalQualityMessage(flag) {
+    const code = String(flag || "").trim().toLowerCase();
+    const messages = {
+      complete: ["interval_quality_good", "informational"],
+      stable_plateau: ["interval_quality_good", "informational"],
+      start_uncertain: ["interval_quality_start_uncertain", "caution"],
+      start_transition_ineligible: ["interval_quality_start_uncertain", "caution"],
+      stop_transition_ineligible: ["interval_quality_stop_uncertain", "caution"],
+      interior_transition_present: ["interval_quality_interior_transition", "caution"],
+      multiple_load_changes: ["interval_quality_interior_transition", "blocking"],
+      incomplete_power_coverage: ["interval_quality_power_incomplete", "caution"],
+      power_gap: ["interval_quality_power_gap", "caution"],
+      long_power_gap: ["interval_quality_power_gap", "caution"],
+      missing_source: ["interval_quality_source_unavailable", "blocking"],
+      stale_source: ["interval_quality_source_stale", "caution"],
+      source_skew_exceeded: ["interval_quality_source_skew", "caution"],
+      baseline_unavailable: ["interval_quality_baseline_unavailable", "caution"],
+      one_sided_baseline: ["interval_quality_one_sided_baseline", "caution"],
+      material_negative_net_power: ["interval_quality_material_negative", "blocking"],
+      material_negative_power: ["interval_quality_material_negative", "blocking"],
+      negative_power_clipped: ["interval_quality_negative_clipped", "caution"],
+      unknown_gap_bridged: ["interval_quality_unknown_gap", "caution"],
+    };
+    const [key, severity] = messages[code] || ["interval_quality_additional_detail", "informational"];
+    return { text: this._panelText(`nilm_workspace.${key}`), severity };
   }
 
   _renderNilmSessionAssignField(session, index) {

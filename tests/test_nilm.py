@@ -24,6 +24,7 @@ from custom_components.circuitsetup_energy_analyzer.nilm import (
     classify_signature,
     cluster_recurring_signatures,
     discover_nilm_helper_candidates,
+    known_load_attribution_records,
     mask_known_loads,
     nilm_assignment_model_is_compound_eligible,
     nilm_helper_candidate_to_dict,
@@ -3793,6 +3794,64 @@ def test_attribute_known_loads_transition_delta_conserves_residual() -> None:
     assert dict(event.features) == features
 
 
+def test_known_load_attribution_records_are_stable_conserving_and_non_misleading(
+) -> None:
+    aggregate = edge(10, 1200.0, split_phase_type="single_leg_a")
+    matched_event = CircuitEvent(
+        timestamp=aggregate.timestamp,
+        circuit_id="dryer",
+        event_type=EventType.START,
+        features={"startup_power_w": 1000.0},
+    )
+    matched = attribute_known_loads(
+        [aggregate],
+        [matched_event],
+        residual_min_delta_w=100.0,
+        topology_by_circuit={
+            "dryer": nilm_domain.KnownLoadTopology(("single_leg_a",))
+        },
+    )
+
+    first = known_load_attribution_records([aggregate], matched)
+    second = known_load_attribution_records([aggregate], matched)
+
+    assert first == second
+    assert len(first) == 1
+    record = first[0]
+    assert record.attribution_id.startswith("nilm-known-load-attribution:v1|")
+    assert record.aggregate_edge_id == nilm_domain._nilm_edge_id(aggregate)
+    assert record.aggregate_delta_w == (
+        record.explained_delta_w + record.residual_delta_w
+    )
+    assert record.known_circuit_ids == ("dryer",)
+    assert record.selection_method == "global_assignment"
+    assert record.residual_edge_id is not None
+    assert record.ambiguity_status == "matched"
+
+    rejected = attribute_known_loads(
+        [aggregate],
+        [matched_event],
+        topology_by_circuit={
+            "dryer": nilm_domain.KnownLoadTopology(("balanced_240v",))
+        },
+    )
+    rejected_record = known_load_attribution_records([aggregate], rejected)[0]
+
+    assert rejected_record.aggregate_delta_w == (
+        rejected_record.explained_delta_w + rejected_record.residual_delta_w
+    )
+    assert rejected_record.known_circuit_ids == ()
+    assert rejected_record.selection_method == "unattributed"
+    assert rejected_record.ambiguity_status == "topology_rejected"
+    assert rejected_record.rejected_candidate_summaries == (
+        {
+            "known_circuit_id": "dryer",
+            "topology_status": "topology_mismatch",
+            "selection_status": "rejected_topology",
+        },
+    )
+
+
 @pytest.mark.parametrize(
     ("aggregate_delta_w", "transition_delta_w", "expected_residual_w"),
     ((120.0, 100.0, 20.0), (-120.0, -100.0, -20.0)),
@@ -4064,6 +4123,12 @@ def test_attribute_known_loads_matches_bounded_compound_known_events() -> None:
     assert match.explained_delta_w == 1200.0
     assert match.residual_edge is None
     assert match.selection_method == "compound"
+    assert len(match.time_offsets_seconds) == 2
+    assert len(match.topology_statuses) == 2
+
+    record = known_load_attribution_records([aggregate], result)[0]
+    assert record.time_offsets_s == match.time_offsets_seconds
+    assert record.topology_statuses == match.topology_statuses
 
 
 def test_known_load_attribution_prefers_exact_compound_over_weaker_single_match() -> (

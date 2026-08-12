@@ -296,6 +296,18 @@ def test_store_persistence_manager_owns_retention_helper_behavior() -> None:
                 {"session_id": "fresh", "end": "2026-06-30T12:00:00+00:00"},
             ],
         },
+        nilm_known_load_attributions_by_circuit={
+            "mains": [
+                {
+                    "attribution_id": "stale",
+                    "timestamp": "2026-05-01T12:00:00+00:00",
+                },
+                {
+                    "attribution_id": "fresh",
+                    "timestamp": "2026-06-30T12:00:00+00:00",
+                },
+            ],
+        },
     )
     coordinator = SimpleNamespace(store_data=store_data)
     manager = StorePersistenceManager(
@@ -325,4 +337,10 @@ def test_store_persistence_manager_owns_retention_helper_behavior() -> None:
     ]
     assert store_data.nilm_session_history_by_circuit["mains"] == [
         {"session_id": "fresh", "end": "2026-06-30T12:00:00+00:00"},
+    ]
+    assert store_data.nilm_known_load_attributions_by_circuit["mains"] == [
+        {
+            "attribution_id": "fresh",
+            "timestamp": "2026-06-30T12:00:00+00:00",
+        },
     ]

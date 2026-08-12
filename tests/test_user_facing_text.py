@@ -4098,6 +4098,206 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
     )
 
 
+def test_nilm_evidence_quality_pagination_and_deep_links_are_bounded() -> None:
+    _run_panel_node_script(
+        r'''
+(async () => {
+  const quality = [{
+    window: "today",
+    status: "complete",
+    runtime_minutes: 0,
+    energy_kwh: 0,
+    included_session_count: 0,
+    excluded_session_count: 0,
+    energy_source: "measured",
+    power_coverage: 0,
+    requested_start: "2026-08-12T00:00:00Z",
+    requested_end: "2026-08-12T12:00:00Z",
+    coverage_start: "2026-08-12T04:00:00Z",
+    coverage_end: "2026-08-12T12:00:00Z",
+    coverage_days: 0.333,
+    longest_trace_gap_seconds: 0,
+    retention_truncated: false,
+  }];
+  const attribution = {
+    attribution_id: "attribution-1",
+    timestamp: "2026-08-12T12:00:00Z",
+    aggregate_delta_w: 1204,
+    explained_delta_w: 1006,
+    residual_delta_w: 198,
+    known_circuit_ids: ["dryer"],
+    known_load_labels: ["Clothes dryer"],
+    selection_method: "global_assignment",
+    compound: false,
+    time_offsets_s: [1.8],
+    topology_statuses: ["consistent"],
+    rejected_candidate_summaries: [{
+      known_circuit_id: "pool_pump",
+      topology_status: "rejected",
+      selection_status: "rejected",
+    }],
+  };
+  const workspace = makeWorkspace({
+    circuit: { circuit_id: "mains" },
+    signatures: [{ signature_id: "signature-1", display_label: "Dryer", estimate_quality: quality }],
+    known_load_attributions: [attribution],
+    sessions: [{
+      session_id: "new-session",
+      start: "2026-08-12T12:00:00Z",
+      end: "2026-08-12T12:05:00Z",
+    }],
+    collection_meta: {
+      sessions: { total_count: 2, returned_count: 1, truncated: true, next_cursor: "cursor-1" },
+    },
+  });
+  const panel = makePanel({ _nilmWorkspace: workspace });
+  const evidence = panel._renderNilmEvidenceDetails(workspace);
+  assert.ok(evidence.includes('data-nilm-evidence-details'));
+  assert.ok(evidence.includes("Today"));
+  assert.ok(evidence.includes("Complete"));
+  assert.ok(evidence.includes("0 kWh"));
+  assert.ok(evidence.includes("0%"));
+  assert.ok(evidence.includes("Aggregate change"));
+  assert.ok(evidence.includes("+1,204 W"));
+  assert.ok(evidence.includes("Clothes dryer"));
+  assert.ok(evidence.includes("Residual retained"));
+  assert.ok(evidence.includes("Rejected candidate"));
+  assert.ok(evidence.includes("Global assignment"));
+  assert.ok(evidence.includes("Consistent"));
+  assert.ok(evidence.includes("Topology rejected"));
+  assert.ok(evidence.includes("Requested range"));
+  assert.ok(evidence.includes("Actual retained coverage range"));
+  const intervalEvidence = panel._renderNilmIntervalEvidence({
+    average_power_w: 0,
+    source_coverage: 0.92,
+    power_coverage: 0,
+    start_transition_eligible: true,
+    stop_transition_eligible: false,
+    interior_transition_count: 2,
+    quality_flags: ["start_uncertain"],
+  });
+  assert.ok(intervalEvidence.includes("Average power: 0 W"));
+  assert.ok(intervalEvidence.includes("Source coverage: 92%"));
+  assert.ok(intervalEvidence.includes("Power coverage: 0%"));
+  assert.ok(intervalEvidence.includes("Start transition uncertain"));
+  assert.ok(intervalEvidence.includes("Boundary quality: Stop transition uncertain"));
+  assert.ok(intervalEvidence.includes("Interior transitions: 2"));
+
+  context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+  panel._evidenceRequestId = 3;
+  panel._loadedRouteKey = "/panel?nilm_workspace=1&circuit_id=mains";
+  panel._render = () => {};
+  const calls = [];
+  panel._requestJson = async (apiPath, fetchPath) => {
+    calls.push({ apiPath, fetchPath });
+    return {
+      status: "ok",
+      items: [{
+        session_id: "older-session",
+        start: "2026-08-12T10:00:00Z",
+        end: "2026-08-12T10:05:00Z",
+      }],
+      total_count: 2,
+      returned_count: 1,
+      truncated: false,
+      next_cursor: null,
+    };
+  };
+  await panel._loadMoreNilmSessions();
+  assert.equal(
+    panel._nilmWorkspace.sessions.map((item) => item.session_id).join(","),
+    "new-session,older-session",
+  );
+  assert.ok(calls[0].fetchPath.includes("collection=sessions"));
+  assert.ok(calls[0].fetchPath.includes("cursor=cursor-1"));
+
+  const deepLinkWorkspace = makeWorkspace({
+    circuit: { circuit_id: "mains" },
+    sessions: workspace.sessions.slice(0, 1),
+  });
+  context.window.location.search = "?nilm_workspace=1&circuit_id=mains&session_id=older-session";
+  const deepLinkPanel = makePanel({
+    _nilmWorkspace: deepLinkWorkspace,
+    _evidenceRequestId: 4,
+    _loadedRouteKey: "/panel?nilm_workspace=1&circuit_id=mains&session_id=older-session",
+  });
+  deepLinkPanel._render = () => {};
+  let focused = null;
+  deepLinkPanel._focusNilmReviewItem = async (item) => {
+    focused = item;
+    return true;
+  };
+  deepLinkPanel._requestJson = async (apiPath, fetchPath) => {
+    calls.push({ apiPath, fetchPath });
+    return {
+      status: "ok",
+      kind: "session",
+      item: {
+        session_id: "older-session",
+        start: "2026-08-12T10:00:00Z",
+        end: "2026-08-12T10:05:00Z",
+      },
+      focus: { start: "2026-08-12T10:00:00Z", end: "2026-08-12T10:05:00Z" },
+      safe_actions: [],
+    };
+  };
+  assert.equal(await deepLinkPanel._focusNilmRouteTarget(
+    deepLinkWorkspace,
+    deepLinkPanel._loadedRouteKey,
+  ), true);
+  assert.equal(focused.item.session_id, "older-session");
+  assert.equal(deepLinkWorkspace.sessions.length, 1);
+  assert.ok(calls.at(-1).fetchPath.includes("nilm_workspace/item"));
+
+  context.window.location.search = "?nilm_workspace=1&circuit_id=mains&ambiguous_session_id=ambiguous-1";
+  const ambiguousPanel = makePanel({
+    _nilmWorkspace: makeWorkspace({
+      circuit: { circuit_id: "mains" },
+      ambiguity_audit: {
+        total_count: 1,
+        fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace/collections?collection=ambiguous_sessions&circuit_id=mains",
+        group_preview: [],
+      },
+    }),
+    _nilmActiveLane: "needs_review",
+    _evidenceRequestId: 5,
+    _loadedRouteKey: "/panel?nilm_workspace=1&circuit_id=mains&ambiguous_session_id=ambiguous-1",
+  });
+  ambiguousPanel._render = () => {};
+  let ambiguityFocused = null;
+  ambiguousPanel._focusNilmAmbiguityOccurrence = async (item) => {
+    ambiguityFocused = item;
+    return true;
+  };
+  ambiguousPanel._requestJson = async () => ({
+    status: "ok",
+    kind: "ambiguous_session",
+    item: {
+      session_id: "ambiguous-1",
+      group_id: "ambiguous-group-1",
+      start: "2026-08-12T09:00:00Z",
+      end: "2026-08-12T09:05:00Z",
+      safe_actions: ["open_on_graph", "create_manual_interval"],
+    },
+    focus: { start: "2026-08-12T09:00:00Z", end: "2026-08-12T09:05:00Z" },
+    safe_actions: ["open_on_graph"],
+  });
+  assert.equal(await ambiguousPanel._focusNilmRouteTarget(
+    ambiguousPanel._nilmWorkspace,
+    ambiguousPanel._loadedRouteKey,
+  ), true);
+  assert.equal(ambiguityFocused.session_id, "ambiguous-1");
+  assert.equal(ambiguousPanel._nilmActiveLane, "needs_review");
+  assert.equal(ambiguousPanel._nilmWorkspace.sessions.length, 0);
+  const auditHtml = ambiguousPanel._renderNilmAmbiguityAudit(ambiguousPanel._nilmWorkspace);
+  assert.ok(auditHtml.includes('data-nilm-ambiguity-occurrence="ambiguous-1"'));
+  assert.ok(auditHtml.includes("data-nilm-ambiguity-open-graph"));
+  assert.ok(!auditHtml.includes("data-nilm-ambiguity-create-interval"));
+})();
+'''
+    )
+
+
 def test_nilm_lane_count_badge_respects_radius_limit() -> None:
     asset = _frontend_source()
     start = asset.index(".nilm-lane strong {")
@@ -6409,6 +6609,8 @@ def test_nilm_reference_sensor_controls_and_import_order() -> None:
   assert.ok(!html.includes('data-nilm-reference-input="onThreshold"'));
   assert.ok(html.includes('data-nilm-reference-input="onDwellSeconds"'));
   assert.ok(html.includes("UNKNOWN is neither OFF nor ON"));
+  assert.ok(html.includes("Hysteresis uses different ON and OFF thresholds"));
+  assert.ok(html.includes("prevent guessing across longer missing history"));
   assert.ok(html.includes('data-nilm-reference-import-summary'));
   assert.ok(html.includes("Last import: 3 of 5 intervals imported."));
   assert.ok(html.includes('data-nilm-reference-low-coverage'));
@@ -6872,7 +7074,7 @@ await panel._requestNilmIntervalEvidence(path, 2);
 assert.equal(panel._nilmIntervalEvidence.start_transition_w, 500);
 assert.equal(rendered, 4);
 const html = panel._renderNilmIntervalEvidence(panel._nilmIntervalEvidence);
-for (const text of ["Start: 500 W", "Stop: -490 W", "Average: 480 W", "Median: 475 W", "Partial energy: 0.12 kWh", "Source coverage: 0.9", "Power coverage: 0.8", "Quality: power_gap"]) {
+for (const text of ["Start transition: 500 W", "Stop transition: -490 W", "Average power: 480 W", "Median power: 475 W", "Estimated energy: 0.12 kWh", "Source coverage: 90%", "Power coverage: 80%", "A long gap appears in the power evidence"]) {
   assert.ok(html.includes(text), html);
 }
 })().catch((error) => { console.error(error); process.exit(1); });
