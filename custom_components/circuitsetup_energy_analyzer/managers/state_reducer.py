@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable, Iterable, Mapping, MutableMapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from math import isfinite
+from statistics import median
 from typing import Any
 
 from ..activity_timeline import build_recent_activity_timeline, timeline_payload
 from ..appliance_notifications import mixed_circuit_allows_alert
+from ..models import SensorRole
 from ..processors.base import FeatureResult, StateUpdate
+from ..state import LatestCircuitPowerObservation
 from ..ux import alert_evidence_detail, friendly_feature_name
 
 _CIRCUIT_MODE_LABELS = {
@@ -23,6 +28,8 @@ _POWER_FLOW_LABELS = {
     "generation": "Generation / Solar Export",
     "mains_net": "Mains Net / Import-Export",
 }
+_LATEST_POWER_CADENCE_WINDOW = 8
+_LATEST_POWER_CADENCE_MAX_INTERVAL_SECONDS = 3_600.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +104,10 @@ def apply_state_update(state: Any, path: tuple[str, ...], value: Any) -> None:
 
 class StateReducer:
     """Apply validated state update paths."""
+
+    def __init__(self) -> None:
+        self._latest_power_source_updated_at_by_circuit: dict[str, datetime] = {}
+        self._latest_power_intervals_by_circuit: dict[str, deque[float]] = {}
 
     def apply_update(self, state: Any, path: tuple[str, ...], value: Any) -> None:
         """Apply one validated state update path."""
@@ -251,12 +262,65 @@ class StateReducer:
         config: Any,
         sample: Any,
     ) -> None:
-        """Store the latest normalized watts for lightweight state entities."""
+        """Store legacy watts plus source-aware latest-power evidence."""
         power_w = getattr(sample, "real_power", None)
         if power_w is None:
             state.latest_real_power_w_by_circuit.pop(config.circuit_id, None)
+        else:
+            state.latest_real_power_w_by_circuit[config.circuit_id] = float(power_w)
+
+        observed_at = _latest_power_utc_datetime(getattr(sample, "timestamp", None))
+        if observed_at is None:
+            # Lightweight legacy callers predate normalized source timestamps.
+            # Keep their numeric behavior without fabricating freshness evidence.
             return
-        state.latest_real_power_w_by_circuit[config.circuit_id] = float(power_w)
+        source_updated_at = _latest_power_source_updated_at(sample)
+        available = _latest_power_is_available(power_w)
+        cadence_s, cadence_sample_count = self._latest_power_cadence(
+            config.circuit_id,
+            source_updated_at,
+        )
+        flags = _latest_power_quality_flags(
+            getattr(sample, "quality_issues", ()),
+            available=available,
+            cadence_s=cadence_s,
+            cadence_sample_count=cadence_sample_count,
+        )
+        state.latest_real_power_observation_by_circuit[config.circuit_id] = (
+            LatestCircuitPowerObservation(
+                power_w=float(power_w) if available else None,
+                observed_at=observed_at,
+                source_updated_at=source_updated_at,
+                available=available,
+                expected_cadence_s=cadence_s,
+                quality_flags=flags,
+            )
+        )
+
+    def _latest_power_cadence(
+        self,
+        circuit_id: str,
+        source_updated_at: datetime | None,
+    ) -> tuple[float | None, int]:
+        """Track bounded positive source-update intervals for one circuit."""
+        intervals = self._latest_power_intervals_by_circuit.setdefault(
+            circuit_id,
+            deque(maxlen=_LATEST_POWER_CADENCE_WINDOW),
+        )
+        if source_updated_at is not None:
+            previous = self._latest_power_source_updated_at_by_circuit.get(circuit_id)
+            if previous is not None and source_updated_at > previous:
+                interval_s = (source_updated_at - previous).total_seconds()
+                if 0.0 < interval_s <= _LATEST_POWER_CADENCE_MAX_INTERVAL_SECONDS:
+                    intervals.append(interval_s)
+            if previous is None or source_updated_at > previous:
+                self._latest_power_source_updated_at_by_circuit[circuit_id] = (
+                    source_updated_at
+                )
+        return (
+            (float(median(intervals)) if intervals else None),
+            len(intervals),
+        )
 
     def reset_learning_state(self, state: Any, circuit_id: str) -> None:
         """Reset volatile state when a circuit baseline is relearned."""
@@ -448,6 +512,62 @@ class StateReducer:
         removed_state = _pop_circuit_state(state, circuit_id, (root,))
         removed_store = _pop_circuit_state(store_data, circuit_id, (root,))
         return removed_state or removed_store
+
+
+def _latest_power_utc_datetime(value: Any) -> datetime | None:
+    """Return a UTC instant without treating invalid timestamps as fresh."""
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+        return None
+    return value.astimezone(UTC)
+
+
+def _latest_power_source_updated_at(sample: Any) -> datetime | None:
+    """Read the normalized real-power source timestamp when available."""
+    values = getattr(sample, "source_updated_at_by_role", ())
+    items = values.items() if isinstance(values, Mapping) else values
+    try:
+        for role, timestamp in items:
+            if role is SensorRole.REAL_POWER or role == SensorRole.REAL_POWER.value:
+                return _latest_power_utc_datetime(timestamp)
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+def _latest_power_is_available(power_w: Any) -> bool:
+    """Return whether real power is an explicitly valid current reading."""
+    if isinstance(power_w, bool):
+        return False
+    try:
+        return power_w is not None and isfinite(float(power_w))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
+def _latest_power_quality_flags(
+    raw_flags: Any,
+    *,
+    available: bool,
+    cadence_s: float | None,
+    cadence_sample_count: int,
+) -> tuple[str, ...]:
+    """Keep small deterministic quality evidence with the observation."""
+    flags = {
+        str(flag).strip()
+        for flag in raw_flags
+        if isinstance(flag, str) and str(flag).strip()
+    }
+    if not available:
+        flags.add("real_power_unavailable")
+    if cadence_s is None:
+        flags.add("cadence_fallback")
+    else:
+        flags.add(f"cadence_samples={cadence_sample_count}")
+        if cadence_sample_count < 3:
+            flags.add("cadence_low_evidence")
+    return tuple(sorted(flags))
 
 
 def _observation_payload(observation: Any) -> dict[str, Any]:

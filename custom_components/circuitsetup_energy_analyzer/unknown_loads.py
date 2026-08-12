@@ -38,7 +38,7 @@ NILM_SESSION_HISTORY_COUNT_MAX = 1_000_000
 _NILM_SESSION_HISTORY_TIMESTAMP_LATEST = (
     datetime.max - timedelta(days=30)
 ).replace(tzinfo=UTC)
-_NILM_SESSION_HISTORY_MAX_ROW_FIELDS = 26
+_NILM_SESSION_HISTORY_MAX_ROW_FIELDS = 42
 _NILM_SESSION_HISTORY_MAX_UNKNOWN_FIELDS = (
     NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT * 64
 )
@@ -51,8 +51,14 @@ _NILM_SESSION_HISTORY_ROW_TEXT_FIELDS = (
     "on_edge_id",
     "off_edge_id",
     "assignment_id",
+    "energy_source",
 )
-_NILM_SESSION_HISTORY_ROW_TIMESTAMP_FIELDS = ("start", "end")
+_NILM_SESSION_HISTORY_ROW_TIMESTAMP_FIELDS = (
+    "start",
+    "end",
+    "trace_started_at",
+    "trace_ended_at",
+)
 _NILM_SESSION_HISTORY_ROW_NUMBER_FIELDS = (
     "duration_seconds",
     "median_power_w",
@@ -66,15 +72,36 @@ _NILM_SESSION_HISTORY_ROW_NUMBER_FIELDS = (
     "plateau_power_w",
     "measured_energy_kwh",
     "power_coverage",
+    "partial_energy_kwh",
+    "energy_estimate_confidence",
+    "covered_duration_seconds",
+    "longest_trace_gap_seconds",
+    "known_source_coverage_min",
+    "known_source_coverage_time_weighted",
 )
 _NILM_SESSION_HISTORY_ROW_COUNT_FIELDS = (
     "overlap_count",
     "alternate_match_count",
     "intermediate_transition_count",
+    "stale_subtraction_prevented_count",
+    "partial_residual_point_count",
+    "negative_residual_point_count",
+    "trace_point_cap_truncation_count",
 )
 _NILM_SESSION_HISTORY_ROW_BOOLEAN_FIELDS = (
     "ambiguous",
     "known_load_masked",
+    "pre_context_coverage",
+    "post_context_coverage",
+    "trace_point_cap_truncated",
+)
+_NILM_SESSION_HISTORY_ENERGY_SOURCES = frozenset(
+    {
+        "residual_trace_measured",
+        "residual_trace_partial",
+        "transition_fallback",
+        "unavailable",
+    }
 )
 _NILM_SESSION_HISTORY_LEGACY_ENERGY_FIELD = "energy_kwh"
 _NILM_SESSION_HISTORY_ROW_OUTPUT_FIELDS = (
@@ -103,6 +130,22 @@ _NILM_SESSION_HISTORY_ROW_OUTPUT_FIELDS = (
     "measured_energy_kwh",
     "power_coverage",
     "intermediate_transition_count",
+    "partial_energy_kwh",
+    "energy_source",
+    "energy_estimate_confidence",
+    "covered_duration_seconds",
+    "longest_trace_gap_seconds",
+    "pre_context_coverage",
+    "post_context_coverage",
+    "known_source_coverage_min",
+    "known_source_coverage_time_weighted",
+    "trace_point_cap_truncated",
+    "trace_started_at",
+    "trace_ended_at",
+    "stale_subtraction_prevented_count",
+    "partial_residual_point_count",
+    "negative_residual_point_count",
+    "trace_point_cap_truncation_count",
 )
 _NILM_SESSION_HISTORY_DURATION_CLOSE_FIELDS = (
     "session_id",
@@ -458,8 +501,8 @@ def _canonical_nilm_session_history_row(
 ) -> tuple[dict[str, Any], dict[str, int | bool]]:
     """Project one row to the fixed scalar NILM session schema.
 
-    The caller visits at most 2,000 rows. This function reads only the 26 known
-    fields, never iterates unknown keys or nested values, and emits scalars or
+    The caller visits at most 2,000 rows. This function reads a fixed bounded
+    scalar schema, never iterates unknown keys or nested values, and emits scalars or
     canonical <=64-byte timestamp text only.
     """
 
@@ -509,6 +552,7 @@ def _canonical_nilm_session_history_row(
         ("on_edge_id", "on_edge", False),
         ("off_edge_id", None, True),
         ("assignment_id", None, True),
+        ("energy_source", None, False),
     ):
         value = values[key]
         if value is _NILM_SESSION_HISTORY_MISSING:
@@ -534,10 +578,22 @@ def _canonical_nilm_session_history_row(
                 maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
             )
             continue
+        if (
+            key == "energy_source"
+            and normalized not in _NILM_SESSION_HISTORY_ENERGY_SOURCES
+        ):
+            facts["identity_aliases_complete"] = False
+            facts["invalid_scalar_count"] = _saturated_nilm_session_history_count(
+                int(facts["invalid_scalar_count"]),
+                1,
+                maximum=_NILM_SESSION_HISTORY_DIAGNOSTIC_MAX,
+            )
+            continue
         row[key] = normalized[1] if identity_kind is not None else normalized
 
     invalid_closed_interval = False
-    for key, allows_none in (("start", False), ("end", True)):
+    for key in _NILM_SESSION_HISTORY_ROW_TIMESTAMP_FIELDS:
+        allows_none = key != "start"
         value = values[key]
         if value is _NILM_SESSION_HISTORY_MISSING:
             continue
@@ -571,6 +627,12 @@ def _canonical_nilm_session_history_row(
         "plateau_power_w",
         "measured_energy_kwh",
         "power_coverage",
+        "partial_energy_kwh",
+        "energy_estimate_confidence",
+        "covered_duration_seconds",
+        "longest_trace_gap_seconds",
+        "known_source_coverage_min",
+        "known_source_coverage_time_weighted",
     }
     legacy_energy = values[_NILM_SESSION_HISTORY_LEGACY_ENERGY_FIELD]
     if legacy_energy is not _NILM_SESSION_HISTORY_MISSING:
@@ -601,6 +663,9 @@ def _canonical_nilm_session_history_row(
                 "confidence",
                 "known_load_confidence",
                 "power_coverage",
+                "energy_estimate_confidence",
+                "known_source_coverage_min",
+                "known_source_coverage_time_weighted",
             },
         )
         if normalized is None:
@@ -631,6 +696,9 @@ def _canonical_nilm_session_history_row(
     for key in _NILM_SESSION_HISTORY_ROW_BOOLEAN_FIELDS:
         value = values[key]
         if value is _NILM_SESSION_HISTORY_MISSING:
+            continue
+        if value is None and key in {"pre_context_coverage", "post_context_coverage"}:
+            row[key] = None
             continue
         if not isinstance(value, bool):
             facts["identity_aliases_complete"] = False
@@ -663,10 +731,10 @@ def _sanitize_nilm_session_history_ingress(
     *,
     max_source_rows: int,
 ) -> tuple[list[dict[str, Any]], dict[str, int | bool]]:
-    """Project a fixed history prefix using O(R * 26) scalar-only CPU work.
+    """Project a fixed history prefix using bounded scalar-only CPU work.
 
     R is capped by ``max_source_rows`` (at most 2,000 in production). Each row
-    reads a fixed 26-key schema and at most three bounded timestamp values. The
+    reads a fixed scalar schema and bounded timestamp values. The
     helper is synchronous and pure: it performs no I/O, await, sleep, executor,
     replay, calibration, sorting, recursive traversal, or raw nested copying.
     """

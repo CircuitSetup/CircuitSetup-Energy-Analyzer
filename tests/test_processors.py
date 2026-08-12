@@ -8932,6 +8932,138 @@ def test_nilm_session_history_replaces_stale_close_with_reopened_session() -> No
     assert [session["session_id"] for session in merged] == ["reopened"]
 
 
+def test_nilm_session_history_preserves_measured_trace_when_refresh_lacks_trace() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+    )
+
+    measured = {
+        "session_id": "session-1",
+        "signature_fingerprint": "pump",
+        "assignment_id": "pump",
+        "on_edge_id": "on-1",
+        "off_edge_id": "off-1",
+        "end": "2026-07-31T12:05:00+00:00",
+        "energy_source": "residual_trace_measured",
+        "measured_energy_kwh": 0.018,
+        "estimated_energy_kwh": 0.018,
+        "power_coverage": 1.0,
+    }
+    fallback = {
+        **measured,
+        "energy_source": "transition_fallback",
+        "measured_energy_kwh": None,
+        "estimated_energy_kwh": 0.017,
+        "power_coverage": None,
+    }
+
+    merged = _merge_nilm_session_history([measured], [fallback])
+
+    assert merged == [measured]
+
+
+def test_nilm_session_history_preserves_partial_trace_quality_after_restart() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+    )
+
+    partial = {
+        "session_id": "session-1",
+        "signature_fingerprint": "pump",
+        "assignment_id": "pump",
+        "on_edge_id": "on-1",
+        "off_edge_id": "off-1",
+        "end": "2026-07-31T12:05:00+00:00",
+        "median_power_w": 120.0,
+        "plateau_power_w": 120.0,
+        "partial_energy_kwh": 0.010,
+        "energy_source": "residual_trace_partial",
+        "power_coverage": 0.6,
+        "intermediate_transition_count": 1,
+        "estimated_energy_kwh": 0.017,
+    }
+    fallback = {
+        **partial,
+        "median_power_w": 100.0,
+        "plateau_power_w": None,
+        "partial_energy_kwh": None,
+        "energy_source": "transition_fallback",
+        "power_coverage": None,
+        "intermediate_transition_count": 0,
+        "estimated_energy_kwh": 0.017,
+    }
+
+    merged = _merge_nilm_session_history([partial], [fallback])
+
+    assert merged[0]["energy_source"] == "residual_trace_partial"
+    assert merged[0]["partial_energy_kwh"] == pytest.approx(0.010)
+    assert merged[0]["plateau_power_w"] == pytest.approx(120.0)
+    assert merged[0]["median_power_w"] == pytest.approx(120.0)
+    assert merged[0]["power_coverage"] == pytest.approx(0.6)
+    assert merged[0]["intermediate_transition_count"] == 1
+    assert merged[0]["estimated_energy_kwh"] == pytest.approx(0.017)
+
+
+def test_nilm_processor_refresh_preserves_persisted_measured_trace_after_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Runtime-only trace loss cannot downgrade a persisted closed session."""
+    from collections import defaultdict
+
+    from custom_components.circuitsetup_energy_analyzer import processors
+    from custom_components.circuitsetup_energy_analyzer.processors import nilm_sample
+
+    measured = {
+        "session_id": "session-1",
+        "signature_fingerprint": "pump",
+        "assignment_id": "pump",
+        "on_edge_id": "on-1",
+        "off_edge_id": "off-1",
+        "start": "2026-07-31T12:00:00+00:00",
+        "end": "2026-07-31T12:05:00+00:00",
+        "energy_source": "residual_trace_measured",
+        "measured_energy_kwh": 0.018,
+        "estimated_energy_kwh": 0.018,
+        "power_coverage": 1.0,
+        "trace_started_at": "2026-07-31T11:59:30+00:00",
+        "trace_ended_at": "2026-07-31T12:05:00+00:00",
+    }
+    fallback = {
+        **measured,
+        "energy_source": "transition_fallback",
+        "measured_energy_kwh": None,
+        "estimated_energy_kwh": 0.017,
+        "power_coverage": None,
+        "trace_started_at": None,
+        "trace_ended_at": None,
+    }
+    store = FeatureStoreData(
+        nilm_session_history_by_circuit={"mains": [measured]}
+    )
+    processor = processors.NilmSampleProcessor(
+        nilm_enabled=lambda _config: True,
+        seed_demo_nilm_state=lambda *_args: None,
+        min_delta_w_for_circuit=lambda _circuit_id: 100.0,
+        detectors={},
+        total_events_by_circuit=defaultdict(int),
+        unmatched_edges_by_circuit=defaultdict(list),
+        ignored_signatures=set(),
+        known_load_events=lambda *_args: (),
+        observe_topology=lambda *_args: [],
+    )
+    monkeypatch.setattr(
+        nilm_sample,
+        "_nilm_session_history_payloads",
+        lambda *_args, **_kwargs: [fallback],
+    )
+
+    processor.refresh_session_history("mains", store)
+
+    assert store.nilm_session_history_by_circuit["mains"] == [measured]
+
+
 def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> None:
     from collections import defaultdict
 

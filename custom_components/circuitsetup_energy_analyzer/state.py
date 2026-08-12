@@ -5,10 +5,23 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from .alerting import alert_anomaly_score
 from .models import AlertEvidence, CircuitEvent, EventType
+
+
+@dataclass(frozen=True, slots=True)
+class LatestCircuitPowerObservation:
+    """Latest source-aware real-power evidence for one configured circuit."""
+
+    power_w: float | None
+    observed_at: datetime
+    source_updated_at: datetime | None
+    available: bool
+    expected_cadence_s: float | None
+    quality_flags: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -62,6 +75,9 @@ class AnalyzerState:
     power_flow_by_circuit: dict[str, str] = field(default_factory=dict)
     maintenance_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
     latest_real_power_w_by_circuit: dict[str, float] = field(default_factory=dict)
+    latest_real_power_observation_by_circuit: dict[
+        str, LatestCircuitPowerObservation
+    ] = field(default_factory=dict)
     operating_state_by_circuit: dict[str, str] = field(default_factory=dict)
     operating_state_snapshot_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict

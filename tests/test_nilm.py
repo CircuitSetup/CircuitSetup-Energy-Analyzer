@@ -5538,9 +5538,13 @@ def test_session_pairing_does_not_learn_energy_from_partial_residual_trace() -> 
     assert len(sessions) == 1
     session = sessions[0]
     assert session.plateau_power_w == 120.0
-    assert session.power_coverage == pytest.approx(0.5)
+    # The gap policy now uses four normal update intervals, while still
+    # rejecting the 480-second outage as insufficient full-session coverage.
+    assert session.power_coverage == pytest.approx(0.6)
     assert session.measured_energy_kwh is None
-    assert session.estimated_energy_kwh == pytest.approx(0.02)
+    assert session.partial_energy_kwh == pytest.approx(0.002)
+    assert session.energy_source == "residual_trace_partial"
+    assert session.estimated_energy_kwh == pytest.approx(0.017)
 
 
 def test_session_pairing_memoizes_and_bounds_trace_evidence(

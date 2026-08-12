@@ -1304,6 +1304,21 @@ def test_feature_store_projects_nilm_session_rows_to_canonical_scalars() -> None
             measured_energy_kwh=0.4,
             power_coverage=0.95,
             intermediate_transition_count=2,
+            energy_source="residual_trace_measured",
+            energy_estimate_confidence=0.92,
+            covered_duration_seconds=1710.0,
+            longest_trace_gap_seconds=15.0,
+            pre_context_coverage=True,
+            post_context_coverage=True,
+            known_source_coverage_min=1.0,
+            known_source_coverage_time_weighted=1.0,
+            trace_point_cap_truncated=False,
+            trace_started_at=now - timedelta(seconds=30),
+            trace_ended_at=now + timedelta(minutes=30, seconds=30),
+            stale_subtraction_prevented_count=2,
+            partial_residual_point_count=3,
+            negative_residual_point_count=1,
+            trace_point_cap_truncation_count=4,
         )
     )
     forward = {

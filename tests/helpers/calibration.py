@@ -18,6 +18,9 @@ from custom_components.circuitsetup_energy_analyzer.alerting import (
 from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
 from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
 from custom_components.circuitsetup_energy_analyzer.managers.state_reducer import (
+    StateReducer,
+)
+from custom_components.circuitsetup_energy_analyzer.managers.state_reducer import (
     apply_state_update as _apply_state_update,
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
@@ -34,6 +37,8 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     Severity,
 )
 from custom_components.circuitsetup_energy_analyzer.nilm import (
+    NilmResidualPowerPoint,
+    NilmResidualTraceMetadata,
     normalize_nilm_assignment_model,
 )
 from custom_components.circuitsetup_energy_analyzer.normalize import (
@@ -225,6 +230,13 @@ class ReplayResult:
     nilm_signatures: list[dict[str, Any]]
     final_state: AnalyzerState
     store_data: FeatureStoreData
+    residual_trace_points_by_circuit: dict[
+        str, tuple[NilmResidualPowerPoint, ...]
+    ] = field(default_factory=dict)
+    residual_trace_metadata_by_circuit: dict[
+        str, NilmResidualTraceMetadata
+    ] = field(default_factory=dict)
+    processing_work_units: int = 0
     metrics: CalibrationMetrics | None = None
 
 
@@ -254,6 +266,18 @@ class CalibrationMetrics:
     nilm_confidence_bins: dict[str, dict[str, float]] = field(default_factory=dict)
     nilm_brier_score: float | None = None
     nilm_expected_calibration_error: float | None = None
+    residual_plateau_mae_w: float | None = None
+    session_energy_mae_kwh: float | None = None
+    stale_subtraction_incidents: int = 0
+    measured_session_count: int = 0
+    partial_session_count: int = 0
+    fallback_session_count: int = 0
+    unavailable_session_count: int = 0
+    measured_session_percentage: float | None = None
+    partial_session_percentage: float | None = None
+    fallback_session_percentage: float | None = None
+    unavailable_session_percentage: float | None = None
+    replay_processing_work_units: int = 0
     decision_impacts: ReplayDecisionImpacts = field(
         default_factory=lambda: ReplayDecisionImpacts()
     )
@@ -531,20 +555,39 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
         energy_usage_processor,
     ) = build_processors()
     hass = SimpleNamespace(data={DOMAIN: {}})
+    state_reducer = StateReducer()
     events: list[CircuitEvent] = []
     alerts: list[AlertEvidence] = []
     setup_issues: list[dict[str, Any]] = []
     snapshots: list[dict[str, Any]] = []
+    processing_work_units = 0
+    residual_trace_metadata_by_circuit: dict[
+        str, NilmResidualTraceMetadata
+    ] = {}
+    source_values_by_entity: dict[str, tuple[Any, datetime]] = {}
 
     for calibration_sample in fixture.samples:
         if calibration_sample.restart_before_sample:
+            _merge_replay_residual_trace_diagnostics(
+                residual_trace_metadata_by_circuit,
+                nilm_processor,
+            )
             state = AnalyzerState()
+            state_reducer = StateReducer()
             (
                 event_processor,
                 nilm_processor,
                 run_cycle_processor,
                 energy_usage_processor,
             ) = build_processors()
+        changed_entities = _update_replay_source_values(
+            source_values_by_entity,
+            calibration_sample,
+        )
+        processing_circuit_ids = _replay_processing_circuit_ids(
+            fixture,
+            changed_entities,
+        )
         context = ProcessingContext(
             now=calibration_sample.timestamp,
             hass=hass,
@@ -557,38 +600,35 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
             ),
             sensitivity="balanced",
         )
+        normalized_samples: list[tuple[CircuitConfig, Any]] = []
         for circuit_config in fixture.circuits:
-            if not any(
-                sensor.entity_id in calibration_sample.states
-                for sensor in circuit_config.sensors
-            ):
-                continue
-            source_states = _source_states_for_sample(
-                circuit_config,
-                calibration_sample,
-            )
             normalized_sample = build_circuit_sample(
                 circuit_config,
-                source_states,
+                _source_states_from_replay_values(
+                    circuit_config,
+                    source_values_by_entity,
+                ),
                 calibration_sample.timestamp,
             )
-            if normalized_sample.real_power is None:
-                state.latest_real_power_w_by_circuit.pop(
-                    circuit_config.circuit_id, None
-                )
-            else:
-                state.latest_real_power_w_by_circuit[circuit_config.circuit_id] = (
-                    normalized_sample.real_power
-                )
-            setup_issues.extend(
-                {
-                    "timestamp": calibration_sample.timestamp.isoformat(),
-                    "circuit_id": circuit_config.circuit_id,
-                    "issue": issue,
-                }
-                for issue in normalized_sample.quality_issues
+            state_reducer.refresh_latest_real_power_state(
+                state,
+                circuit_config,
+                normalized_sample,
             )
+            if circuit_config.circuit_id in processing_circuit_ids:
+                setup_issues.extend(
+                    {
+                        "timestamp": calibration_sample.timestamp.isoformat(),
+                        "circuit_id": circuit_config.circuit_id,
+                        "issue": issue,
+                    }
+                    for issue in normalized_sample.quality_issues
+                )
+            normalized_samples.append((circuit_config, normalized_sample))
 
+        for circuit_config, normalized_sample in normalized_samples:
+            if circuit_config.circuit_id not in processing_circuit_ids:
+                continue
             if calibration_sample.completes_prior_energy_days:
                 _mark_prior_energy_days_complete(
                     store_data,
@@ -623,6 +663,7 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
                         events=tuple(events),
                     )
                 )
+            processing_work_units += len(results)
             for result in results:
                 new_events, new_alerts = _apply_feature_result(
                     result,
@@ -652,6 +693,17 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
         ],
         final_state=state,
         store_data=store_data,
+        residual_trace_points_by_circuit={
+            circuit_id: tuple(trace)
+            for circuit_id, trace in (
+                nilm_processor._residual_power_trace_by_circuit.items()  # noqa: SLF001
+            )
+        },
+        residual_trace_metadata_by_circuit=_merged_replay_residual_trace_metadata(
+            residual_trace_metadata_by_circuit,
+            nilm_processor,
+        ),
+        processing_work_units=processing_work_units,
     )
     result.metrics = evaluate_replay_result(fixture, result)
     return result
@@ -703,6 +755,10 @@ def evaluate_replay_result(
     )
     reconciliation = _combined_reconciliation(result)
     component_metrics = _component_metrics(fixture, result)
+    residual_trace_metrics = _residual_trace_replay_metrics(
+        result,
+        component_metrics,
+    )
     nilm_confidence_bins, nilm_brier, nilm_ece = _nilm_confidence_calibration(
         fixture,
         result,
@@ -736,9 +792,76 @@ def evaluate_replay_result(
         nilm_confidence_bins=nilm_confidence_bins,
         nilm_brier_score=nilm_brier,
         nilm_expected_calibration_error=nilm_ece,
+        **residual_trace_metrics,
         decision_impacts=_decision_impacts(fixture, result),
         replay_split=fixture.labels.replay_split,
     )
+
+
+def _residual_trace_replay_metrics(
+    result: ReplayResult,
+    component_metrics: Mapping[str, ComponentReplayMetrics],
+) -> dict[str, int | float | None]:
+    """Summarize session and bounded in-memory trace evidence for a replay."""
+    sessions = _completed_nilm_sessions(result)
+    sources = [
+        str(session.get("energy_source") or "unavailable") for session in sessions
+    ]
+    plateau_errors = [
+        abs(float(session["plateau_power_w"]) - abs(float(session["on_delta_w"])))
+        for session in sessions
+        if isinstance(session.get("plateau_power_w"), (int, float))
+        and isinstance(session.get("on_delta_w"), (int, float))
+    ]
+    energy_errors = [
+        component.energy_absolute_error_kwh
+        for component in component_metrics.values()
+        if component.energy_absolute_error_kwh is not None
+    ]
+    stale_incidents = sum(
+        metadata.stale_subtraction_prevented_count
+        for metadata in result.residual_trace_metadata_by_circuit.values()
+    )
+    total_sessions = len(sources)
+    source_percentages = {
+        source: (
+            round(100.0 * sources.count(source) / total_sessions, 3)
+            if total_sessions
+            else None
+        )
+        for source in (
+            "residual_trace_measured",
+            "residual_trace_partial",
+            "transition_fallback",
+            "unavailable",
+        )
+    }
+    return {
+        "residual_plateau_mae_w": (
+            round(sum(plateau_errors) / len(plateau_errors), 6)
+            if plateau_errors
+            else None
+        ),
+        "session_energy_mae_kwh": (
+            round(sum(energy_errors) / len(energy_errors), 6)
+            if energy_errors
+            else None
+        ),
+        "stale_subtraction_incidents": stale_incidents,
+        "measured_session_count": sources.count("residual_trace_measured"),
+        "partial_session_count": sources.count("residual_trace_partial"),
+        "fallback_session_count": sources.count("transition_fallback"),
+        "unavailable_session_count": sources.count("unavailable"),
+        "measured_session_percentage": source_percentages[
+            "residual_trace_measured"
+        ],
+        "partial_session_percentage": source_percentages[
+            "residual_trace_partial"
+        ],
+        "fallback_session_percentage": source_percentages["transition_fallback"],
+        "unavailable_session_percentage": source_percentages["unavailable"],
+        "replay_processing_work_units": result.processing_work_units,
+    }
 
 
 def fixture_expectation_failures(
@@ -1224,16 +1347,140 @@ def _parse_expectations(raw: Mapping[str, Any]) -> CalibrationExpectations:
     )
 
 
-def _source_states_for_sample(
-    circuit_config: CircuitConfig,
+def _merge_replay_residual_trace_diagnostics(
+    metadata_by_circuit: dict[str, NilmResidualTraceMetadata],
+    nilm_processor: NilmSampleProcessor,
+) -> None:
+    """Accumulate bounded processor-lifetime trace diagnostics across restarts."""
+    metadata_by_circuit.update(
+        _merged_replay_residual_trace_metadata(metadata_by_circuit, nilm_processor)
+    )
+
+
+def _merged_replay_residual_trace_metadata(
+    prior: Mapping[str, NilmResidualTraceMetadata],
+    nilm_processor: NilmSampleProcessor,
+) -> dict[str, NilmResidualTraceMetadata]:
+    """Combine restart-separated bounded counters without inventing trace history."""
+    merged = dict(prior)
+    for (
+        circuit_id,
+        metadata,
+    ) in nilm_processor._residual_trace_metadata_by_circuit.items():  # noqa: SLF001
+        previous = merged.get(circuit_id)
+        if previous is None:
+            merged[circuit_id] = metadata
+            continue
+        merged[circuit_id] = NilmResidualTraceMetadata(
+            configured_horizon_seconds=metadata.configured_horizon_seconds,
+            point_cap=metadata.point_cap,
+            point_cap_truncated=metadata.point_cap_truncated,
+            oldest_point_at=metadata.oldest_point_at,
+            newest_point_at=metadata.newest_point_at,
+            stale_subtraction_prevented_count=min(
+                previous.stale_subtraction_prevented_count
+                + metadata.stale_subtraction_prevented_count,
+                1_000_000,
+            ),
+            partial_residual_point_count=min(
+                previous.partial_residual_point_count
+                + metadata.partial_residual_point_count,
+                1_000_000,
+            ),
+            negative_residual_point_count=min(
+                previous.negative_residual_point_count
+                + metadata.negative_residual_point_count,
+                1_000_000,
+            ),
+            trace_point_cap_truncation_count=min(
+                previous.trace_point_cap_truncation_count
+                + metadata.trace_point_cap_truncation_count,
+                1_000_000,
+            ),
+        )
+    return merged
+
+
+def _update_replay_source_values(
+    source_values_by_entity: dict[str, tuple[Any, datetime]],
     sample: CalibrationSample,
+) -> frozenset[str]:
+    """Apply fixture source updates while retaining HA's current source states."""
+    changed_entities: set[str] = set()
+    for entity_id, raw_state in sample.states.items():
+        state_value, last_updated = _fixture_source_state(raw_state, sample.timestamp)
+        source_values_by_entity[entity_id] = (state_value, last_updated)
+        if not (
+            isinstance(raw_state, Mapping)
+            and raw_state.get("last_updated_offset_seconds") is not None
+        ):
+            changed_entities.add(entity_id)
+    return frozenset(changed_entities)
+
+
+def _replay_processing_circuit_ids(
+    fixture: CalibrationFixture,
+    changed_entities: frozenset[str],
+) -> frozenset[str]:
+    """Mirror coordinator source-update selection for calibration replays."""
+    all_circuit_ids = frozenset(
+        circuit_config.circuit_id for circuit_config in fixture.circuits
+    )
+    if not changed_entities:
+        return all_circuit_ids
+
+    known_source_entity_ids = {
+        sensor.entity_id
+        for circuit_config in fixture.circuits
+        for sensor in circuit_config.sensors
+    }
+    mains_voltage_entity_ids = {
+        sensor.entity_id
+        for circuit_config in fixture.circuits
+        if nilm_source_kind(circuit_config) is not None
+        for sensor in circuit_config.sensors
+        if sensor.role is SensorRole.VOLTAGE
+    }
+    if (
+        changed_entities & mains_voltage_entity_ids
+        or not changed_entities.issubset(known_source_entity_ids)
+    ):
+        return all_circuit_ids
+
+    selected_circuit_ids = {
+        circuit_config.circuit_id
+        for circuit_config in fixture.circuits
+        if any(
+            sensor.entity_id in changed_entities
+            for sensor in circuit_config.sensors
+        )
+    }
+    if not selected_circuit_ids:
+        return all_circuit_ids
+
+    if any(
+        nilm_source_kind(circuit_config) is None
+        for circuit_config in fixture.circuits
+        if circuit_config.circuit_id in selected_circuit_ids
+    ):
+        selected_circuit_ids.update(
+            circuit_config.circuit_id
+            for circuit_config in fixture.circuits
+            if nilm_source_kind(circuit_config) is not None
+        )
+    return frozenset(selected_circuit_ids)
+
+
+def _source_states_from_replay_values(
+    circuit_config: CircuitConfig,
+    source_values_by_entity: Mapping[str, tuple[Any, datetime]],
 ) -> dict[str, SourceState]:
     states: dict[str, SourceState] = {}
     for sensor in circuit_config.sensors:
-        if sensor.entity_id not in sample.states:
+        source_value = source_values_by_entity.get(sensor.entity_id)
+        if source_value is None:
             continue
-        raw_state = sample.states[sensor.entity_id]
-        state_value, last_updated = _fixture_source_state(raw_state, sample.timestamp)
+        state_value, last_updated = source_value
         states[sensor.entity_id] = SourceState(
             entity_id=sensor.entity_id,
             state=str(state_value),

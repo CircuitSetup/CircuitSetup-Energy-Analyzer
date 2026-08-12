@@ -1608,6 +1608,19 @@ def test_old_fixture_report_header_is_unchanged() -> None:
     assert "Source kind" not in report
 
 
+def test_calibration_report_is_deterministic_without_explicit_generated_time() -> None:
+    from scripts.calibrate_confidence import build_markdown_report
+
+    fixture = load_calibration_fixture(FIXTURE_DIR / "normal_kettle_cycle.yaml")
+    metrics = [evaluate_replay_result(fixture, replay_fixture_processors(fixture))]
+
+    first = build_markdown_report(metrics)
+    second = build_markdown_report(metrics)
+
+    assert first == second
+    assert "Generated:" not in first
+
+
 def test_repository_keeps_appliance_qa_docs_local_only() -> None:
     repo_root = Path(__file__).parents[1]
     ignore_text = (repo_root / ".gitignore").read_text(encoding="utf-8")
