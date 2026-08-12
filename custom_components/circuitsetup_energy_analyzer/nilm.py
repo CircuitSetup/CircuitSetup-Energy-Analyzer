@@ -8405,8 +8405,8 @@ def _nilm_normalized_power_trace(
         if point is None:
             continue
         existing = points.get(point.timestamp)
-        if existing is None or _nilm_residual_point_quality_key(point) > (
-            _nilm_residual_point_quality_key(existing)
+        if existing is None or nilm_residual_point_quality_key(point) > (
+            nilm_residual_point_quality_key(existing)
         ):
             points[point.timestamp] = point
     return tuple(points[timestamp] for timestamp in sorted(points))
@@ -8482,7 +8482,7 @@ def _nilm_trace_timestamp(value: Any) -> datetime | None:
     return value.astimezone(UTC)
 
 
-def _nilm_residual_point_quality_key(
+def nilm_residual_point_quality_key(
     point: NilmResidualPowerPoint,
 ) -> tuple[object, ...]:
     """Choose one deterministic duplicate timestamp without favoring stale data."""

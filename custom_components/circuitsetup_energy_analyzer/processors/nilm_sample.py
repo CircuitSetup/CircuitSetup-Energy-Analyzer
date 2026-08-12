@@ -46,6 +46,7 @@ from ..nilm import (
     known_load_attribution_records,
     nilm_helper_candidate_to_dict,
     nilm_known_load_attribution_to_dict,
+    nilm_residual_point_quality_key,
     nilm_session_to_dict,
     nilm_signature_fingerprint,
     nilm_signature_fingerprint_v1,
@@ -591,20 +592,6 @@ def _nilm_residual_utc_timestamp(value: datetime) -> datetime:
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
-def _nilm_residual_point_replacement_key(
-    point: NilmResidualPowerPoint,
-) -> tuple[object, ...]:
-    """Resolve identical timestamps deterministically without changing order."""
-    return (
-        int(point.subtraction_complete),
-        point.known_source_coverage,
-        -len(point.quality_flags),
-        point.quality_flags,
-        point.residual_power_w,
-        point.explained_known_power_w,
-    )
-
-
 def _nilm_residual_diagnostic_total(
     metadata: NilmResidualTraceMetadata | None,
     field: str,
@@ -789,13 +776,49 @@ class NilmSampleProcessor:
         circuit_id: str,
         point: NilmResidualPowerPoint,
     ) -> None:
-        """Retain a sorted bounded trace and disclose every cap truncation."""
+        """Retain a sorted bounded trace with an O(1) monotonic append path."""
         trace = self._residual_power_trace_by_circuit.setdefault(circuit_id, deque())
+        if not trace or point.timestamp > trace[-1].timestamp:
+            trace.append(point)
+            cutoff = point.timestamp - self._residual_power_trace_horizon
+            while trace and trace[0].timestamp < cutoff:
+                trace.popleft()
+            cap_removed = 0
+            while len(trace) > self._residual_power_trace_max_items:
+                trace.popleft()
+                cap_removed += 1
+            self._update_residual_trace_metadata(
+                circuit_id, point, point_retained=True, cap_removed=cap_removed
+            )
+            self._revisions(circuit_id).residual_trace += 1
+            return
+
+        if point.timestamp == trace[-1].timestamp:
+            existing = trace[-1]
+            if nilm_residual_point_quality_key(point) <= (
+                nilm_residual_point_quality_key(existing)
+            ):
+                return
+            trace[-1] = point
+            self._update_residual_trace_metadata(
+                circuit_id, point, point_retained=True, cap_removed=0
+            )
+            self._revisions(circuit_id).residual_trace += 1
+            return
+
+        self._rebuild_residual_trace(circuit_id, point)
+
+    def _rebuild_residual_trace(
+        self, circuit_id: str, point: NilmResidualPowerPoint
+    ) -> None:
+        """Insert an out-of-order point through the bounded slow path."""
+        trace = self._residual_power_trace_by_circuit[circuit_id]
+        before = tuple(trace)
         points_by_timestamp = {existing.timestamp: existing for existing in trace}
         existing = points_by_timestamp.get(point.timestamp)
         accepted_point = existing is None or (
-            _nilm_residual_point_replacement_key(point)
-            >= _nilm_residual_point_replacement_key(existing)
+            nilm_residual_point_quality_key(point)
+            > nilm_residual_point_quality_key(existing)
         )
         if accepted_point:
             points_by_timestamp[point.timestamp] = point
@@ -812,10 +835,29 @@ class NilmSampleProcessor:
             retained = retained[-self._residual_power_trace_max_items :]
         trace.clear()
         trace.extend(retained)
-        previous = self._residual_trace_metadata_by_circuit.get(circuit_id)
         point_retained = accepted_point and point != existing and any(
             item.timestamp == point.timestamp for item in retained
         )
+        self._update_residual_trace_metadata(
+            circuit_id,
+            point,
+            point_retained=point_retained,
+            cap_removed=cap_removed,
+        )
+        if tuple(trace) != before:
+            self._revisions(circuit_id).residual_trace += 1
+
+    def _update_residual_trace_metadata(
+        self,
+        circuit_id: str,
+        point: NilmResidualPowerPoint,
+        *,
+        point_retained: bool,
+        cap_removed: int,
+    ) -> None:
+        """Refresh endpoint metadata and bounded lifetime diagnostics."""
+        trace = self._residual_power_trace_by_circuit[circuit_id]
+        previous = self._residual_trace_metadata_by_circuit.get(circuit_id)
         truncation_count = min(
             (previous.trace_point_cap_truncation_count if previous else 0)
             + int(cap_removed > 0),
@@ -830,11 +872,11 @@ class NilmSampleProcessor:
                     or (
                         previous is not None
                         and previous.point_cap_truncated
-                        and len(retained) == self._residual_power_trace_max_items
+                        and len(trace) == self._residual_power_trace_max_items
                     )
                 ),
-                oldest_point_at=retained[0].timestamp if retained else None,
-                newest_point_at=retained[-1].timestamp if retained else None,
+                oldest_point_at=trace[0].timestamp if trace else None,
+                newest_point_at=trace[-1].timestamp if trace else None,
                 stale_subtraction_prevented_count=_nilm_residual_diagnostic_total(
                     previous,
                     "stale_subtraction_prevented_count",
