@@ -506,6 +506,11 @@ def test_feature_store_round_trips_known_load_attribution_ledger() -> None:
             }
         ],
         "provenance_version": 1,
+        "electrical_dimension_statuses": {
+            "var": "measured_subtraction",
+            "va": "recomputed",
+            "pf": "recomputed",
+        },
     }
     data = FeatureStoreData(
         nilm_known_load_attributions_by_circuit={"mains": [attribution]}

@@ -16,6 +16,7 @@ from .models import (
     CircuitEvent,
     CircuitMode,
     EventType,
+    SensorRole,
 )
 from .normalize import NormalizedCircuitSample
 from .profiles import supports_direct_appliance_analysis
@@ -46,6 +47,10 @@ _RUNNING_STEP_MATERIAL_FLOOR_W = 100.0
 _RUNNING_STEP_POST_SAMPLE_COUNT = 3
 _RUNNING_STEP_MAX_POST_SPREAD_W = 25.0
 _RUNNING_STEP_COOLDOWN_SECONDS = 60.0
+_TRANSITION_ELECTRICAL_ALIGNMENT_SECONDS = 15.0
+_TRANSITION_ELECTRICAL_EVIDENCE_VERSION = 1
+_TRANSITION_VAR_CONVENTION = "signed_var_v1"
+_TRANSITION_LEG_W_CONVENTION = "signed_real_power_w_v1"
 
 _GENERIC_PROFILE = {
     "on_threshold_w": 80.0,
@@ -325,6 +330,13 @@ class OperatingDetectionResult:
 class _TransitionSample:
     timestamp: datetime
     power_w: float
+    reactive_power: float | None = None
+    leg_a_power_w: float | None = None
+    leg_b_power_w: float | None = None
+    real_power_updated_at: datetime | None = None
+    reactive_power_updated_at: datetime | None = None
+    leg_a_power_updated_at: datetime | None = None
+    leg_b_power_updated_at: datetime | None = None
 
 
 def _transition_features(
@@ -376,7 +388,189 @@ def _transition_features(
         features["transition_quality"] = "partial"
     else:
         features["transition_quality"] = "legacy_fallback"
+    electrical_dimension_features = (
+        _transition_dimension_features(
+            pre_samples,
+            post_samples,
+            dimension="var",
+            value_attribute="reactive_power",
+            updated_at_attribute="reactive_power_updated_at",
+            convention=_TRANSITION_VAR_CONVENTION,
+        ),
+        _transition_dimension_features(
+            pre_samples,
+            post_samples,
+            dimension="leg_a_w",
+            value_attribute="leg_a_power_w",
+            updated_at_attribute="leg_a_power_updated_at",
+            convention=_TRANSITION_LEG_W_CONVENTION,
+        ),
+        _transition_dimension_features(
+            pre_samples,
+            post_samples,
+            dimension="leg_b_w",
+            value_attribute="leg_b_power_w",
+            updated_at_attribute="leg_b_power_updated_at",
+            convention=_TRANSITION_LEG_W_CONVENTION,
+        ),
+    )
+    if any(
+        dimension_features.get(f"transition_{dimension}_alignment_status")
+        != "missing"
+        for dimension_features, dimension in zip(
+            electrical_dimension_features,
+            ("var", "leg_a_w", "leg_b_w"),
+            strict=True,
+        )
+    ):
+        features["transition_electrical_evidence_version"] = (
+            _TRANSITION_ELECTRICAL_EVIDENCE_VERSION
+        )
+        for dimension_features in electrical_dimension_features:
+            features.update(dimension_features)
     return features
+
+
+def _transition_dimension_features(
+    pre_samples: tuple[_TransitionSample, ...],
+    post_samples: tuple[_TransitionSample, ...],
+    *,
+    dimension: str,
+    value_attribute: str,
+    updated_at_attribute: str,
+    convention: str,
+) -> dict[str, Any]:
+    """Return explicit, complete evidence for one optional transition dimension."""
+
+    all_samples = (*pre_samples, *post_samples)
+    values_by_sample = [
+        (
+            _finite_or_none(getattr(sample, value_attribute)),
+            _transition_dimension_alignment_status(sample, updated_at_attribute),
+        )
+        for sample in all_samples
+    ]
+    valid_count = sum(
+        value is not None and status == "aligned"
+        for value, status in values_by_sample
+    )
+    coverage = valid_count / len(all_samples) if all_samples else 0.0
+    statuses = [status for _value, status in values_by_sample]
+    has_missing_values = any(value is None for value, _status in values_by_sample)
+    status = (
+        "missing"
+        if not all_samples
+        else "stale"
+        if "stale" in statuses
+        else "misaligned"
+        if "misaligned" in statuses
+        else "missing"
+        if has_missing_values or "missing" in statuses
+        else "partial"
+        if coverage < 1.0 or not pre_samples or not post_samples
+        else "aligned"
+    )
+    features: dict[str, Any] = {
+        f"transition_{dimension}_coverage": coverage,
+        f"transition_{dimension}_alignment_status": status,
+    }
+    if status != "aligned" or not pre_samples or not post_samples:
+        return features
+
+    pre_values = [
+        float(getattr(sample, value_attribute)) for sample in pre_samples
+    ]
+    post_values = [
+        float(getattr(sample, value_attribute)) for sample in post_samples
+    ]
+    pre_median = float(median(pre_values))
+    post_median = float(median(post_values))
+    support = (*pre_samples, *post_samples)
+    features.update(
+        {
+            f"transition_{dimension}_pre_median": pre_median,
+            f"transition_{dimension}_post_median": post_median,
+            f"transition_delta_{dimension}": post_median - pre_median,
+            f"transition_{dimension}_spread": float(
+                median([abs(value - pre_median) for value in pre_values])
+                + median([abs(value - post_median) for value in post_values])
+            ),
+            f"transition_{dimension}_support_oldest": min(
+                sample.timestamp for sample in support
+            ).isoformat(),
+            f"transition_{dimension}_support_newest": max(
+                sample.timestamp for sample in support
+            ).isoformat(),
+            f"transition_{dimension}_window_start": (
+                pre_samples[-1].timestamp.isoformat()
+            ),
+            f"transition_{dimension}_window_end": (
+                post_samples[0].timestamp.isoformat()
+            ),
+            f"transition_{dimension}_convention": convention,
+        }
+    )
+    return features
+
+
+def _transition_dimension_alignment_status(
+    sample: _TransitionSample,
+    updated_at_attribute: str,
+) -> str:
+    """Classify a transition sample without allowing stale evidence to pass."""
+
+    updated_at = getattr(sample, updated_at_attribute)
+    if updated_at is None:
+        return "missing"
+    real_updated_at = sample.real_power_updated_at
+    if real_updated_at is None:
+        return "missing"
+    try:
+        if abs((sample.timestamp - updated_at).total_seconds()) > (
+            _TRANSITION_ELECTRICAL_ALIGNMENT_SECONDS
+        ):
+            return "stale"
+        if abs((real_updated_at - updated_at).total_seconds()) > (
+            _TRANSITION_ELECTRICAL_ALIGNMENT_SECONDS
+        ):
+            return "misaligned"
+    except TypeError:
+        return "misaligned"
+    return "aligned"
+
+
+def _transition_sample(
+    sample: NormalizedCircuitSample,
+    watts: float,
+) -> _TransitionSample:
+    """Capture only direct, timestamp-aligned values already on a sample."""
+
+    real_updated_at = _sample_source_updated_at(sample, SensorRole.REAL_POWER)
+    # Aggregated leg samples retain the oldest real-power source timestamp, so
+    # this is evidence for both legs only when both underlying legs are fresh.
+    return _TransitionSample(
+        timestamp=sample.timestamp,
+        power_w=watts,
+        reactive_power=_finite_or_none(getattr(sample, "reactive_power", None)),
+        leg_a_power_w=_finite_or_none(getattr(sample, "leg_a_real_power", None)),
+        leg_b_power_w=_finite_or_none(getattr(sample, "leg_b_real_power", None)),
+        real_power_updated_at=real_updated_at,
+        reactive_power_updated_at=_sample_source_updated_at(
+            sample, SensorRole.REACTIVE_POWER
+        ),
+        leg_a_power_updated_at=real_updated_at,
+        leg_b_power_updated_at=real_updated_at,
+    )
+
+
+def _sample_source_updated_at(
+    sample: NormalizedCircuitSample,
+    role: SensorRole,
+) -> datetime | None:
+    for source_role, timestamp in getattr(sample, "source_updated_at_by_role", ()):
+        if source_role is role or str(source_role) == role.value:
+            return timestamp if isinstance(timestamp, datetime) else None
+    return None
 
 
 def resolve_operating_detection(
@@ -640,9 +834,7 @@ class OperatingStateMachine:
         self._state_since = sample.timestamp
         self._candidate_since = None
         self._transition_reason = "initial_below_on_threshold"
-        self._append_transition_context(
-            self._off_transition_context, sample.timestamp, watts
-        )
+        self._append_transition_context(self._off_transition_context, sample, watts)
         if sample.voltage is not None:
             self._nominal_voltage = sample.voltage
         return self._result(self._transition_reason)
@@ -657,11 +849,11 @@ class OperatingStateMachine:
                 self._state = OperatingState.PENDING_ON
                 self._candidate_since = sample.timestamp
                 self._begin_pending_transition(
-                    "start", sample.timestamp, watts, self._off_transition_context
+                    "start", sample, watts, self._off_transition_context
                 )
                 self._transition_reason = "pending_on"
                 return self._result(self._transition_reason)
-            self._append_pending_transition_sample(sample.timestamp, watts)
+            self._append_pending_transition_sample(sample, watts)
             if self._candidate_since is not None and (
                 sample.timestamp - self._candidate_since
             ).total_seconds() >= self._profile.on_dwell_seconds:
@@ -706,11 +898,11 @@ class OperatingStateMachine:
                 self._state = OperatingState.PENDING_OFF
                 self._candidate_since = sample.timestamp
                 self._begin_pending_transition(
-                    "stop", sample.timestamp, watts, self._running_transition_context
+                    "stop", sample, watts, self._running_transition_context
                 )
                 self._transition_reason = "pending_off"
                 return self._result(self._transition_reason)
-            self._append_pending_transition_sample(sample.timestamp, watts)
+            self._append_pending_transition_sample(sample, watts)
             if self._candidate_since is not None and (
                 sample.timestamp - self._candidate_since
             ).total_seconds() >= self._profile.off_dwell_seconds:
@@ -883,9 +1075,7 @@ class OperatingStateMachine:
             and watts < self._profile.on_threshold_w
         ):
             self._stable_off_power_w.append(watts)
-            self._append_transition_context(
-                self._off_transition_context, sample.timestamp, watts
-            )
+            self._append_transition_context(self._off_transition_context, sample, watts)
         elif (
             self._state is OperatingState.RUNNING
             and self._stable_state is OperatingState.RUNNING
@@ -893,17 +1083,17 @@ class OperatingStateMachine:
         ):
             self._stable_running_power_w.append(watts)
             self._append_transition_context(
-                self._running_transition_context, sample.timestamp, watts
+                self._running_transition_context, sample, watts
             )
 
     def _append_transition_context(
         self,
         context: deque[_TransitionSample],
-        timestamp: datetime,
+        sample: NormalizedCircuitSample,
         watts: float,
     ) -> None:
-        self._prune_transition_buffer(context, timestamp)
-        context.append(_TransitionSample(timestamp=timestamp, power_w=watts))
+        self._prune_transition_buffer(context, sample.timestamp)
+        context.append(_transition_sample(sample, watts))
 
     def _prune_transition_buffer(
         self,
@@ -918,29 +1108,27 @@ class OperatingStateMachine:
     def _begin_pending_transition(
         self,
         kind: str,
-        timestamp: datetime,
+        sample: NormalizedCircuitSample,
         watts: float,
         context: deque[_TransitionSample],
     ) -> None:
-        self._prune_transition_buffer(context, timestamp)
+        self._prune_transition_buffer(context, sample.timestamp)
         self._pending_transition_kind = kind
         self._pending_transition_pre = tuple(context)
         self._pending_transition_post.clear()
-        self._pending_transition_first_post_at = timestamp
-        self._pending_transition_post.append(
-            _TransitionSample(timestamp=timestamp, power_w=watts)
-        )
+        self._pending_transition_first_post_at = sample.timestamp
+        self._pending_transition_post.append(_transition_sample(sample, watts))
 
     def _append_pending_transition_sample(
         self,
-        timestamp: datetime,
+        sample: NormalizedCircuitSample,
         watts: float,
     ) -> None:
         if self._pending_transition_kind is not None:
-            self._prune_transition_buffer(self._pending_transition_post, timestamp)
-            self._pending_transition_post.append(
-                _TransitionSample(timestamp=timestamp, power_w=watts)
+            self._prune_transition_buffer(
+                self._pending_transition_post, sample.timestamp
             )
+            self._pending_transition_post.append(_transition_sample(sample, watts))
 
     def _pending_transition_features(
         self,
@@ -975,7 +1163,7 @@ class OperatingStateMachine:
             if self._running_step_candidate_expired(sample.timestamp):
                 self._clear_pending_running_step()
             else:
-                self._append_running_step_post(sample.timestamp, watts)
+                self._append_running_step_post(sample, watts)
                 post = tuple(self._pending_running_step_post)
                 if len(post) < _RUNNING_STEP_POST_SAMPLE_COUNT:
                     return None
@@ -1032,16 +1220,16 @@ class OperatingStateMachine:
             return None
         self._pending_running_step_pre = pre
         self._pending_running_step_first_post_at = sample.timestamp
-        self._pending_running_step_post.append(
-            _TransitionSample(timestamp=sample.timestamp, power_w=watts)
-        )
+        self._pending_running_step_post.append(_transition_sample(sample, watts))
         return None
 
-    def _append_running_step_post(self, timestamp: datetime, watts: float) -> None:
-        self._prune_transition_buffer(self._pending_running_step_post, timestamp)
-        self._pending_running_step_post.append(
-            _TransitionSample(timestamp=timestamp, power_w=watts)
-        )
+    def _append_running_step_post(
+        self,
+        sample: NormalizedCircuitSample,
+        watts: float,
+    ) -> None:
+        self._prune_transition_buffer(self._pending_running_step_post, sample.timestamp)
+        self._pending_running_step_post.append(_transition_sample(sample, watts))
 
     def _running_step_cooldown_elapsed(self, timestamp: datetime) -> bool:
         return self._last_running_step_at is None or (

@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 from hashlib import sha256
 from itertools import combinations
-from math import isclose, isfinite, log
+from math import copysign, hypot, isclose, isfinite, log
 from statistics import median
 from typing import Any
 from urllib.parse import urlencode
@@ -2317,6 +2317,10 @@ class NilmEdge:
     parent_edge_id: str | None = None
     explained_known_circuit_ids: tuple[str, ...] = ()
     transition_kind: str = "step"
+    electrical_evidence_version: int = dataclass_field(default=0, compare=False)
+    electrical_dimension_statuses: tuple[tuple[str, str], ...] = dataclass_field(
+        default=(), compare=False
+    )
 
 
 class NilmComponentStatus(StrEnum):
@@ -3512,6 +3516,9 @@ NILM_SESSION_GLOBAL_MATCHING_MAX_NODES = 64
 NILM_SESSION_CANDIDATE_EDGE_MAX_ITEMS = 64
 NILM_SESSION_CANDIDATE_PAIR_MAX_ITEMS = 512
 NILM_SESSION_TRACE_PAIR_MAX_ITEMS = 64
+NILM_ELECTRICAL_EVIDENCE_VERSION = 1
+NILM_VAR_CONVENTION = "signed_var_v1"
+NILM_LEG_W_CONVENTION = "signed_real_power_w_v1"
 
 if not isclose(
     KNOWN_LOAD_MAGNITUDE_WEIGHT + KNOWN_LOAD_TIME_WEIGHT + KNOWN_LOAD_TOPOLOGY_WEIGHT,
@@ -3618,6 +3625,7 @@ class NilmKnownLoadAttributionRecord:
     ambiguity_status: str
     rejected_candidate_summaries: tuple[Mapping[str, Any], ...]
     provenance_version: int
+    electrical_dimension_statuses: tuple[tuple[str, str], ...] = ()
 
 
 def known_load_topology_for_config(config: CircuitConfig) -> KnownLoadTopology:
@@ -4398,6 +4406,11 @@ class NilmEdgeDetector:
         if abs(delta_w) < self.effective_min_delta_w:
             return None
 
+        confirmation_window = self.confirmation_max_interval
+        previous_real_time = _source_updated_at(previous, SensorRole.REAL_POWER)
+        sample_real_time = _source_updated_at(sample, SensorRole.REAL_POWER)
+        previous_var_time = _source_updated_at(previous, SensorRole.REACTIVE_POWER)
+        sample_var_time = _source_updated_at(sample, SensorRole.REACTIVE_POWER)
         leg_a_delta = _optional_delta(
             getattr(sample, "leg_a_real_power", None),
             getattr(previous, "leg_a_real_power", None),
@@ -4407,9 +4420,6 @@ class NilmEdgeDetector:
             getattr(previous, "leg_b_real_power", None),
         )
         topology = _split_phase_topology(leg_a_delta, leg_b_delta)
-        confirmation_window = self.confirmation_max_interval
-        previous_real_time = _source_updated_at(previous, SensorRole.REAL_POWER)
-        sample_real_time = _source_updated_at(sample, SensorRole.REAL_POWER)
         previous_va, previous_pf = _nilm_electrical_features(
             previous,
             previous_real_time,
@@ -4420,9 +4430,53 @@ class NilmEdgeDetector:
             sample_real_time,
             confirmation_window,
         )
-        previous_var_time = _source_updated_at(previous, SensorRole.REACTIVE_POWER)
-        sample_var_time = _source_updated_at(sample, SensorRole.REACTIVE_POWER)
-
+        previous_evidence_real_time = _recorded_source_updated_at(
+            previous, SensorRole.REAL_POWER
+        )
+        sample_evidence_real_time = _recorded_source_updated_at(
+            sample, SensorRole.REAL_POWER
+        )
+        var_status = _electrical_dimension_status(
+            sample.reactive_power,
+            previous.reactive_power,
+            _recorded_source_updated_at(sample, SensorRole.REACTIVE_POWER),
+            _recorded_source_updated_at(previous, SensorRole.REACTIVE_POWER),
+            sample_evidence_real_time,
+            previous_evidence_real_time,
+            sample.timestamp,
+            previous.timestamp,
+            confirmation_window,
+        )
+        leg_a_status = _electrical_dimension_status(
+            getattr(sample, "leg_a_real_power", None),
+            getattr(previous, "leg_a_real_power", None),
+            sample_evidence_real_time,
+            previous_evidence_real_time,
+            sample_evidence_real_time,
+            previous_evidence_real_time,
+            sample.timestamp,
+            previous.timestamp,
+            confirmation_window,
+        )
+        leg_b_status = _electrical_dimension_status(
+            getattr(sample, "leg_b_real_power", None),
+            getattr(previous, "leg_b_real_power", None),
+            sample_evidence_real_time,
+            previous_evidence_real_time,
+            sample_evidence_real_time,
+            previous_evidence_real_time,
+            sample.timestamp,
+            previous.timestamp,
+            confirmation_window,
+        )
+        electrical_dimension_statuses = (
+            ("var", var_status),
+            ("leg_a_w", leg_a_status),
+            ("leg_b_w", leg_b_status),
+        )
+        has_electrical_evidence = any(
+            status != "missing" for _dimension, status in electrical_dimension_statuses
+        )
         return NilmEdge(
             timestamp=sample.timestamp,
             delta_w=delta_w,
@@ -4460,6 +4514,12 @@ class NilmEdgeDetector:
             dominant_leg=topology["dominant_leg"],
             split_phase_type=topology["split_phase_type"],
             transition_kind=transition_kind,
+            electrical_evidence_version=(
+                NILM_ELECTRICAL_EVIDENCE_VERSION if has_electrical_evidence else 0
+            ),
+            electrical_dimension_statuses=(
+                electrical_dimension_statuses if has_electrical_evidence else ()
+            ),
         )
 
     def process_many(self, samples: Iterable[CircuitSample]) -> list[NilmEdge]:
@@ -4533,6 +4593,18 @@ def _source_updated_at(sample: CircuitSample, role: SensorRole) -> datetime:
     return sample.timestamp
 
 
+def _recorded_source_updated_at(
+    sample: CircuitSample,
+    role: SensorRole,
+) -> datetime | None:
+    """Return only a source timestamp actually carried by the sample."""
+
+    for source_role, timestamp in getattr(sample, "source_updated_at_by_role", ()):
+        if source_role is role or str(source_role) == role.value:
+            return timestamp if isinstance(timestamp, datetime) else None
+    return None
+
+
 def _aligned_source_updated_at(
     sample: CircuitSample,
     roles: tuple[SensorRole, ...],
@@ -4568,6 +4640,44 @@ def _aligned_optional_delta(
         ):
             return None
     return float(current) - float(previous)
+
+
+def _electrical_dimension_status(
+    current: float | None,
+    previous: float | None,
+    current_updated_at: datetime | None,
+    previous_updated_at: datetime | None,
+    current_real_updated_at: datetime | None,
+    previous_real_updated_at: datetime | None,
+    current_timestamp: datetime,
+    previous_timestamp: datetime,
+    max_interval: timedelta | None,
+) -> str:
+    """Classify explicit per-dimension evidence without changing edge values."""
+
+    if (
+        current is None
+        or previous is None
+        or current_updated_at is None
+        or previous_updated_at is None
+        or current_real_updated_at is None
+        or previous_real_updated_at is None
+    ):
+        return "missing"
+    if max_interval is not None:
+        if (
+            abs(current_updated_at - current_timestamp) > max_interval
+            or abs(previous_updated_at - previous_timestamp) > max_interval
+            or abs(current_real_updated_at - current_timestamp) > max_interval
+            or abs(previous_real_updated_at - previous_timestamp) > max_interval
+        ):
+            return "stale"
+        if (
+            abs(current_updated_at - current_real_updated_at) > max_interval
+            or abs(previous_updated_at - previous_real_updated_at) > max_interval
+        ):
+            return "misaligned"
+    return "measured"
 
 
 @dataclass(frozen=True, slots=True)
@@ -5212,6 +5322,7 @@ def _compound_known_load_matches(
             edge,
             residual_delta_w,
             known_circuit_ids=known_circuit_ids,
+            known_events=tuple(item[1] for item in group),
             residual_min_delta_w=residual_min_delta_w,
         )
         topology_statuses = tuple(item[5] for item in group)
@@ -5394,6 +5505,7 @@ def attribute_known_loads(
                     edge,
                     residual_delta_w,
                     known_circuit_ids=(event.circuit_id,),
+                    known_events=(event,),
                     residual_min_delta_w=residual_min_delta_w,
                 )
                 if eligible
@@ -5661,6 +5773,11 @@ def known_load_attribution_records(
                 ambiguity_status="matched",
                 rejected_candidate_summaries=rejections,
                 provenance_version=NILM_KNOWN_LOAD_ATTRIBUTION_PROVENANCE_VERSION,
+                electrical_dimension_statuses=(
+                    match.residual_edge.electrical_dimension_statuses
+                    if match.residual_edge is not None
+                    else ()
+                ),
             )
         else:
             ambiguity_status = (
@@ -5705,7 +5822,7 @@ def nilm_known_load_attribution_to_dict(
 ) -> dict[str, Any]:
     """Return the JSON-safe persistence/read-model representation of a record."""
 
-    return {
+    payload = {
         "attribution_id": record.attribution_id,
         "timestamp": record.timestamp.isoformat(),
         "aggregate_edge_id": record.aggregate_edge_id,
@@ -5728,6 +5845,11 @@ def nilm_known_load_attribution_to_dict(
         ],
         "provenance_version": record.provenance_version,
     }
+    if record.electrical_dimension_statuses:
+        payload["electrical_dimension_statuses"] = dict(
+            record.electrical_dimension_statuses
+        )
+    return payload
 
 
 def _nilm_known_load_attribution_id(aggregate_edge_id: str) -> str:
@@ -5797,11 +5919,128 @@ def _known_load_rejection_summaries(
     )
 
 
+def _known_load_residual_dimension(
+    edge: NilmEdge,
+    known_events: tuple[CircuitEvent, ...],
+    *,
+    dimension: str,
+    attribute: str,
+    convention: str,
+) -> tuple[float | None, str]:
+    """Subtract one optional additive dimension only from complete evidence."""
+
+    aggregate_value = _nilm_number(getattr(edge, attribute))
+    if aggregate_value is None:
+        return None, "missing_aggregate"
+    aggregate_status = _aggregate_electrical_dimension_status(edge, dimension)
+    if aggregate_status != "measured":
+        return None, aggregate_status
+
+    known_values: list[float] = []
+    known_statuses: list[str] = []
+    for event in known_events:
+        value, status = _known_event_electrical_dimension(
+            event,
+            edge.timestamp,
+            dimension=dimension,
+            convention=convention,
+        )
+        if value is not None and status == "measured":
+            known_values.append(value)
+        known_statuses.append(status)
+    if len(known_values) != len(known_events):
+        if len(known_events) > 1:
+            return None, "partial_compound"
+        return None, known_statuses[0] if known_statuses else "missing_known"
+    return aggregate_value - sum(known_values), "measured_subtraction"
+
+
+def _aggregate_electrical_dimension_status(edge: NilmEdge, dimension: str) -> str:
+    """Return whether current aggregate evidence proves one dimension."""
+
+    if edge.electrical_evidence_version != NILM_ELECTRICAL_EVIDENCE_VERSION:
+        return "unsupported"
+    status = dict(edge.electrical_dimension_statuses).get(dimension)
+    if status == "measured":
+        return "measured"
+    if status == "missing":
+        return "missing_aggregate"
+    if status == "stale":
+        return "stale_aggregate"
+    if status == "misaligned":
+        return "misaligned_aggregate"
+    return "unsupported"
+
+
+def _known_event_electrical_dimension(
+    event: CircuitEvent,
+    aggregate_timestamp: datetime,
+    *,
+    dimension: str,
+    convention: str,
+) -> tuple[float | None, str]:
+    """Read one explicit direct-transition dimension without legacy fallback."""
+
+    if _finite_event_feature_number(
+        event, "transition_electrical_evidence_version"
+    ) != float(NILM_ELECTRICAL_EVIDENCE_VERSION):
+        return None, "missing_known"
+    alignment_status = str(
+        event.features.get(f"transition_{dimension}_alignment_status") or ""
+    ).strip()
+    if alignment_status == "stale":
+        return None, "stale_known"
+    if alignment_status == "misaligned":
+        return None, "misaligned_known"
+    if alignment_status != "aligned":
+        return None, "missing_known"
+    if (
+        str(event.features.get(f"transition_{dimension}_convention") or "")
+        != convention
+    ):
+        return None, "convention_incompatible"
+    coverage = _finite_event_feature_number(event, f"transition_{dimension}_coverage")
+    if coverage is None or coverage < 1.0:
+        return None, "missing_known"
+    value = _finite_event_feature_number(event, f"transition_delta_{dimension}")
+    if value is None:
+        return None, "missing_known"
+    window_start = _event_feature_datetime(
+        event, f"transition_{dimension}_window_start"
+    )
+    window_end = _event_feature_datetime(event, f"transition_{dimension}_window_end")
+    support_oldest = _event_feature_datetime(
+        event, f"transition_{dimension}_support_oldest"
+    )
+    support_newest = _event_feature_datetime(
+        event, f"transition_{dimension}_support_newest"
+    )
+    if (
+        window_start is None
+        or window_end is None
+        or support_oldest is None
+        or support_newest is None
+    ):
+        return None, "missing_known"
+    try:
+        if (
+            window_end < window_start
+            or support_newest < support_oldest
+            or not support_oldest <= window_start <= window_end <= support_newest
+            or not window_start <= aggregate_timestamp <= window_end
+        ):
+            return None, "misaligned_known"
+    except TypeError:
+        return None, "misaligned_known"
+    return value, "measured"
+
+
 def _known_load_residual_edge(
     edge: NilmEdge,
     residual_delta_w: float,
     known_circuit_ids: tuple[str, ...],
     *,
+    known_events: tuple[CircuitEvent, ...],
     residual_min_delta_w: float,
 ) -> NilmEdge | None:
     """Create a provenance-linked residual when it clears the configured floor."""
@@ -5813,25 +6052,84 @@ def _known_load_residual_edge(
     )
     if abs(residual_delta_w) < threshold:
         return None
+    residual_var, var_status = _known_load_residual_dimension(
+        edge,
+        known_events,
+        dimension="var",
+        attribute="delta_var",
+        convention=NILM_VAR_CONVENTION,
+    )
+    residual_leg_a, leg_a_status = _known_load_residual_dimension(
+        edge,
+        known_events,
+        dimension="leg_a_w",
+        attribute="leg_a_delta_w",
+        convention=NILM_LEG_W_CONVENTION,
+    )
+    residual_leg_b, leg_b_status = _known_load_residual_dimension(
+        edge,
+        known_events,
+        dimension="leg_b_w",
+        attribute="leg_b_delta_w",
+        convention=NILM_LEG_W_CONVENTION,
+    )
+    residual_va = (
+        round(copysign(hypot(residual_delta_w, residual_var), residual_delta_w), 3)
+        if residual_var is not None
+        else None
+    )
+    residual_pf = (
+        round(min(abs(residual_delta_w) / abs(residual_va), 1.0), 3)
+        if residual_va not in {None, 0.0}
+        else None
+    )
+    topology = (
+        _split_phase_topology(residual_leg_a, residual_leg_b)
+        if residual_leg_a is not None and residual_leg_b is not None
+        else {
+            "leg_balance_ratio": None,
+            "dominant_leg": None,
+            "split_phase_type": "unknown",
+        }
+    )
+    statuses = [
+        ("var", var_status),
+        ("leg_a_w", leg_a_status),
+        ("leg_b_w", leg_b_status),
+    ]
+    if residual_va is not None:
+        statuses.append(("va", "recomputed"))
+    if residual_pf is not None:
+        statuses.append(("pf", "recomputed"))
+    aggregate_statuses = dict(edge.electrical_dimension_statuses)
+    has_measured_aggregate_dimension = any(
+        aggregate_statuses.get(dimension) == "measured"
+        for dimension in ("var", "leg_a_w", "leg_b_w")
+    )
     return NilmEdge(
         timestamp=edge.timestamp,
         delta_w=residual_delta_w,
-        # The direct-meter event only establishes real-power attribution.
-        # Reactive, apparent, PF and leg deltas are not proportional to real
-        # power, so carrying scaled aggregate values would fabricate evidence.
-        delta_var=None,
-        delta_va=None,
-        delta_pf=None,
+        delta_var=_round_optional(residual_var),
+        delta_va=residual_va,
+        delta_pf=residual_pf,
         direction="on" if residual_delta_w > 0 else "off",
-        leg_a_delta_w=None,
-        leg_b_delta_w=None,
-        leg_balance_ratio=None,
-        dominant_leg=None,
-        split_phase_type="unknown",
+        leg_a_delta_w=_round_optional(residual_leg_a),
+        leg_b_delta_w=_round_optional(residual_leg_b),
+        leg_balance_ratio=topology["leg_balance_ratio"],
+        dominant_leg=topology["dominant_leg"],
+        split_phase_type=topology["split_phase_type"],
         origin="known_load_residual",
         parent_edge_id=_nilm_edge_id(edge),
         explained_known_circuit_ids=known_circuit_ids,
         transition_kind=edge.transition_kind,
+        electrical_evidence_version=(
+            NILM_ELECTRICAL_EVIDENCE_VERSION
+            if has_measured_aggregate_dimension
+            else 0
+        ),
+        electrical_dimension_statuses=(
+            tuple(statuses) if has_measured_aggregate_dimension else ()
+        ),
     )
 
 
