@@ -5434,6 +5434,8 @@ def test_dynamic_panel_static_text_lives_in_translations() -> None:
         "Label appliance interval",
         "Session Validation",
         "Prediction Preview",
+        "Power: measured {measured}, estimated {estimated}, error {error}",
+        "Energy: measured {measured}, estimated {estimated}, error {error}",
         "Known Load Overlays",
         "Solar/Net Overlays",
         "Show known-load overlays",
