@@ -6914,8 +6914,8 @@ panel._openNilmIntervalEditor();
 panel._removeNilmDraftInterval(0);
 const editorHtml = panel._renderNilmLabelIntervalEditor(workspace);
 assert.ok(editorHtml.includes(">Save Changes<"), editorHtml);
-assert.ok(editorHtml.includes("One representative interval is enough"), editorHtml);
-assert.ok(editorHtml.includes("Additional representative runs improve"), editorHtml);
+assert.ok(editorHtml.includes("Select one complete run of one appliance"), editorHtml);
+assert.ok(editorHtml.includes("Add more clean runs to improve"), editorHtml);
 await panel._callNilmLabelIntervalAction(-1, "save");
 assert.equal(calls.length, 2);
 assert.equal(calls[1].service, "save_nilm_interval_changes");
@@ -7249,9 +7249,9 @@ def test_nilm_interval_action_contracts() -> None:
           { value: "dishwasher", label: "Dishwasher" },
         ] } } });
       for (const expected of [
-        "Label appliance interval", "Select one full appliance run per interval",
-        "start just before its power-on step",
-        "avoid intervals where they also turn on or off",
+        "Label appliance interval", "Select one complete run of one appliance",
+        "Start just before its power rises",
+        "Avoid intervals where another appliance also turns on or off",
         "Appliance Type", "Dishwasher", "Save Changes",
       ]) assert.ok(html.includes(expected), expected);
       assert.ok(!html.includes('data-nilm-label-interval-input="observed_transition_w"'));
