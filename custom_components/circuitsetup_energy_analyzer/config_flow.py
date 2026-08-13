@@ -234,6 +234,7 @@ from .phase_balance import (
     DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
     DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
 )
+from .profiles import nilm_source_kind
 from .recommendation_guidance import (
     is_hidden_recommendation_evidence_key,
     recommendation_setting_default_value,
@@ -1473,10 +1474,6 @@ def _setup_schema(source_entity_ids: Iterable[str] | None = None) -> Any:
                 default=False,
             ): bool,
             vol.Optional(
-                CONF_ENABLE_EXPERIMENTAL_NILM,
-                default=DEFAULT_ENABLE_EXPERIMENTAL_NILM,
-            ): bool,
-            vol.Optional(
                 CONF_MAINS_SOURCE_ENTITIES,
                 default=[],
             ): _energy_entity_list_selector(
@@ -1647,13 +1644,6 @@ def _mains_schema(
         mains_source_entities,
         source_entity_ids,
     )
-    enable_experimental_nilm = bool(
-        _entry_value(
-            config_entry,
-            CONF_ENABLE_EXPERIMENTAL_NILM,
-            DEFAULT_ENABLE_EXPERIMENTAL_NILM,
-        )
-    )
     known_load_circuits = _known_load_circuits_from_entry(config_entry)
     source_entities = _normalize_demo_source_entity_ids(
         _strict_string_list(
@@ -1674,22 +1664,21 @@ def _mains_schema(
         source_entities,
         mains_source_entities,
     )
-    return vol.Schema(
-        {
-            vol.Optional(
-                CONF_ENABLE_EXPERIMENTAL_NILM,
-                default=enable_experimental_nilm,
-            ): bool,
-            vol.Optional(
-                CONF_MAINS_SOURCE_ENTITIES,
-                default=mains_source_entities,
-            ): _energy_entity_list_selector(selectable_source_entities),
+    schema: dict[Any, Any] = {
+        vol.Optional(
+            CONF_MAINS_SOURCE_ENTITIES,
+            default=mains_source_entities,
+        ): _energy_entity_list_selector(selectable_source_entities),
+    }
+    known_load_options = _known_load_circuit_options_from_config(config)
+    if _config_has_enabled_nilm_detection_source(config) and known_load_options:
+        schema[
             vol.Optional(
                 CONF_KNOWN_LOAD_CIRCUITS,
                 default=known_load_circuits,
-            ): _multi_select_selector(_known_load_circuit_options_from_config(config)),
-        }
-    )
+            )
+        ] = _multi_select_selector(known_load_options)
+    return vol.Schema(schema)
 
 
 def _utility_schema(
@@ -4324,23 +4313,23 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                     user_input.get(CONF_MAINS_SOURCE_ENTITIES, []),
                     invalid_error_key="invalid_mains_source_entities",
                 )
-                known_load_circuits = _known_load_circuits_from_input(
-                    user_input,
-                    config,
-                )
+                updates: dict[str, Any] = {
+                    CONF_MAINS_SOURCE_ENTITIES: mains_source_entities,
+                }
+                if _config_has_enabled_nilm_detection_source(config):
+                    updates[CONF_KNOWN_LOAD_CIRCUITS] = (
+                        _known_load_circuits_from_input(
+                            user_input,
+                            config,
+                        )
+                    )
             except SetupValidationError as err:
                 return await self._async_show_mains_form({"base": err.error_key})
             return self.async_create_entry(
                 title="",
                 data=_options_with_updates(
                     self._config_entry,
-                    {
-                        CONF_ENABLE_EXPERIMENTAL_NILM: bool(
-                            user_input.get(CONF_ENABLE_EXPERIMENTAL_NILM, False)
-                        ),
-                        CONF_MAINS_SOURCE_ENTITIES: mains_source_entities,
-                        CONF_KNOWN_LOAD_CIRCUITS: known_load_circuits,
-                    },
+                    updates,
                 ),
             )
 
@@ -6309,9 +6298,33 @@ def _known_load_circuits_from_entry(
     )
 
 
+def _config_has_enabled_nilm_detection_source(config: Mapping[str, Any]) -> bool:
+    if bool(config.get(CONF_ENABLE_EXPERIMENTAL_NILM, False)):
+        return True
+    for circuit in config.get(CONF_CIRCUITS, []) or []:
+        if isinstance(circuit, Mapping):
+            enabled = bool(
+                circuit.get(
+                    CONF_NILM_DETECTION_ENABLED,
+                    DEFAULT_NILM_DETECTION_ENABLED,
+                )
+            )
+        else:
+            enabled = bool(
+                getattr(
+                    circuit,
+                    CONF_NILM_DETECTION_ENABLED,
+                    DEFAULT_NILM_DETECTION_ENABLED,
+                )
+            )
+        if enabled and nilm_source_kind(circuit) is not None:
+            return True
+    return False
+
+
 def _should_show_setup_nilm_step(config: Mapping[str, Any]) -> bool:
     return bool(
-        config.get(CONF_ENABLE_EXPERIMENTAL_NILM, False)
+        _config_has_enabled_nilm_detection_source(config)
         and _known_load_circuit_options_from_config(config)
     )
 
