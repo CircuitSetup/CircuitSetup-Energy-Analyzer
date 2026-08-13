@@ -922,7 +922,8 @@ export function createNilmWorkspaceMethods({
       const editingExisting = draftIntervals.length > 0 && draftIntervals.every(
         (interval) => String(interval.interval_id || "").trim(),
       );
-      if (!label || (!applianceProfile && !editingExisting && !removedIntervalIds.length)
+      const assigningExisting = Boolean(String(draft.assignment_id || "").trim());
+      if (!label || (!applianceProfile && !assigningExisting && !editingExisting && !removedIntervalIds.length)
           || (!draftIntervals.length && !removedIntervalIds.length)) {
         this._setNilmIntervalError(this._panelText("errors.nilm_interval_fields_required"));
         return;
