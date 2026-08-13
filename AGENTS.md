@@ -91,5 +91,6 @@
 
 - PR CI can differ from local branch results because GitHub evaluates the merge commit against current `master`.
 - When a requirement refers to what is currently on GitHub, compare against current `master`, not only the branch point.
+- Do not commit Codex-generated planning, design, implementation-plan, or QA documents unless the user explicitly asks for those documents to be checked in. Keep them local and untracked by default.
 - Do not create QA docs in this repo unless the user explicitly asks for them.
 - For frontend panel changes, bump `custom_components/circuitsetup_energy_analyzer/panel.py::PANEL_MODULE_VERSION` so the browser cache-buster tracks shipped JavaScript.
