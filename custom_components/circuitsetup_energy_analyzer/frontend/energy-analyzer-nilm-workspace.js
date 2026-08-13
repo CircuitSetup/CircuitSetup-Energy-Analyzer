@@ -1099,14 +1099,33 @@ export function createNilmWorkspaceMethods({
     }
     const data = Object.assign({}, action.data || {});
     if (action.requires && action.requires.includes("label")) {
+      const sessionDraftKey = collectionKey === "sessions"
+        ? this._nilmSessionLabelDraftKey(item)
+        : "";
       const labelInput = this.shadowRoot.querySelector(
         collectionKey === "sessions"
           ? `#nilm_session_label_${index}`
           : `#nilm_assignment_label_${index}`,
       );
-      const existingAssignment = this._nilmExistingAssignmentSelection(`${collectionKey}_${index}`);
+      const selectedAssignmentId = sessionDraftKey
+        && this._nilmSessionAssignmentDrafts.has(sessionDraftKey)
+        ? this._nilmSessionAssignmentDrafts.get(sessionDraftKey)
+        : null;
+      const existingAssignment = this._nilmExistingAssignmentSelection(
+        `${collectionKey}_${index}`,
+        selectedAssignmentId,
+        action.assignment_options,
+      );
+      const hasSessionLabelDraft = Boolean(
+        sessionDraftKey && this._nilmSessionLabelDrafts.has(sessionDraftKey),
+      );
+      const sessionLabel = hasSessionLabelDraft
+        ? this._nilmSessionLabelDrafts.get(sessionDraftKey)
+        : "";
       const label = existingAssignment
         ? existingAssignment.label
+        : hasSessionLabelDraft
+        ? sessionLabel
         : labelInput
         ? labelInput.value
         : item.display_name || item.label || item.appliance_id || "";
@@ -1677,7 +1696,26 @@ export function createNilmWorkspaceMethods({
     if (!input || !input.dataset.nilmSessionLabelKey) {
       return;
     }
-    this._nilmSessionLabelDrafts.set(input.dataset.nilmSessionLabelKey, input.value);
+    const key = input.dataset.nilmSessionLabelKey;
+    this._nilmSessionLabelDrafts.set(key, input.value);
+    for (const duplicate of this.shadowRoot.querySelectorAll("[data-nilm-session-label-key]")) {
+      if (duplicate !== input && duplicate.dataset.nilmSessionLabelKey === key) {
+        duplicate.value = input.value;
+      }
+    }
+  }
+
+  _rememberNilmSessionAssignmentDraft(select) {
+    if (!select || !select.dataset.nilmSessionAssignmentKey) {
+      return;
+    }
+    const key = select.dataset.nilmSessionAssignmentKey;
+    this._nilmSessionAssignmentDrafts.set(key, select.value);
+    for (const duplicate of this.shadowRoot.querySelectorAll("[data-nilm-session-assignment-key]")) {
+      if (duplicate !== select && duplicate.dataset.nilmSessionAssignmentKey === key) {
+        duplicate.value = select.value;
+      }
+    }
   }
 
   _rememberNilmAssignmentDraft(input) {
@@ -2901,7 +2939,13 @@ export function createNilmWorkspaceMethods({
     }
   }
 
-  _renderNilmExistingAssignmentField(action, key, selectedAssignmentId = "", decisionKey = "") {
+  _renderNilmExistingAssignmentField(
+    action,
+    key,
+    selectedAssignmentId = "",
+    decisionKey = "",
+    sessionAssignmentKey = "",
+  ) {
     const options = action && Array.isArray(action.assignment_options)
       ? action.assignment_options
       : [];
@@ -2911,7 +2955,7 @@ export function createNilmWorkspaceMethods({
     return `
       <label class="nilm-label-field">
         <span class="muted">${this._escape(this._panelText("nilm_workspace.existing_appliance"))}</span>
-        <select data-nilm-existing-assignment="${this._escape(key)}" ${decisionKey ? `data-nilm-decision-assignment-key="${this._escape(decisionKey)}"` : ""}>
+        <select data-nilm-existing-assignment="${this._escape(key)}" ${decisionKey ? `data-nilm-decision-assignment-key="${this._escape(decisionKey)}"` : ""} ${sessionAssignmentKey ? `data-nilm-session-assignment-key="${this._escape(sessionAssignmentKey)}"` : ""}>
           <option value="">${this._escape(this._panelText("nilm_workspace.new_appliance"))}</option>
           ${options.map((option) => `<option value="${this._escape(option.value || "")}" ${String(option.value || "") === String(selectedAssignmentId || "") ? "selected" : ""}>${this._escape(option.label || option.value || "")}</option>`).join("")}
         </select>
@@ -2919,16 +2963,23 @@ export function createNilmWorkspaceMethods({
     `;
   }
 
-  _nilmExistingAssignmentSelection(key) {
+  _nilmExistingAssignmentSelection(key, selectedAssignmentId = null, assignmentOptions = []) {
     const select = this.shadowRoot.querySelector(`[data-nilm-existing-assignment="${key}"]`);
-    const assignmentId = select ? String(select.value || "").trim() : "";
+    const assignmentId = String(
+      selectedAssignmentId === null ? (select && select.value) || "" : selectedAssignmentId,
+    ).trim();
     if (!assignmentId) {
       return null;
     }
-    const option = select.selectedOptions && select.selectedOptions[0];
+    const option = Array.isArray(assignmentOptions)
+      ? assignmentOptions.find((item) => String(item && item.value || "") === assignmentId)
+      : null;
+    const selectedOption = select && select.value === assignmentId
+      ? select.selectedOptions && select.selectedOptions[0]
+      : null;
     return {
       assignment_id: assignmentId,
-      label: String((option && option.textContent) || assignmentId).trim(),
+      label: String((option && option.label) || (selectedOption && selectedOption.textContent) || assignmentId).trim(),
     };
   }
 
@@ -4706,8 +4757,11 @@ export function createNilmWorkspaceMethods({
     const currentLabel = this._nilmSessionLabelDrafts.has(draftKey)
       ? this._nilmSessionLabelDrafts.get(draftKey)
       : "";
+    const selectedAssignmentId = this._nilmSessionAssignmentDrafts.has(draftKey)
+      ? this._nilmSessionAssignmentDrafts.get(draftKey)
+      : "";
     return `
-      ${this._renderNilmExistingAssignmentField(session && session.actions && session.actions.assign, `sessions_${index}`)}
+      ${this._renderNilmExistingAssignmentField(session && session.actions && session.actions.assign, `sessions_${index}`, selectedAssignmentId, "", draftKey)}
       <label class="nilm-label-field" for="nilm_session_label_${index}">
         <span class="muted">${this._escape(this._panelText("nilm_workspace.appliance_name"))}</span>
         <input
