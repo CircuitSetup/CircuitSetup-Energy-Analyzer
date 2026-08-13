@@ -10052,6 +10052,64 @@ test("NILM interval boundary handles support keyboard and pointer editing", asyn
   await toHaveNoViolations(page);
 });
 
+test("NILM interval drag previews live and finalizes at graph leave", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: [[
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T17:55:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "900", last_changed: "2026-07-13T18:00:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "930", last_changed: "2026-07-13T18:05:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "925", last_changed: "2026-07-13T18:10:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "920", last_changed: "2026-07-13T18:40:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T18:45:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T18:50:00Z", effective_role: "real_power", source_unit: "W" },
+      ]] });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.history = {
+      ...payload.history,
+      entities: ["sensor.mains_power"],
+      source_entities: ["sensor.mains_power"],
+      max_hours: 24,
+      api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+      fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-open-interval-editor]").click();
+  await expect(panel.locator("[data-nilm-interval-editor]")).toContainText(
+    "Select one complete run of one appliance.",
+  );
+  await expect(panel.locator("[data-nilm-interval-guidance]")).toContainText(
+    "Start just before its power rises.",
+  );
+
+  const chart = panel.locator("[data-nilm-chart-select]");
+  const box = await chart.boundingBox();
+  expect(box).not.toBeNull();
+  await page.mouse.move(box.x + box.width * 0.25, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.60, box.y + box.height / 2);
+  await expect(chart.locator("[data-nilm-provisional-band]")).toBeVisible();
+  await expect(panel.locator('[data-nilm-label-interval-input="start"]')).toHaveValue("");
+
+  await page.mouse.move(box.x + box.width + 20, box.y + box.height / 2);
+  await expect(panel.locator("[data-nilm-provisional-band]")).toHaveCount(0);
+  await expect(panel.locator('.nilm-session-band[data-nilm-band-kind="draft"]')).toBeVisible();
+  const start = panel.locator('[data-nilm-label-interval-input="start"]');
+  const end = panel.locator('[data-nilm-label-interval-input="end"]');
+  await expect(start).not.toHaveValue("");
+  await expect(end).not.toHaveValue("");
+  const oldStart = await start.inputValue();
+  await panel.locator('[data-nilm-boundary-handle="start"]').press("ArrowRight");
+  await expect(start).not.toHaveValue(oldStart);
+  await page.mouse.up();
+});
+
 test("NILM interval history failure preserves the graph without opening the editor", async ({ page }) => {
   test.info().annotations.push(
     { type: "allow-browser-error", description: "500 http://127.0.0.1:4173/api/circuitsetup_energy_analyzer/nilm_workspace_history" },
