@@ -2985,9 +2985,19 @@ def _manual_evidence_mapping(
         derived = derive_manual_interval_evidence(
             samples, start=start, end=end, source_entity_ids=source_entity_ids
         )
+        start_transition_w = derived.start_transition_w
+        stop_transition_w = derived.stop_transition_w
         result = {
-            "start_transition_w": derived.start_transition_w,
-            "stop_transition_w": derived.stop_transition_w,
+            "start_transition_w": (
+                start_transition_w
+                if start_transition_w is not None and start_transition_w > 0.0
+                else None
+            ),
+            "stop_transition_w": (
+                stop_transition_w
+                if stop_transition_w is not None and stop_transition_w < 0.0
+                else None
+            ),
             "median_power_w": derived.net_plateau_power_w,
             "average_power_w": derived.average_power_w,
             "measured_energy_kwh": derived.measured_energy_kwh,
