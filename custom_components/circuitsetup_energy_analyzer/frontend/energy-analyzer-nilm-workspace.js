@@ -4490,6 +4490,12 @@ export function createNilmWorkspaceMethods({
     return `<div class="metric" data-nilm-interval-editor>
         <h3>${this._escape(this._panelText("nilm_workspace.interval_prompt"))}</h3>
         <p class="muted">${this._escape(this._panelText("nilm_workspace.interval_prompt_detail"))}</p>
+        <ul class="muted nilm-interval-guidance" data-nilm-interval-guidance>
+          <li>${this._escape(this._panelText("nilm_workspace.interval_guidance_start"))}</li>
+          <li>${this._escape(this._panelText("nilm_workspace.interval_guidance_end"))}</li>
+          <li>${this._escape(this._panelText("nilm_workspace.interval_guidance_other_loads"))}</li>
+          <li>${this._escape(this._panelText("nilm_workspace.interval_guidance_examples"))}</li>
+        </ul>
         <div class="nilm-interval-form nilm-interval-identity">
           ${this._renderNilmExistingAssignmentField(action, "label_interval", draft.assignment_id)}
           <label>

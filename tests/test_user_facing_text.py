@@ -6504,7 +6504,16 @@ def test_nilm_multi_interval_labeling_contracts() -> None:
   } } });
   const html = panel._renderNilmLabelIntervalEditor(workspace);
   assert.ok(html.includes("Label appliance interval"));
-  assert.ok(html.includes("Select one full appliance run per interval"));
+  assert.ok(html.includes("data-nilm-interval-guidance"));
+  for (const guidance of [
+    "Select one complete run of one appliance.",
+    "Start just before its power rises.",
+    "End just after its power falls.",
+    "Avoid intervals where another appliance also turns on or off.",
+    "One clean run is enough.",
+  ]) {
+    assert.ok(html.includes(guidance), guidance);
+  }
   assert.ok(html.includes('data-nilm-interval-row="0"'));
   assert.ok(html.includes('data-nilm-interval-row="1"'));
   assert.ok(html.includes('data-nilm-active="true"'));
