@@ -9160,6 +9160,76 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   await toHaveNoViolations(page);
 });
 
+test("NILM session assignment keeps the selected existing appliance across rerenders", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: [] });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    const session = payload.sessions.find((item) => item.session_id === "nilm-session-0");
+    delete session.signature_review;
+    session.actions = {
+      assign: {
+        domain: "circuitsetup_energy_analyzer",
+        service: "assign_nilm_session",
+        data: {
+          circuit_id: "mains",
+          session_id: "nilm-session-0",
+          signature_fingerprint: "signature-1",
+        },
+        requires: ["label"],
+        assignment_options: [{ value: "dishwasher", label: "Dishwasher" }],
+      },
+    };
+    payload.lanes.needs_review = {
+      ...payload.lanes.needs_review,
+      signature_ids: [],
+      session_ids: ["nilm-session-0"],
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+
+  const existingAssignment = panel.locator('[data-nilm-existing-assignment="sessions_0"]');
+  await expect(existingAssignment).toHaveCount(2);
+  await existingAssignment.last().selectOption("dishwasher");
+  await expect.poll(() => existingAssignment.evaluateAll((selects) => selects.map((select) => select.value)))
+    .toEqual(["dishwasher", "dishwasher"]);
+  await page.evaluate(() => window.__panel._render());
+  await expect.poll(() => existingAssignment.evaluateAll((selects) => selects.map((select) => select.value)))
+    .toEqual(["dishwasher", "dishwasher"]);
+  await existingAssignment.first().selectOption("");
+  await expect.poll(() => existingAssignment.evaluateAll((selects) => selects.map((select) => select.value)))
+    .toEqual(["", ""]);
+  await expect.poll(() => page.evaluate(() => window.__panel._nilmSessionAssignmentDrafts.get("nilm-session-0")))
+    .toBe("");
+  const applianceName = panel.locator('[data-nilm-session-label-key="nilm-session-0"]');
+  await applianceName.last().fill("Window AC");
+  await expect.poll(() => applianceName.evaluateAll((inputs) => inputs.map((input) => input.value)))
+    .toEqual(["Window AC", "Window AC"]);
+  await applianceName.first().fill("");
+  await expect.poll(() => applianceName.evaluateAll((inputs) => inputs.map((input) => input.value)))
+    .toEqual(["", ""]);
+  await expect.poll(() => page.evaluate(() => ({
+    has: window.__panel._nilmSessionLabelDrafts.has("nilm-session-0"),
+    value: window.__panel._nilmSessionLabelDrafts.get("nilm-session-0"),
+  }))).toEqual({ has: true, value: "" });
+  await existingAssignment.last().selectOption("dishwasher");
+  await panel.locator('[data-nilm-session-action="assign"]').last().click();
+
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
+    service: "assign_nilm_session",
+    data: {
+      assignment_id: "dishwasher",
+      label: "Dishwasher",
+      session_id: "nilm-session-0",
+    },
+  });
+});
+
 test("assigned NILM intervals can be labeled, inspected, and removed", async ({ page }) => {
   let workspaceLoads = 0;
   const historyWindows = [];

@@ -1963,6 +1963,11 @@ export class PanelShellMethods {
     for (const input of this.shadowRoot.querySelectorAll("[data-nilm-session-label-input]")) {
       input.addEventListener("input", () => this._rememberNilmSessionLabelDraft(input));
     }
+    for (const select of this.shadowRoot.querySelectorAll("[data-nilm-session-assignment-key]")) {
+      const remember = () => this._rememberNilmSessionAssignmentDraft(select);
+      select.addEventListener("input", remember);
+      select.addEventListener("change", remember);
+    }
     for (const input of this.shadowRoot.querySelectorAll("[data-nilm-assignment-input]")) {
       input.addEventListener("input", () => this._rememberNilmAssignmentDraft(input));
       input.addEventListener("change", () => this._rememberNilmAssignmentDraft(input));
