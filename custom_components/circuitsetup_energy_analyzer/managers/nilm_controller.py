@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from statistics import median
 from typing import Any
 
-from ..const import CONF_ENABLE_EXPERIMENTAL_NILM, DOMAIN
+from ..const import DOMAIN
 from ..demo import demo_nilm_workspace_seed, is_demo_config
 from ..discovery import sensor_metadata_role_conflict, sensor_role_from_metadata
 from ..models import (
@@ -249,14 +249,10 @@ class NilmController:
 
     def enabled_for_config(self, config: Any) -> bool:
         """Return whether NILM processing is enabled for one circuit config."""
-        coordinator = self._coordinator
-        enabled = bool(
-            coordinator.options.get(
-                CONF_ENABLE_EXPERIMENTAL_NILM,
-                coordinator.entry_data.get(CONF_ENABLE_EXPERIMENTAL_NILM, False),
-            )
+        return (
+            bool(getattr(config, "nilm_detection_enabled", False))
+            and nilm_source_kind(config) is not None
         )
-        return enabled and nilm_source_kind(config) is not None
 
     def clear_topology_state(self, circuit_id: str) -> None:
         """Clear retained NILM topology state and cached alert policy."""

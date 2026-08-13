@@ -90,6 +90,7 @@ class _SettingsCoordinator:
             settings_recommendation_decisions={},
             alert_feedback={},
             sensitivity_by_circuit={},
+            nilm_detection_sensitivity_by_circuit={},
             energy_usage_settings_by_circuit={
                 "fridge": {"daily_spike_ratio": 0.25}
             },
@@ -1554,16 +1555,22 @@ def test_settings_controller_builds_feature_alert_policies() -> None:
     assert water_policy.min_baseline_confidence == pytest.approx(0.7)
 
 
-def test_settings_controller_returns_nilm_min_delta_for_sensitivity() -> None:
+@pytest.mark.asyncio
+async def test_nilm_delta_uses_detection_sensitivity_not_alert_sensitivity() -> None:
     recommendation = _recommendation()
     coordinator = _SettingsCoordinator(recommendation)
     controller = settings_controller.SettingsController(coordinator)
     coordinator.store_data.sensitivity_by_circuit["fridge"] = "sensitive"
-    coordinator.store_data.sensitivity_by_circuit["hvac"] = "quiet"
 
-    assert controller.nilm_min_delta_w("fridge") == pytest.approx(50.0)
-    assert controller.nilm_min_delta_w("hvac") == pytest.approx(150.0)
-    assert controller.nilm_min_delta_w("unknown") == pytest.approx(100.0)
+    assert controller.sensitivity_for_circuit("fridge") == "sensitive"
+    assert controller.nilm_detection_sensitivity_for_circuit("fridge") == "balanced"
+    assert controller.nilm_min_delta_w("fridge") == pytest.approx(100.0)
+
+    await controller.async_set_nilm_detection_sensitivity("fridge", "quiet")
+
+    assert controller.sensitivity_for_circuit("fridge") == "sensitive"
+    assert controller.nilm_detection_sensitivity_for_circuit("fridge") == "quiet"
+    assert controller.nilm_min_delta_w("fridge") == pytest.approx(150.0)
 
 
 def test_settings_controller_reads_runtime_setting_defaults() -> None:

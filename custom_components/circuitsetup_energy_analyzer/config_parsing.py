@@ -7,6 +7,7 @@ from typing import Any
 
 from .const import (
     CONF_CIRCUITS,
+    CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_MAINS_SOURCE_ENTITIES,
     CONF_NILM_DETECTION_ENABLED,
     CONF_NILM_DETECTION_SENSITIVITY,
@@ -38,6 +39,7 @@ from .models import (
     SensorRef,
     SensorRole,
 )
+from .profiles import nilm_source_kind
 from .ux import normalize_nilm_detection_sensitivity
 
 
@@ -56,6 +58,21 @@ def retention_mode_from_sources(
         return RetentionMode.STANDARD
 
 
+def _legacy_nilm_detection_enabled(
+    entry_data: Mapping[str, Any],
+    options: Mapping[str, Any],
+    raw_circuit: Any,
+) -> bool:
+    if isinstance(raw_circuit, Mapping) and CONF_NILM_DETECTION_ENABLED in raw_circuit:
+        return False
+    return bool(
+        options.get(
+            CONF_ENABLE_EXPERIMENTAL_NILM,
+            entry_data.get(CONF_ENABLE_EXPERIMENTAL_NILM, False),
+        )
+    )
+
+
 def circuit_configs_from_entry_data(
     entry_data: dict[str, Any],
     options: dict[str, Any] | None = None,
@@ -71,7 +88,15 @@ def circuit_configs_from_entry_data(
         else entry_data.get(CONF_CIRCUITS, [])
     )
     for raw_circuit in raw_circuits:
-        config = _circuit_config_from_raw(raw_circuit, default_retention_mode)
+        config = _circuit_config_from_raw(
+            raw_circuit,
+            default_retention_mode,
+            legacy_nilm_detection_enabled=_legacy_nilm_detection_enabled(
+                entry_data,
+                options,
+                raw_circuit,
+            ),
+        )
         if config is not None:
             configs.append(config)
 
@@ -543,12 +568,19 @@ def mains_context_config_from_sources(
         ),
         retention_mode=retention_mode_from_sources(entry_data, options),
         power_flow=PowerFlowMode.MAINS_NET,
+        nilm_detection_enabled=_legacy_nilm_detection_enabled(
+            entry_data,
+            options,
+            None,
+        ),
     )
 
 
 def _circuit_config_from_raw(
     raw_circuit: Any,
     default_retention_mode: RetentionMode = RetentionMode.STANDARD,
+    *,
+    legacy_nilm_detection_enabled: bool = False,
 ) -> CircuitConfig | None:
     if isinstance(raw_circuit, CircuitConfig):
         return raw_circuit
@@ -583,7 +615,14 @@ def _circuit_config_from_raw(
         nilm_detection_enabled=bool(
             raw_circuit.get(
                 CONF_NILM_DETECTION_ENABLED,
-                DEFAULT_NILM_DETECTION_ENABLED,
+                (
+                    legacy_nilm_detection_enabled
+                    if nilm_source_kind(
+                        {"appliance_profile": appliance_profile, "mode": mode}
+                    )
+                    is not None
+                    else DEFAULT_NILM_DETECTION_ENABLED
+                ),
             )
         ),
         nilm_detection_sensitivity=normalize_nilm_detection_sensitivity(

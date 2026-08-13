@@ -32,7 +32,7 @@ from .unknown_loads import (
     NILM_SESSION_HISTORY_MAX_ITEMS_PER_CIRCUIT,
     _sanitize_nilm_session_history_ingress,
 )
-from .ux import normalize_sensitivity
+from .ux import normalize_nilm_detection_sensitivity, normalize_sensitivity
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -122,6 +122,9 @@ class FeatureStoreData:
         default_factory=dict
     )
     sensitivity_by_circuit: dict[str, str] = field(default_factory=dict)
+    nilm_detection_sensitivity_by_circuit: dict[str, str] = field(
+        default_factory=dict
+    )
     maintenance_by_circuit: dict[str, dict[str, Any]] = field(default_factory=dict)
     alert_feedback: dict[str, dict[str, Any]] = field(default_factory=dict)
     energy_usage_settings_by_circuit: dict[str, dict[str, Any]] = field(
@@ -394,6 +397,12 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
             str(circuit_id): normalize_sensitivity(sensitivity)
             for circuit_id, sensitivity in data.sensitivity_by_circuit.items()
         },
+        "nilm_detection_sensitivity_by_circuit": {
+            str(circuit_id): normalize_nilm_detection_sensitivity(sensitivity)
+            for circuit_id, sensitivity in (
+                data.nilm_detection_sensitivity_by_circuit.items()
+            )
+        },
         "maintenance_by_circuit": _dict_of_dicts(data.maintenance_by_circuit),
         "alert_feedback": _dict_of_dicts(data.alert_feedback),
         "energy_usage_settings_by_circuit": _dict_of_dicts(
@@ -556,6 +565,12 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
             str(circuit_id): normalize_sensitivity(sensitivity)
             for circuit_id, sensitivity in _mapping_items(
                 raw.get("sensitivity_by_circuit", {})
+            )
+        },
+        nilm_detection_sensitivity_by_circuit={
+            str(circuit_id): normalize_nilm_detection_sensitivity(sensitivity)
+            for circuit_id, sensitivity in _mapping_items(
+                raw.get("nilm_detection_sensitivity_by_circuit", {})
             )
         },
         maintenance_by_circuit=_dict_of_dicts(
@@ -787,6 +802,9 @@ def prune_events(
         contextual_baseline_samples_by_circuit=contextual_samples,
         contextual_baselines_by_circuit=contextual_stats,
         sensitivity_by_circuit=data.sensitivity_by_circuit,
+        nilm_detection_sensitivity_by_circuit=(
+            data.nilm_detection_sensitivity_by_circuit
+        ),
         maintenance_by_circuit=data.maintenance_by_circuit,
         alert_feedback=data.alert_feedback,
         energy_usage_settings_by_circuit=data.energy_usage_settings_by_circuit,
