@@ -1273,6 +1273,10 @@ def test_estimate_unknown_load_uses_partial_electrical_evidence_without_va() -> 
     assert motor["likely_type"] == "motor"
     assert motor["display_name"] == "Estimated motor load"
     assert motor["typical_power_factor"] is None
+    assert " va " not in " ".join(resistive["evidence"]).lower()
+    assert "estimated pf" not in " ".join(resistive["evidence"]).lower()
+    assert " va " not in " ".join(motor["evidence"]).lower()
+    assert "estimated pf" not in " ".join(motor["evidence"]).lower()
 
 
 def test_estimate_unknown_load_marks_balanced_low_var_as_heat_candidate() -> None:

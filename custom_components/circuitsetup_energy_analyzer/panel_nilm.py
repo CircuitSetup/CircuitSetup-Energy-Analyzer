@@ -45,6 +45,7 @@ from .nilm import (
     resolve_nilm_signature_fingerprint,
 )
 from .nilm_interval_evidence import NilmReferenceExtractionSettings
+from .nilm_load_identification import MIN_CONFIDENCE, MIN_OCCURRENCES
 from .nilm_validation import (
     match_nilm_validation_intervals,
     nilm_validation_interval_id,
@@ -122,7 +123,6 @@ from .services import (
     SERVICE_VALIDATE_NILM_ASSIGNMENT_HISTORY,
     SERVICE_VALIDATE_NILM_SESSION,
 )
-from .unknown_loads import MIN_CONFIDENCE, MIN_OCCURRENCES
 from .ux import friendly_feature_name
 
 MAX_NILM_PANEL_SIGNATURES = 5

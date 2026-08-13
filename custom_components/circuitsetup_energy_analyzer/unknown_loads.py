@@ -18,8 +18,6 @@ from .nilm import (
 )
 from .nilm_load_identification import identify_estimated_load
 
-MIN_OCCURRENCES = 3
-MIN_CONFIDENCE = 0.5
 UNKNOWN_LOAD_INVENTORY_SCHEMA_VERSION = 4
 MIN_SIGNATURE_PAIR_SCORE = 0.50
 SIGNATURE_PAIR_AMBIGUITY_MARGIN = 0.08
@@ -1192,6 +1190,7 @@ def estimate_unknown_load(signature: NilmSignature) -> dict[str, Any]:
             typical_va=typical_va,
             typical_power_factor=typical_power_factor,
             evidence_reason=identification.evidence_reason,
+            has_enough_evidence=identification.has_enough_evidence,
         ),
     }
 
@@ -3386,13 +3385,6 @@ def _within_tolerance(
     return abs(value - reference) <= max(abs(reference) * ratio, floor)
 
 
-def _has_enough_evidence(signature: NilmSignature) -> bool:
-    return (
-        signature.occurrence_count >= MIN_OCCURRENCES
-        and signature.confidence >= MIN_CONFIDENCE
-    )
-
-
 def _evidence(
     signature: NilmSignature,
     *,
@@ -3403,8 +3395,16 @@ def _evidence(
     typical_va: float | None,
     typical_power_factor: float | None,
     evidence_reason: str,
+    has_enough_evidence: bool,
 ) -> list[str]:
     evidence_strength = signature.evidence_strength or signature.confidence
+    measurements = [f"Typical median change is {typical_watts:.1f} W"]
+    if typical_var is not None:
+        measurements.append(f"{typical_var:.1f} VAR")
+    if typical_va is not None:
+        measurements.append(f"{typical_va:.1f} VA")
+    if typical_power_factor is not None:
+        measurements.append(f"estimated PF {typical_power_factor:.3f}")
     evidence = [
         (
             f"Estimated from {signature.occurrence_count} recurring unmatched events "
@@ -3415,15 +3415,10 @@ def _evidence(
             f"{_voltage_label(voltage_class)} topology "
             f"({signature.split_phase_type}, dominant leg {signature.dominant_leg})."
         ),
-        (
-            f"Typical median change is {typical_watts:.1f} W, "
-            f"{_optional_metric_text(typical_var, 1)} VAR, "
-            f"{_optional_metric_text(typical_va, 1)} VA, "
-            f"estimated PF {_optional_metric_text(typical_power_factor, 3)}."
-        ),
+        ", ".join(measurements) + ".",
     ]
 
-    if not _has_enough_evidence(signature):
+    if not has_enough_evidence:
         evidence.append(
             "Limited recurring evidence; keep this as unknown until more samples "
             "are observed."
@@ -3436,10 +3431,7 @@ def _evidence(
     elif likely_type == "resistive":
         evidence.append(evidence_reason)
     elif likely_type == "motor":
-        evidence.append(
-            "Possible motor-like pattern: single-leg 120 V, meaningful "
-            "reactive power, and lower estimated PF."
-        )
+        evidence.append(evidence_reason)
     elif likely_type == "power_electronics":
         evidence.append(
             "Possible power-electronics pattern: VA and VAR are high versus "

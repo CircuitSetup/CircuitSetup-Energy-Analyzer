@@ -66,7 +66,11 @@ def identify_estimated_load(
         likely_type=likely_type,
         display_name=_display_name(likely_type),
         review_label=user_label or _review_label(likely_type, voltage_class),
-        evidence_reason=_evidence_reason(likely_type, has_enough_evidence),
+        evidence_reason=_evidence_reason(
+            likely_type,
+            has_enough_evidence,
+            typical_power_factor=typical_power_factor,
+        ),
         voltage_class=voltage_class,
         typical_watts=typical_watts,
         typical_var=typical_var,
@@ -107,12 +111,17 @@ def _likely_type(
         return "heating_element_candidate"
     if typical_watts >= 200.0 and looks_resistive:
         return "resistive"
+    has_motor_pf_evidence = (
+        typical_power_factor <= 0.9
+        if typical_power_factor is not None
+        else pf_delta is not None and abs(pf_delta) > 0.08
+    )
     if (
         voltage_class == "120 V"
         and split_phase_type in {"single_leg_a", "single_leg_b"}
         and typical_watts >= 150.0
         and reactive_ratio >= 0.25
-        and (typical_power_factor is None or typical_power_factor <= 0.9)
+        and has_motor_pf_evidence
     ):
         return "motor"
     if (
@@ -161,7 +170,12 @@ def _split_phase_label(voltage_class: str, label: str) -> str:
     )
 
 
-def _evidence_reason(likely_type: str, has_enough_evidence: bool) -> str:
+def _evidence_reason(
+    likely_type: str,
+    has_enough_evidence: bool,
+    *,
+    typical_power_factor: float | None,
+) -> str:
     if not has_enough_evidence:
         return (
             "Limited recurring evidence; keep this as unknown until more samples "
@@ -173,11 +187,21 @@ def _evidence_reason(likely_type: str, has_enough_evidence: bool) -> str:
             "and PF near unity."
         )
     if likely_type == "resistive":
+        if typical_power_factor is None:
+            return (
+                "Possible resistive load: VAR is low and PF stayed stable during "
+                "the transition."
+            )
         return (
             "Possible resistive load: watts and VA are nearly the same, VAR is "
             "low, and PF is near unity."
         )
     if likely_type == "motor":
+        if typical_power_factor is None:
+            return (
+                "Possible motor load: single-leg 120 V, meaningful reactive power, "
+                "and PF changed during the transition."
+            )
         return (
             "Possible motor load: single-leg 120 V, meaningful reactive power, "
             "and lower estimated PF."

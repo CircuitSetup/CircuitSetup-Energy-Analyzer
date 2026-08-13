@@ -56,6 +56,8 @@ def test_identifies_resistive_when_va_missing_but_pf_delta_is_stable() -> None:
     assert result.display_name == "Estimated resistive load"
     assert result.review_label == "possible 120 V resistive load"
     assert result.typical_power_factor is None
+    assert " VA " not in result.evidence_reason
+    assert "estimated PF" not in result.evidence_reason
 
 
 def test_identifies_motor_without_requiring_va_when_reactive_topology_matches() -> None:
@@ -73,6 +75,36 @@ def test_identifies_motor_without_requiring_va_when_reactive_topology_matches() 
     assert result.display_name == "Estimated motor load"
     assert result.review_label == "possible 120 V motor load"
     assert result.typical_power_factor is None
+    assert " VA " not in result.evidence_reason
+    assert "estimated PF" not in result.evidence_reason
+
+
+def test_missing_va_motor_candidate_requires_pf_delta_evidence() -> None:
+    result = identify_estimated_load(
+        median_delta_w=520.0,
+        median_delta_var=330.0,
+        median_delta_va=None,
+        median_delta_pf=None,
+        split_phase_type="single_leg_b",
+        occurrence_count=5,
+        confidence=0.74,
+    )
+
+    assert result.likely_type == "unknown"
+
+
+def test_missing_va_motor_candidate_rejects_neutral_pf_delta() -> None:
+    result = identify_estimated_load(
+        median_delta_w=520.0,
+        median_delta_var=330.0,
+        median_delta_va=None,
+        median_delta_pf=0.0,
+        split_phase_type="single_leg_b",
+        occurrence_count=5,
+        confidence=0.74,
+    )
+
+    assert result.likely_type == "unknown"
 
 
 def test_identifies_electronics_only_when_va_supports_high_reactive_signature() -> None:
