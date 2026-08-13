@@ -1,10 +1,4 @@
-"""Compatibility helpers for typed NILM confidence fields.
-
-The legacy ``confidence`` value remains persisted for existing consumers, but
-is never treated as a generic correctness probability. Signatures use evidence
-strength, sessions use pairing confidence, and assignments retain auditable
-feedback evidence separately from their legacy compatibility value.
-"""
+"""Migration and feedback helpers for typed NILM confidence fields."""
 
 from __future__ import annotations
 
@@ -20,11 +14,7 @@ def migrate_nilm_confidence_semantics(
     signatures_by_circuit: Mapping[str, Any],
     sessions_by_circuit: Mapping[str, Any],
 ) -> bool:
-    """Add typed confidence aliases to persisted NILM records idempotently.
-
-    This is called during feature-store loading, never from the per-sample
-    processor.  It leaves lifecycle state and the legacy value unchanged.
-    """
+    """Normalize persisted NILM records to typed confidence fields idempotently."""
     changed = False
     for record in _records(assignments_by_circuit):
         changed |= _migrate_assignment(record)
@@ -42,12 +32,7 @@ def apply_nilm_feedback_evidence(
     correct: bool,
     timestamp: str,
 ) -> bool:
-    """Apply one idempotent, auditable +0.05/-0.15 feedback observation.
-
-    Replaying an unchanged feedback event is a no-op. A changed decision is
-    retained as a later revision, so both the typed score and the legacy
-    mirror can be reconstructed from the audit trail.
-    """
+    """Apply one idempotent, auditable +0.05/-0.15 feedback observation."""
     normalized_id = str(feedback_id or "").strip()
     if not normalized_id:
         raise ValueError("feedback_id is required")
@@ -57,7 +42,6 @@ def apply_nilm_feedback_evidence(
 
     events = _feedback_events(assignment.get("feedback_evidence_events"))
     current_score = _feedback_evidence_score(assignment, events)
-    legacy_score = _legacy_confidence_score(assignment, current_score)
     previous = next(
         (
             event
@@ -70,7 +54,6 @@ def apply_nilm_feedback_evidence(
         if previous["outcome"] == outcome:
             return False
     score = round(_clamp(current_score + delta), 3)
-    legacy_score_after = round(_clamp(legacy_score + delta), 3)
     events.append(
         {
             "feedback_id": normalized_id,
@@ -78,20 +61,12 @@ def apply_nilm_feedback_evidence(
             "delta": delta,
             "timestamp": normalized_timestamp,
             "score_after": score,
-            "legacy_confidence_after": legacy_score_after,
         }
     )
     current_outcomes = _latest_feedback_events(events)
 
     changed = False
-    # ``confidence`` remains the legacy compatibility mirror and deliberately
-    # follows its historical adjustment path. The typed score starts from
-    # auditable feedback only; a legacy mixed value is never its provenance.
-    changed |= _set_if_changed(
-        assignment,
-        "confidence",
-        legacy_score_after,
-    )
+    assignment.pop("confidence", None)
     changed |= _set_if_changed(assignment, "feedback_evidence_score", score)
     changed |= _set_if_changed(assignment, "feedback_evidence_events", events)
     changed |= _set_if_changed(
@@ -114,35 +89,38 @@ def apply_nilm_feedback_evidence(
 
 
 def _migrate_assignment(record: MutableMapping[str, Any]) -> bool:
-    legacy_confidence = _number(record.get("confidence"))
     feedback_evidence_score = _number(record.get("feedback_evidence_score"))
     model_fit = _number(record.get("model_confidence"))
     if (
-        legacy_confidence is None
-        and model_fit is None
+        model_fit is None
+        and feedback_evidence_score is None
         and not any(
             key in record
             for key in (
+                "confidence",
                 "feedback_evidence_score",
                 "model_fit",
                 "confidence_kind",
                 "confidence_semantics_version",
+                "feedback_evidence_events",
             )
         )
     ):
         return False
     changed = _ensure_semantics_version(record)
+    if "confidence" in record:
+        record.pop("confidence", None)
+        changed = True
     if feedback_evidence_score is not None:
         changed |= _set_if_changed(record, "confidence_kind", "feedback_evidence")
-    elif (
-        str(record.get("confidence_kind") or "").strip().lower()
-        == "feedback_evidence"
-    ):
-        changed |= _set_if_changed(record, "confidence_kind", "legacy_mixed")
-    else:
-        changed |= _set_if_missing(record, "confidence_kind", "legacy_mixed")
+    elif "confidence_kind" in record:
+        record.pop("confidence_kind", None)
+        changed = True
     if model_fit is not None:
         changed |= _set_if_missing(record, "model_fit", round(_clamp(model_fit), 3))
+    if "feedback_evidence_events" in record:
+        events = _feedback_events(record.get("feedback_evidence_events"))
+        changed |= _set_if_changed(record, "feedback_evidence_events", events)
     return changed
 
 
@@ -167,8 +145,12 @@ def _migrate_signature(record: MutableMapping[str, Any]) -> bool:
         )
     if evidence_strength is not None:
         changed |= _set_if_changed(record, "confidence_kind", "evidence_strength")
-    else:
-        changed |= _set_if_missing(record, "confidence_kind", "legacy_mixed")
+    elif "confidence_kind" in record:
+        record.pop("confidence_kind", None)
+        changed = True
+    if "confidence" in record:
+        record.pop("confidence", None)
+        changed = True
     return changed
 
 
@@ -193,8 +175,12 @@ def _migrate_session(record: MutableMapping[str, Any]) -> bool:
         )
     if pairing_confidence is not None:
         changed |= _set_if_changed(record, "confidence_kind", "pairing_confidence")
-    else:
-        changed |= _set_if_missing(record, "confidence_kind", "legacy_mixed")
+    elif "confidence_kind" in record:
+        record.pop("confidence_kind", None)
+        changed = True
+    if "confidence" in record:
+        record.pop("confidence", None)
+        changed = True
     return changed
 
 
@@ -244,13 +230,6 @@ def _feedback_evidence_score(
     return score
 
 
-def _legacy_confidence_score(
-    assignment: Mapping[str, Any], feedback_evidence_score: float
-) -> float:
-    value = _number(assignment.get("confidence"))
-    return _clamp(value if value is not None else feedback_evidence_score)
-
-
 def _latest_feedback_events(
     events: Iterable[Mapping[str, Any]],
 ) -> dict[str, Mapping[str, Any]]:
@@ -276,11 +255,6 @@ def _feedback_events(value: Any) -> list[dict[str, Any]]:
             score_after = _number(item.get("score_after"))
             if score_after is not None:
                 event["score_after"] = round(_clamp(score_after), 3)
-            legacy_confidence_after = _number(item.get("legacy_confidence_after"))
-            if legacy_confidence_after is not None:
-                event["legacy_confidence_after"] = round(
-                    _clamp(legacy_confidence_after), 3
-                )
             events.append(event)
     # Feedback is an operator action, not a per-sample path. Keep its source
     # decisions so an old feedback ID remains idempotent and the current

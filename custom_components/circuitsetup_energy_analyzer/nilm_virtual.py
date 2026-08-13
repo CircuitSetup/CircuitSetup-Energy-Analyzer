@@ -522,12 +522,9 @@ def _nilm_virtual_appliance_state(
     feedback_evidence_score = _nilm_optional_float(
         assignment.get("feedback_evidence_score")
     )
-    confidence_kind = str(assignment.get("confidence_kind") or "legacy_mixed").strip()
-    if (
-        confidence_kind.lower() == "feedback_evidence"
-        and feedback_evidence_score is None
-    ):
-        confidence_kind = "legacy_mixed"
+    confidence_kind = (
+        "feedback_evidence" if feedback_evidence_score is not None else ""
+    )
     return NilmVirtualApplianceState(
         appliance_id=identity.appliance_id,
         assignment_id=assignment_id,
@@ -539,7 +536,7 @@ def _nilm_virtual_appliance_state(
             + (_clamped_float(runtime.get("energy_kwh")) if live_available else 0.0),
             6,
         ),
-        confidence=_clamped_float(assignment.get("confidence"), upper=1.0),
+        confidence=_clamped_float(feedback_evidence_score, upper=1.0),
         last_seen=_session_payload_seen(latest_session),
         active_signature_id=(
             str(runtime.get("signature_fingerprint") or "") or None
@@ -970,31 +967,39 @@ def _nilm_alert_message(
     *,
     confidence: float,
 ) -> str:
+    confidence_label = _nilm_confidence_label(state)
+    confidence_suffix = (
+        f" {confidence_label}: {round(confidence * 100)}%."
+        if confidence_label
+        else ""
+    )
     return (
         f"{getattr(state, 'display_name', 'NILM appliance')} {phrase}. "
         "Estimated from aggregate circuit power by NILM. "
-        f"{_nilm_confidence_label(state)}: {round(confidence * 100)}%."
+        f"{confidence_suffix}".strip()
     )
 
 
 def _nilm_finished_message(state: Any, *, confidence: float) -> str:
     """Describe the completed estimated on/off run in a user-facing alert."""
+    confidence_label = _nilm_confidence_label(state)
+    confidence_suffix = (
+        f" {confidence_label}: {round(confidence * 100)}%."
+        if confidence_label
+        else ""
+    )
     return (
         f"{getattr(state, 'display_name', 'NILM appliance')}: "
         "a detected estimated run ended. NILM matched a completed on/off run "
         "from aggregate circuit power. "
-        f"{_nilm_confidence_label(state)}: {round(confidence * 100)}%."
+        f"{confidence_suffix}".strip()
     )
 
 
-def _nilm_confidence_label(state: Any) -> str:
+def _nilm_confidence_label(state: Any) -> str | None:
     """Name the context-specific assignment percentage in notifications."""
     kind = _nilm_confidence_kind(state)
-    return (
-        "Feedback evidence score"
-        if kind == "feedback_evidence"
-        else "Legacy confidence (mixed semantics)"
-    )
+    return "Feedback evidence score" if kind == "feedback_evidence" else None
 
 
 def _nilm_alert_features(
@@ -1041,12 +1046,11 @@ def _nilm_alert_features(
     feedback_evidence_score = _nilm_optional_float(
         getattr(state, "feedback_evidence_score", None)
     )
-    return {
+    features = {
         "source": "nilm",
         "source_type": "nilm_estimate",
         "estimated": True,
         "confidence": confidence,
-        "confidence_kind": confidence_kind,
         **(
             {"feedback_evidence_score": feedback_evidence_score}
             if feedback_evidence_score is not None
@@ -1066,28 +1070,24 @@ def _nilm_alert_features(
         "notification_type": notification_type,
         "notification_key": notification_key,
     }
+    if confidence_kind:
+        features["confidence_kind"] = confidence_kind
+    return features
 
 
 def _nilm_confidence_kind(state: Any) -> str:
     """Return a label kind only when its matching typed value is present."""
-    kind = str(getattr(state, "confidence_kind", "") or "legacy_mixed").strip()
     feedback_evidence_score = _nilm_optional_float(
         getattr(state, "feedback_evidence_score", None)
     )
-    return (
-        "feedback_evidence"
-        if kind.lower() == "feedback_evidence" and feedback_evidence_score is not None
-        else "legacy_mixed"
-    )
+    return "feedback_evidence" if feedback_evidence_score is not None else ""
 
 
 def _nilm_contextual_confidence(state: Any) -> float:
     """Choose the numeric value that matches the confidence label and gate."""
-    if _nilm_confidence_kind(state) == "feedback_evidence":
-        return _clamped_float(
-            getattr(state, "feedback_evidence_score", None), upper=1.0
-        )
-    return _clamped_float(getattr(state, "confidence", None), upper=1.0)
+    return _clamped_float(
+        getattr(state, "feedback_evidence_score", None), upper=1.0
+    )
 
 
 def _nilm_assignment_sessions(

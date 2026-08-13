@@ -7293,8 +7293,8 @@ test("NILM workspace uses Home Assistant surfaces", async ({ page }) => {
     if (!url.pathname.endsWith("/nilm_workspace")) return false;
     const payload = structuredClone(apiPayload(url.pathname));
     Object.assign(payload.assignments[0], {
-      confidence: 0.62,
-      confidence_kind: "legacy_mixed",
+      feedback_evidence_score: 0.62,
+      confidence_kind: "feedback_evidence",
       model_fit: null,
     });
     await route.fulfill({ json: payload });
@@ -7325,7 +7325,7 @@ test("NILM workspace uses Home Assistant surfaces", async ({ page }) => {
   await expect(panel.locator(".nilm-review-inspector")).toBeVisible();
   await expect(panel.locator("[data-nilm-apply-decision]")).toBeEnabled();
   await panel.locator('[data-nilm-lane="assigned"]').click();
-  await expect(panel.getByText("Legacy confidence (mixed semantics): 62%")).toHaveCount(2);
+  await expect(panel.getByText("Feedback evidence score: 62%")).toHaveCount(2);
 });
 
 test("NILM workspace says when an edge has no dominant leg", async ({ page }) => {
@@ -7339,6 +7339,7 @@ test("NILM workspace says when an edge has no dominant leg", async ({ page }) =>
       split_phase_type: "unknown",
       dominant_leg: null,
     }];
+    payload.source = { source_kind: "mains" };
     await route.fulfill({ json: payload });
     return true;
   });
@@ -7864,7 +7865,7 @@ test("NILM workspace separates hidden lanes and restores hidden assignments", as
   });
 });
 
-test("NILM workspace restores hidden signatures and explains blocked publication", async ({ page }) => {
+test("NILM workspace restores hidden signatures and keeps blocked publication disabled", async ({ page }) => {
   let restored = false;
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/nilm_workspace")) return false;
@@ -7897,7 +7898,7 @@ test("NILM workspace restores hidden signatures and explains blocked publication
 
   const panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=mains");
   await panel.locator('[data-nilm-lane="assigned"]').click();
-  await expect(panel.getByText("Confirm enough matched sessions before publishing.")).toBeVisible();
+  await expect(panel.getByText("Confirm enough matched sessions before publishing.")).toHaveCount(0);
   await expect(panel.getByRole("button", { name: "Create HA Device" })).toBeDisabled();
 
   await panel.locator('[data-nilm-lane="hidden"]').click();

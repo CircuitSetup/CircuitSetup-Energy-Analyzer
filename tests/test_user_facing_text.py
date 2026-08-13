@@ -3588,11 +3588,11 @@ def test_nilm_lane_rendering_contracts() -> None:
           signature_id: "sig-1",
           display_label: "Load",
           typical_power_w: 250,
-          confidence: 1.4,
+          evidence_strength: 1.4,
         },
         index: 0,
       }, items, false);
-      for (const expected of ["--power-percent:25%", "Legacy confidence (mixed semantics): 100%", '<progress max="100" value="100"']) {
+      for (const expected of ["--power-percent:25%", "Evidence strength: 100%", '<progress max="100" value="100"']) {
         assert.ok(html.includes(expected));
       }
     }
@@ -3633,7 +3633,7 @@ def test_nilm_lane_rendering_contracts() -> None:
       const panel = makePanel();
       const item = { kind: "signature", index: 0, item: {
         signature_id: "sig-1", display_label: "Unknown load",
-        typical_power_w: 1250, confidence: 0.82, seen_count: 7,
+        typical_power_w: 1250, evidence_strength: 0.82, seen_count: 7,
         last_seen: "2026-07-09T14:30:00Z",
       } };
       const html = panel._renderNilmReviewCard(item, [item], true);
@@ -3933,7 +3933,8 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
         assignment_id: "assignment-1",
         display_name: "Dishwasher",
         appliance_profile: "dishwasher",
-        confidence: 0.8,
+        confidence_kind: "feedback_evidence",
+        feedback_evidence_score: 0.8,
         appliance_detail_path: "/detail/dishwasher",
         actions: {
           rename: {},
@@ -3988,12 +3989,12 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
         "data-nilm-assignment-action",
         "data-nilm-appliance-detail-path",
         "Appliance Assignments",
-        "Legacy confidence (mixed semantics): 80%",
+        "Feedback evidence score: 80%",
       ]) {
         assert.ok(!secondary.includes(duplicate));
       }
       assert.ok(html.includes("Dishwasher"));
-      assert.ok(html.includes("Legacy confidence (mixed semantics): 80%"));
+      assert.ok(html.includes("Feedback evidence score: 80%"));
     }
 
     const validationSession = {
@@ -4003,7 +4004,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       display_label: "Dishwasher",
       assignment_id: "assignment-dishwasher",
       signature_fingerprint: "dishwasher-fingerprint",
-      confidence: 0.82,
+      pairing_confidence: 0.82,
       median_power_w: 720,
       estimated_energy_kwh: 0.61,
       actions: { validate: {}, reject: {} },
@@ -4018,7 +4019,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       const html = panel._renderNilmWorkspaceBody();
       for (const expected of [
         "Session Validation", "Predicted Dishwasher", "2026-06-24", "51m",
-        "Estimated by NILM", "Legacy confidence (mixed semantics): 82%", "Correct", "Wrong appliance",
+        "Estimated by NILM", "Pairing confidence: 82%", "Correct", "Wrong appliance",
         "Adjust Interval", 'data-nilm-session-action="validate"',
         'data-nilm-session-action="reject"', 'data-nilm-session-interval-index="0"',
       ]) assert.ok(html.includes(expected), expected);
@@ -4053,7 +4054,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
         _nilmFocusedOccurrenceIndex: 0,
         _nilmWorkspace: makeWorkspace({
           history: { start: "2026-06-24T18:00:00Z", end: "2026-06-24T19:10:00Z" },
-          sessions: [{ ...validationSession, confidence: 0.7 }],
+          sessions: [{ ...validationSession, pairing_confidence: 0.7 }],
         }),
       });
       panel._nilmWorkspaceHistorySeries = [[
@@ -4066,7 +4067,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       ]];
       const html = panel._renderNilmWorkspaceBody();
       for (const expected of [
-        "Estimated by NILM", "Low pairing confidence", "Legacy confidence (mixed semantics): 70%",
+        "Estimated by NILM", "Low pairing confidence", "Pairing confidence: 70%",
         'data-nilm-session-confidence="0.70"', 'data-nilm-low-confidence="true"',
       ]) assert.ok(html.includes(expected), expected);
     }
@@ -4095,6 +4096,164 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
   }
 })();
 """
+    )
+
+
+def test_nilm_workspace_collection_formatting_and_publication_disclosures() -> None:
+    _run_panel_node_script(
+        r'''
+const edge = {
+  timestamp: "2026-08-12T12:00:00Z",
+  direction: "on",
+  delta_w: 123.4567,
+  split_phase_type: "unknown",
+  dominant_leg: "L1",
+};
+const sessions = [
+  {
+    session_id: "open-session",
+    display_label: "Washer",
+    start: "2026-08-12T12:00:00Z",
+    end: null,
+    pairing_confidence: 0.82,
+    median_power_w: 123.456,
+    estimated_energy_kwh: 0.9,
+    actions: { assign: makeAction("assign_session_to_appliance") },
+  },
+  {
+    session_id: "closed-session",
+    display_label: "Dryer",
+    start: "2026-08-12T13:00:00Z",
+    end: "2026-08-12T13:30:00Z",
+    pairing_confidence: 0.72,
+    median_power_w: 321.987,
+    estimated_energy_kwh: 0.16,
+    actions: { assign: makeAction("assign_session_to_appliance") },
+  },
+];
+const workspace = makeWorkspace({
+  source: { source_kind: "mains" },
+  sessions,
+  edges: [edge],
+  ambiguity_audit: {
+    total_count: 1,
+    fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace/collections?collection=ambiguous_sessions&circuit_id=mains",
+    group_preview: [],
+  },
+  known_load_attributions: [{
+    timestamp: "2026-08-12T12:00:00Z",
+    aggregate_delta_w: 1,
+    explained_delta_w: 1,
+    residual_delta_w: 0,
+    known_circuit_ids: [],
+    known_load_labels: [],
+    selection_method: "unattributed",
+  }],
+});
+const panel = makePanel({ _nilmWorkspace: workspace });
+const secondary = panel._renderNilmSecondaryCollections(workspace);
+const openStart = secondary.indexOf("Predicted Washer");
+const closedStart = secondary.indexOf("Predicted Dryer");
+const openBlock = secondary.slice(openStart, closedStart);
+assert.ok(openStart >= 0 && closedStart > openStart);
+assert.match(secondary, /data-nilm-session-range><span>[^<]+<\/span><span>[^<]+<\/span>/);
+assert.ok(openBlock.includes("Pairing confidence"));
+assert.ok(openBlock.includes("123.456 W"));
+assert.ok(!openBlock.includes("kWh"));
+assert.ok(secondary.includes("Pairing confidence: 72%"));
+assert.match(secondary, /<strong>On: 123\.46 W<\/strong>\s*<span>/);
+assert.ok(secondary.includes("Dominant leg: L1"));
+assert.ok(!secondary.includes("unknown"));
+const singlePhase = panel._renderNilmSecondaryCollections({
+  ...workspace,
+  source: { source_kind: "single_phase" },
+});
+assert.ok(!singlePhase.includes("Dominant leg"));
+
+const assignment = {
+  assignment_id: "dryer",
+  display_name: "Dryer",
+  median_power_error: 1.234,
+  energy_estimate_error: 0.16,
+  helper_options: [{ helper_circuit_id: "washer", helper_name: "Washer" }],
+  helper_links: [],
+  publication: { available: false, reason: "internal detail" },
+  publication_readiness: {
+    status: "needs_review",
+    reasons: ["internal reason"],
+    gates: { validated_sessions: "pending" },
+  },
+};
+const inspector = panel._renderNilmReviewInspector({ kind: "assignment", index: 0, item: assignment });
+assert.ok(inspector.indexOf("Median power error") < inspector.indexOf("Energy error"));
+assert.match(inspector, /Median power error[\s\S]*<\/p>\s*<p[^>]*>Energy error/);
+assert.ok(inspector.includes("Publication readiness"));
+assert.ok(inspector.includes("<details open>"));
+assert.ok(inspector.includes("Publication readiness gates"));
+assert.ok(!inspector.includes("Reason:"));
+assert.ok(!inspector.includes("internal detail"));
+assert.ok(inspector.includes("A helper circuit is a separately metered load"));
+assert.ok(inspector.includes("Choose a helper circuit"));
+assert.ok(!inspector.includes("Choose another helper circuit"));
+assert.ok(secondary.includes("Uncertain events"));
+assert.ok(secondary.includes("Review uncertain events"));
+assert.ok(secondary.includes('class="nilm-evidence-summary"'));
+assert.ok(secondary.includes("Evidence quality and attribution"));
+assert.ok(secondary.indexOf("data-nilm-ambiguity-audit") > secondary.indexOf("data-nilm-secondary-collections"));
+assert.ok(secondary.indexOf("data-nilm-evidence-section") > secondary.indexOf("data-nilm-secondary-collections"));
+''',
+    )
+
+
+def test_nilm_helper_prompt_distinguishes_unassigned_and_assigned_helpers() -> None:
+    _run_panel_node_script(
+        r'''
+const workspace = makeWorkspace();
+const panel = makePanel({ _nilmWorkspace: workspace });
+const helperOptions = [{ helper_circuit_id: "washer", helper_name: "Washer" }];
+const unassigned = panel._renderNilmHelperEvidence({
+  assignment_id: "dryer-unassigned",
+  helper_options: helperOptions,
+  helper_links: [],
+  helper_candidates: [],
+}, 0);
+const assigned = panel._renderNilmHelperEvidence({
+  assignment_id: "dryer-assigned",
+  helper_options: helperOptions,
+  helper_links: [{ helper_circuit_id: "washer", helper_name: "Washer" }],
+  helper_candidates: [],
+}, 1);
+
+assert.ok(unassigned.includes("Choose a helper circuit"));
+assert.ok(!unassigned.includes("Choose another helper circuit"));
+assert.ok(assigned.includes("Choose another helper circuit"));
+''',
+    )
+
+
+def test_open_nilm_session_matches_validation_confidence_format() -> None:
+    _run_panel_node_script(
+        r'''
+const workspace = makeWorkspace({
+  sessions: [{
+    session_id: "open-session",
+    display_label: "Washer",
+    start: "2026-08-12T12:00:00Z",
+    end: null,
+    pairing_confidence: 0.4,
+    median_power_w: 123.45,
+    estimated_energy_kwh: 0.9,
+  }],
+});
+const panel = makePanel({ _nilmWorkspace: workspace });
+const html = panel._renderNilmSecondaryCollections(workspace);
+const sessionsStart = html.indexOf("NILM Sessions");
+const edgesStart = html.indexOf("NILM Edges", sessionsStart);
+const sessions = html.slice(sessionsStart, edgesStart);
+
+assert.ok(sessions.includes("In progress. Pairing confidence 40%"));
+assert.ok(!sessions.includes("Low pairing confidence"));
+''',
     )
 
 
@@ -4770,8 +4929,8 @@ const html = panel._chartSvg(
     y_axis_label: "W",
     nilm_select_interval: true,
     nilm_sessions: [
-      { session_id: "session-in", display_label: "Dishwasher", start: "2026-06-24T18:05:00Z", end: "2026-06-24T18:25:00Z", confidence: 0.82, selected: true },
-      { session_id: "session-out", display_label: "Out of window", start: "2026-06-24T20:00:00Z", end: "2026-06-24T20:30:00Z", confidence: 0.9 },
+      { session_id: "session-in", display_label: "Dishwasher", start: "2026-06-24T18:05:00Z", end: "2026-06-24T18:25:00Z", pairing_confidence: 0.82, selected: true },
+      { session_id: "session-out", display_label: "Out of window", start: "2026-06-24T20:00:00Z", end: "2026-06-24T20:30:00Z", pairing_confidence: 0.9 },
     ],
     nilm_edges: [
       { timestamp: "2026-06-24T18:15:00Z", direction: "rising" },
@@ -6829,7 +6988,7 @@ const saved = {
 const session = {
   session_id: "session-review",
   display_label: "Uncertain Washer",
-  confidence: 0.67,
+  pairing_confidence: 0.67,
   ambiguous: true,
   median_power_w: 440,
   actions: { assign: makeAction("assign_session_to_appliance", { requires: ["label"] }) },
@@ -6882,7 +7041,7 @@ assert.equal(reviewItems.map((item) => item.kind).join(","), "assignment,session
 const sessionItem = reviewItems.find((item) => item.kind === "session");
 assert.equal(panel._nilmReviewKey(sessionItem), "session:session-review");
 const sessionHtml = panel._renderNilmReviewInspector(sessionItem);
-assert.ok(sessionHtml.includes("Legacy confidence (mixed semantics): 67%"), sessionHtml);
+assert.ok(sessionHtml.includes("Pairing confidence: 67%"), sessionHtml);
 assert.ok(sessionHtml.includes("Ambiguous"), sessionHtml);
 assert.ok(sessionHtml.includes('data-nilm-session-action="assign"'), sessionHtml);
 await panel._callNilmWorkspaceItemAction("sessions", 0, "assign");

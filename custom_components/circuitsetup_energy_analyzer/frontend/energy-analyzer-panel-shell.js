@@ -1404,6 +1404,18 @@ export class PanelShellMethods {
           min-height: 44px;
           padding-block: 8px;
         }
+        .nilm-evidence-summary {
+          background: transparent;
+          border: 0;
+          color: var(--primary-text-color, #212121);
+          cursor: pointer;
+          font: inherit;
+          font-size: 18px;
+          font-weight: 700;
+          min-height: 44px;
+          padding: 8px 0;
+          text-align: left;
+        }
         .nilm-estimate-quality-rows,
         .nilm-known-load-attributions {
           display: grid;

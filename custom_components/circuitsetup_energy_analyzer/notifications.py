@@ -235,12 +235,18 @@ def _nilm_source_lines(alert: AlertEvidence) -> list[str]:
         lines.append(nilm_estimated)
 
     confidence = _nilm_confidence(alert)
+    translation_key = _nilm_confidence_translation_key(alert)
     confidence_label = _nilm_confidence_label(alert)
-    if confidence is not None and f"{confidence_label}:" not in alert.message:
+    if (
+        confidence is not None
+        and translation_key is not None
+        and confidence_label
+        and f"{confidence_label}:" not in alert.message
+    ):
         lines.append(
             _notification_text_format(
                 "alert",
-                _nilm_confidence_translation_key(alert),
+                translation_key,
                 confidence=round(confidence * 100),
             )
         )
@@ -261,19 +267,16 @@ def _nilm_confidence(alert: AlertEvidence) -> float | None:
 
 
 def _nilm_confidence_label(alert: AlertEvidence) -> str:
-    """Return the context-specific label for a NILM legacy percentage."""
-    return _notification_text("alert", _nilm_confidence_translation_key(alert)).split(
-        ":", 1
-    )[0]
+    """Return the label for a typed NILM percentage, when available."""
+    translation_key = _nilm_confidence_translation_key(alert)
+    if translation_key is None:
+        return ""
+    return _notification_text("alert", translation_key).split(":", 1)[0]
 
 
-def _nilm_confidence_translation_key(alert: AlertEvidence) -> str:
+def _nilm_confidence_translation_key(alert: AlertEvidence) -> str | None:
     kind = str(alert.features.get("confidence_kind") or "").strip().lower()
-    return (
-        "feedback_evidence_line"
-        if kind == "feedback_evidence"
-        else "legacy_nilm_confidence_line"
-    )
+    return "feedback_evidence_line" if kind == "feedback_evidence" else None
 
 
 def _alert_confidence(alert: AlertEvidence) -> float | None:

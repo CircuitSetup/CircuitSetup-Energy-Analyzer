@@ -2313,11 +2313,6 @@ def _nilm_signature_label(signature: Mapping[str, Any], fallback: str) -> str:
         parts.append(
             f"evidence strength {round(float(evidence_strength) * 100):.0f}%"
         )
-    elif isinstance(signature.get("confidence"), (int, float)):
-        parts.append(
-            "legacy confidence (mixed semantics) "
-            f"{round(float(signature['confidence']) * 100):.0f}%"
-        )
     first_seen = _format_first_seen_label(signature.get("first_seen"))
     if first_seen:
         parts.append(f"first seen {first_seen}")
@@ -3790,7 +3785,9 @@ def _nilm_validation_payload(
                     str(session.get("session_id") or "") if session else None
                 ),
                 "overlap_seconds": match.overlap_seconds if match else 0.0,
-                "prediction_confidence": session.get("confidence") if session else None,
+                "prediction_confidence": (
+                    session.get("pairing_confidence") if session else None
+                ),
                 "measured_power_w": measured_power_w,
                 "estimated_power_w": estimated_power_w,
                 "power_error_w": (

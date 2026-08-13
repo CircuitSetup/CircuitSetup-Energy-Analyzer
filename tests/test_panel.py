@@ -457,7 +457,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260813-5"
+    assert PANEL_MODULE_VERSION == "20260813-6"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -1540,7 +1540,7 @@ def test_alert_evidence_payload_includes_selectable_nilm_merge_targets() -> None
                     "display_name": "Motor-like load",
                     "likely_type": "motor",
                     "typical_watts": 3800.0,
-                    "confidence": 0.72,
+                    "evidence_strength": 0.72,
                     "first_seen": "2026-06-10T09:00:00+00:00",
                 },
                 {
@@ -1548,7 +1548,7 @@ def test_alert_evidence_payload_includes_selectable_nilm_merge_targets() -> None
                     "display_name": "Pool pump-like load",
                     "likely_type": "pump",
                     "typical_watts": 1100.0,
-                    "confidence": 0.65,
+                    "evidence_strength": 0.65,
                     "first_seen": "2026-06-09T09:00:00+00:00",
                 },
             ]
@@ -1562,7 +1562,7 @@ def test_alert_evidence_payload_includes_selectable_nilm_merge_targets() -> None
 
     merge_action = payload["nilm"]["signatures"][0]["actions"]["merge"]
     assert payload["nilm"]["signatures"][0]["display_label"] == (
-        "Motor-like load, 3.8 kW, legacy confidence (mixed semantics) 72%, "
+        "Motor-like load, 3.8 kW, evidence strength 72%, "
         "first seen 2026-06-10"
     )
     assert merge_action["data"] == {
@@ -1573,7 +1573,7 @@ def test_alert_evidence_payload_includes_selectable_nilm_merge_targets() -> None
         {
             "value": "signature_2",
             "label": (
-                "Pool pump-like load, 1.1 kW, legacy confidence (mixed semantics) "
+                "Pool pump-like load, 1.1 kW, evidence strength "
                 "65%, first seen 2026-06-09"
             ),
         }
@@ -6347,7 +6347,7 @@ def test_nilm_workspace_payload_validates_sensor_labels_against_predictions() ->
         "matched_assignment_id": "assignment-dishwasher",
         "matched_session_id": payload["sessions"][0]["session_id"],
         "overlap_seconds": 1500.0,
-        "prediction_confidence": payload["sessions"][0]["confidence"],
+        "prediction_confidence": payload["sessions"][0]["pairing_confidence"],
         "measured_power_w": None,
         "estimated_power_w": 817.5,
         "power_error_w": None,

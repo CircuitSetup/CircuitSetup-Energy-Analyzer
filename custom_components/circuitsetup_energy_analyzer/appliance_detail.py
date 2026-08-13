@@ -441,7 +441,7 @@ def _nilm_contextual_confidence(state: NilmVirtualApplianceState) -> float:
         and state.feedback_evidence_score is not None
     ):
         return state.feedback_evidence_score
-    return state.confidence
+    return 0.0
 
 
 def _nilm_metric_comparisons(
@@ -583,7 +583,9 @@ def _nilm_session_detail(
             "estimated_energy_kwh": _number_or_none(
                 session.get("estimated_energy_kwh")
             ),
-            "confidence": _number_or_none(session.get("confidence")),
+            "pairing_confidence": _number_or_none(
+                session.get("pairing_confidence")
+            ),
             "validation_result": _nilm_session_validation_result(
                 state,
                 session_id,
@@ -1396,14 +1398,18 @@ def _nilm_expectations(
             state.confidence_kind == "feedback_evidence"
             and state.feedback_evidence_score is not None
         )
-        else "Legacy confidence (mixed semantics)"
+        else None
     )
     if review_needed:
         status: ExpectationStatus = "watch"
         observed = (
-            f"{confidence_label} is {round(contextual_confidence * 100)}% "
-            "and status is "
-            f"{state.model_status}."
+            f"{confidence_label} is {round(contextual_confidence * 100)}% and "
+            f"status is {state.model_status}."
+            if confidence_label
+            else (
+                "Auditable feedback evidence is not available and status is "
+                f"{state.model_status}."
+            )
         )
         title = "NILM assignment needs validation"
         first_check = "Validate this estimated appliance before relying on alerts."
@@ -1412,6 +1418,8 @@ def _nilm_expectations(
         observed = (
             "The NILM assignment is validated with sufficient "
             f"{confidence_label.lower()}."
+            if confidence_label
+            else "The NILM assignment is validated without auditable feedback evidence."
         )
         title = "NILM estimate is validated"
         first_check = "No validation action is needed right now."

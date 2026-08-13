@@ -66,6 +66,7 @@ class ApplianceInsight:
     learning_readiness: dict[str, Any]
     confidence: float | None
     confidence_kind: str | None
+    feedback_evidence_score: float | None
     needs_attention: bool
     is_running: bool
     is_learning: bool
@@ -79,6 +80,8 @@ class ApplianceInsight:
         payload = asdict(self)
         if not self.is_nilm or self.confidence_kind is None:
             payload.pop("confidence_kind", None)
+        if not self.is_nilm or self.feedback_evidence_score is None:
+            payload.pop("feedback_evidence_score", None)
         return payload
 
 
@@ -300,6 +303,9 @@ def _append_insight(
             confidence=_number_or_none(getattr(detail, "confidence", None)),
             confidence_kind=(
                 str(getattr(detail, "confidence_kind", "") or "") or None
+            ),
+            feedback_evidence_score=_number_or_none(
+                getattr(detail, "feedback_evidence_score", None)
             ),
             needs_attention=identity in attention_keys,
             is_running="running" in activity_state.casefold(),

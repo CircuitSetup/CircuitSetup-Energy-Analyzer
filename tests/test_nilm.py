@@ -6864,7 +6864,7 @@ def test_nilm_today_vs_normal_stays_blocked_below_validation_thresholds() -> Non
         {
             "confirmed_session_ids": ["session-1", "session-2", "session-3"],
             "rejected_session_ids": ["session-4", "session-5"],
-            "confidence": 0.72,
+            "feedback_evidence_score": 0.72,
         }
     )
     sessions = [
@@ -6906,7 +6906,7 @@ def test_nilm_today_vs_normal_enables_only_after_all_validation_thresholds() -> 
                 "session-5",
             ],
             "rejected_session_ids": ["session-6"],
-            "confidence": 0.84,
+            "feedback_evidence_score": 0.84,
         }
     )
     sessions = [
@@ -6945,7 +6945,6 @@ def test_nilm_publication_gates_extend_the_validation_readiness_contract() -> No
         "session_ids": session_ids,
         "confirmed_session_ids": session_ids,
         "rejected_session_ids": [],
-        "confidence": 0.8,
         "feedback_evidence_score": 0.8,
         "model_fit": 0.91,
         "validation_evaluable_session_count": 3,
@@ -7057,10 +7056,11 @@ def test_nilm_publication_gates_extend_the_validation_readiness_contract() -> No
     assert quality_unavailable["gates"]["data_quality"] == "unavailable"
     assert "source_quality_unavailable" in quality_unavailable["reasons"]
 
-    legacy_only = dict(assignment)
-    legacy_only.pop("feedback_evidence_score")
-    legacy_publication = evaluate_readiness(
-        legacy_only,
+    without_feedback_evidence = dict(assignment)
+    without_feedback_evidence.pop("feedback_evidence_score")
+    without_feedback_evidence.pop("confidence", None)
+    publication_without_feedback = evaluate_readiness(
+        without_feedback_evidence,
         sessions,
         min_confirmed_sessions=3,
         min_distinct_days=3,
@@ -7068,9 +7068,13 @@ def test_nilm_publication_gates_extend_the_validation_readiness_contract() -> No
         min_confidence=0.8,
     )
 
-    assert legacy_publication["ready"] is True
-    assert legacy_publication["publication_readiness"]["status"] == "manual_review"
+    assert publication_without_feedback["ready"] is False
+    assert publication_without_feedback["confidence"] == 0.0
+    assert (
+        publication_without_feedback["publication_readiness"]["status"]
+        == "manual_review"
+    )
     assert (
         "feedback_evidence_unavailable"
-        in legacy_publication["publication_readiness"]["reasons"]
+        in publication_without_feedback["publication_readiness"]["reasons"]
     )

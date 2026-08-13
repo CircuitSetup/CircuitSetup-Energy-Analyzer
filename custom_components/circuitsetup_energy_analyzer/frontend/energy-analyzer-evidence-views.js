@@ -647,15 +647,11 @@ export function createEvidenceViewMethods({
       if (!Number.isFinite(start) || !Number.isFinite(end) || end <= minTime || start >= maxTime) {
         return null;
       }
-      const pairingConfidence = Number(session && (session.pairing_confidence ?? session.confidence));
-      const pairingKnown = session && (
-        session.pairing_confidence !== undefined
-        || String(session.confidence_kind || "").trim().toLowerCase() === "pairing_confidence"
-      );
+      const pairingConfidence = Number(session && session.pairing_confidence);
       const confidenceValue = Number.isFinite(pairingConfidence) ? Math.max(0, Math.min(1, pairingConfidence)) : null;
-      return { session, start, end, confidenceValue, pairingKnown };
+      return { session, start, end, confidenceValue };
     }).filter(Boolean);
-    const sessionBands = sessionItems.map(({ session, start, end, confidenceValue, pairingKnown }) => {
+    const sessionBands = sessionItems.map(({ session, start, end, confidenceValue }) => {
       const confidenceAttr = confidenceValue !== null ? ` data-nilm-session-confidence="${confidenceValue.toFixed(2)}"` : "";
       const lowConfidenceAttr = this._isLowNilmConfidence(confidenceValue) ? ' data-nilm-low-confidence="true"' : "";
       const selectedAttr = session.selected ? ' data-nilm-selected="true"' : "";
@@ -663,10 +659,9 @@ export function createEvidenceViewMethods({
       const draftAttr = Number.isInteger(session.draft_index) ? ` data-nilm-draft-index="${session.draft_index}"` : "";
       const labelIntervalAttr = Number.isInteger(session.label_interval_index) ? ` data-nilm-label-interval-index="${session.label_interval_index}"` : "";
       const confidenceStyle = confidenceValue !== null ? ` style="opacity:${(0.08 + confidenceValue * 0.2).toFixed(2)}"` : "";
-      const confidenceLabel = confidenceValue !== null ? this._panelTextFormat(
-        pairingKnown ? "chart.session_pairing_confidence" : "chart.session_legacy_confidence",
-        { confidence: Math.round(confidenceValue * 100) },
-      ) : "";
+      const confidenceLabel = confidenceValue !== null
+        ? this._panelTextFormat("chart.session_pairing_confidence", { confidence: Math.round(confidenceValue * 100) })
+        : "";
       const left = x(Math.max(start, minTime));
       const right = x(Math.min(end, maxTime));
       const bandWidth = Math.max(right - left, 1);

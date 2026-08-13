@@ -30,10 +30,7 @@ from ..nilm import (
     nilm_signature_is_assignable,
     normalize_nilm_assignment_model,
 )
-from ..nilm_confidence import (
-    NILM_CONFIDENCE_SEMANTICS_VERSION,
-    apply_nilm_feedback_evidence,
-)
+from ..nilm_confidence import apply_nilm_feedback_evidence
 from ..nilm_interval_evidence import NilmReferenceExtractionSettings
 from ..nilm_validation import (
     match_nilm_validation_intervals,
@@ -606,11 +603,6 @@ class NilmController:
             model.get("model_confidence"),
             default=0.0,
         )
-        assignment.setdefault("confidence_kind", "legacy_mixed")
-        assignment.setdefault(
-            "confidence_semantics_version",
-            NILM_CONFIDENCE_SEMANTICS_VERSION,
-        )
 
     def _nilm_model_time_zone(self) -> str | None:
         context_builder = getattr(self._coordinator, "context_builder", None)
@@ -685,9 +677,6 @@ class NilmController:
                 "session_ids": [],
                 "label_interval_ids": [],
                 "lifecycle_state": lifecycle_state,
-                "confidence": 0.0,
-                "confidence_kind": "legacy_mixed",
-                "confidence_semantics_version": NILM_CONFIDENCE_SEMANTICS_VERSION,
                 "created_at": now,
                 "updated_at": now,
                 "created_device": False,
@@ -721,19 +710,6 @@ class NilmController:
         self._append_unique(
             assignment.setdefault("label_interval_ids", []),
             label_interval_id,
-        )
-        try:
-            confidence_value = float(confidence)
-        except (TypeError, ValueError):
-            confidence_value = 1.0
-        assignment["confidence"] = max(
-            float(assignment.get("confidence") or 0.0),
-            max(min(confidence_value, 1.0), 0.0),
-        )
-        assignment.setdefault("confidence_kind", "legacy_mixed")
-        assignment.setdefault(
-            "confidence_semantics_version",
-            NILM_CONFIDENCE_SEMANTICS_VERSION,
         )
         del assignments[: -self._assignment_max_items]
         return assignment
@@ -3969,10 +3945,7 @@ class NilmController:
         target["false_positive_rate"] = (
             round(len(rejected) / validation_total, 3) if validation_total else 0.0
         )
-        target["confidence"] = max(
-            self._nonnegative_float_value(target.get("confidence"), default=0.0),
-            self._nonnegative_float_value(source.get("confidence"), default=0.0),
-        )
+        target.pop("confidence", None)
         target["publish_entities"] = bool(
             target.get("publish_entities") or source.get("publish_entities")
         )
