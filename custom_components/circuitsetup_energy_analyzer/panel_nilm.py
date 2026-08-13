@@ -3546,6 +3546,7 @@ def _nilm_workspace_lanes(
         signature_id = str(signature.get(ATTR_SIGNATURE_ID) or "").strip()
         if not signature_id:
             continue
+        review_state = str(signature.get("review_state") or "").strip().lower()
         complete_component = _nilm_signature_direction(signature) == "on" and bool(
             signature.get("session_ids")
         )
@@ -3553,6 +3554,7 @@ def _nilm_workspace_lanes(
             lanes["hidden"]["signature_ids"].append(signature_id)
         elif (
             complete_component
+            and review_state != "assigned"
             and _nilm_signature_session_fingerprint(signature)
             not in reviewed_session_fingerprints
             and not str(signature.get("matched_assignment_id") or "").strip()

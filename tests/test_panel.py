@@ -2266,6 +2266,39 @@ def test_nilm_workspace_lanes_only_show_complete_component_signatures() -> None:
     assert "expected" not in lanes
 
 
+def test_nilm_workspace_lanes_keep_assigned_out_after_fingerprint_drift() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_workspace_lanes,
+    )
+
+    lanes = _nilm_workspace_lanes(
+        [
+            {
+                "signature_id": "assigned-signature",
+                "feedback_fingerprint": "assigned-fingerprint",
+                "direction": "on",
+                "review_state": "assigned",
+                "session_ids": ["assigned-session"],
+            },
+            {
+                "signature_id": "new-signature",
+                "feedback_fingerprint": "new-fingerprint",
+                "direction": "on",
+                "review_state": "new",
+                "session_ids": ["new-session"],
+            },
+        ],
+        [
+            {
+                "assignment_id": "configured-primary",
+                "signature_fingerprints": ["replacement-fingerprint"],
+            }
+        ],
+    )
+
+    assert lanes["needs_review"]["signature_ids"] == ["new-signature"]
+
+
 def test_nilm_workspace_reviews_closed_components_and_maps_stale_assignment() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
