@@ -2131,6 +2131,7 @@
         "helper_confirm": "Confirm helper",
         "helper_remove": "Remove helper",
         "helper_manual": "Choose a helper circuit",
+        "helper_manual_another": "Choose another helper circuit",
         "helper_select": "Helper circuit",
         "helper_set": "Set helper",
         "reference_sensors": "Reference sensors",

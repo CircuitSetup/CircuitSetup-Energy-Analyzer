@@ -4205,6 +4205,58 @@ assert.ok(secondary.indexOf("data-nilm-evidence-section") > secondary.indexOf("d
     )
 
 
+def test_nilm_helper_prompt_distinguishes_unassigned_and_assigned_helpers() -> None:
+    _run_panel_node_script(
+        r'''
+const workspace = makeWorkspace();
+const panel = makePanel({ _nilmWorkspace: workspace });
+const helperOptions = [{ helper_circuit_id: "washer", helper_name: "Washer" }];
+const unassigned = panel._renderNilmHelperEvidence({
+  assignment_id: "dryer-unassigned",
+  helper_options: helperOptions,
+  helper_links: [],
+  helper_candidates: [],
+}, 0);
+const assigned = panel._renderNilmHelperEvidence({
+  assignment_id: "dryer-assigned",
+  helper_options: helperOptions,
+  helper_links: [{ helper_circuit_id: "washer", helper_name: "Washer" }],
+  helper_candidates: [],
+}, 1);
+
+assert.ok(unassigned.includes("Choose a helper circuit"));
+assert.ok(!unassigned.includes("Choose another helper circuit"));
+assert.ok(assigned.includes("Choose another helper circuit"));
+''',
+    )
+
+
+def test_open_nilm_session_matches_validation_confidence_format() -> None:
+    _run_panel_node_script(
+        r'''
+const workspace = makeWorkspace({
+  sessions: [{
+    session_id: "open-session",
+    display_label: "Washer",
+    start: "2026-08-12T12:00:00Z",
+    end: null,
+    pairing_confidence: 0.4,
+    median_power_w: 123.45,
+    estimated_energy_kwh: 0.9,
+  }],
+});
+const panel = makePanel({ _nilmWorkspace: workspace });
+const html = panel._renderNilmSecondaryCollections(workspace);
+const sessionsStart = html.indexOf("NILM Sessions");
+const edgesStart = html.indexOf("NILM Edges", sessionsStart);
+const sessions = html.slice(sessionsStart, edgesStart);
+
+assert.ok(sessions.includes("In progress. Pairing confidence 40%"));
+assert.ok(!sessions.includes("Low pairing confidence"));
+''',
+    )
+
+
 def test_nilm_evidence_quality_pagination_and_deep_links_are_bounded() -> None:
     _run_panel_node_script(
         r'''

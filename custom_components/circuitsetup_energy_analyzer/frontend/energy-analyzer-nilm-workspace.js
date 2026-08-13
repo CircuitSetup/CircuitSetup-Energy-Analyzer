@@ -2458,8 +2458,11 @@ export function createNilmWorkspaceMethods({
         && Number(item.matched_on_count) > 0
         && Number(item.source_on_count) > 0);
     const helperOptions = Array.isArray(assignment.helper_options) ? assignment.helper_options : [];
+    const helperPromptKey = confirmedIds.size
+      ? "nilm_workspace.helper_manual_another"
+      : "nilm_workspace.helper_manual";
     const manual = helperOptions.length ? `<div class="nilm-helper-manual">
-      <h3>${this._escape(this._panelText("nilm_workspace.helper_manual"))}</h3>
+      <h3>${this._escape(this._panelText(helperPromptKey))}</h3>
       <label for="nilm_helper_option_${index}">${this._escape(this._panelText("nilm_workspace.helper_select"))}</label>
       <select id="nilm_helper_option_${index}" data-nilm-helper-option data-nilm-assignment-index="${index}">
         ${helperOptions.map((item) => `<option value="${this._escape(item.helper_circuit_id || "")}">${this._escape(item.helper_name || item.helper_circuit_id || "")}</option>`).join("")}
@@ -3676,7 +3679,7 @@ export function createNilmWorkspaceMethods({
           const confidence = isOpen ? "" : pairing
             ? `<p class="muted">${this._escape(pairing.text)}</p>`
             : "";
-          const lowConfidence = pairing && this._isLowNilmConfidence(pairing.value)
+          const lowConfidence = !isOpen && pairing && this._isLowNilmConfidence(pairing.value)
             ? `<p class="muted">${this._escape(this._nilmLowConfidenceExplanation(item))}</p>`
             : "";
           const powerSummary = this._panelTextFormat(

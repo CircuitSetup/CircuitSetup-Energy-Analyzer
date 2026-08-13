@@ -63,6 +63,8 @@ def _detail(
     runtime: tuple[float | None, float | None] = (150.0, 100.0),
     runs: tuple[float | None, float | None] = (3.0, 2.0),
     confidence: float | None = None,
+    confidence_kind: str | None = None,
+    feedback_evidence_score: float | None = None,
     source_status: str = "fresh",
     readiness_status: str = "ready",
     appliance_profile: str = "washer",
@@ -78,6 +80,8 @@ def _detail(
         appliance_profile=appliance_profile,
         source_type=source_type,
         confidence=confidence,
+        confidence_kind=confidence_kind,
+        feedback_evidence_score=feedback_evidence_score,
         model_status="validated" if source_type == "nilm_estimate" else None,
         activity_state=activity_state,
         daily_energy_kwh=energy[0],
@@ -405,6 +409,30 @@ def test_appliance_index_lists_direct_and_nilm_with_filter_metadata(
     assert by_key["circuit:fridge"]["is_learning"] is True
     assert by_key["nilm:dishwasher"]["is_nilm"] is True
     assert by_key["nilm:dishwasher"]["has_data_problem"] is False
+
+
+def test_appliance_index_exposes_typed_nilm_feedback_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    dishwasher = _detail(
+        "mains",
+        "Dishwasher",
+        appliance_key="nilm:dishwasher",
+        assignment_id="dishwasher",
+        source_type="nilm_estimate",
+        confidence=0.81,
+        confidence_kind="feedback_evidence",
+        feedback_evidence_score=0.81,
+    )
+    coordinator = _install_index_sources(
+        monkeypatch,
+        direct=(),
+        nilm=(dishwasher,),
+    )
+
+    (item,) = appliance_insights.appliance_insights_for_coordinators((coordinator,))
+
+    assert item.as_dict()["feedback_evidence_score"] == pytest.approx(0.81)
 
 
 def test_appliance_index_treats_waiting_for_delta_as_learning(
