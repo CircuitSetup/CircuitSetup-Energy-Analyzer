@@ -75,6 +75,93 @@ def test_assignment_schema_round_trips_saved_circuit_composition(
     assert _schema_default(schema, "circuit_composition") == expected
 
 
+def test_assignment_schema_includes_nilm_detection_controls() -> None:
+    from custom_components.circuitsetup_energy_analyzer.const import (
+        CONF_NILM_DETECTION_ENABLED,
+        CONF_NILM_DETECTION_SENSITIVITY,
+    )
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        _assignment_schema,
+    )
+
+    schema = _assignment_schema(
+        {
+            "entity_ids": ("sensor.shared_power",),
+            "appliance_profile": "mixed",
+            "mode": "mixed",
+        }
+    )
+
+    assert CONF_NILM_DETECTION_ENABLED in _schema_keys(schema)
+    assert CONF_NILM_DETECTION_SENSITIVITY in _schema_keys(schema)
+    assert _schema_default(schema, CONF_NILM_DETECTION_ENABLED) is False
+    assert _schema_default(schema, CONF_NILM_DETECTION_SENSITIVITY) == "balanced"
+
+
+def test_assignment_to_circuit_persists_nilm_detection_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer.const import (
+        CONF_NILM_DETECTION_ENABLED,
+        CONF_NILM_DETECTION_SENSITIVITY,
+    )
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        COMPOSITION_PURE_MIXED,
+        FIELD_APPLIANCE_PROFILE,
+        FIELD_CIRCUIT_COMPOSITION,
+        FIELD_CIRCUIT_NAME,
+        FIELD_CIRCUIT_RETENTION_MODE,
+        _circuit_from_assignment_group,
+    )
+
+    circuit = _circuit_from_assignment_group(
+        {"circuit_id": "shared", "entity_ids": ("sensor.shared_power",)},
+        {
+            FIELD_CIRCUIT_NAME: "Shared Loads",
+            FIELD_APPLIANCE_PROFILE: "mixed",
+            FIELD_CIRCUIT_COMPOSITION: COMPOSITION_PURE_MIXED,
+            FIELD_CIRCUIT_RETENTION_MODE: "standard",
+            CONF_NILM_DETECTION_ENABLED: True,
+            CONF_NILM_DETECTION_SENSITIVITY: "sensitive",
+        },
+    )
+
+    assert circuit is not None
+    assert circuit["appliance_profile"] == "mixed"
+    assert circuit["mode"] == "mixed"
+    assert circuit[CONF_NILM_DETECTION_ENABLED] is True
+    assert circuit[CONF_NILM_DETECTION_SENSITIVITY] == "sensitive"
+
+
+def test_assignment_to_circuit_defaults_nilm_off_for_mixed() -> None:
+    from custom_components.circuitsetup_energy_analyzer.const import (
+        CONF_NILM_DETECTION_ENABLED,
+        CONF_NILM_DETECTION_SENSITIVITY,
+    )
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        COMPOSITION_PURE_MIXED,
+        FIELD_APPLIANCE_PROFILE,
+        FIELD_CIRCUIT_COMPOSITION,
+        FIELD_CIRCUIT_NAME,
+        FIELD_CIRCUIT_RETENTION_MODE,
+        _circuit_from_assignment_group,
+    )
+
+    circuit = _circuit_from_assignment_group(
+        {"circuit_id": "shared", "entity_ids": ("sensor.shared_power",)},
+        {
+            FIELD_CIRCUIT_NAME: "Shared Loads",
+            FIELD_APPLIANCE_PROFILE: "mixed",
+            FIELD_CIRCUIT_COMPOSITION: COMPOSITION_PURE_MIXED,
+            FIELD_CIRCUIT_RETENTION_MODE: "standard",
+        },
+    )
+
+    assert circuit is not None
+    assert circuit["appliance_profile"] == "mixed"
+    assert circuit["mode"] == "mixed"
+    assert circuit[CONF_NILM_DETECTION_ENABLED] is False
+    assert circuit[CONF_NILM_DETECTION_SENSITIVITY] == "balanced"
+
+
 @pytest.mark.parametrize(
     ("composition", "expected_profile", "expected_mode"),
     [
@@ -3374,6 +3461,8 @@ async def test_user_flow_builds_assignment_step_from_source_selection() -> None:
         "circuit_name",
         "appliance_profile",
         "circuit_composition",
+        "nilm_detection_enabled",
+        "nilm_detection_sensitivity",
         "circuit_retention_mode",
     }
     assert _schema_default(result["data_schema"], "circuit_name") == (
@@ -4940,6 +5029,8 @@ async def test_assignment_step_creates_entry_with_user_circuit_assignments() -> 
             "mode": "single_phase",
             "power_flow": "load",
             "retention_mode": "diagnostic",
+            "nilm_detection_enabled": False,
+            "nilm_detection_sensitivity": "balanced",
             "sensors": [
                 {
                     "entity_id": "sensor.air_handler_active_power",
@@ -4960,6 +5051,8 @@ async def test_assignment_step_creates_entry_with_user_circuit_assignments() -> 
             "mode": "single_phase",
             "power_flow": "load",
             "retention_mode": "standard",
+            "nilm_detection_enabled": False,
+            "nilm_detection_sensitivity": "balanced",
             "sensors": [
                 {
                     "entity_id": "sensor.sump_pump_active_power",
@@ -5296,6 +5389,8 @@ async def test_options_assignment_review_selects_one_saved_assignment() -> None:
             "mode": "dual_phase",
             "power_flow": "load",
             "retention_mode": "standard",
+            "nilm_detection_enabled": False,
+            "nilm_detection_sensitivity": "balanced",
             "sensors": [
                 {"entity_id": "sensor.upstairs_hvac_l1_power", "role": "real_power"},
                 {"entity_id": "sensor.upstairs_hvac_l2_power", "role": "real_power"},
@@ -5308,6 +5403,8 @@ async def test_options_assignment_review_selects_one_saved_assignment() -> None:
             "mode": "dual_phase",
             "power_flow": "load",
             "retention_mode": "standard",
+            "nilm_detection_enabled": False,
+            "nilm_detection_sensitivity": "balanced",
             "sensors": [
                 {"entity_id": "sensor.downstairs_hvac_l1_power", "role": "real_power"},
                 {"entity_id": "sensor.downstairs_hvac_l2_power", "role": "real_power"},
@@ -5377,6 +5474,8 @@ async def test_options_assignment_review_selects_one_saved_assignment() -> None:
             "mode": "dual_phase",
             "power_flow": "load",
             "retention_mode": "standard",
+            "nilm_detection_enabled": False,
+            "nilm_detection_sensitivity": "balanced",
             "sensors": [
                 {
                     "entity_id": "sensor.downstairs_hvac_l1_power",

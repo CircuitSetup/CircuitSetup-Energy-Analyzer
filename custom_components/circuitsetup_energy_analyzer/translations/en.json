@@ -17,7 +17,7 @@
           "water_flow_sensor_entities": "Water Flow Sensors",
           "thermostat_entities": "Thermostats",
           "thermostat_temperature_sensor_entities": "Indoor Temperature Sensors",
-          "sensitivity": "Sensitivity",
+          "sensitivity": "Alert Sensitivity",
           "retention_mode": "Retention Mode"
         },
         "data_description": {
@@ -46,6 +46,8 @@
           "circuit_name": "Circuit Name",
         "appliance_profile": "Appliance Type",
         "circuit_composition": "Circuit Composition",
+          "nilm_detection_enabled": "Enable NILM Detection",
+          "nilm_detection_sensitivity": "NILM Detection Sensitivity",
           "circuit_retention_mode": "Circuit Retention"
         },
         "data_description": {
@@ -55,6 +57,8 @@
           "circuit_name": "Edit the display name used for this analyzed circuit.",
         "appliance_profile": "Choose the appliance type used for automatic analysis and alerts. This is ignored for Several loads with no primary.",
         "circuit_composition": "Choose One appliance, A primary appliance plus other loads, or Several loads with no primary.",
+          "nilm_detection_enabled": "Turns on NILM edge detection for this mixed or aggregate circuit. Leave off unless this circuit contains multiple loads you want to separate.",
+          "nilm_detection_sensitivity": "Controls how small a power transition NILM should try to detect. Quiet detects larger transitions, Balanced is the default, and Sensitive detects smaller transitions.",
           "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 18 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       },
@@ -139,7 +143,7 @@
           "water_flow_sensor_entities": "Water Flow Sensors",
           "thermostat_entities": "Thermostats",
           "thermostat_temperature_sensor_entities": "Indoor Temperature Sensors",
-          "sensitivity": "Sensitivity",
+          "sensitivity": "Alert Sensitivity",
           "retention_mode": "Retention Mode"
         },
         "data_description": {
@@ -530,6 +534,8 @@
           "circuit_name": "Circuit Name",
         "appliance_profile": "Appliance Type",
         "circuit_composition": "Circuit Composition",
+          "nilm_detection_enabled": "Enable NILM Detection",
+          "nilm_detection_sensitivity": "NILM Detection Sensitivity",
           "circuit_retention_mode": "Circuit Retention"
         },
         "data_description": {
@@ -539,6 +545,8 @@
           "circuit_name": "Edit the display name used for this analyzed circuit.",
         "appliance_profile": "Choose the appliance type used for automatic analysis and alerts. This is ignored for Several loads with no primary.",
         "circuit_composition": "Choose One appliance, A primary appliance plus other loads, or Several loads with no primary.",
+          "nilm_detection_enabled": "Turns on NILM edge detection for this mixed or aggregate circuit. Leave off unless this circuit contains multiple loads you want to separate.",
+          "nilm_detection_sensitivity": "Controls how small a power transition NILM should try to detect. Quiet detects larger transitions, Balanced is the default, and Sensitive detects smaller transitions.",
           "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 18 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       }

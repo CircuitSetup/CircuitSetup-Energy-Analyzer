@@ -8,8 +8,11 @@ from typing import Any
 from .const import (
     CONF_CIRCUITS,
     CONF_MAINS_SOURCE_ENTITIES,
+    CONF_NILM_DETECTION_ENABLED,
+    CONF_NILM_DETECTION_SENSITIVITY,
     CONF_RETENTION_MODE,
     CONF_SOURCE_ENTITIES,
+    DEFAULT_NILM_DETECTION_ENABLED,
     DEFAULT_RETENTION_MODE,
 )
 from .context_sources import (
@@ -35,6 +38,7 @@ from .models import (
     SensorRef,
     SensorRole,
 )
+from .ux import normalize_nilm_detection_sensitivity
 
 
 def retention_mode_from_sources(
@@ -576,6 +580,15 @@ def _circuit_config_from_raw(
         sensors=_sensor_refs_from_raw(raw_circuit),
         retention_mode=retention_mode,
         power_flow=_power_flow_mode_from_raw(raw_circuit, appliance_profile, mode),
+        nilm_detection_enabled=bool(
+            raw_circuit.get(
+                CONF_NILM_DETECTION_ENABLED,
+                DEFAULT_NILM_DETECTION_ENABLED,
+            )
+        ),
+        nilm_detection_sensitivity=normalize_nilm_detection_sensitivity(
+            raw_circuit.get(CONF_NILM_DETECTION_SENSITIVITY)
+        ),
         energy_usage_window_days=_positive_int_from_raw(
             raw_circuit,
             "energy_usage_window_days",

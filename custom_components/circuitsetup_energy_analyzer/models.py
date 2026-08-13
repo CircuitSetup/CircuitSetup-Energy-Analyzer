@@ -128,6 +128,8 @@ class CircuitConfig:
     sensors: tuple[SensorRef, ...] = ()
     retention_mode: RetentionMode = RetentionMode.STANDARD
     power_flow: PowerFlowMode = PowerFlowMode.LOAD
+    nilm_detection_enabled: bool = False
+    nilm_detection_sensitivity: str = "balanced"
     energy_usage_window_days: int = 7
     daily_energy_spike_ratio: float = 0.25
     daily_energy_goal_kwh: float | None = None

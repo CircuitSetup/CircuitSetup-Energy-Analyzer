@@ -44,6 +44,8 @@ CONF_ENTITY_DETAIL_LEVEL = "entity_detail_level"
 CONF_EXTRA_SOURCE_ENTITIES = "extra_source_entities"
 CONF_KNOWN_LOAD_CIRCUITS = "known_load_circuits"
 CONF_MAINS_SOURCE_ENTITIES = "mains_source_entities"
+CONF_NILM_DETECTION_ENABLED = "nilm_detection_enabled"
+CONF_NILM_DETECTION_SENSITIVITY = "nilm_detection_sensitivity"
 CONF_OUTDOOR_TEMPERATURE_ENTITY = "outdoor_temperature_entity"
 CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT = "rain_activity_delta_threshold_pct"
 CONF_RAIN_INTENSITY_ENTITY = "rain_intensity_entity"
@@ -73,6 +75,8 @@ CONF_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT = (
 CONF_BLOWER_REPRESENTS_GAS_HEAT = "blower_represents_gas_heat"
 
 DEFAULT_ENABLE_EXPERIMENTAL_NILM = False
+DEFAULT_NILM_DETECTION_ENABLED = False
+DEFAULT_NILM_DETECTION_SENSITIVITY = "balanced"
 DASHBOARD_LAYOUT_SIMPLE = "simple"
 DASHBOARD_LAYOUT_STANDARD = "standard"
 DASHBOARD_LAYOUT_EXPERT = "expert"

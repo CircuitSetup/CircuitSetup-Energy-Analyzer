@@ -149,6 +149,8 @@ from .const import (
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_LINKED_THERMOSTAT_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
+    CONF_NILM_DETECTION_ENABLED,
+    CONF_NILM_DETECTION_SENSITIVITY,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
     CONF_RAIN_INTENSITY_ENTITY,
@@ -174,6 +176,8 @@ from .const import (
     DEFAULT_ENTITY_DETAIL_LEVEL,
     DEFAULT_FLOW_MISMATCH_THRESHOLD_MINUTES,
     DEFAULT_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT,
+    DEFAULT_NILM_DETECTION_ENABLED,
+    DEFAULT_NILM_DETECTION_SENSITIVITY,
     DEFAULT_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
     DEFAULT_RAIN_PUMP_CORRELATION_ENABLED,
     DEFAULT_RAIN_RESPONSE_WINDOW_MINUTES,
@@ -248,7 +252,11 @@ from .utility_comparison import (
     VALID_UTILITY_SOURCE_TYPES,
     VALID_UTILITY_STATISTIC_PERIODS,
 )
-from .ux import SENSITIVITY_LABELS, normalize_sensitivity
+from .ux import (
+    SENSITIVITY_LABELS,
+    normalize_nilm_detection_sensitivity,
+    normalize_sensitivity,
+)
 
 TITLE = "CircuitSetup Energy Analyzer"
 ERROR_NO_SOURCE_ENTITIES = "no_source_entities"
@@ -1564,6 +1572,24 @@ def _assignment_schema(group: Mapping[str, Any]) -> Any:
                 ),
                 translation_key=FIELD_CIRCUIT_COMPOSITION,
             ),
+            vol.Optional(
+                CONF_NILM_DETECTION_ENABLED,
+                default=bool(
+                    group.get(
+                        CONF_NILM_DETECTION_ENABLED,
+                        DEFAULT_NILM_DETECTION_ENABLED,
+                    )
+                ),
+            ): bool,
+            vol.Optional(
+                CONF_NILM_DETECTION_SENSITIVITY,
+                default=normalize_nilm_detection_sensitivity(
+                    group.get(
+                        CONF_NILM_DETECTION_SENSITIVITY,
+                        DEFAULT_NILM_DETECTION_SENSITIVITY,
+                    )
+                ),
+            ): _select_selector(sensitivity_options()),
             vol.Required(
                 FIELD_CIRCUIT_RETENTION_MODE,
                 default=str(group.get("retention_mode") or DEFAULT_RETENTION_MODE),
@@ -3105,6 +3131,8 @@ def _remember_assignment_review_input(flow: Any, user_input: Mapping[str, Any]) 
         FIELD_CIRCUIT_NAME,
         FIELD_APPLIANCE_PROFILE,
         FIELD_CIRCUIT_RETENTION_MODE,
+        CONF_NILM_DETECTION_ENABLED,
+        CONF_NILM_DETECTION_SENSITIVITY,
     ):
         if field in user_input:
             group[field.removeprefix("circuit_")] = user_input[field]
@@ -3218,6 +3246,21 @@ def _circuit_from_assignment_group(
             group.get("sensor_legs"),
         )
     )
+    nilm_detection_enabled = bool(
+        user_input.get(
+            CONF_NILM_DETECTION_ENABLED,
+            group.get(CONF_NILM_DETECTION_ENABLED, DEFAULT_NILM_DETECTION_ENABLED),
+        )
+    )
+    nilm_detection_sensitivity = normalize_nilm_detection_sensitivity(
+        user_input.get(
+            CONF_NILM_DETECTION_SENSITIVITY,
+            group.get(
+                CONF_NILM_DETECTION_SENSITIVITY,
+                DEFAULT_NILM_DETECTION_SENSITIVITY,
+            ),
+        )
+    )
     power_flow = _default_power_flow_for_assignment(profile, mode)
     sensors = [
         {
@@ -3237,6 +3280,8 @@ def _circuit_from_assignment_group(
         "mode": mode,
         "power_flow": power_flow,
         "retention_mode": retention_mode,
+        "nilm_detection_enabled": nilm_detection_enabled,
+        "nilm_detection_sensitivity": nilm_detection_sensitivity,
         "sensors": sensors,
     }
 
