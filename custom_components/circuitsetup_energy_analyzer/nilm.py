@@ -26,6 +26,7 @@ from .models import (
 )
 from .nilm_confidence import NILM_CONFIDENCE_SEMANTICS_VERSION
 from .nilm_interval_evidence import DEFAULT_THRESHOLDS
+from .nilm_load_identification import identify_estimated_load
 
 _LEGACY_INTERVAL_CONFIDENCE_CAP = 0.25
 _MAX_POSITIVE_EVIDENCE = 96
@@ -6722,52 +6723,16 @@ def _cluster_topology_coverage(edges: Iterable[NilmEdge]) -> float:
 def classify_signature(signature: NilmSignature) -> str:
     """Return a deliberately non-definitive label for a recurring signature."""
 
-    if signature.user_label:
-        return signature.user_label
-
-    abs_w = abs(signature.median_delta_w)
-    abs_var = (
-        abs(signature.median_delta_var)
-        if signature.median_delta_var is not None
-        else None
-    )
-    abs_va = (
-        abs(signature.median_delta_va)
-        if signature.median_delta_va is not None
-        else None
-    )
-    abs_pf = (
-        abs(signature.median_delta_pf)
-        if signature.median_delta_pf is not None
-        else None
-    )
-    reactive_ratio = abs_var / max(abs_w, 1.0) if abs_var is not None else None
-
-    if (
-        abs_var is not None
-        and abs_pf is not None
-        and abs_pf <= 0.08
-        and abs_w >= 200
-        and reactive_ratio is not None
-        and reactive_ratio <= 0.12
-    ):
-        return _split_phase_label(signature, "resistive load")
-    if (
-        abs_var is not None
-        and abs_w >= 200
-        and reactive_ratio is not None
-        and reactive_ratio >= 0.3
-    ):
-        return _split_phase_label(signature, "motor-like load")
-    if (
-        abs_var is not None
-        and abs_va is not None
-        and abs_va >= 100
-        and reactive_ratio is not None
-        and reactive_ratio >= 0.75
-    ):
-        return _split_phase_label(signature, "power-electronics load")
-    return "unknown recurring load"
+    return identify_estimated_load(
+        median_delta_w=signature.median_delta_w,
+        median_delta_var=signature.median_delta_var,
+        median_delta_va=signature.median_delta_va,
+        median_delta_pf=signature.median_delta_pf,
+        split_phase_type=signature.split_phase_type,
+        occurrence_count=signature.occurrence_count,
+        confidence=signature.confidence,
+        user_label=signature.user_label,
+    ).review_label
 
 
 @dataclass(frozen=True, slots=True)
@@ -8035,14 +8000,6 @@ def _split_phase_types_compatible(edge: NilmEdge, reference: NilmEdge) -> bool:
 
 def _uncertain_split_phase_type(value: str) -> bool:
     return value in {"unknown", "missing_leg_data"}
-
-
-def _split_phase_label(signature: NilmSignature, label: str) -> str:
-    if signature.split_phase_type == "balanced_240v":
-        return f"possible 240 V {label}"
-    if signature.split_phase_type in {"single_leg_a", "single_leg_b"}:
-        return f"possible 120 V {label}"
-    return f"possible {label}"
 
 
 def _open_nilm_session(
