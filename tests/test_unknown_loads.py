@@ -22,8 +22,8 @@ BASE_TIME = datetime(2026, 6, 7, 12, 0, tzinfo=UTC)
 def signature(
     signature_id: str,
     watts: float,
-    var: float,
-    va: float,
+    var: float | None,
+    va: float | None,
     *,
     delta_pf: float = 0.0,
     occurrence_count: int = 4,
@@ -1217,6 +1217,68 @@ def test_estimate_unknown_load_marks_reactive_signature_as_motor() -> None:
     assert "diagnosis" not in result["display_name"].lower()
 
 
+def test_estimate_unknown_load_marks_low_reactive_signature_as_resistive() -> None:
+    result = estimate_unknown_load(
+        signature(
+            "sig-resistive-a",
+            500.0,
+            20.0,
+            501.0,
+            delta_pf=0.02,
+            occurrence_count=4,
+            confidence=0.7,
+            split_phase_type="single_leg_a",
+            dominant_leg="a",
+        )
+    )
+
+    assert result["likely_type"] == "resistive"
+    assert result["display_name"] == "Estimated resistive load"
+    evidence_text = " ".join(result["evidence"]).lower()
+    assert "possible resistive" in evidence_text
+    assert "no conservative helper pattern matched" not in evidence_text
+
+
+def test_estimate_unknown_load_uses_partial_electrical_evidence_without_va() -> None:
+    resistive = estimate_unknown_load(
+        signature(
+            "sig-resistive-va-missing",
+            500.0,
+            20.0,
+            None,
+            delta_pf=0.02,
+            occurrence_count=4,
+            confidence=0.7,
+            split_phase_type="single_leg_a",
+            dominant_leg="a",
+        )
+    )
+    motor = estimate_unknown_load(
+        signature(
+            "sig-motor-va-missing",
+            520.0,
+            330.0,
+            None,
+            delta_pf=-0.14,
+            occurrence_count=5,
+            confidence=0.74,
+            split_phase_type="single_leg_b",
+            dominant_leg="b",
+        )
+    )
+
+    assert resistive["likely_type"] == "resistive"
+    assert resistive["display_name"] == "Estimated resistive load"
+    assert resistive["typical_power_factor"] is None
+    assert motor["likely_type"] == "motor"
+    assert motor["display_name"] == "Estimated motor load"
+    assert motor["typical_power_factor"] is None
+    assert " va " not in " ".join(resistive["evidence"]).lower()
+    assert "estimated pf" not in " ".join(resistive["evidence"]).lower()
+    assert " va " not in " ".join(motor["evidence"]).lower()
+    assert "estimated pf" not in " ".join(motor["evidence"]).lower()
+
+
 def test_estimate_unknown_load_marks_balanced_low_var_as_heat_candidate() -> None:
     result = estimate_unknown_load(
         signature(
@@ -1236,7 +1298,7 @@ def test_estimate_unknown_load_marks_balanced_low_var_as_heat_candidate() -> Non
     assert result["voltage_class"] == "240 V"
     assert result["dominant_leg"] == "balanced"
     assert result["typical_power_factor"] == 0.998
-    assert "candidate" in result["display_name"].lower()
+    assert result["display_name"] == "Estimated heating load"
     assert "candidate" in " ".join(result["evidence"]).lower()
 
 

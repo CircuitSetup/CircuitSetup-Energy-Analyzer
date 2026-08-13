@@ -9431,7 +9431,7 @@ def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> Non
     signature = store_data.nilm_signatures["mains"][0]
     assert signature["signature_id"].startswith("on-")
     assert signature["occurrence_count"] == 3
-    assert signature["classification"].startswith("possible")
+    assert signature["classification"] == "unknown recurring load"
     updates = {update.path: update.value for update in results[-1].state_updates}
     assert updates[("nilm_signature_count_by_circuit", "mains")] == 1
     assert updates[("nilm_unmatched_load_percentage_by_circuit", "mains")] == 100.0

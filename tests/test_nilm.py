@@ -5750,17 +5750,62 @@ def test_classify_signature_is_conservative_and_allows_user_label_override() -> 
                 split_phase_type="single_leg_b",
             )
         )
-        == "possible 120 V motor-like load"
+        == "unknown recurring load"
     )
     assert (
         classify_signature(NilmSignature("motor", 500.0, 220.0, 548.0, -0.18, 4, 0.7))
-        == "possible motor-like load"
+        == "unknown recurring load"
     )
     assert (
         classify_signature(
             NilmSignature("electronics", 80.0, 90.0, 125.0, -0.25, 4, 0.7)
         )
-        == "possible power-electronics load"
+        == "possible electronics load"
+    )
+    assert (
+        classify_signature(
+            NilmSignature(
+                "balanced-heater",
+                4300.0,
+                90.0,
+                4310.0,
+                0.01,
+                6,
+                0.86,
+                split_phase_type="balanced_240v",
+            )
+        )
+        == "possible 240 V heating load"
+    )
+    assert (
+        classify_signature(
+            NilmSignature(
+                "single-va-missing",
+                500.0,
+                20.0,
+                None,
+                0.02,
+                4,
+                0.7,
+                split_phase_type="single_leg_b",
+            )
+        )
+        == "possible 120 V resistive load"
+    )
+    assert (
+        classify_signature(
+            NilmSignature(
+                "single-motor-va-missing",
+                520.0,
+                330.0,
+                None,
+                -0.14,
+                5,
+                0.74,
+                split_phase_type="single_leg_b",
+            )
+        )
+        == "possible 120 V motor load"
     )
     assert (
         classify_signature(NilmSignature("unknown", 120.0, 30.0, 124.0, 0.01, 4, 0.7))

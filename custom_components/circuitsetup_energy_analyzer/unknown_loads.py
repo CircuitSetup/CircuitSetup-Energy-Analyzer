@@ -16,9 +16,8 @@ from .nilm import (
     nilm_signature_is_assignable,
     nilm_signature_is_off_direction,
 )
+from .nilm_load_identification import identify_estimated_load
 
-MIN_OCCURRENCES = 3
-MIN_CONFIDENCE = 0.5
 UNKNOWN_LOAD_INVENTORY_SCHEMA_VERSION = 4
 MIN_SIGNATURE_PAIR_SCORE = 0.50
 SIGNATURE_PAIR_AMBIGUITY_MARGIN = 0.08
@@ -1149,23 +1148,25 @@ def estimate_unknown_load(signature: NilmSignature) -> dict[str, Any]:
     """Return a conservative user-facing estimate for an unknown NILM signature."""
 
     evidence_strength = signature.evidence_strength or signature.confidence
-    typical_watts = _rounded_abs(signature.median_delta_w)
-    typical_var = _rounded_abs(signature.median_delta_var)
-    typical_va = _rounded_abs(signature.median_delta_va)
-    typical_power_factor = _typical_power_factor(typical_watts, typical_va)
-    voltage_class = _voltage_class(signature.split_phase_type)
-    likely_type = _likely_type(
-        signature,
-        typical_watts=typical_watts,
-        typical_var=typical_var,
-        typical_va=typical_va,
-        typical_power_factor=typical_power_factor,
-        voltage_class=voltage_class,
+    identification = identify_estimated_load(
+        median_delta_w=signature.median_delta_w,
+        median_delta_var=signature.median_delta_var,
+        median_delta_va=signature.median_delta_va,
+        median_delta_pf=signature.median_delta_pf,
+        split_phase_type=signature.split_phase_type,
+        occurrence_count=signature.occurrence_count,
+        confidence=signature.confidence,
     )
+    typical_watts = identification.typical_watts
+    typical_var = identification.typical_var
+    typical_va = identification.typical_va
+    typical_power_factor = identification.typical_power_factor
+    voltage_class = identification.voltage_class
+    likely_type = identification.likely_type
 
     return {
         "signature_id": signature.signature_id,
-        "display_name": _display_name(likely_type, voltage_class),
+        "display_name": identification.display_name,
         "likely_type": likely_type,
         "voltage_class": voltage_class,
         "split_phase_type": signature.split_phase_type,
@@ -1188,6 +1189,8 @@ def estimate_unknown_load(signature: NilmSignature) -> dict[str, Any]:
             typical_var=typical_var,
             typical_va=typical_va,
             typical_power_factor=typical_power_factor,
+            evidence_reason=identification.evidence_reason,
+            has_enough_evidence=identification.has_enough_evidence,
         ),
     }
 
@@ -3382,73 +3385,6 @@ def _within_tolerance(
     return abs(value - reference) <= max(abs(reference) * ratio, floor)
 
 
-def _likely_type(
-    signature: NilmSignature,
-    *,
-    typical_watts: float,
-    typical_var: float | None,
-    typical_va: float | None,
-    typical_power_factor: float | None,
-    voltage_class: str,
-) -> str:
-    if not _has_enough_evidence(signature):
-        return "unknown"
-
-    if typical_var is None or typical_va is None or typical_power_factor is None:
-        return "unknown"
-    reactive_ratio = typical_var / max(typical_watts, 1.0)
-    if (
-        voltage_class == "240 V"
-        and signature.split_phase_type == "balanced_240v"
-        and typical_watts >= 1000.0
-        and reactive_ratio <= 0.12
-        and typical_power_factor >= 0.95
-    ):
-        return "heating_element_candidate"
-
-    if (
-        voltage_class == "120 V"
-        and signature.split_phase_type in {"single_leg_a", "single_leg_b"}
-        and typical_watts >= 150.0
-        and reactive_ratio >= 0.25
-        and typical_power_factor <= 0.9
-    ):
-        return "motor"
-
-    if typical_va >= 100.0 and typical_var >= 75.0 and reactive_ratio >= 0.75:
-        return "power_electronics"
-
-    return "unknown"
-
-
-def _has_enough_evidence(signature: NilmSignature) -> bool:
-    return (
-        signature.occurrence_count >= MIN_OCCURRENCES
-        and signature.confidence >= MIN_CONFIDENCE
-    )
-
-
-def _voltage_class(split_phase_type: str) -> str:
-    if split_phase_type == "balanced_240v":
-        return "240 V"
-    if split_phase_type in {"single_leg_a", "single_leg_b"}:
-        return "120 V"
-    if split_phase_type == "imbalanced_240v_or_mixed":
-        return "mixed"
-    return "unknown"
-
-
-def _display_name(likely_type: str, voltage_class: str) -> str:
-    if likely_type == "heating_element_candidate":
-        return "Estimated 240 V heating element candidate"
-    if likely_type == "motor":
-        voltage = "120 V" if voltage_class == "120 V" else "unknown-voltage"
-        return f"Estimated possible {voltage} motor-like unknown load"
-    if likely_type == "power_electronics":
-        return "Estimated possible power-electronics unknown load"
-    return "Estimated unknown load"
-
-
 def _evidence(
     signature: NilmSignature,
     *,
@@ -3458,8 +3394,17 @@ def _evidence(
     typical_var: float | None,
     typical_va: float | None,
     typical_power_factor: float | None,
+    evidence_reason: str,
+    has_enough_evidence: bool,
 ) -> list[str]:
     evidence_strength = signature.evidence_strength or signature.confidence
+    measurements = [f"Typical median change is {typical_watts:.1f} W"]
+    if typical_var is not None:
+        measurements.append(f"{typical_var:.1f} VAR")
+    if typical_va is not None:
+        measurements.append(f"{typical_va:.1f} VA")
+    if typical_power_factor is not None:
+        measurements.append(f"estimated PF {typical_power_factor:.3f}")
     evidence = [
         (
             f"Estimated from {signature.occurrence_count} recurring unmatched events "
@@ -3470,15 +3415,10 @@ def _evidence(
             f"{_voltage_label(voltage_class)} topology "
             f"({signature.split_phase_type}, dominant leg {signature.dominant_leg})."
         ),
-        (
-            f"Typical median change is {typical_watts:.1f} W, "
-            f"{_optional_metric_text(typical_var, 1)} VAR, "
-            f"{_optional_metric_text(typical_va, 1)} VA, "
-            f"estimated PF {_optional_metric_text(typical_power_factor, 3)}."
-        ),
+        ", ".join(measurements) + ".",
     ]
 
-    if not _has_enough_evidence(signature):
+    if not has_enough_evidence:
         evidence.append(
             "Limited recurring evidence; keep this as unknown until more samples "
             "are observed."
@@ -3488,11 +3428,10 @@ def _evidence(
             "Possible heating element candidate: balanced 240 V, high W, "
             "low VAR, and PF near unity."
         )
+    elif likely_type == "resistive":
+        evidence.append(evidence_reason)
     elif likely_type == "motor":
-        evidence.append(
-            "Possible motor-like pattern: single-leg 120 V, meaningful "
-            "reactive power, and lower estimated PF."
-        )
+        evidence.append(evidence_reason)
     elif likely_type == "power_electronics":
         evidence.append(
             "Possible power-electronics pattern: VA and VAR are high versus "
@@ -3512,21 +3451,6 @@ def _voltage_label(voltage_class: str) -> str:
     if voltage_class == "mixed":
         return "mixed"
     return "unknown-voltage"
-
-
-def _typical_power_factor(
-    typical_watts: float,
-    typical_va: float | None,
-) -> float | None:
-    if typical_va is None or typical_va <= 0.0:
-        return None
-    return round(min(typical_watts / typical_va, 1.0), 3)
-
-
-def _rounded_abs(value: float | None) -> float | None:
-    if value is None:
-        return None
-    return round(abs(float(value)), 3)
 
 
 def _optional_abs(value: float | None) -> float | None:
