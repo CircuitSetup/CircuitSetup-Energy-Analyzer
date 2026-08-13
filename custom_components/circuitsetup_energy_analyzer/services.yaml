@@ -1323,6 +1323,44 @@ set_circuit_sensitivity:
               label: Balanced
             - value: sensitive
               label: Sensitive
+set_nilm_detection_sensitivity:
+  name: Set NILM detection sensitivity
+  description: "Advanced/script action: set the NILM edge detection sensitivity preset for one configured Load Separation circuit. The normal user path is the NILM workspace."
+  fields:
+    circuit_id:
+      name: Circuit ID
+      description: Optional configured Load Separation circuit identifier, such as mains. You can choose an analyzer entity instead.
+      required: false
+      example: mains
+      selector:
+        text:
+    entity_id:
+      name: Analyzer Entity
+      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity.
+      required: false
+      selector:
+        entity:
+          domain:
+            - sensor
+            - binary_sensor
+            - button
+            - select
+            - number
+            - switch
+    preset:
+      name: Preset
+      description: NILM detection sensitivity preset for the circuit.
+      required: true
+      example: balanced
+      selector:
+        select:
+          options:
+            - value: quiet
+              label: Quiet
+            - value: balanced
+              label: Balanced
+            - value: sensitive
+              label: Sensitive
 set_energy_usage_settings:
   name: Set energy usage settings
   description: "Advanced/script action: set daily energy usage spike tracking for one configured circuit. The normal user path is Advanced Circuit Settings."

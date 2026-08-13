@@ -9148,7 +9148,7 @@ test("NILM review supports decisions, validation, and interval labeling", async 
     "assign_signature_to_appliance",
     "validate_nilm_session",
     "validate_nilm_assignment_history",
-    "set_circuit_sensitivity",
+    "set_nilm_detection_sensitivity",
     "save_nilm_interval_changes",
   ]);
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({

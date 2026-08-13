@@ -1856,7 +1856,7 @@
       "nilm_workspace": {
         "average_power": "Average power",
         "source_picker_label": "Load Separation source",
-        "sensitivity": "Detection sensitivity and effective minimum edge",
+        "sensitivity": "NILM detection sensitivity and effective minimum edge",
         "use_sensitivity": "Use {setting}",
         "loading": "Loading NILM workspace...",
         "unavailable": "No NILM workspace is available for this circuit.",

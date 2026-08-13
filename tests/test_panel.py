@@ -457,7 +457,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260813-7"
+    assert PANEL_MODULE_VERSION == "20260813-8"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -1812,7 +1812,7 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         configs=(mains_config, known_config, solar_config),
     )
     coordinator.settings_controller = SimpleNamespace(
-        sensitivity_for_circuit=lambda _circuit_id: "balanced",
+        nilm_detection_sensitivity_for_circuit=lambda _circuit_id: "balanced",
         nilm_min_delta_w=lambda _circuit_id: 100.0,
     )
     coordinator.store_data.nilm_label_intervals_by_circuit = {
@@ -1920,7 +1920,7 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         "recommendation": "sensitive",
         "action": {
             "domain": DOMAIN,
-            "service": "set_circuit_sensitivity",
+            "service": "set_nilm_detection_sensitivity",
             "data": {
                 "circuit_id": "mains",
                 "preset": "sensitive",

@@ -380,7 +380,7 @@ export const nilmWorkspace = {
     recommendation: "sensitive",
     action: {
       domain: "circuitsetup_energy_analyzer",
-      service: "set_circuit_sensitivity",
+      service: "set_nilm_detection_sensitivity",
       data: { circuit_id: "mains", preset: "sensitive", entry_id: "entry-1" },
     },
   },

@@ -116,7 +116,7 @@ from .services import (
     SERVICE_RESTORE_NILM_ITEM,
     SERVICE_RETIRE_NILM_APPLIANCE_ASSIGNMENT,
     SERVICE_SAVE_NILM_INTERVAL_CHANGES,
-    SERVICE_SET_CIRCUIT_SENSITIVITY,
+    SERVICE_SET_NILM_DETECTION_SENSITIVITY,
     SERVICE_SET_NILM_HELPER_LINK,
     SERVICE_SET_NILM_REFERENCE_LINK,
     SERVICE_UNPUBLISH_NILM_APPLIANCE_ASSIGNMENT,
@@ -1707,14 +1707,14 @@ def _nilm_workspace_sensitivity(
         current = "balanced"
         threshold = 100.0
     else:
-        current = settings.sensitivity_for_circuit(circuit_id)
+        current = settings.nilm_detection_sensitivity_for_circuit(circuit_id)
         threshold = settings.nilm_min_delta_w(circuit_id)
     recommendation = _nilm_sensitivity_recommendation(
         current, threshold, label_intervals
     )
     action = {
         "domain": DOMAIN,
-        "service": SERVICE_SET_CIRCUIT_SENSITIVITY,
+        "service": SERVICE_SET_NILM_DETECTION_SENSITIVITY,
         "data": {ATTR_CIRCUIT_ID: circuit_id},
     }
     if recommendation is not None:

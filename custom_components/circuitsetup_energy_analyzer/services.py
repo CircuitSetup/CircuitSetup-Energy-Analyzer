@@ -72,6 +72,7 @@ SERVICE_REMOVE_NILM_HELPER_LINK = "remove_nilm_helper_link"
 SERVICE_SET_NILM_REFERENCE_LINK = "set_nilm_reference_link"
 SERVICE_REMOVE_NILM_REFERENCE_LINK = "remove_nilm_reference_link"
 SERVICE_SET_CIRCUIT_SENSITIVITY = "set_circuit_sensitivity"
+SERVICE_SET_NILM_DETECTION_SENSITIVITY = "set_nilm_detection_sensitivity"
 SERVICE_SET_ENERGY_USAGE_SETTINGS = "set_energy_usage_settings"
 SERVICE_SET_ENERGY_GOAL_SETTINGS = "set_energy_goal_settings"
 SERVICE_SET_ACTIVITY_ALERT_SETTINGS = "set_activity_alert_settings"
@@ -239,6 +240,10 @@ MARK_CIRCUIT_MIXED_SERVICE_SCHEMA = _schema(
     required=(ATTR_CIRCUIT_ID,), optional=(ATTR_ENTRY_ID,)
 )
 SENSITIVITY_SERVICE_SCHEMA = _schema(
+    required=(ATTR_PRESET,),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
+)
+NILM_DETECTION_SENSITIVITY_SERVICE_SCHEMA = _schema(
     required=(ATTR_PRESET,),
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID),
 )
@@ -729,6 +734,9 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_SET_NILM_REFERENCE_LINK: NILM_SET_REFERENCE_LINK_SERVICE_SCHEMA,
     SERVICE_REMOVE_NILM_REFERENCE_LINK: NILM_REMOVE_REFERENCE_LINK_SERVICE_SCHEMA,
     SERVICE_SET_CIRCUIT_SENSITIVITY: SENSITIVITY_SERVICE_SCHEMA,
+    SERVICE_SET_NILM_DETECTION_SENSITIVITY: (
+        NILM_DETECTION_SENSITIVITY_SERVICE_SCHEMA
+    ),
     SERVICE_SET_ENERGY_USAGE_SETTINGS: ENERGY_USAGE_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_ENERGY_GOAL_SETTINGS: ENERGY_GOAL_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_ACTIVITY_ALERT_SETTINGS: ACTIVITY_ALERT_SETTINGS_SERVICE_SCHEMA,
@@ -1609,6 +1617,16 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 circuit_id,
                 _service_sensitivity_preset(data.get(ATTR_PRESET)),
             )
+        elif service == SERVICE_SET_NILM_DETECTION_SENSITIVITY:
+            await _call_if_present(
+                coordinator,
+                "async_set_nilm_detection_sensitivity",
+                circuit_id,
+                _service_sensitivity_preset(
+                    data.get(ATTR_PRESET),
+                    setting_name="NILM detection sensitivity",
+                ),
+            )
         elif service == SERVICE_SET_ENERGY_USAGE_SETTINGS:
             await _call_if_present(
                 coordinator,
@@ -1778,14 +1796,18 @@ def _service_circuit_id(
     return None
 
 
-def _service_sensitivity_preset(value: Any) -> str:
+def _service_sensitivity_preset(
+    value: Any,
+    *,
+    setting_name: str = "alert sensitivity",
+) -> str:
     normalized = str(value or "").strip().lower()
     if normalized in SENSITIVITY_VALUES:
         return normalized
 
     choices = ", ".join(_SENSITIVITY_SERVICE_OPTIONS)
     raise HomeAssistantError(
-        f"Cannot set alert sensitivity to {value!r}. Choose one of: {choices}."
+        f"Cannot set {setting_name} to {value!r}. Choose one of: {choices}."
     )
 
 

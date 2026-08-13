@@ -802,6 +802,17 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             preset,
         )
 
+    async def async_set_nilm_detection_sensitivity(
+        self: Self,
+        circuit_id: str,
+        preset: str,
+    ) -> None:
+        """Persist a NILM detection sensitivity preset for one circuit."""
+        await self.settings_controller.async_set_nilm_detection_sensitivity(
+            circuit_id,
+            preset,
+        )
+
     async def async_mark_circuit_mixed(self, circuit_id: str) -> None:
         """Persist a user-confirmed shared circuit and reconcile direct state."""
         config = self.circuit_registry.config_for_circuit(circuit_id)
