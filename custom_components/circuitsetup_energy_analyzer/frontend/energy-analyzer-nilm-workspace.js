@@ -1704,6 +1704,44 @@ export function createNilmWorkspaceMethods({
     if (button.classList) button.classList.toggle("secondary", !dirty);
   }
 
+  _createNilmChartSelectionBand(chart) {
+    const ownerDocument = chart && chart.ownerDocument;
+    if (!ownerDocument || !ownerDocument.createElementNS) return null;
+    const band = ownerDocument.createElementNS("http://www.w3.org/2000/svg", "rect");
+    band.setAttribute("class", "nilm-session-band");
+    band.setAttribute("data-nilm-band-kind", "draft");
+    band.setAttribute("data-nilm-selected", "true");
+    band.setAttribute("data-nilm-provisional-band", "true");
+    band.setAttribute("pointer-events", "none");
+    chart.appendChild(band);
+    return band;
+  }
+
+  _updateNilmChartSelectionBand(band, startTime, endTime, chart) {
+    if (!band) return;
+    const chartStart = Number(chart.dataset.chartStart);
+    const chartEnd = Number(chart.dataset.chartEnd);
+    const chartLeft = Number(chart.dataset.chartLeft);
+    const chartRight = Number(chart.dataset.chartRight);
+    const chartTop = Number(chart.dataset.chartTop);
+    const chartBottom = Number(chart.dataset.chartBottom);
+    if (![chartStart, chartEnd, chartLeft, chartRight, chartTop, chartBottom]
+      .every(Number.isFinite)
+      || chartEnd <= chartStart
+      || chartRight <= chartLeft
+      || chartBottom <= chartTop) return;
+    const x = (time) => chartLeft + (
+      (Math.max(chartStart, Math.min(chartEnd, time)) - chartStart)
+      / (chartEnd - chartStart)
+    ) * (chartRight - chartLeft);
+    const left = Math.min(x(startTime), x(endTime));
+    const right = Math.max(x(startTime), x(endTime));
+    band.setAttribute("x", left.toFixed(1));
+    band.setAttribute("y", String(chartTop));
+    band.setAttribute("width", Math.max(1, right - left).toFixed(1));
+    band.setAttribute("height", String(chartBottom - chartTop));
+  }
+
   _startNilmChartSelection(event, chart) {
     if (event.target && event.target.dataset && (
       event.target.dataset.nilmDraftIndex !== undefined
@@ -1716,12 +1754,37 @@ export function createNilmWorkspaceMethods({
     if (!Number.isFinite(startTime)) {
       return;
     }
-    const finish = (finishEvent) => {
+    const pointerId = event.pointerId;
+    const matchingPointer = (pointerEvent) => (
+      pointerId === undefined
+      || pointerEvent.pointerId === undefined
+      || pointerEvent.pointerId === pointerId
+    );
+    const band = this._createNilmChartSelectionBand(chart);
+    let lastTime = startTime;
+    let completed = false;
+    const update = (moveEvent) => {
+      if (completed || !matchingPointer(moveEvent)) return;
+      const nextTime = this._snapNilmChartTimeToEdge(
+        this._chartEventTime(moveEvent, chart),
+        chart,
+      );
+      if (!Number.isFinite(nextTime)) return;
+      lastTime = nextTime;
+      this._updateNilmChartSelectionBand(band, startTime, lastTime, chart);
+    };
+    const cleanup = () => {
+      chart.removeEventListener("pointermove", update);
+      chart.removeEventListener("pointerup", finish);
+      chart.removeEventListener("pointerleave", leave);
       chart.removeEventListener("pointercancel", cancel);
-      const endTime = this._snapNilmChartTimeToEdge(this._chartEventTime(finishEvent, chart), chart);
-      if (!Number.isFinite(endTime)) {
-        return;
-      }
+      if (band) band.remove();
+    };
+    const finalize = () => {
+      if (completed) return;
+      completed = true;
+      cleanup();
+      const endTime = lastTime;
       const start = Math.min(startTime, endTime);
       const end = Math.max(startTime, endTime);
       if (end <= start) {
@@ -1748,14 +1811,25 @@ export function createNilmWorkspaceMethods({
       this._render();
       this._scheduleNilmIntervalEvidence();
     };
-    const cancel = () => {
-      chart.removeEventListener("pointerup", finish);
+    const finish = (finishEvent) => {
+      if (completed || !matchingPointer(finishEvent)) return;
+      update(finishEvent);
+      finalize();
     };
-    if (chart.setPointerCapture && event.pointerId !== undefined) {
-      chart.setPointerCapture(event.pointerId);
-    }
-    chart.addEventListener("pointerup", finish, { once: true });
-    chart.addEventListener("pointercancel", cancel, { once: true });
+    const leave = (leaveEvent) => {
+      if (completed || !matchingPointer(leaveEvent)) return;
+      update(leaveEvent);
+      finalize();
+    };
+    const cancel = (cancelEvent) => {
+      if (completed || !matchingPointer(cancelEvent)) return;
+      finalize();
+    };
+    this._updateNilmChartSelectionBand(band, startTime, startTime, chart);
+    chart.addEventListener("pointermove", update);
+    chart.addEventListener("pointerup", finish);
+    chart.addEventListener("pointerleave", leave);
+    chart.addEventListener("pointercancel", cancel);
   }
 
   _removeNilmDraftInterval(index) {

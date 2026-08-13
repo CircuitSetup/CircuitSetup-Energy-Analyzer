@@ -6525,22 +6525,76 @@ def test_nilm_multi_interval_labeling_contracts() -> None:
   assert.equal(bands.filter((item) => item.interval_id === "retired-1").length, 0);
   assert.ok(bands.some((item) => item.band_kind === "draft" && item.selected));
 
-  const listeners = {};
-  const chart = {
-    dataset: { chartLeft: "54", chartRight: "876", chartStart: "0", chartEnd: "1000" },
-    getAttribute: () => "0 0 900 320",
-    getBoundingClientRect: () => ({ left: 0, width: 900 }),
-    setPointerCapture() {},
-    addEventListener(type, callback) { listeners[type] = callback; },
-    removeEventListener() {},
+  const makeChart = () => {
+    const listeners = new Map();
+    const removed = [];
+    const chart = {
+      dataset: {
+        chartLeft: "54", chartRight: "876", chartTop: "18", chartBottom: "278",
+        chartStart: "0", chartEnd: "1000",
+      },
+      ownerDocument: { createElementNS() {
+        return {
+          attributes: {},
+          setAttribute(name, value) { this.attributes[name] = String(value); },
+          remove() { this.removed = true; },
+        };
+      } },
+      getAttribute: () => "0 0 900 320",
+      getBoundingClientRect: () => ({ left: 0, width: 900 }),
+      appendChild(element) { this.band = element; },
+      addEventListener(type, callback) { listeners.set(type, callback); },
+      removeEventListener(type, callback) { removed.push([type, callback]); },
+    };
+    return { chart, listeners, removed };
   };
-  panel._render = () => {};
-  panel._startNilmChartSelection({ clientX: 300, pointerId: 1 }, chart);
-  listeners.pointerup({ clientX: 500 });
+  let renders = 0;
+  panel._render = () => { renders += 1; };
+  panel._scheduleNilmIntervalEvidence = () => {};
+
+  const forward = makeChart();
+  panel._startNilmChartSelection(
+    { target: { dataset: {} }, clientX: 300, pointerId: 1 },
+    forward.chart,
+  );
+  const stalePointerUp = forward.listeners.get("pointerup");
+  forward.listeners.get("pointermove")({ clientX: 500, pointerId: 1 });
+  assert.equal(forward.chart.band.attributes["data-nilm-provisional-band"], "true");
+  assert.ok(Number(forward.chart.band.attributes.width) > 1);
+  assert.equal(renders, 0);
+  assert.equal(panel._nilmLabelIntervalDraft.intervals.length, 2);
+
+  forward.listeners.get("pointerleave")({ clientX: 950, pointerId: 1 });
   assert.equal(panel._nilmLabelIntervalDraft.intervals.length, 3);
   assert.equal(panel._nilmActiveIntervalIndex, 2);
-  assert.ok(panel._nilmLabelIntervalDraft.intervals[2].start);
-  assert.ok(panel._nilmLabelIntervalDraft.intervals[2].end);
+  assert.equal(panel._nilmLabelIntervalDraft.intervals[2].end_millis, 1000);
+  assert.equal(renders, 1);
+  assert.equal(forward.chart.band.removed, true);
+  assert.ok(forward.removed.some(([type]) => type === "pointermove"));
+
+  stalePointerUp({ clientX: 700, pointerId: 1 });
+  assert.equal(panel._nilmLabelIntervalDraft.intervals.length, 3);
+  assert.equal(panel._updateNilmDraftBoundary(2, "start", 400), true);
+  assert.equal(panel._nilmLabelIntervalDraft.intervals[2].start_millis, 400);
+
+  const zeroWidth = makeChart();
+  panel._startNilmChartSelection(
+    { target: { dataset: {} }, clientX: 400, pointerId: 2 },
+    zeroWidth.chart,
+  );
+  zeroWidth.listeners.get("pointercancel")({ pointerId: 2 });
+  assert.equal(panel._nilmLabelIntervalDraft.intervals.length, 3);
+  assert.equal(zeroWidth.chart.band.removed, true);
+
+  const reverse = makeChart();
+  panel._startNilmChartSelection(
+    { target: { dataset: {} }, clientX: 700, pointerId: 3 },
+    reverse.chart,
+  );
+  reverse.listeners.get("pointermove")({ clientX: 300, pointerId: 3 });
+  reverse.listeners.get("pointerup")({ clientX: 300, pointerId: 3 });
+  const reversedInterval = panel._nilmLabelIntervalDraft.intervals[3];
+  assert.ok(reversedInterval.start_millis < reversedInterval.end_millis);
 })();
 """
     )
