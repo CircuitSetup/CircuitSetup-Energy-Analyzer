@@ -11,7 +11,7 @@ from custom_components.circuitsetup_energy_analyzer.nilm_confidence import (
 )
 
 
-def test_legacy_migration_is_idempotent_and_preserves_lifecycle() -> None:
+def test_migration_is_idempotent_and_preserves_typed_semantics() -> None:
     assignments = {
         "mains": [
             {
@@ -37,8 +37,8 @@ def test_legacy_migration_is_idempotent_and_preserves_lifecycle() -> None:
     signature = signatures["mains"][0]
     session = sessions["mains"][0]
     assert assignment["lifecycle_state"] == "published"
-    assert assignment["confidence"] == 0.83
-    assert assignment["confidence_kind"] == "legacy_mixed"
+    assert "confidence" not in assignment
+    assert "confidence_kind" not in assignment
     assert "feedback_evidence_score" not in assignment
     assert signature["confidence_kind"] == "evidence_strength"
     assert signature["evidence_strength"] == 0.7
@@ -67,7 +67,8 @@ def test_migration_does_not_keep_a_feedback_label_without_typed_evidence() -> No
     }
 
     assert migrate_nilm_confidence_semantics(assignments, {}, {}) is True
-    assert assignments["mains"][0]["confidence_kind"] == "legacy_mixed"
+    assert "confidence" not in assignments["mains"][0]
+    assert "confidence_kind" not in assignments["mains"][0]
 
 
 def test_migration_labels_existing_typed_feedback_evidence() -> None:
@@ -83,6 +84,41 @@ def test_migration_labels_existing_typed_feedback_evidence() -> None:
 
     assert migrate_nilm_confidence_semantics(assignments, {}, {}) is True
     assert assignments["mains"][0]["confidence_kind"] == "feedback_evidence"
+    assert "confidence" not in assignments["mains"][0]
+
+
+def test_migration_removes_legacy_confidence_event_mirrors() -> None:
+    assignments = {
+        "mains": [
+            {
+                "assignment_id": "legacy-events",
+                "confidence": 0.72,
+                "confidence_kind": "legacy_mixed",
+                "feedback_evidence_events": [
+                    {
+                        "feedback_id": "session:one",
+                        "outcome": "correct",
+                        "score_after": 0.05,
+                        "legacy_confidence_after": 0.77,
+                    }
+                ],
+            }
+        ]
+    }
+
+    assert migrate_nilm_confidence_semantics(assignments, {}, {}) is True
+    record = assignments["mains"][0]
+    assert "confidence" not in record
+    assert "confidence_kind" not in record
+    assert record["feedback_evidence_events"] == [
+        {
+            "feedback_id": "session:one",
+            "outcome": "correct",
+            "delta": 0.05,
+            "timestamp": "",
+            "score_after": 0.05,
+        }
+    ]
 
 
 def test_feedback_evidence_is_idempotent_and_auditable() -> None:
@@ -97,10 +133,7 @@ def test_feedback_evidence_is_idempotent_and_auditable() -> None:
         correct=True,
         timestamp="2026-08-01T12:00:00+00:00",
     ) is True
-    # The legacy mirror keeps its historical update behavior, but a newly
-    # typed score starts with the auditable feedback observation rather than
-    # treating legacy mixed confidence as feedback provenance.
-    assert assignment["confidence"] == 0.75
+    assert "confidence" not in assignment
     assert assignment["feedback_evidence_score"] == 0.05
     assert assignment["feedback_confirmed_count"] == 1
     assert assignment["feedback_rejected_count"] == 0
@@ -110,7 +143,7 @@ def test_feedback_evidence_is_idempotent_and_auditable() -> None:
         correct=True,
         timestamp="2026-08-01T12:00:00+00:00",
     ) is False
-    assert assignment["confidence"] == 0.75
+    assert "confidence" not in assignment
     assert assignment["feedback_evidence_events"] == [
         {
             "feedback_id": "session:one",
@@ -118,7 +151,6 @@ def test_feedback_evidence_is_idempotent_and_auditable() -> None:
             "delta": 0.05,
             "timestamp": "2026-08-01T12:00:00+00:00",
             "score_after": 0.05,
-            "legacy_confidence_after": 0.75,
         }
     ]
 
@@ -128,7 +160,7 @@ def test_feedback_evidence_is_idempotent_and_auditable() -> None:
         correct=False,
         timestamp="2026-08-01T12:01:00+00:00",
     ) is True
-    assert assignment["confidence"] == 0.6
+    assert "confidence" not in assignment
     assert assignment["feedback_evidence_score"] == 0.0
     assert assignment["feedback_confirmed_count"] == 0
     assert assignment["feedback_rejected_count"] == 1
@@ -139,7 +171,6 @@ def test_feedback_evidence_is_idempotent_and_auditable() -> None:
             "delta": 0.05,
             "timestamp": "2026-08-01T12:00:00+00:00",
             "score_after": 0.05,
-            "legacy_confidence_after": 0.75,
         },
         {
             "feedback_id": "session:one",
@@ -147,7 +178,6 @@ def test_feedback_evidence_is_idempotent_and_auditable() -> None:
             "delta": -0.15,
             "timestamp": "2026-08-01T12:01:00+00:00",
             "score_after": 0.0,
-            "legacy_confidence_after": 0.6,
         },
     ]
 

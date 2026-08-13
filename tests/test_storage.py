@@ -1329,10 +1329,13 @@ def test_feature_store_round_trips_nilm_session_history() -> None:
     restored = feature_store_data_from_dict(raw)
 
     assert raw["nilm_session_history_by_circuit"] == {"mains": [session]}
+    expected_session = {
+        key: value for key, value in session.items() if key != "confidence"
+    }
     assert restored.nilm_session_history_by_circuit == {
         "mains": [
             {
-                **session,
+                **expected_session,
                 "pairing_confidence": 0.9,
                 "confidence_kind": "pairing_confidence",
                 "confidence_semantics_version": NILM_CONFIDENCE_SEMANTICS_VERSION,
@@ -1450,6 +1453,7 @@ def test_feature_store_projects_nilm_session_rows_to_canonical_scalars() -> None
             trace_point_cap_truncation_count=4,
         )
     )
+    assert "confidence" not in canonical
     forward = {
         **canonical,
         "raw_nested": {"items": ["unbounded", {"still": "raw"}]},
@@ -1468,6 +1472,7 @@ def test_feature_store_projects_nilm_session_rows_to_canonical_scalars() -> None
         {"nilm_session_history_by_circuit": {"mains": [reverse]}}
     )
 
+    canonical.pop("confidence", None)
     assert restored_forward.nilm_session_history_by_circuit["mains"] == [canonical]
     assert restored_reverse.nilm_session_history_by_circuit["mains"] == [canonical]
     assert list(restored_forward.nilm_session_history_by_circuit["mains"][0]) == list(
@@ -1552,6 +1557,7 @@ def test_feature_store_round_trips_bounded_nilm_ambiguity_candidates() -> None:
             ambiguity_candidates=candidates,
         )
     )
+    assert "confidence" not in canonical
 
     restored = feature_store_data_from_dict(
         {"nilm_session_history_by_circuit": {"mains": [canonical]}}
@@ -1560,6 +1566,7 @@ def test_feature_store_round_trips_bounded_nilm_ambiguity_candidates() -> None:
     assert [
         candidate["candidate_id"] for candidate in canonical["ambiguity_candidates"]
     ] == ["candidate-best", "candidate-middle", "candidate-other"]
+    canonical.pop("confidence", None)
     assert restored.nilm_session_history_by_circuit["mains"] == [canonical]
 
 
@@ -1682,11 +1689,13 @@ def test_feature_store_round_trips_nilm_appliance_assignments() -> None:
     restored = feature_store_data_from_dict(raw)
 
     assert raw["nilm_appliance_assignments_by_circuit"] == {"mains": [assignment]}
+    expected_assignment = {
+        key: value for key, value in assignment.items() if key != "confidence"
+    }
     assert restored.nilm_appliance_assignments_by_circuit == {
         "mains": [
             {
-                **assignment,
-                "confidence_kind": "legacy_mixed",
+                **expected_assignment,
                 "confidence_semantics_version": NILM_CONFIDENCE_SEMANTICS_VERSION,
             }
         ]

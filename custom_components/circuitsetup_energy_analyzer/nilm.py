@@ -3922,7 +3922,6 @@ def nilm_session_to_dict(session: NilmSession) -> dict[str, Any]:
         "duration_seconds": session.duration_seconds,
         "median_power_w": session.median_power_w,
         "estimated_energy_kwh": session.estimated_energy_kwh,
-        "confidence": session.confidence,
         "pairing_confidence": (
             session.pairing_confidence
             if session.pairing_confidence is not None
