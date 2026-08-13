@@ -9654,6 +9654,7 @@ test("NILM interval editor saves the selected existing appliance", async ({ page
       service: "save_nilm_interval_changes",
       assignment_options: [{ value: "dishwasher", label: "Dishwasher" }],
     };
+    payload.assignments.find((assignment) => assignment.assignment_id === "dishwasher").appliance_profile = null;
     await route.fulfill({ json: payload });
     return true;
   });
@@ -9678,6 +9679,9 @@ test("NILM interval editor saves the selected existing appliance", async ({ page
       removed_interval_ids: [],
     },
   });
+  const serviceCalls = await page.evaluate(() => window.__serviceCalls);
+  expect(serviceCalls).toHaveLength(1);
+  expect(serviceCalls[0].data).not.toHaveProperty("appliance_profile");
 });
 
 test("NILM permanent deletion requires confirmation before removing an assignment", async ({ page }) => {
