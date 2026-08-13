@@ -3018,6 +3018,61 @@ export function createNilmWorkspaceMethods({
     }).format(ratio);
   }
 
+  _nilmHasPositiveEvidenceValue(value) {
+    const number = this._nilmFiniteNumber(value);
+    return number !== null && number > 0;
+  }
+
+  _nilmQualityLabelIsGeneric(label) {
+    const normalized = String(label || "").trim().toLowerCase();
+    const unknown = String(this._panelText("common.unknown") || "unknown").trim().toLowerCase();
+    return !normalized || normalized === unknown || normalized.startsWith(`${unknown} `) || normalized.startsWith("unknown load");
+  }
+
+  _nilmEstimateQualityRowIsUseful(row, label) {
+    if (!row) return false;
+    const status = String(row.status || "legacy_unverified").trim().toLowerCase();
+    const hasRetainedEvidence = [
+      row.runtime_minutes,
+      row.energy_kwh,
+      row.included_session_count,
+      row.power_coverage,
+      row.coverage_days,
+    ].some((value) => this._nilmHasPositiveEvidenceValue(value));
+    if (status === "ambiguous") return hasRetainedEvidence;
+    if (status === "legacy_unverified") {
+      return hasRetainedEvidence || !this._nilmQualityLabelIsGeneric(label);
+    }
+    return hasRetainedEvidence || !this._nilmQualityLabelIsGeneric(label);
+  }
+
+  _nilmKnownLoadAttributionHasVisibleEvidence(record) {
+    if (!record) return false;
+    const knownLoads = Array.isArray(record.known_load_labels)
+      ? record.known_load_labels.filter(Boolean)
+      : Array.isArray(record.known_circuit_ids)
+        ? record.known_circuit_ids.filter(Boolean)
+        : [];
+    const rejected = Array.isArray(record.rejected_candidate_summaries)
+      ? record.rejected_candidate_summaries.filter(Boolean)
+      : [];
+    const hasWatts = [
+      record.aggregate_delta_w,
+      record.explained_delta_w,
+      record.residual_delta_w,
+    ].some((value) => {
+      const number = this._nilmFiniteNumber(value);
+      return number !== null && Math.abs(number) >= 0.5;
+    });
+    const hasScore = [
+      record.magnitude_score,
+      record.time_score,
+      record.topology_score,
+      record.total_score,
+    ].some((value) => this._nilmHasPositiveEvidenceValue(value));
+    return hasWatts || knownLoads.length || rejected.length || hasScore;
+  }
+
   _nilmConfidenceDescriptor(item, kind = "") {
     const record = item && typeof item === "object" ? item : {};
     const requestedKind = String(kind || "").trim().toLowerCase();
@@ -3239,15 +3294,19 @@ export function createNilmWorkspaceMethods({
 
   _renderNilmEvidenceDetails(workspace) {
     const quality = (Array.isArray(workspace && workspace.signatures) ? workspace.signatures : [])
-      .slice(0, 20)
       .map((signature) => ({
         label: signature.display_label || signature.signature_id || this._panelText("common.unknown"),
-        rows: Array.isArray(signature.estimate_quality) ? signature.estimate_quality.slice(0, 3) : [],
+        rows: Array.isArray(signature.estimate_quality) ? signature.estimate_quality
+          .filter((row) => this._nilmEstimateQualityRowIsUseful(row, signature.display_label || signature.signature_id))
+          .slice(0, 3) : [],
       }))
-      .filter((item) => item.rows.length);
+      .filter((item) => item.rows.length)
+      .slice(0, 20);
     const attributions = (Array.isArray(workspace && workspace.known_load_attributions)
       ? workspace.known_load_attributions
-      : []).slice(0, 20);
+      : [])
+      .filter((record) => this._nilmKnownLoadAttributionHasVisibleEvidence(record))
+      .slice(0, 20);
     if (!quality.length && !attributions.length) return "";
     return `<section class="workspace-section section-surface nilm-evidence-section" data-nilm-evidence-section>
       <details class="nilm-evidence-details" data-nilm-evidence-details>
