@@ -131,6 +131,39 @@ def test_assignment_to_circuit_persists_nilm_detection_settings() -> None:
     assert circuit[CONF_NILM_DETECTION_SENSITIVITY] == "sensitive"
 
 
+def test_assignment_to_circuit_coerces_nilm_off_for_unsupported_profile() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        COMPOSITION_DEDICATED,
+        FIELD_APPLIANCE_PROFILE,
+        FIELD_CIRCUIT_COMPOSITION,
+        FIELD_CIRCUIT_NAME,
+        FIELD_CIRCUIT_RETENTION_MODE,
+        _circuit_from_assignment_group,
+    )
+    from custom_components.circuitsetup_energy_analyzer.const import (
+        CONF_NILM_DETECTION_ENABLED,
+        CONF_NILM_DETECTION_SENSITIVITY,
+    )
+
+    circuit = _circuit_from_assignment_group(
+        {"circuit_id": "fridge", "entity_ids": ("sensor.fridge_power",)},
+        {
+            FIELD_CIRCUIT_NAME: "Fridge",
+            FIELD_APPLIANCE_PROFILE: "refrigerator",
+            FIELD_CIRCUIT_COMPOSITION: COMPOSITION_DEDICATED,
+            FIELD_CIRCUIT_RETENTION_MODE: "standard",
+            CONF_NILM_DETECTION_ENABLED: True,
+            CONF_NILM_DETECTION_SENSITIVITY: "sensitive",
+        },
+    )
+
+    assert circuit is not None
+    assert circuit["appliance_profile"] == "refrigerator"
+    assert circuit["mode"] == "single_phase"
+    assert circuit[CONF_NILM_DETECTION_ENABLED] is False
+    assert circuit[CONF_NILM_DETECTION_SENSITIVITY] == "sensitive"
+
+
 def test_assignment_to_circuit_defaults_nilm_off_for_mixed() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         COMPOSITION_PURE_MIXED,
@@ -654,7 +687,6 @@ async def test_user_flow_mains_only_sources_skip_assignment_review() -> None:
 
     result = await flow.async_step_user(
         {
-            CONF_ENABLE_EXPERIMENTAL_NILM: True,
             CONF_EXTRA_SOURCE_ENTITIES: [
                 "sensor.main_l1_power",
                 "sensor.main_l2_power",
@@ -663,7 +695,12 @@ async def test_user_flow_mains_only_sources_skip_assignment_review() -> None:
     )
 
     assert result["type"] == "form"
-    assert result["step_id"] == "utility"
+    assert result["step_id"] == "nilm"
+    assert _schema_default(result["data_schema"], "nilm_detection_enabled") is False
+    assert (
+        _schema_default(result["data_schema"], "nilm_detection_sensitivity")
+        == "balanced"
+    )
     assert flow._pending_final_config[CONF_EXTRA_SOURCE_ENTITIES] == []
     assert flow._pending_final_config[CONF_SOURCE_ENTITIES] == []
     assert flow._pending_final_config[CONF_MAINS_SOURCE_ENTITIES] == [
@@ -672,6 +709,27 @@ async def test_user_flow_mains_only_sources_skip_assignment_review() -> None:
     ]
     assert flow._pending_final_config[CONF_CIRCUITS] == []
     assert flow._pending_final_config[CONF_CIRCUIT_ASSIGNMENTS] == ""
+
+    result = await flow.async_step_nilm(
+        {
+            "nilm_detection_enabled": True,
+            "nilm_detection_sensitivity": "sensitive",
+        }
+    )
+
+    assert result["type"] == "form"
+    assert result["step_id"] == "utility"
+    mains = flow._pending_final_config[CONF_CIRCUITS][0]
+    assert mains["circuit_id"] == "mains"
+    assert mains["appliance_profile"] == "mains_nilm"
+    assert mains["mode"] == "mains_nilm"
+    assert mains["power_flow"] == "mains_net"
+    assert mains["nilm_detection_enabled"] is True
+    assert mains["nilm_detection_sensitivity"] == "sensitive"
+    assert [sensor["entity_id"] for sensor in mains["sensors"]] == [
+        "sensor.main_l1_power",
+        "sensor.main_l2_power",
+    ]
 
 
 def test_validate_setup_input_adds_demo_source_bundle_when_enabled() -> None:
@@ -1955,16 +2013,24 @@ async def test_options_mains_step_combines_mains_and_nilm_settings() -> None:
     assert form["step_id"] == "mains"
     assert _schema_keys(form["data_schema"]) == {
         CONF_MAINS_SOURCE_ENTITIES,
+        "nilm_detection_enabled",
+        "nilm_detection_sensitivity",
         CONF_KNOWN_LOAD_CIRCUITS,
     }
     assert _schema_default(form["data_schema"], CONF_MAINS_SOURCE_ENTITIES) == [
         "sensor.old_mains_power"
     ]
+    assert _schema_default(form["data_schema"], "nilm_detection_enabled") is True
+    assert _schema_default(form["data_schema"], "nilm_detection_sensitivity") == (
+        "balanced"
+    )
     assert _schema_default(form["data_schema"], CONF_KNOWN_LOAD_CIRCUITS) == ["fridge"]
 
     result = await flow.async_step_mains(
         {
             CONF_MAINS_SOURCE_ENTITIES: ["sensor.panel_mains_l1_power"],
+            "nilm_detection_enabled": True,
+            "nilm_detection_sensitivity": "sensitive",
             CONF_KNOWN_LOAD_CIRCUITS: ["hvac"],
         }
     )
@@ -1973,10 +2039,17 @@ async def test_options_mains_step_combines_mains_and_nilm_settings() -> None:
     assert result["data"][CONF_ENABLE_EXPERIMENTAL_NILM] is True
     assert result["data"][CONF_MAINS_SOURCE_ENTITIES] == ["sensor.panel_mains_l1_power"]
     assert result["data"][CONF_KNOWN_LOAD_CIRCUITS] == ["hvac"]
+    mains = result["data"][CONF_CIRCUITS][2]
+    assert mains["circuit_id"] == "mains"
+    assert mains["nilm_detection_enabled"] is True
+    assert mains["nilm_detection_sensitivity"] == "sensitive"
+    assert [sensor["entity_id"] for sensor in mains["sensors"]] == [
+        "sensor.panel_mains_l1_power"
+    ]
 
 
 @pytest.mark.asyncio
-async def test_options_mains_step_hides_known_loads_without_nilm_source() -> None:
+async def test_options_mains_step_shows_mains_nilm_controls_without_source() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerOptionsFlow,
     )
@@ -1993,7 +2066,29 @@ async def test_options_mains_step_hides_known_loads_without_nilm_source() -> Non
     form = await flow.async_step_mains()
 
     assert form["type"] == "form"
-    assert _schema_keys(form["data_schema"]) == {CONF_MAINS_SOURCE_ENTITIES}
+    assert _schema_keys(form["data_schema"]) == {
+        CONF_MAINS_SOURCE_ENTITIES,
+        "nilm_detection_enabled",
+        "nilm_detection_sensitivity",
+    }
+    assert _schema_default(form["data_schema"], "nilm_detection_enabled") is False
+    assert _schema_default(form["data_schema"], "nilm_detection_sensitivity") == (
+        "balanced"
+    )
+
+    result = await flow.async_step_mains(
+        {
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.panel_mains_power"],
+            "nilm_detection_enabled": True,
+            "nilm_detection_sensitivity": "sensitive",
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    mains = result["data"][CONF_CIRCUITS][-1]
+    assert mains["circuit_id"] == "mains"
+    assert mains["nilm_detection_enabled"] is True
+    assert mains["nilm_detection_sensitivity"] == "sensitive"
 
 
 @pytest.mark.asyncio
@@ -3993,6 +4088,36 @@ def test_assignment_groups_from_sources_returns_empty_for_mains_only() -> None:
         )
         == []
     )
+
+
+def test_assignment_groups_preserve_saved_nilm_detection_settings() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        _assignment_schema,
+        assignment_groups_from_sources,
+    )
+
+    groups = assignment_groups_from_sources(
+        ["sensor.shared_loads_power"],
+        existing_circuits=[
+            {
+                "circuit_id": "shared_loads",
+                "name": "Shared Loads",
+                "appliance_profile": "mixed",
+                "mode": "mixed",
+                "nilm_detection_enabled": True,
+                "nilm_detection_sensitivity": "sensitive",
+                "sensors": [{"entity_id": "sensor.shared_loads_power"}],
+            }
+        ],
+    )
+
+    assert len(groups) == 1
+    assert groups[0]["nilm_detection_enabled"] is True
+    assert groups[0]["nilm_detection_sensitivity"] == "sensitive"
+
+    schema = _assignment_schema(groups[0])
+    assert _schema_default(schema, "nilm_detection_enabled") is True
+    assert _schema_default(schema, "nilm_detection_sensitivity") == "sensitive"
 
 
 def test_assignment_groups_share_scaled_metric_suffixes() -> None:

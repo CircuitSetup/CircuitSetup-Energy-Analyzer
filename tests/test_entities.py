@@ -1422,6 +1422,44 @@ def test_setup_health_attributes_include_guided_onboarding_checklist() -> None:
     assert attrs["checklist_ready_count"] == 10
 
 
+def test_setup_health_checklist_uses_per_circuit_nilm_enabled() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+    )
+
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            data_quality_checklist_by_circuit={
+                "mixed": {
+                    "sample_observed": True,
+                    "required_sensors_present": True,
+                    "numeric_states_valid": True,
+                    "source_data_fresh": True,
+                }
+            },
+        ),
+        circuit_configs=(
+            CircuitConfig(
+                circuit_id="mixed",
+                name="Mixed Loads",
+                appliance_profile=ApplianceProfile.MIXED,
+                mode=CircuitMode.MIXED,
+                sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+                nilm_detection_enabled=True,
+            ),
+        ),
+        options={CONF_ENTITY_DETAIL_LEVEL: "standard"},
+        last_dashboard_create_request={"action": "created"},
+    )
+
+    checklist = {
+        item["item_id"]: item
+        for item in setup_health_attributes(coordinator)["checklist"]
+    }
+
+    assert checklist["nilm_enabled"]["status"] == "ok"
+
+
 def test_setup_health_waits_to_verify_configured_source_data() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         setup_health_attributes,

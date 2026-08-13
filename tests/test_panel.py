@@ -7445,28 +7445,40 @@ def test_setup_health_payload_exposes_checklist_and_next_step() -> None:
 
 
 def test_setup_health_payload_surfaces_nilm_review_without_safety_severity() -> None:
-    from custom_components.circuitsetup_energy_analyzer.const import (
-        CONF_ENABLE_EXPERIMENTAL_NILM,
-    )
     from custom_components.circuitsetup_energy_analyzer.panel import (
         setup_health_payload,
     )
 
-    config = CircuitConfig(
+    disabled_config = CircuitConfig(
         circuit_id="mixed",
         name="Mixed Loads",
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
     )
-    coordinator = _coordinator(config=config)
+    enabled_config = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed Loads",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
+    )
+    coordinator = _coordinator(config=disabled_config)
     coordinator.entry_id = "entry-1"
-    coordinator.options = {CONF_ENABLE_EXPERIMENTAL_NILM: True}
+    coordinator.options = {}
     coordinator.data = SimpleNamespace()
     coordinator.store_data.nilm_signatures = {"mixed": [{"signature_id": "sig-1"}]}
     coordinator.state.nilm_reconciliation_by_circuit = {
         "mixed": {"status": "conflict", "conflict_reason": "over_allocation"}
     }
+
+    disabled = setup_health_payload([coordinator])
+    assert not [
+        item for item in disabled["issues"] if item["issue"].startswith("nilm_")
+    ]
+
+    coordinator.circuit_configs = (enabled_config,)
 
     payload = setup_health_payload([coordinator])
     nilm_issues = [

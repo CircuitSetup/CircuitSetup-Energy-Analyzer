@@ -1669,6 +1669,14 @@ def _mains_schema(
             CONF_MAINS_SOURCE_ENTITIES,
             default=mains_source_entities,
         ): _energy_entity_list_selector(selectable_source_entities),
+        vol.Optional(
+            CONF_NILM_DETECTION_ENABLED,
+            default=_mains_nilm_detection_enabled_from_config(config),
+        ): bool,
+        vol.Optional(
+            CONF_NILM_DETECTION_SENSITIVITY,
+            default=_mains_nilm_detection_sensitivity_from_config(config),
+        ): _select_selector(sensitivity_options()),
     }
     known_load_options = _known_load_circuit_options_from_config(config)
     if _config_has_enabled_nilm_detection_source(config) and known_load_options:
@@ -1679,6 +1687,108 @@ def _mains_schema(
             )
         ] = _multi_select_selector(known_load_options)
     return vol.Schema(schema)
+
+
+def _mains_nilm_raw_circuit(config: Mapping[str, Any]) -> Any | None:
+    for circuit in config.get(CONF_CIRCUITS, []) or []:
+        if isinstance(circuit, Mapping):
+            circuit_id = str(circuit.get("circuit_id") or circuit.get("id") or "")
+            profile = str(circuit.get("appliance_profile") or "")
+            mode = str(circuit.get("mode") or "")
+        else:
+            circuit_id = str(getattr(circuit, "circuit_id", "") or "")
+            profile = str(getattr(circuit, "appliance_profile", "") or "")
+            mode = str(getattr(circuit, "mode", "") or "")
+        if (
+            circuit_id == "mains"
+            or profile == ApplianceProfile.MAINS_NILM.value
+            or mode == CircuitMode.MAINS_NILM.value
+        ):
+            return circuit
+    return None
+
+
+def _mains_nilm_detection_enabled_from_config(config: Mapping[str, Any]) -> bool:
+    circuit = _mains_nilm_raw_circuit(config)
+    if isinstance(circuit, Mapping) and CONF_NILM_DETECTION_ENABLED in circuit:
+        return bool(circuit.get(CONF_NILM_DETECTION_ENABLED))
+    if circuit is not None and hasattr(circuit, CONF_NILM_DETECTION_ENABLED):
+        return bool(getattr(circuit, CONF_NILM_DETECTION_ENABLED))
+    return bool(config.get(CONF_ENABLE_EXPERIMENTAL_NILM, False))
+
+
+def _mains_nilm_detection_sensitivity_from_config(config: Mapping[str, Any]) -> str:
+    circuit = _mains_nilm_raw_circuit(config)
+    if isinstance(circuit, Mapping) and CONF_NILM_DETECTION_SENSITIVITY in circuit:
+        return normalize_nilm_detection_sensitivity(
+            circuit.get(CONF_NILM_DETECTION_SENSITIVITY)
+        )
+    if circuit is not None and hasattr(circuit, CONF_NILM_DETECTION_SENSITIVITY):
+        return normalize_nilm_detection_sensitivity(
+            getattr(circuit, CONF_NILM_DETECTION_SENSITIVITY)
+        )
+    return DEFAULT_NILM_DETECTION_SENSITIVITY
+
+
+def _mains_nilm_circuit_from_input(
+    config: Mapping[str, Any],
+    mains_source_entities: Iterable[str],
+    *,
+    enabled: bool,
+    sensitivity: Any,
+) -> dict[str, Any]:
+    existing = _mains_nilm_raw_circuit(config)
+    circuit = dict(existing) if isinstance(existing, Mapping) else {}
+    circuit_id = str(circuit.get("circuit_id") or circuit.get("id") or "mains").strip()
+    circuit["circuit_id"] = circuit_id or "mains"
+    if "id" in circuit:
+        circuit["id"] = circuit["circuit_id"]
+    circuit["name"] = str(circuit.get("name") or "Mains NILM")
+    circuit["appliance_profile"] = ApplianceProfile.MAINS_NILM.value
+    circuit["mode"] = CircuitMode.MAINS_NILM.value
+    circuit["power_flow"] = PowerFlowMode.MAINS_NET.value
+    circuit["retention_mode"] = _normalize_retention_mode(
+        str(circuit.get("retention_mode") or config.get(CONF_RETENTION_MODE) or "")
+    )
+    circuit[CONF_NILM_DETECTION_ENABLED] = bool(enabled)
+    circuit[CONF_NILM_DETECTION_SENSITIVITY] = normalize_nilm_detection_sensitivity(
+        sensitivity
+    )
+    circuit["sensors"] = [
+        _source_sensor_dict_from_entity_id(entity_id)
+        for entity_id in dict.fromkeys(mains_source_entities)
+    ]
+    return circuit
+
+
+def _config_with_mains_nilm_settings(
+    config: Mapping[str, Any],
+    mains_source_entities: Iterable[str],
+    *,
+    enabled: bool,
+    sensitivity: Any,
+) -> dict[str, Any]:
+    updated = dict(config)
+    existing_mains = _mains_nilm_raw_circuit(config)
+    circuits = [
+        {**circuit, "sensors": _copied_circuit_sensors(circuit)}
+        for circuit in config.get(CONF_CIRCUITS, []) or []
+        if isinstance(circuit, Mapping) and circuit is not existing_mains
+    ]
+    if enabled or existing_mains is not None:
+        circuits.append(
+            _mains_nilm_circuit_from_input(
+                config,
+                mains_source_entities,
+                enabled=enabled,
+                sensitivity=sensitivity,
+            )
+        )
+    updated[CONF_CIRCUITS] = circuits
+    updated[CONF_CIRCUIT_ASSIGNMENTS] = (
+        _assignment_text_from_circuits(circuits) if circuits else ""
+    )
+    return updated
 
 
 def _utility_schema(
@@ -1802,15 +1912,32 @@ def _advanced_circuit_schema(config: Mapping[str, Any]) -> Any:
 def _nilm_schema(
     config: Mapping[str, Any],
     known_load_circuits: Iterable[str] = (),
+    *,
+    include_detection_settings: bool = False,
 ) -> Any:
-    return vol.Schema(
-        {
+    schema: dict[Any, Any] = {}
+    if include_detection_settings:
+        schema.update(
+            {
+                vol.Optional(
+                    CONF_NILM_DETECTION_ENABLED,
+                    default=_mains_nilm_detection_enabled_from_config(config),
+                ): bool,
+                vol.Optional(
+                    CONF_NILM_DETECTION_SENSITIVITY,
+                    default=_mains_nilm_detection_sensitivity_from_config(config),
+                ): _select_selector(sensitivity_options()),
+            }
+        )
+    known_load_options = _known_load_circuit_options_from_config(config)
+    if known_load_options:
+        schema[
             vol.Optional(
                 CONF_KNOWN_LOAD_CIRCUITS,
                 default=list(known_load_circuits),
-            ): _multi_select_selector(_known_load_circuit_options_from_config(config)),
-        }
-    )
+            )
+        ] = _multi_select_selector(known_load_options)
+    return vol.Schema(schema)
 
 
 def _recommendations_schema(
@@ -2791,6 +2918,18 @@ def assignment_groups_from_sources(
                         )
                     )
                 ),
+                CONF_NILM_DETECTION_ENABLED: bool(
+                    saved_circuit.get(
+                        CONF_NILM_DETECTION_ENABLED,
+                        DEFAULT_NILM_DETECTION_ENABLED,
+                    )
+                ),
+                CONF_NILM_DETECTION_SENSITIVITY: normalize_nilm_detection_sensitivity(
+                    saved_circuit.get(
+                        CONF_NILM_DETECTION_SENSITIVITY,
+                        DEFAULT_NILM_DETECTION_SENSITIVITY,
+                    )
+                ),
                 "selected_entity_ids": selected_entity_ids,
             }
         )
@@ -3235,7 +3374,7 @@ def _circuit_from_assignment_group(
             group.get("sensor_legs"),
         )
     )
-    nilm_detection_enabled = bool(
+    nilm_detection_requested = bool(
         user_input.get(
             CONF_NILM_DETECTION_ENABLED,
             group.get(CONF_NILM_DETECTION_ENABLED, DEFAULT_NILM_DETECTION_ENABLED),
@@ -3251,6 +3390,10 @@ def _circuit_from_assignment_group(
         )
     )
     power_flow = _default_power_flow_for_assignment(profile, mode)
+    nilm_detection_enabled = (
+        nilm_detection_requested
+        and nilm_source_kind({"appliance_profile": profile, "mode": mode}) is not None
+    )
     sensors = [
         {
             "entity_id": entity_id,
@@ -3890,12 +4033,32 @@ class CircuitSetupEnergyAnalyzerConfigFlow(config_entries.ConfigFlow, domain=DOM
             or {}
         )
         errors: dict[str, str] = {}
+        include_detection_settings = _should_show_setup_mains_nilm_controls(
+            final_config
+        )
 
         if user_input is not None:
             try:
                 final_config[CONF_KNOWN_LOAD_CIRCUITS] = (
                     _known_load_circuits_from_input(user_input, final_config)
                 )
+                if include_detection_settings:
+                    final_config = _config_with_mains_nilm_settings(
+                        final_config,
+                        final_config.get(CONF_MAINS_SOURCE_ENTITIES, []),
+                        enabled=bool(
+                            user_input.get(
+                                CONF_NILM_DETECTION_ENABLED,
+                                _mains_nilm_detection_enabled_from_config(final_config),
+                            )
+                        ),
+                        sensitivity=user_input.get(
+                            CONF_NILM_DETECTION_SENSITIVITY,
+                            _mains_nilm_detection_sensitivity_from_config(
+                                final_config
+                            ),
+                        ),
+                    )
             except SetupValidationError as err:
                 errors["base"] = err.error_key
             else:
@@ -3907,6 +4070,7 @@ class CircuitSetupEnergyAnalyzerConfigFlow(config_entries.ConfigFlow, domain=DOM
             data_schema=_nilm_schema(
                 final_config,
                 final_config.get(CONF_KNOWN_LOAD_CIRCUITS, []),
+                include_detection_settings=include_detection_settings,
             ),
             errors=errors,
         )
@@ -4316,6 +4480,28 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                 updates: dict[str, Any] = {
                     CONF_MAINS_SOURCE_ENTITIES: mains_source_entities,
                 }
+                existing_mains_nilm = _mains_nilm_raw_circuit(config)
+                nilm_detection_enabled = bool(
+                    user_input.get(
+                        CONF_NILM_DETECTION_ENABLED,
+                        _mains_nilm_detection_enabled_from_config(config),
+                    )
+                )
+                if nilm_detection_enabled or existing_mains_nilm is not None:
+                    nilm_detection_sensitivity = user_input.get(
+                        CONF_NILM_DETECTION_SENSITIVITY,
+                        _mains_nilm_detection_sensitivity_from_config(config),
+                    )
+                    updated_config = _config_with_mains_nilm_settings(
+                        config,
+                        mains_source_entities,
+                        enabled=nilm_detection_enabled,
+                        sensitivity=nilm_detection_sensitivity,
+                    )
+                    updates[CONF_CIRCUITS] = updated_config[CONF_CIRCUITS]
+                    updates[CONF_CIRCUIT_ASSIGNMENTS] = updated_config[
+                        CONF_CIRCUIT_ASSIGNMENTS
+                    ]
                 if _config_has_enabled_nilm_detection_source(config):
                     updates[CONF_KNOWN_LOAD_CIRCUITS] = (
                         _known_load_circuits_from_input(
@@ -6324,8 +6510,17 @@ def _config_has_enabled_nilm_detection_source(config: Mapping[str, Any]) -> bool
 
 def _should_show_setup_nilm_step(config: Mapping[str, Any]) -> bool:
     return bool(
-        _config_has_enabled_nilm_detection_source(config)
-        and _known_load_circuit_options_from_config(config)
+        (
+            _config_has_enabled_nilm_detection_source(config)
+            and _known_load_circuit_options_from_config(config)
+        )
+        or _should_show_setup_mains_nilm_controls(config)
+    )
+
+
+def _should_show_setup_mains_nilm_controls(config: Mapping[str, Any]) -> bool:
+    return bool(
+        config.get(CONF_MAINS_SOURCE_ENTITIES) and not config.get(CONF_CIRCUITS)
     )
 
 
