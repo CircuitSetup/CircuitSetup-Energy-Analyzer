@@ -2090,6 +2090,8 @@
         "prediction_preview_empty": "No reference sensor intervals are saved yet.",
         "prediction_preview_description": "Preview compares saved labels with NILM's predicted sessions.",
         "prediction_overlap": "{match} {seconds} seconds overlap",
+        "prediction_power_comparison": "Power: measured {measured}, estimated {estimated}, error {error}",
+        "prediction_energy_comparison": "Energy: measured {measured}, estimated {estimated}, error {error}",
         "no_matching_prediction": "No matching NILM prediction",
         "prediction_missed": "missed",
         "known_load_overlays": "Known Load Overlays",

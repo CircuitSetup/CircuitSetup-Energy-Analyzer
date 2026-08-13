@@ -4678,8 +4678,18 @@ export function createNilmWorkspaceMethods({
     const preview = Array.isArray(validation.prediction_preview)
       ? validation.prediction_preview
       : [];
+    const groundTruthCount = Number(metrics.ground_truth_interval_count ?? preview.length);
+    const hasReferenceIntervals = preview.length > 0 || (Number.isFinite(groundTruthCount) && groundTruthCount > 0);
+    if (!hasReferenceIntervals) {
+      return `
+        <h3>${this._escape(this._panelText("nilm_workspace.validation"))}</h3>
+        <p class="muted">${this._escape(this._panelText("nilm_workspace.validation_description"))}</p>
+        <p class="muted">${this._escape(this._panelText("nilm_workspace.prediction_preview_empty"))}</p>
+      `;
+    }
     const validationCount = Number(
-      metrics.evaluable_session_count
+      metrics.evaluable_prediction_count
+      ?? metrics.evaluable_session_count
       ?? metrics.validation_evaluable_session_count
       ?? (Number(metrics.true_positive_count || 0) + Number(metrics.false_positive_count || 0)),
     );
@@ -4689,7 +4699,7 @@ export function createNilmWorkspaceMethods({
       <div class="summary">
         <div class="metric">
           <span>${this._escape(this._panelText("nilm_workspace.ground_truth"))}</span>
-          <strong>${this._escape(metrics.ground_truth_interval_count || 0)}</strong>
+          <strong>${this._escape(Number.isFinite(groundTruthCount) ? groundTruthCount : preview.length)}</strong>
         </div>
         <div class="metric">
           <span>${this._escape(this._panelTextFormat("nilm_workspace.validation_precision", { count: Number.isFinite(validationCount) ? validationCount : 0 }))}</span>
@@ -4705,9 +4715,39 @@ export function createNilmWorkspaceMethods({
           <span>${this._escape(item.ground_truth_entity_id || "")}</span>
           <strong>${this._escape(item.label || this._panelText("nilm_workspace.ground_truth"))} - ${this._escape(item.prediction_status || this._panelText("nilm_workspace.prediction_missed"))}</strong>
           <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.prediction_overlap", { match: item.matched_assignment_id || this._panelText("nilm_workspace.no_matching_prediction"), seconds: this._formatMetricValue(item.overlap_seconds) }))}</p>
+          ${this._nilmPredictionComparisonLines(item)}
         </div>
       `, this._panelText("nilm_workspace.prediction_preview_description"))}
     `;
+  }
+
+  _nilmPredictionComparisonLines(item) {
+    const powerValues = [
+      item && item.measured_power_w,
+      item && item.estimated_power_w,
+      item && item.power_error_w,
+    ].map((value) => this._nilmFiniteNumber(value));
+    const energyValues = [
+      item && item.measured_energy_kwh,
+      item && item.estimated_energy_kwh,
+      item && item.energy_error_kwh,
+    ].map((value) => this._nilmFiniteNumber(value));
+    const lines = [];
+    if (powerValues.every((value) => value !== null)) {
+      lines.push(this._panelTextFormat("nilm_workspace.prediction_power_comparison", {
+        measured: this._nilmFormatQuantity(powerValues[0], "W"),
+        estimated: this._nilmFormatQuantity(powerValues[1], "W"),
+        error: this._nilmFormatQuantity(powerValues[2], "W"),
+      }));
+    }
+    if (energyValues.every((value) => value !== null)) {
+      lines.push(this._panelTextFormat("nilm_workspace.prediction_energy_comparison", {
+        measured: this._nilmFormatQuantity(energyValues[0], "kWh"),
+        estimated: this._nilmFormatQuantity(energyValues[1], "kWh"),
+        error: this._nilmFormatQuantity(energyValues[2], "kWh"),
+      }));
+    }
+    return lines.map((line) => `<p class="muted">${this._escape(line)}</p>`).join("");
   }
 
   _renderNilmWorkspaceList(title, items, emptyText, renderItem, description = "") {
