@@ -7339,6 +7339,7 @@ test("NILM workspace says when an edge has no dominant leg", async ({ page }) =>
       split_phase_type: "unknown",
       dominant_leg: null,
     }];
+    payload.source = { source_kind: "mains" };
     await route.fulfill({ json: payload });
     return true;
   });
@@ -7864,7 +7865,7 @@ test("NILM workspace separates hidden lanes and restores hidden assignments", as
   });
 });
 
-test("NILM workspace restores hidden signatures and explains blocked publication", async ({ page }) => {
+test("NILM workspace restores hidden signatures and keeps blocked publication disabled", async ({ page }) => {
   let restored = false;
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/nilm_workspace")) return false;
@@ -7897,7 +7898,7 @@ test("NILM workspace restores hidden signatures and explains blocked publication
 
   const panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=mains");
   await panel.locator('[data-nilm-lane="assigned"]').click();
-  await expect(panel.getByText("Confirm enough matched sessions before publishing.")).toBeVisible();
+  await expect(panel.getByText("Confirm enough matched sessions before publishing.")).toHaveCount(0);
   await expect(panel.getByRole("button", { name: "Create HA Device" })).toBeDisabled();
 
   await panel.locator('[data-nilm-lane="hidden"]').click();
