@@ -697,7 +697,7 @@ export function createEvidenceViewMethods({
     const edgeTimesAttr = edgeItems.length
       ? ` data-nilm-edge-times="${edgeItems.map((edge) => edge.time).join(",")}"`
       : "";
-    const chartAttrs = ` data-chart-start="${minTime}" data-chart-end="${maxTime}" data-chart-min="${baseMinTime}" data-chart-max="${baseMaxTime}" data-chart-left="${padLeft}" data-chart-right="${width - padRight}" data-chart-zoom-key="${this._escape(zoomKey)}"`;
+    const chartAttrs = ` data-chart-start="${minTime}" data-chart-end="${maxTime}" data-chart-min="${baseMinTime}" data-chart-max="${baseMaxTime}" data-chart-left="${padLeft}" data-chart-right="${width - padRight}" data-chart-top="${padTop}" data-chart-bottom="${height - padBottom}" data-chart-zoom-key="${this._escape(zoomKey)}"`;
     const selectAttrs = alert.nilm_select_interval
       ? ` tabindex="0" data-nilm-chart-select="1"${edgeTimesAttr}`
       : "";

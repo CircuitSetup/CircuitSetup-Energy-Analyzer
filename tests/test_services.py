@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sys
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -1594,6 +1594,73 @@ async def test_manual_label_uses_configured_power_evidence(
     assert "observed_transition_w" not in kwargs
     assert kwargs["evidence"]["start_transition_w"] == 100.0
     assert kwargs["evidence"]["evidence_source"] == "manual_backend"
+
+
+@pytest.mark.parametrize(
+    ("before_w", "inside_w", "after_w", "field", "eligible_field", "flag"),
+    (
+        (
+            200.0,
+            100.0,
+            0.0,
+            "start_transition_w",
+            "start_transition_eligible",
+            "start_transition_ineligible",
+        ),
+        (
+            0.0,
+            100.0,
+            200.0,
+            "stop_transition_w",
+            "stop_transition_eligible",
+            "stop_transition_ineligible",
+        ),
+    ),
+)
+def test_manual_evidence_omits_opposite_direction_boundary_transition(
+    before_w: float,
+    inside_w: float,
+    after_w: float,
+    field: str,
+    eligible_field: str,
+    flag: str,
+) -> None:
+    """Opposite-direction boundaries remain reviewable without invalid evidence."""
+    from custom_components.circuitsetup_energy_analyzer import services
+    from custom_components.circuitsetup_energy_analyzer.managers import nilm_controller
+    from custom_components.circuitsetup_energy_analyzer.nilm_interval_evidence import (
+        NilmPowerSample,
+    )
+
+    start = datetime(2026, 8, 1, 0, 0, 20, tzinfo=UTC)
+    end = datetime(2026, 8, 1, 0, 1, 40, tzinfo=UTC)
+    samples = tuple(
+        NilmPowerSample(start + timedelta(seconds=offset), watts, "sensor.mains")
+        for offset, watts in (
+            (-20, before_w),
+            (-10, before_w),
+            (0, inside_w),
+            (10, inside_w),
+            (70, inside_w),
+            (80, inside_w),
+            (90, after_w),
+            (100, after_w),
+        )
+    )
+
+    evidence = services._manual_evidence_mapping(
+        samples,
+        start=start,
+        end=end,
+        source_entity_ids=("sensor.mains",),
+        extra_flags=set(),
+    )
+
+    assert evidence[field] is None
+    assert evidence[eligible_field] is False
+    assert flag in evidence["quality_flags"]
+    validated = nilm_controller.NilmController._validated_schema_2_evidence(evidence)
+    assert validated is not None
 
 
 @pytest.mark.asyncio

@@ -922,7 +922,8 @@ export function createNilmWorkspaceMethods({
       const editingExisting = draftIntervals.length > 0 && draftIntervals.every(
         (interval) => String(interval.interval_id || "").trim(),
       );
-      if (!label || (!applianceProfile && !editingExisting && !removedIntervalIds.length)
+      const assigningExisting = Boolean(String(draft.assignment_id || "").trim());
+      if (!label || (!applianceProfile && !assigningExisting && !editingExisting && !removedIntervalIds.length)
           || (!draftIntervals.length && !removedIntervalIds.length)) {
         this._setNilmIntervalError(this._panelText("errors.nilm_interval_fields_required"));
         return;
@@ -1703,6 +1704,44 @@ export function createNilmWorkspaceMethods({
     if (button.classList) button.classList.toggle("secondary", !dirty);
   }
 
+  _createNilmChartSelectionBand(chart) {
+    const ownerDocument = chart && chart.ownerDocument;
+    if (!ownerDocument || !ownerDocument.createElementNS) return null;
+    const band = ownerDocument.createElementNS("http://www.w3.org/2000/svg", "rect");
+    band.setAttribute("class", "nilm-session-band");
+    band.setAttribute("data-nilm-band-kind", "draft");
+    band.setAttribute("data-nilm-selected", "true");
+    band.setAttribute("data-nilm-provisional-band", "true");
+    band.setAttribute("pointer-events", "none");
+    chart.appendChild(band);
+    return band;
+  }
+
+  _updateNilmChartSelectionBand(band, startTime, endTime, chart) {
+    if (!band) return;
+    const chartStart = Number(chart.dataset.chartStart);
+    const chartEnd = Number(chart.dataset.chartEnd);
+    const chartLeft = Number(chart.dataset.chartLeft);
+    const chartRight = Number(chart.dataset.chartRight);
+    const chartTop = Number(chart.dataset.chartTop);
+    const chartBottom = Number(chart.dataset.chartBottom);
+    if (![chartStart, chartEnd, chartLeft, chartRight, chartTop, chartBottom]
+      .every(Number.isFinite)
+      || chartEnd <= chartStart
+      || chartRight <= chartLeft
+      || chartBottom <= chartTop) return;
+    const x = (time) => chartLeft + (
+      (Math.max(chartStart, Math.min(chartEnd, time)) - chartStart)
+      / (chartEnd - chartStart)
+    ) * (chartRight - chartLeft);
+    const left = Math.min(x(startTime), x(endTime));
+    const right = Math.max(x(startTime), x(endTime));
+    band.setAttribute("x", left.toFixed(1));
+    band.setAttribute("y", String(chartTop));
+    band.setAttribute("width", Math.max(1, right - left).toFixed(1));
+    band.setAttribute("height", String(chartBottom - chartTop));
+  }
+
   _startNilmChartSelection(event, chart) {
     if (event.target && event.target.dataset && (
       event.target.dataset.nilmDraftIndex !== undefined
@@ -1715,12 +1754,37 @@ export function createNilmWorkspaceMethods({
     if (!Number.isFinite(startTime)) {
       return;
     }
-    const finish = (finishEvent) => {
+    const pointerId = event.pointerId;
+    const matchingPointer = (pointerEvent) => (
+      pointerId === undefined
+      || pointerEvent.pointerId === undefined
+      || pointerEvent.pointerId === pointerId
+    );
+    const band = this._createNilmChartSelectionBand(chart);
+    let lastTime = startTime;
+    let completed = false;
+    const update = (moveEvent) => {
+      if (completed || !matchingPointer(moveEvent)) return;
+      const nextTime = this._snapNilmChartTimeToEdge(
+        this._chartEventTime(moveEvent, chart),
+        chart,
+      );
+      if (!Number.isFinite(nextTime)) return;
+      lastTime = nextTime;
+      this._updateNilmChartSelectionBand(band, startTime, lastTime, chart);
+    };
+    const cleanup = () => {
+      chart.removeEventListener("pointermove", update);
+      chart.removeEventListener("pointerup", finish);
+      chart.removeEventListener("pointerleave", leave);
       chart.removeEventListener("pointercancel", cancel);
-      const endTime = this._snapNilmChartTimeToEdge(this._chartEventTime(finishEvent, chart), chart);
-      if (!Number.isFinite(endTime)) {
-        return;
-      }
+      if (band) band.remove();
+    };
+    const finalize = () => {
+      if (completed) return;
+      completed = true;
+      cleanup();
+      const endTime = lastTime;
       const start = Math.min(startTime, endTime);
       const end = Math.max(startTime, endTime);
       if (end <= start) {
@@ -1747,14 +1811,25 @@ export function createNilmWorkspaceMethods({
       this._render();
       this._scheduleNilmIntervalEvidence();
     };
-    const cancel = () => {
-      chart.removeEventListener("pointerup", finish);
+    const finish = (finishEvent) => {
+      if (completed || !matchingPointer(finishEvent)) return;
+      update(finishEvent);
+      finalize();
     };
-    if (chart.setPointerCapture && event.pointerId !== undefined) {
-      chart.setPointerCapture(event.pointerId);
-    }
-    chart.addEventListener("pointerup", finish, { once: true });
-    chart.addEventListener("pointercancel", cancel, { once: true });
+    const leave = (leaveEvent) => {
+      if (completed || !matchingPointer(leaveEvent)) return;
+      update(leaveEvent);
+      finalize();
+    };
+    const cancel = (cancelEvent) => {
+      if (completed || !matchingPointer(cancelEvent)) return;
+      finalize();
+    };
+    this._updateNilmChartSelectionBand(band, startTime, startTime, chart);
+    chart.addEventListener("pointermove", update);
+    chart.addEventListener("pointerup", finish);
+    chart.addEventListener("pointerleave", leave);
+    chart.addEventListener("pointercancel", cancel);
   }
 
   _removeNilmDraftInterval(index) {
@@ -3018,6 +3093,56 @@ export function createNilmWorkspaceMethods({
     }).format(ratio);
   }
 
+  _nilmHasPositiveEvidenceValue(value) {
+    const number = this._nilmFiniteNumber(value);
+    return number !== null && number > 0;
+  }
+
+  _nilmQualityLabelIsGeneric(label) {
+    const normalized = String(label || "").trim().toLowerCase();
+    const unknown = String(this._panelText("common.unknown") || "unknown").trim().toLowerCase();
+    return !normalized || normalized === unknown || normalized.startsWith(`${unknown} `) || normalized.startsWith("unknown load");
+  }
+
+  _nilmEstimateQualityRowIsUseful(row, label) {
+    if (!row) return false;
+    const status = String(row.status || "legacy_unverified").trim().toLowerCase();
+    const hasRetainedEvidence = [
+      row.runtime_minutes,
+      row.energy_kwh,
+      row.included_session_count,
+      row.power_coverage,
+      row.coverage_days,
+    ].some((value) => this._nilmHasPositiveEvidenceValue(value));
+    if (status === "ambiguous") return hasRetainedEvidence;
+    if (status === "legacy_unverified") {
+      return hasRetainedEvidence || !this._nilmQualityLabelIsGeneric(label);
+    }
+    return hasRetainedEvidence || !this._nilmQualityLabelIsGeneric(label);
+  }
+
+  _nilmKnownLoadAttributionHasVisibleEvidence(record) {
+    if (!record) return false;
+    const rejected = Array.isArray(record.rejected_candidate_summaries)
+      ? record.rejected_candidate_summaries.filter(Boolean)
+      : [];
+    const hasWatts = [
+      record.aggregate_delta_w,
+      record.explained_delta_w,
+      record.residual_delta_w,
+    ].some((value) => {
+      const number = this._nilmFiniteNumber(value);
+      return number !== null && Math.abs(number) >= 0.5;
+    });
+    const hasScore = [
+      record.magnitude_score,
+      record.time_score,
+      record.topology_score,
+      record.total_score,
+    ].some((value) => this._nilmHasPositiveEvidenceValue(value));
+    return hasWatts || rejected.length || hasScore;
+  }
+
   _nilmConfidenceDescriptor(item, kind = "") {
     const record = item && typeof item === "object" ? item : {};
     const requestedKind = String(kind || "").trim().toLowerCase();
@@ -3233,15 +3358,19 @@ export function createNilmWorkspaceMethods({
 
   _renderNilmEvidenceDetails(workspace) {
     const quality = (Array.isArray(workspace && workspace.signatures) ? workspace.signatures : [])
-      .slice(0, 20)
       .map((signature) => ({
         label: signature.display_label || signature.signature_id || this._panelText("common.unknown"),
-        rows: Array.isArray(signature.estimate_quality) ? signature.estimate_quality.slice(0, 3) : [],
+        rows: Array.isArray(signature.estimate_quality) ? signature.estimate_quality
+          .filter((row) => this._nilmEstimateQualityRowIsUseful(row, signature.display_label || signature.signature_id))
+          .slice(0, 3) : [],
       }))
-      .filter((item) => item.rows.length);
+      .filter((item) => item.rows.length)
+      .slice(0, 20);
     const attributions = (Array.isArray(workspace && workspace.known_load_attributions)
       ? workspace.known_load_attributions
-      : []).slice(0, 20);
+      : [])
+      .filter((record) => this._nilmKnownLoadAttributionHasVisibleEvidence(record))
+      .slice(0, 20);
     if (!quality.length && !attributions.length) return "";
     return `<section class="workspace-section section-surface nilm-evidence-section" data-nilm-evidence-section>
       <details class="nilm-evidence-details" data-nilm-evidence-details>
@@ -4395,6 +4524,12 @@ export function createNilmWorkspaceMethods({
     return `<div class="metric" data-nilm-interval-editor>
         <h3>${this._escape(this._panelText("nilm_workspace.interval_prompt"))}</h3>
         <p class="muted">${this._escape(this._panelText("nilm_workspace.interval_prompt_detail"))}</p>
+        <ul class="muted nilm-interval-guidance" data-nilm-interval-guidance>
+          <li>${this._escape(this._panelText("nilm_workspace.interval_guidance_start"))}</li>
+          <li>${this._escape(this._panelText("nilm_workspace.interval_guidance_end"))}</li>
+          <li>${this._escape(this._panelText("nilm_workspace.interval_guidance_other_loads"))}</li>
+          <li>${this._escape(this._panelText("nilm_workspace.interval_guidance_examples"))}</li>
+        </ul>
         <div class="nilm-interval-form nilm-interval-identity">
           ${this._renderNilmExistingAssignmentField(action, "label_interval", draft.assignment_id)}
           <label>
@@ -4708,8 +4843,18 @@ export function createNilmWorkspaceMethods({
     const preview = Array.isArray(validation.prediction_preview)
       ? validation.prediction_preview
       : [];
+    const groundTruthCount = Number(metrics.ground_truth_interval_count ?? preview.length);
+    const hasReferenceIntervals = preview.length > 0 || (Number.isFinite(groundTruthCount) && groundTruthCount > 0);
+    if (!hasReferenceIntervals) {
+      return `
+        <h3>${this._escape(this._panelText("nilm_workspace.validation"))}</h3>
+        <p class="muted">${this._escape(this._panelText("nilm_workspace.validation_description"))}</p>
+        <p class="muted">${this._escape(this._panelText("nilm_workspace.prediction_preview_empty"))}</p>
+      `;
+    }
     const validationCount = Number(
-      metrics.evaluable_session_count
+      metrics.evaluable_prediction_count
+      ?? metrics.evaluable_session_count
       ?? metrics.validation_evaluable_session_count
       ?? (Number(metrics.true_positive_count || 0) + Number(metrics.false_positive_count || 0)),
     );
@@ -4719,7 +4864,7 @@ export function createNilmWorkspaceMethods({
       <div class="summary">
         <div class="metric">
           <span>${this._escape(this._panelText("nilm_workspace.ground_truth"))}</span>
-          <strong>${this._escape(metrics.ground_truth_interval_count || 0)}</strong>
+          <strong>${this._escape(Number.isFinite(groundTruthCount) ? groundTruthCount : preview.length)}</strong>
         </div>
         <div class="metric">
           <span>${this._escape(this._panelTextFormat("nilm_workspace.validation_precision", { count: Number.isFinite(validationCount) ? validationCount : 0 }))}</span>
@@ -4735,9 +4880,39 @@ export function createNilmWorkspaceMethods({
           <span>${this._escape(item.ground_truth_entity_id || "")}</span>
           <strong>${this._escape(item.label || this._panelText("nilm_workspace.ground_truth"))} - ${this._escape(item.prediction_status || this._panelText("nilm_workspace.prediction_missed"))}</strong>
           <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.prediction_overlap", { match: item.matched_assignment_id || this._panelText("nilm_workspace.no_matching_prediction"), seconds: this._formatMetricValue(item.overlap_seconds) }))}</p>
+          ${this._nilmPredictionComparisonLines(item)}
         </div>
       `, this._panelText("nilm_workspace.prediction_preview_description"))}
     `;
+  }
+
+  _nilmPredictionComparisonLines(item) {
+    const powerValues = [
+      item && item.measured_power_w,
+      item && item.estimated_power_w,
+      item && item.power_error_w,
+    ].map((value) => this._nilmFiniteNumber(value));
+    const energyValues = [
+      item && item.measured_energy_kwh,
+      item && item.estimated_energy_kwh,
+      item && item.energy_error_kwh,
+    ].map((value) => this._nilmFiniteNumber(value));
+    const lines = [];
+    if (powerValues.every((value) => value !== null)) {
+      lines.push(this._panelTextFormat("nilm_workspace.prediction_power_comparison", {
+        measured: this._nilmFormatQuantity(powerValues[0], "W"),
+        estimated: this._nilmFormatQuantity(powerValues[1], "W"),
+        error: this._nilmFormatQuantity(powerValues[2], "W"),
+      }));
+    }
+    if (energyValues.every((value) => value !== null)) {
+      lines.push(this._panelTextFormat("nilm_workspace.prediction_energy_comparison", {
+        measured: this._nilmFormatQuantity(energyValues[0], "kWh"),
+        estimated: this._nilmFormatQuantity(energyValues[1], "kWh"),
+        error: this._nilmFormatQuantity(energyValues[2], "kWh"),
+      }));
+    }
+    return lines.map((line) => `<p class="muted">${this._escape(line)}</p>`).join("");
   }
 
   _renderNilmWorkspaceList(title, items, emptyText, renderItem, description = "") {
