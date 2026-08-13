@@ -6198,6 +6198,21 @@ test("NILM evidence quality and provenance remain bounded and accessible", async
       },
     ];
     payload.signatures.push({
+      signature_id: "unknown-empty-signature",
+      display_label: "Unknown",
+      estimate_quality: [{
+        window: "30_days",
+        status: "ambiguous",
+        runtime_minutes: 0,
+        energy_kwh: 0,
+        included_session_count: 0,
+        excluded_session_count: 4,
+        energy_source: "unavailable",
+        power_coverage: null,
+        retention_truncated: false,
+      }],
+    });
+    payload.signatures.push({
       signature_id: "legacy-signature",
       display_label: "Legacy estimate",
       estimate_quality: [{
@@ -6229,6 +6244,17 @@ test("NILM evidence quality and provenance remain bounded and accessible", async
         topology_status: "rejected",
         selection_status: "rejected",
       }],
+    }, {
+      attribution_id: "attribution-empty",
+      timestamp: "2026-07-13T18:05:00Z",
+      aggregate_edge_id: "aggregate-empty",
+      aggregate_delta_w: 0,
+      explained_delta_w: 0,
+      residual_delta_w: 0,
+      known_load_labels: ["Unknown"],
+      selection_method: "unattributed",
+      compound: false,
+      rejected_candidate_summaries: [],
     }];
     await route.fulfill({ json: payload });
     return true;
@@ -6262,7 +6288,10 @@ test("NILM evidence quality and provenance remain bounded and accessible", async
   await evidence.locator("summary").first().click();
   await expect(evidence.locator('[data-nilm-estimate-quality-window="today"]')).toContainText("Complete");
   await expect(evidence.locator('[data-nilm-estimate-quality-window="7_days"]')).toContainText("Partial history");
-  await expect(evidence.locator('[data-nilm-estimate-quality-window="30_days"]').first()).toContainText("Ambiguous");
+  await expect(evidence).not.toContainText("Ambiguous");
+  await expect(evidence.locator('[data-nilm-estimate-quality-window="30_days"]')).toHaveCount(1);
+  await expect(evidence.getByRole("heading", { name: "Estimate quality for Unknown", exact: true })).toHaveCount(0);
+  await expect(evidence.locator("[data-nilm-known-load-attribution]")).toHaveCount(1);
   await expect(evidence).toContainText("Legacy estimate");
   await expect(evidence).toContainText("Requested range");
   await expect(evidence).toContainText("Actual retained coverage range");
