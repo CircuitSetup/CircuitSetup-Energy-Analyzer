@@ -8242,6 +8242,66 @@ test("NILM assignment links authoritative state and separate power history", asy
   await toHaveNoViolations(page);
 });
 
+test("NILM validation shows setup guidance instead of zero-score metrics without reference intervals", async ({ page }) => {
+  await mockPanelApi(page);
+  const panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=mains");
+
+  await expect(panel.getByText("Validation compares saved labels with NILM's predicted sessions.")).toBeVisible();
+  await expect(panel.getByText("No reference sensor intervals are saved yet.")).toBeVisible();
+  await expect(panel.getByText("Reference intervals")).toHaveCount(0);
+  await expect(panel.getByText(/Validation precision \(n=0\)/)).toHaveCount(0);
+  await expect(panel.getByText("Recall")).toHaveCount(0);
+  await toHaveNoViolations(page);
+});
+
+test("NILM validation renders evaluable prediction count and estimate error details", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.validation = {
+      metrics: {
+        ground_truth_interval_count: 2,
+        prediction_count: 3,
+        evaluable_prediction_count: 2,
+        matched_ground_truth_count: 1,
+        matched_prediction_count: 1,
+        precision: 0.5,
+        recall: 0.5,
+      },
+      prediction_preview: [
+        {
+          interval_id: "interval-1",
+          label: "Dishwasher",
+          ground_truth_entity_id: "sensor.dishwasher_power",
+          source: "reference_sensor",
+          prediction_status: "matched",
+          matched_assignment_id: "dishwasher",
+          matched_session_id: "nilm-session-1",
+          overlap_seconds: 2700,
+          measured_power_w: 820,
+          estimated_power_w: 800,
+          power_error_w: 20,
+          measured_energy_kwh: 0.42,
+          estimated_energy_kwh: 0.4,
+          energy_error_kwh: 0.02,
+        },
+      ],
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=mains");
+
+  const referenceMetric = panel.locator(".metric").filter({ hasText: "Reference intervals" });
+  await expect(referenceMetric).toContainText("2");
+  await expect(panel.getByText("Validation precision (n=2)")).toBeVisible();
+  await expect(panel.getByText("50%")).toHaveCount(2);
+  await expect(panel.getByText("Power: measured 820 W, estimated 800 W, error 20 W")).toBeVisible();
+  await expect(panel.getByText("Energy: measured 0.42 kWh, estimated 0.4 kWh, error 0.02 kWh")).toBeVisible();
+  await toHaveNoViolations(page);
+});
+
 test("NILM workspace gates electrical topology facts by source capability", async ({ page }) => {
   let topologyMode = "single";
   await mockPanelApi(page, async ({ route, url }) => {
