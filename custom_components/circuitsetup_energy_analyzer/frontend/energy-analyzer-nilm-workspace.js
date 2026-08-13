@@ -3048,11 +3048,6 @@ export function createNilmWorkspaceMethods({
 
   _nilmKnownLoadAttributionHasVisibleEvidence(record) {
     if (!record) return false;
-    const knownLoads = Array.isArray(record.known_load_labels)
-      ? record.known_load_labels.filter(Boolean)
-      : Array.isArray(record.known_circuit_ids)
-        ? record.known_circuit_ids.filter(Boolean)
-        : [];
     const rejected = Array.isArray(record.rejected_candidate_summaries)
       ? record.rejected_candidate_summaries.filter(Boolean)
       : [];
@@ -3070,7 +3065,7 @@ export function createNilmWorkspaceMethods({
       record.topology_score,
       record.total_score,
     ].some((value) => this._nilmHasPositiveEvidenceValue(value));
-    return hasWatts || knownLoads.length || rejected.length || hasScore;
+    return hasWatts || rejected.length || hasScore;
   }
 
   _nilmConfidenceDescriptor(item, kind = "") {
