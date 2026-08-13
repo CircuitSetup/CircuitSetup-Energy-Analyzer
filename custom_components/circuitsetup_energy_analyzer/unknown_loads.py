@@ -1191,6 +1191,7 @@ def estimate_unknown_load(signature: NilmSignature) -> dict[str, Any]:
             typical_var=typical_var,
             typical_va=typical_va,
             typical_power_factor=typical_power_factor,
+            evidence_reason=identification.evidence_reason,
         ),
     }
 
@@ -3401,6 +3402,7 @@ def _evidence(
     typical_var: float | None,
     typical_va: float | None,
     typical_power_factor: float | None,
+    evidence_reason: str,
 ) -> list[str]:
     evidence_strength = signature.evidence_strength or signature.confidence
     evidence = [
@@ -3431,6 +3433,8 @@ def _evidence(
             "Possible heating element candidate: balanced 240 V, high W, "
             "low VAR, and PF near unity."
         )
+    elif likely_type == "resistive":
+        evidence.append(evidence_reason)
     elif likely_type == "motor":
         evidence.append(
             "Possible motor-like pattern: single-leg 120 V, meaningful "

@@ -1234,6 +1234,9 @@ def test_estimate_unknown_load_marks_low_reactive_signature_as_resistive() -> No
 
     assert result["likely_type"] == "resistive"
     assert result["display_name"] == "Estimated resistive load"
+    evidence_text = " ".join(result["evidence"]).lower()
+    assert "possible resistive" in evidence_text
+    assert "no conservative helper pattern matched" not in evidence_text
 
 
 def test_estimate_unknown_load_uses_partial_electrical_evidence_without_va() -> None:
