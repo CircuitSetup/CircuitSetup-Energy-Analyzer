@@ -8223,7 +8223,7 @@ async def test_nilm_session_validation_updates_assignment_metrics() -> None:
 
     validated = await coordinator.async_validate_nilm_session("mains", "session_1")
 
-    assert validated["confidence"] == pytest.approx(0.85)
+    assert validated["feedback_evidence_score"] == pytest.approx(0.05)
     assert validated["lifecycle_state"] == "validated"
     assert validated["confirmed_session_ids"] == ["session_1"]
     assert validated["rejected_session_ids"] == []
@@ -8245,13 +8245,13 @@ async def test_nilm_session_validation_updates_assignment_metrics() -> None:
         "session_1",
     )
 
-    assert duplicate_validated["confidence"] == pytest.approx(0.85)
+    assert duplicate_validated["feedback_evidence_score"] == pytest.approx(0.05)
     assert duplicate_validated["confirmed_sessions"] == 1
 
     now["value"] = datetime(2026, 6, 2, 14, 5, tzinfo=UTC)
     rejected = await coordinator.async_reject_nilm_session("mains", "session_1")
 
-    assert rejected["confidence"] == pytest.approx(0.7)
+    assert rejected["feedback_evidence_score"] == pytest.approx(0.0)
     assert rejected["lifecycle_state"] == "needs_validation"
     assert rejected["confirmed_session_ids"] == []
     assert rejected["rejected_session_ids"] == ["session_1"]
@@ -8273,7 +8273,7 @@ async def test_nilm_session_validation_updates_assignment_metrics() -> None:
         "session_1",
     )
 
-    assert duplicate_rejected["confidence"] == pytest.approx(0.7)
+    assert duplicate_rejected["feedback_evidence_score"] == pytest.approx(0.0)
     assert duplicate_rejected["rejected_sessions"] == 1
 
 
@@ -8604,7 +8604,7 @@ async def test_nilm_assignment_history_validation_confirms_matches() -> None:
     assert validated["confirmed_sessions"] == 1
     assert validated["rejected_sessions"] == 0
     assert validated["adjusted_sessions"] == 0
-    assert validated["confidence"] == pytest.approx(0.85)
+    assert validated["feedback_evidence_score"] == pytest.approx(0.05)
     assert validated["lifecycle_state"] == "validated"
     assert validated["last_validation"] == "history"
     assert validated["last_validated_at"] == "2026-06-02T14:00:00+00:00"
@@ -8723,8 +8723,8 @@ async def test_nilm_assignment_history_validation_recomputes_existing_matches() 
         "assignment-dishwasher",
     )
 
-    assert first["confidence"] == pytest.approx(0.85)
-    assert second["confidence"] == pytest.approx(0.85)
+    assert first["feedback_evidence_score"] == pytest.approx(0.05)
+    assert second["feedback_evidence_score"] == pytest.approx(0.05)
     assert second["matched_ground_truth_count"] == 1
     assert second["median_power_error"] == pytest.approx(80.0)
     assert second["energy_estimate_error"] == pytest.approx(0.085)
@@ -8804,7 +8804,7 @@ async def test_nilm_assignment_history_validation_rejects_direct_meter_conflicts
     assert validated["confirmed_sessions"] == 0
     assert validated["rejected_sessions"] == 1
     assert validated["adjusted_sessions"] == 0
-    assert validated["confidence"] == pytest.approx(0.65)
+    assert validated["feedback_evidence_score"] == pytest.approx(0.0)
     assert validated["lifecycle_state"] == "published"
     assert validated["validation_status"] == "conflict"
     assert validated["publication_review_required"] is True
@@ -8898,9 +8898,9 @@ async def test_nilm_assignment_history_validation_preserves_existing_conflicts()
     assert first["history_validation_manual_session_ids"] == [
         "session-false-positive"
     ]
-    assert first["confidence"] == pytest.approx(0.65)
+    assert "feedback_evidence_score" not in first
     assert second["rejected_session_ids"] == ["session-false-positive"]
-    assert second["confidence"] == pytest.approx(0.65)
+    assert "feedback_evidence_score" not in second
     assert second["lifecycle_state"] == "conflict"
     assert second["last_validation"] == "direct_meter_conflict"
     assert second["last_rejected_at"] == "2026-06-02T15:05:00+00:00"
@@ -9045,10 +9045,10 @@ async def test_nilm_assignment_history_validation_keeps_manual_decisions_idempot
         "history-match",
         "history-false-positive",
     ]
-    assert first["confidence"] == pytest.approx(0.5)
+    assert first["feedback_evidence_score"] == pytest.approx(0.0)
     assert second["confirmed_session_ids"] == first["confirmed_session_ids"]
     assert second["rejected_session_ids"] == first["rejected_session_ids"]
-    assert second["confidence"] == pytest.approx(0.5)
+    assert second["feedback_evidence_score"] == pytest.approx(0.0)
 
 
 @pytest.mark.asyncio
@@ -9347,7 +9347,7 @@ async def test_nilm_assignment_merge_moves_references_to_target() -> None:
     assert merged["label_interval_ids"] == ["label-source"]
     assert merged["confirmed_session_ids"] == ["source-session"]
     assert merged["rejected_session_ids"] == ["target-session"]
-    assert merged["confidence"] == 0.9
+    assert "confidence" not in merged
     assert merged["lifecycle_state"] == "published"
     assert merged["publish_entities"] is True
     assert merged["updated_at"] == "2026-06-02T16:00:00+00:00"
@@ -9835,6 +9835,8 @@ def test_nilm_virtual_alert_builders_gate_confidence_and_repeated_evidence() -> 
         is_running=False,
         estimated_energy_kwh_today=0.45,
         confidence=0.82,
+        feedback_evidence_score=0.82,
+        confidence_kind="feedback_evidence",
         last_seen=now - timedelta(minutes=5),
         active_session_id=None,
         latest_session_id="session-1",
@@ -9854,7 +9856,7 @@ def test_nilm_virtual_alert_builders_gate_confidence_and_repeated_evidence() -> 
     assert finished_alert.baseline_value == pytest.approx(0.8)
     assert "a detected estimated run ended" in finished_alert.message
     assert "completed on/off run" in finished_alert.message
-    assert "Legacy confidence (mixed semantics): 82%" in finished_alert.message
+    assert "Feedback evidence score: 82%" in finished_alert.message
     assert finished_alert.features["source_type"] == "nilm_estimate"
     assert finished_alert.features["estimated"] is True
     assert finished_alert.features["confidence"] == pytest.approx(0.82)
@@ -9863,10 +9865,16 @@ def test_nilm_virtual_alert_builders_gate_confidence_and_repeated_evidence() -> 
         "assignment-dishwasher:session-1"
     )
 
-    low_confidence_state = SimpleNamespace(**{**state.__dict__, "confidence": 0.7})
+    low_confidence_state = SimpleNamespace(
+        **{**state.__dict__, "confidence": 0.7, "feedback_evidence_score": 0.7}
+    )
     assert finished_builder(low_confidence_state, now=now) is None
     nan_confidence_state = SimpleNamespace(
-        **{**state.__dict__, "confidence": float("nan")}
+        **{
+            **state.__dict__,
+            "confidence": float("nan"),
+            "feedback_evidence_score": float("nan"),
+        }
     )
     assert finished_builder(nan_confidence_state, now=now) is None
     pending_validation_state = SimpleNamespace(
@@ -9879,6 +9887,7 @@ def test_nilm_virtual_alert_builders_gate_confidence_and_repeated_evidence() -> 
             **state.__dict__,
             "is_running": True,
             "confidence": 0.86,
+            "feedback_evidence_score": 0.86,
             "last_seen": now - timedelta(minutes=45),
             "active_session_id": "session-open",
             "latest_session_id": "session-open",
@@ -10030,6 +10039,7 @@ async def test_opted_in_nilm_finished_notification_uses_existing_alert_flow(
                         "label_interval_ids": [],
                         "lifecycle_state": "published",
                         "confidence": 0.91,
+                        "feedback_evidence_score": 0.91,
                         "created_at": "2026-06-02T12:00:00+00:00",
                         "updated_at": "2026-06-02T12:00:00+00:00",
                         "created_device": True,
@@ -10107,6 +10117,7 @@ async def test_nilm_virtual_low_confidence_notification_prompts_validation(
                         "mains_circuit_id": "mains",
                         "lifecycle_state": "needs_validation",
                         "confidence": 0.72,
+                        "feedback_evidence_score": 0.72,
                         "created_device": True,
                         "publish_entities": True,
                     }
@@ -10169,6 +10180,7 @@ async def test_suppressed_nilm_alert_is_stored_once(
                         "mains_circuit_id": "mains",
                         "lifecycle_state": "needs_validation",
                         "confidence": 0.5,
+                        "feedback_evidence_score": 0.5,
                         "created_device": True,
                         "publish_entities": True,
                     }
@@ -10224,6 +10236,7 @@ async def test_nilm_virtual_needs_validation_notification_uses_review_category(
                         "mains_circuit_id": "mains",
                         "lifecycle_state": "needs_validation",
                         "confidence": 0.91,
+                        "feedback_evidence_score": 0.91,
                         "created_device": True,
                         "publish_entities": True,
                     }
@@ -10274,6 +10287,7 @@ async def test_nilm_virtual_conflict_notification_uses_model_drift_category(
                         "mains_circuit_id": "mains",
                         "lifecycle_state": "conflict",
                         "confidence": 0.91,
+                        "feedback_evidence_score": 0.91,
                         "created_device": True,
                         "publish_entities": True,
                     }
@@ -10367,7 +10381,7 @@ async def test_nilm_notification_feedback_adjusts_assignment_confidence() -> Non
     assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][
         0
     ]
-    assert assignment["confidence"] == pytest.approx(0.75)
+    assert assignment["feedback_evidence_score"] == pytest.approx(0.0)
     assert assignment["lifecycle_state"] == "needs_validation"
     assert assignment["confirmed_session_ids"] == []
     assert assignment["rejected_session_ids"] == ["session-1"]
@@ -10378,7 +10392,7 @@ async def test_nilm_notification_feedback_adjusts_assignment_confidence() -> Non
     coordinator.store_data.alerts.append(alert)
     assert await mark_correct(alert_id) is True
 
-    assert assignment["confidence"] == pytest.approx(0.8)
+    assert assignment["feedback_evidence_score"] == pytest.approx(0.05)
     assert assignment["last_validation"] == "correct"
     assert assignment["confirmed_session_ids"] == ["session-1"]
     assert assignment["rejected_session_ids"] == []
@@ -10441,7 +10455,7 @@ def test_nilm_controller_applies_alert_feedback_validation() -> None:
     assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][
         0
     ]
-    assert assignment["confidence"] == pytest.approx(0.85)
+    assert assignment["feedback_evidence_score"] == pytest.approx(0.05)
     assert assignment["last_validation"] == "correct"
     assert assignment["confirmed_session_ids"] == ["session-1"]
     assert assignment["rejected_session_ids"] == []
@@ -10506,7 +10520,7 @@ async def test_nilm_non_session_notification_feedback_keeps_session_counts_empty
     assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"][
         0
     ]
-    assert assignment["confidence"] == pytest.approx(0.75)
+    assert assignment["feedback_evidence_score"] == pytest.approx(0.0)
     assert assignment["confirmed_session_ids"] == []
     assert assignment["rejected_session_ids"] == []
     assert assignment["confirmed_sessions"] == 0
@@ -12145,7 +12159,7 @@ async def test_demo_mains_nilm_history_is_seeded_after_learning() -> None:
     sessions = coordinator.store_data.nilm_session_history_by_circuit[circuit_id]
     assert any(session["end"] is not None for session in sessions)
     assert all(session["median_power_w"] > 0 for session in sessions)
-    assert all(session["confidence"] > 0 for session in sessions)
+    assert all(session["pairing_confidence"] > 0 for session in sessions)
     workspace = nilm_workspace_payload([coordinator], circuit_id=circuit_id)
     assert workspace["edge_count"] >= 4
     assert {edge["direction"] for edge in workspace["edges"]} == {"on", "off"}

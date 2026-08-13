@@ -2467,7 +2467,7 @@ export function createNilmWorkspaceMethods({
       <span class="muted">${this._escape(this._panelText("nilm_workspace.helper_relationship_corroborates"))}</span>
       <button type="button" data-nilm-assignment-index="${index}" data-nilm-assignment-action="helper_manual">${this._escape(this._panelText("nilm_workspace.helper_set"))}</button>
     </div>` : "";
-    return `<div class="nilm-helper-list" data-nilm-helper-list><h3>${this._escape(this._panelText("nilm_workspace.helper_evidence"))}</h3>${(assignment.helper_links || []).map((item, offset) => renderEvidence(item, offset, true)).join("")}${candidates.map(({ item, offset }) => renderEvidence(item, offset, false)).join("")}${manual}</div>`;
+    return `<div class="nilm-helper-list" data-nilm-helper-list><h3>${this._escape(this._panelText("nilm_workspace.helper_evidence"))}</h3><p class="muted">${this._escape(this._panelText("nilm_workspace.helper_evidence_description"))}</p>${(assignment.helper_links || []).map((item, offset) => renderEvidence(item, offset, true)).join("")}${candidates.map(({ item, offset }) => renderEvidence(item, offset, false)).join("")}${manual}</div>`;
   }
 
   _nilmReferenceDraft(assignment) {
@@ -2888,8 +2888,6 @@ export function createNilmWorkspaceMethods({
         ${intervalEditor || intervalFeedback ? `<section class="workspace-section nilm-interval-editor-section section-surface">${intervalEditor}${intervalFeedback}</section>` : ""}
         <section class="workspace-section section-surface">${this._renderNilmWorkspaceLanes(workspace)}</section>
         <section class="workspace-section section-surface">${this._renderNilmReviewLayout(workspace)}</section>
-        ${this._renderNilmAmbiguityAudit(workspace)}
-        ${this._renderNilmEvidenceDetails(workspace)}
         ${this._renderNilmSecondaryCollections(workspace)}
       </div>
     `;
@@ -3022,8 +3020,8 @@ export function createNilmWorkspaceMethods({
     const requestedKind = String(kind || "").trim().toLowerCase();
     const semanticKind = String(record.confidence_kind || "").trim().toLowerCase();
     const normalizedKind = requestedKind || semanticKind;
-    let field = "confidence";
-    let labelKey = "legacy_mixed_confidence";
+    let field = "";
+    let labelKey = "";
     const hasEvidenceStrength = this._nilmFiniteNumber(record.evidence_strength) !== null;
     const hasPairingConfidence = this._nilmFiniteNumber(record.pairing_confidence) !== null;
     if (semanticKind === "evidence_strength" || (requestedKind === "signature" && hasEvidenceStrength)) {
@@ -3032,23 +3030,17 @@ export function createNilmWorkspaceMethods({
     } else if (semanticKind === "pairing_confidence" || (requestedKind === "session" && hasPairingConfidence)) {
       field = "pairing_confidence";
       labelKey = "pairing_confidence";
-    } else if (requestedKind === "signature" || requestedKind === "session" || semanticKind === "legacy_mixed") {
-      labelKey = "legacy_mixed_confidence";
     } else if (normalizedKind === "assignment" || normalizedKind === "virtual") {
-      if (
-        semanticKind === "legacy_mixed"
-        || this._nilmFiniteNumber(record.feedback_evidence_score) === null
-      ) {
-        labelKey = "legacy_mixed_confidence";
-      } else if (semanticKind === "model_fit") {
-        field = record.model_fit !== undefined ? "model_fit" : "model_confidence";
+      if (semanticKind === "model_fit" && this._nilmFiniteNumber(record.model_fit ?? record.model_confidence) !== null) {
+        field = this._nilmFiniteNumber(record.model_fit) !== null ? "model_fit" : "model_confidence";
         labelKey = "model_fit";
-      } else {
-        field = record.feedback_evidence_score !== undefined ? "feedback_evidence_score" : "confidence";
+      } else if (this._nilmFiniteNumber(record.feedback_evidence_score) !== null) {
+        field = "feedback_evidence_score";
         labelKey = "feedback_evidence_score";
       }
     }
-    const rawValue = this._nilmFiniteNumber(record[field] ?? record.confidence);
+    if (!field || !labelKey) return null;
+    const rawValue = this._nilmFiniteNumber(record[field]);
     if (rawValue === null) return null;
     const value = Math.max(0, Math.min(1, rawValue));
     const percent = Math.round(value * 100);
@@ -3432,7 +3424,7 @@ export function createNilmWorkspaceMethods({
       <h2>${this._escape(this._panelText("nilm_workspace.ambiguity_audit_title"))}</h2>
       <p id="nilm_ambiguity_audit_summary"><strong>${this._escape(this._panelTextFormat("nilm_workspace.ambiguity_audit_summary", { count: totalCount }))}</strong></p>
       <p class="muted" data-nilm-ambiguity-no-action>${this._escape(this._panelText("nilm_workspace.ambiguity_audit_no_action"))}</p>
-      <button type="button" class="secondary" data-nilm-ambiguity-toggle="audit" aria-expanded="${expanded}" aria-controls="${contentId}" aria-describedby="nilm_ambiguity_audit_summary nilm_ambiguity_audit_no_action">
+      <button type="button" class="nilm-evidence-summary" data-nilm-ambiguity-toggle="audit" aria-expanded="${expanded}" aria-controls="${contentId}" aria-describedby="nilm_ambiguity_audit_summary nilm_ambiguity_audit_no_action">
         ${this._escape(this._panelText("nilm_workspace.ambiguity_audit_review"))}
       </button>
       <p id="nilm_ambiguity_audit_no_action" class="sr-only">${this._escape(this._panelText("nilm_workspace.ambiguity_audit_no_action"))}</p>
@@ -3643,6 +3635,7 @@ export function createNilmWorkspaceMethods({
     const unassignedSessions = (Array.isArray(workspace.sessions) ? workspace.sessions : [])
       .map((item, index) => ({ ...item, workspace_index: index }))
       .filter((item) => !String(item && item.assignment_id || "").trim());
+    const showDominantLeg = workspace.source && workspace.source.source_kind === "mains";
     return `<section class="workspace-section section-surface" data-nilm-secondary-collections>
       <h2>${this._escape(this._panelText("nilm_workspace.secondary_details"))}</h2>
         ${this._renderNilmSessionValidationCards(workspace)}
@@ -3673,12 +3666,31 @@ export function createNilmWorkspaceMethods({
         </div>
       `, this._panelText("nilm_workspace.solar_net_overlays_description")) : ""}
         ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.sessions_title"), unassignedSessions, this._panelText("nilm_workspace.sessions_empty"), (item, index) => {
+          const label = item.display_label || item.display_name || item.appliance_id || item.assignment_id || this._panelText("common.appliance");
+          const isOpen = !item.end;
           const pairing = this._nilmConfidenceDescriptor(item, "session");
+          const duration = this._nilmSessionDuration(item);
+          const status = isOpen
+            ? this._panelTextFormat("nilm_workspace.provisional_pairing_confidence", { value: pairing ? this._nilmFormatPercent(pairing.value) : this._panelText("common.unknown") })
+            : this._panelTextFormat("nilm_workspace.estimated_by_nilm", { duration: duration ? `, ${duration}` : "" });
+          const confidence = isOpen ? "" : pairing
+            ? `<p class="muted">${this._escape(pairing.text)}</p>`
+            : "";
+          const lowConfidence = pairing && this._isLowNilmConfidence(pairing.value)
+            ? `<p class="muted">${this._escape(this._nilmLowConfidenceExplanation(item))}</p>`
+            : "";
+          const powerSummary = this._panelTextFormat(
+            isOpen ? "nilm_workspace.session_power_summary_open" : "nilm_workspace.session_power_summary",
+            { power: this._formatMetricValue(item.median_power_w), energy: this._formatMetricValue(item.estimated_energy_kwh) },
+          );
           return `
         <div class="metric">
-          <span>${this._escape(item.start || "")}</span>
-          <strong>${this._escape(this._panelTextFormat("nilm_workspace.session_summary", { power: this._formatMetricValue(item.median_power_w), evidence: pairing ? pairing.text : this._panelText("common.unknown") }))}</strong>
-          <p class="muted">${this._escape(item.end ? this._panelTextFormat("nilm_workspace.session_end", { end: item.end }) : this._panelText("common.open_session"))}</p>
+          <strong>${this._escape(this._panelTextFormat("nilm_workspace.predicted", { label }))}</strong>
+          ${this._renderNilmSessionTime(item)}
+          <p class="muted">${this._escape(status)}</p>
+          ${confidence}
+          ${lowConfidence}
+          <p class="muted">${this._escape(powerSummary)}</p>
           ${item.actions && item.actions.assign ? this._renderNilmSessionAssignField(item, item.workspace_index) : ""}
           ${item.actions && item.actions.assign ? `<div class="actions">
             <button type="button" class="secondary" data-nilm-session-index="${item.workspace_index}" data-nilm-session-action="assign" ${this._busyAction === `nilm_sessions_${item.workspace_index}_assign` ? "disabled" : ""}>${this._escape(this._panelText("actions.labels.assign_appliance"))}</button>
@@ -3689,11 +3701,13 @@ export function createNilmWorkspaceMethods({
         ${this._renderNilmSessionPagination(workspace)}
         ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.edges_title"), workspace.edges, this._panelText("nilm_workspace.edges_empty"), (item) => `
         <div class="metric">
-          <span>${this._escape(item.timestamp || "")}</span>
-          <strong>${this._escape(this._friendlyFeature(item.direction))}: ${this._escape(this._formatMetricValue(item.delta_w))} W</strong>
-          <p class="muted">${this._escape(item.split_phase_type || this._panelText("common.unknown"))} · ${this._escape(this._panelText("nilm_workspace.fact_dominant_leg"))}: ${this._escape(String(item.dominant_leg || "").trim() || this._panelText("nilm_workspace.no_dominant_leg"))}</p>
+          <strong>${this._escape(this._friendlyFeature(item.direction))}: ${this._escape(this._formatNilmWatts(item.delta_w))} W</strong>
+          <span>${this._escape(this._formatDateTime(item.timestamp))}</span>
+          ${showDominantLeg ? `<p class="muted">${this._escape(this._panelText("nilm_workspace.fact_dominant_leg"))}: ${this._escape(String(item.dominant_leg || "").trim() || this._panelText("nilm_workspace.no_dominant_leg"))}</p>` : ""}
         </div>
         `, this._panelText("nilm_workspace.edges_description"))}
+        ${this._renderNilmAmbiguityAudit(workspace)}
+        ${this._renderNilmEvidenceDetails(workspace)}
     </section>`;
   }
 
@@ -4033,7 +4047,8 @@ export function createNilmWorkspaceMethods({
       ? `
         ${this._nilmConfidenceDescriptor(item, "assignment") ? `<p class="muted">${this._escape(this._nilmConfidenceDescriptor(item, "assignment").text)}</p>` : ""}
         <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_rates", { false_positive: Math.round(Number(item.false_positive_rate || 0) * 100), false_negative: Math.round(Number(item.false_negative_rate || 0) * 100) }))}</p>
-        <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_errors", { power: this._formatMetricValue(item.median_power_error), energy: this._formatMetricValue(item.energy_estimate_error) }))}</p>
+        <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_median_power_error", { power: this._formatMetricValue(item.median_power_error) }))}</p>
+        <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_energy_error", { energy: this._formatMetricValue(item.energy_estimate_error) }))}</p>
         ${assignedIntervals.length ? `<div class="entity-list" data-nilm-assigned-intervals>${assignedIntervals.map(({ interval, index }) => `<div class="metric">
           <span>${this._escape(this._panelText("common.labeled_interval"))}</span>
           <strong>${this._escape(this._formatNilmSessionRange(interval))}</strong>
@@ -4233,13 +4248,16 @@ export function createNilmWorkspaceMethods({
     return `
       <div class="metric" data-nilm-session-validation-card data-nilm-open="${isOpen}">
         <strong>${this._escape(this._panelTextFormat("nilm_workspace.predicted", { label }))}</strong>
-        <span class="muted" data-nilm-session-range>${this._escape(this._formatNilmSessionRange(session))}</span>
+        ${this._renderNilmSessionTime(session)}
         <p class="muted">${this._escape(isOpen
           ? this._panelTextFormat("nilm_workspace.provisional_pairing_confidence", { value: pairing ? this._nilmFormatPercent(pairing.value) : this._panelText("common.unknown") })
           : this._panelTextFormat("nilm_workspace.estimated_by_nilm", { duration: duration ? `, ${duration}` : "" }))}</p>
         ${isOpen ? "" : confidence}
         ${isOpen ? "" : lowConfidence}
-        <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.session_power_summary", { power: this._formatMetricValue(session.median_power_w), energy: this._formatMetricValue(session.estimated_energy_kwh) }))}</p>
+        <p class="muted">${this._escape(this._panelTextFormat(
+          isOpen ? "nilm_workspace.session_power_summary_open" : "nilm_workspace.session_power_summary",
+          { power: this._formatMetricValue(session.median_power_w), energy: this._formatMetricValue(session.estimated_energy_kwh) },
+        ))}</p>
         ${validationActions}
       </div>
     `;
@@ -4280,6 +4298,19 @@ export function createNilmWorkspaceMethods({
       return this._panelTextFormat("nilm_workspace.range_open", { start });
     }
     return `${start} - ${this._formatDateTime(session.end)}`;
+  }
+
+  _renderNilmSessionTime(session) {
+    const start = this._formatDateTime(session && session.start);
+    if (!session || !session.end) {
+      return `<span class="muted" data-nilm-session-range><span>${this._escape(this._panelTextFormat("nilm_workspace.range_open", { start }))}</span></span>`;
+    }
+    return `<span class="muted nilm-session-range" data-nilm-session-range><span>${this._escape(start)}</span><span>${this._escape(this._formatDateTime(session.end))}</span></span>`;
+  }
+
+  _formatNilmWatts(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? this._formatNumber(number) : this._panelText("common.unknown");
   }
 
   _renderNilmSignatureFacts(signature) {
@@ -4612,16 +4643,13 @@ export function createNilmWorkspaceMethods({
   _renderNilmPublicationReadiness(readiness) {
     if (!readiness || typeof readiness !== "object") return "";
     const status = this._friendlyFeature(readiness.status || "learning");
-    const reasons = Array.isArray(readiness.reasons)
-      ? readiness.reasons.filter(Boolean).map((reason) => this._friendlyFeature(reason))
-      : [];
     const gates = readiness.gates && typeof readiness.gates === "object"
       ? Object.entries(readiness.gates)
       : [];
     return `<div class="nilm-publication-readiness" data-nilm-publication-readiness>
-      <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.publication_readiness", { status }))}</p>
-      ${reasons.length ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.publication_readiness_reason", { reason: reasons.join("; ") }))}</p>` : ""}
-      ${gates.length ? `<details><summary>${this._escape(this._panelText("nilm_workspace.publication_readiness_gates"))}</summary><ul>${gates.map(([gate, value]) => `<li>${this._escape(this._panelTextFormat("nilm_workspace.publication_gate", { gate: this._friendlyFeature(gate), status: this._friendlyFeature(value) }))}</li>`).join("")}</ul></details>` : ""}
+      <p class="muted"><strong>${this._escape(this._panelText("nilm_workspace.publication_readiness"))}</strong></p>
+      <p class="muted">${this._escape(status)}</p>
+      ${gates.length ? `<details open><summary>${this._escape(this._panelText("nilm_workspace.publication_readiness_gates"))}</summary><ul>${gates.map(([gate, value]) => `<li>${this._escape(this._panelTextFormat("nilm_workspace.publication_gate", { gate: this._friendlyFeature(gate), status: this._friendlyFeature(value) }))}</li>`).join("")}</ul></details>` : ""}
     </div>`;
   }
 
@@ -4632,7 +4660,7 @@ export function createNilmWorkspaceMethods({
       item && item.publication_readiness,
     );
     const publicationState = publication && publication.available === false
-      ? `${readiness}<p class="muted" data-nilm-publication-reason>${this._escape(publication.reason || "")}</p><button type="button" class="secondary" disabled>${this._escape(this._panelText("actions.labels.create_ha_device"))}</button>`
+      ? `${readiness}<button type="button" class="secondary" disabled>${this._escape(this._panelText("actions.labels.create_ha_device"))}</button>`
       : readiness;
     const detailButton = this._nilmApplianceDetailButton(item);
     if ((!actions || !Object.keys(actions).length) && !detailButton && !publicationState) {

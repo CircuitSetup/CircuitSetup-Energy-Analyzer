@@ -150,7 +150,6 @@ def test_ambiguous_finished_alert_feedback_is_rejected() -> None:
     """A stale ambiguous finished alert cannot mutate its assignment."""
     assignment = {
         "assignment_id": "assignment-pump",
-        "confidence": 0.8,
     }
     controller = _nilm_controller(
         SimpleNamespace(
@@ -186,13 +185,12 @@ def test_ambiguous_finished_alert_feedback_is_rejected() -> None:
             datetime(2026, 8, 12, 12, 5, tzinfo=UTC),
         )
 
-    assert assignment == {"assignment_id": "assignment-pump", "confidence": 0.8}
+    assert assignment == {"assignment_id": "assignment-pump"}
 
 
 def test_duplicate_finished_alert_feedback_is_idempotent_and_auditable() -> None:
     assignment = {
         "assignment_id": "assignment-pump",
-        "confidence": 0.7,
         "lifecycle_state": "validated",
     }
     controller = _nilm_controller(
@@ -227,7 +225,7 @@ def test_duplicate_finished_alert_feedback_is_idempotent_and_auditable() -> None
     controller.apply_alert_feedback(alert, "correct", alert.timestamp)
     controller.apply_alert_feedback(alert, "correct", alert.timestamp)
 
-    assert assignment["confidence"] == 0.75
+    assert "confidence" not in assignment
     assert assignment["feedback_evidence_score"] == 0.05
     assert assignment["feedback_confirmed_count"] == 1
     assert assignment["feedback_evidence_events"] == [
@@ -237,7 +235,6 @@ def test_duplicate_finished_alert_feedback_is_idempotent_and_auditable() -> None
             "delta": 0.05,
             "timestamp": "2026-08-12T12:00:00+00:00",
             "score_after": 0.05,
-            "legacy_confidence_after": 0.75,
         }
     ]
 
@@ -625,9 +622,9 @@ def test_nilm_controller_owns_assignment_helper_behavior() -> None:
     assert updated["signature_fingerprints"] == ["fingerprint-1"]
     assert updated["session_ids"] == ["session-1"]
     assert updated["label_interval_ids"] == ["interval-1"]
-    assert updated["confidence"] == 0.82
+    assert "confidence" not in updated
     assert "feedback_evidence_score" not in updated
-    assert updated["confidence_kind"] == "legacy_mixed"
+    assert "confidence_kind" not in updated
     assert updated["role"] == "component"
 
 
@@ -4709,7 +4706,6 @@ async def test_duplicate_direct_session_feedback_is_idempotent() -> None:
         "assignment_id": "assignment-pump",
         "session_ids": ["session-1"],
         "lifecycle_state": "validated",
-        "confidence": 0.7,
         "model_revision": 7,
         "model_fingerprint": "model-seven",
     }
@@ -4729,7 +4725,7 @@ async def test_duplicate_direct_session_feedback_is_idempotent() -> None:
     )
 
     assert assignment == after_first_feedback
-    assert assignment["confidence"] == 0.75
+    assert "confidence" not in assignment
     assert assignment["feedback_evidence_score"] == 0.05
     assert assignment["feedback_evidence_events"] == [
         {
@@ -4738,7 +4734,6 @@ async def test_duplicate_direct_session_feedback_is_idempotent() -> None:
             "delta": 0.05,
             "timestamp": now.isoformat(),
             "score_after": 0.05,
-            "legacy_confidence_after": 0.75,
         }
     ]
 

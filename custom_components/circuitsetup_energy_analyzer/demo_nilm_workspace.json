@@ -13,7 +13,7 @@
       "dominant_leg": "a",
       "split_phase_type": "single_leg_a",
       "occurrence_count": 8,
-      "confidence": 0.82,
+      "evidence_strength": 0.82,
       "classification": "motor",
       "review_state": "new"
     },
@@ -29,7 +29,7 @@
       "dominant_leg": "balanced",
       "split_phase_type": "balanced_240v",
       "occurrence_count": 5,
-      "confidence": 0.78,
+      "evidence_strength": 0.78,
       "classification": "resistive",
       "review_state": "new"
     }
@@ -70,7 +70,7 @@
         "typical_var": 510.0,
         "typical_va": 1052.0,
         "typical_power_factor": 0.875,
-        "confidence": 0.82,
+        "evidence_strength": 0.82,
         "occurrence_count": 8,
         "first_seen": {
           "offset_seconds": -529200
@@ -118,7 +118,7 @@
         "typical_var": 180.0,
         "typical_va": 4104.0,
         "typical_power_factor": 0.999,
-        "confidence": 0.78,
+        "evidence_strength": 0.78,
         "occurrence_count": 5,
         "first_seen": {
           "offset_seconds": -529200
@@ -163,7 +163,7 @@
       "duration_seconds": 3900.0,
       "median_power_w": 920.0,
       "estimated_energy_kwh": 0.997,
-      "confidence": 0.82,
+      "pairing_confidence": 0.82,
       "overlap_count": 0,
       "ambiguous": false,
       "alternate_match_count": 0,
@@ -186,7 +186,7 @@
       "duration_seconds": 3600.0,
       "median_power_w": 4100.0,
       "estimated_energy_kwh": 4.1,
-      "confidence": 0.78,
+      "pairing_confidence": 0.78,
       "overlap_count": 0,
       "ambiguous": false,
       "alternate_match_count": 0,
@@ -206,8 +206,8 @@
       "end": null,
       "duration_seconds": null,
       "median_power_w": 920.0,
-      "estimated_energy_kwh": 0.583,
-      "confidence": 0.82,
+      "estimated_energy_kwh": null,
+      "pairing_confidence": 0.82,
       "overlap_count": 0,
       "ambiguous": false,
       "alternate_match_count": 0,
@@ -229,7 +229,7 @@
         "offset_seconds": -4500
       },
       "source": "demo_ground_truth",
-      "confidence": 0.9,
+      "evidence_confidence": 0.9,
       "mains_entity_id": "sensor.cs_energy_analyzer_demo_mains_l1_active_power",
       "ground_truth_entity_id": "sensor.cs_energy_analyzer_demo_pool_pump_active_power",
       "created_at": {
@@ -258,7 +258,6 @@
         "demo_pool_pump_interval"
       ],
       "lifecycle_state": "assigned",
-      "confidence": 0.82,
       "created_at": {
         "offset_seconds": 0
       },

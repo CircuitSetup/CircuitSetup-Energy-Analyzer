@@ -7264,8 +7264,8 @@ test("NILM workspace uses Home Assistant surfaces", async ({ page }) => {
     if (!url.pathname.endsWith("/nilm_workspace")) return false;
     const payload = structuredClone(apiPayload(url.pathname));
     Object.assign(payload.assignments[0], {
-      confidence: 0.62,
-      confidence_kind: "legacy_mixed",
+      feedback_evidence_score: 0.62,
+      confidence_kind: "feedback_evidence",
       model_fit: null,
     });
     await route.fulfill({ json: payload });
@@ -7296,7 +7296,7 @@ test("NILM workspace uses Home Assistant surfaces", async ({ page }) => {
   await expect(panel.locator(".nilm-review-inspector")).toBeVisible();
   await expect(panel.locator("[data-nilm-apply-decision]")).toBeEnabled();
   await panel.locator('[data-nilm-lane="assigned"]').click();
-  await expect(panel.getByText("Legacy confidence (mixed semantics): 62%")).toHaveCount(2);
+  await expect(panel.getByText("Feedback evidence score: 62%")).toHaveCount(2);
 });
 
 test("NILM workspace says when an edge has no dominant leg", async ({ page }) => {

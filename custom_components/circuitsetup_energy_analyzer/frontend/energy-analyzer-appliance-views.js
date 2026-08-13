@@ -715,20 +715,19 @@ export function createApplianceViewMethods({
   }
 
   _applianceInsightConfidenceText(item) {
-    const confidence = item && item.confidence;
-    if (confidence === null || confidence === undefined) return "";
-    const value = this._formatConfidence(confidence);
     if (item.source_type !== "nilm_estimate") {
+      const confidence = item && item.confidence;
+      if (confidence === null || confidence === undefined) return "";
+      const value = this._formatConfidence(confidence);
       return this._panelTextFormat("appliance_insights.confidence", { confidence: value });
     }
     const kind = String(item.confidence_kind || "").trim().toLowerCase();
-    if (kind === "feedback_evidence") {
-      return this._panelTextFormat("nilm_workspace.feedback_evidence_score", { value });
-    }
-    if (kind === "legacy_mixed") {
-      return this._panelTextFormat("nilm_workspace.legacy_mixed_confidence", { value });
-    }
-    return this._panelTextFormat("nilm_workspace.legacy_mixed_confidence", { value });
+    const evidence = Number(item.feedback_evidence_score);
+    if (kind !== "feedback_evidence" || !Number.isFinite(evidence)) return "";
+    return this._panelTextFormat(
+      "nilm_workspace.feedback_evidence_score",
+      { value: this._formatConfidence(evidence) },
+    );
   }
 
   _renderApplianceDetailBody() {

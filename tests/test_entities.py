@@ -3699,7 +3699,7 @@ async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
         "session_ids": [],
         "label_interval_ids": [],
         "lifecycle_state": "published",
-        "confidence": 0.92,
+        "confidence": 0.0,
         "created_device": True,
         "publish_entities": True,
     }
@@ -3792,7 +3792,7 @@ async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
         "appliance_profile": "dishwasher",
         "mains_circuit_id": "mains",
         "mains_source": "sensor.mains_power",
-        "confidence": 0.92,
+        "confidence": 0.0,
         "model_status": "published",
         "last_validation": None,
         "reference_available": False,
@@ -3803,9 +3803,14 @@ async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
         "reference_fallback_to_nilm": True,
     }
     attributes = estimated_power.extra_state_attributes
-    assert expected_attributes.items() <= attributes.items()
+    missing_attributes = {
+        key: expected_value
+        for key, expected_value in expected_attributes.items()
+        if attributes.get(key) != expected_value
+    }
+    assert not missing_attributes, missing_attributes
     assert "feedback_evidence_score" not in attributes
-    assert attributes["confidence_kind"] == "legacy_mixed"
+    assert "confidence_kind" not in attributes
     assert "model_fit" not in attributes
     assert "calibrated_probability" not in attributes
     assert attributes["publication_readiness"] is not None

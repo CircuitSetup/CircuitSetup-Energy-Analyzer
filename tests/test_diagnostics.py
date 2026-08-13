@@ -206,7 +206,8 @@ async def test_diagnostics_includes_appliance_detail_runtime_summaries() -> None
                         "display_name": "Dishwasher",
                         "appliance_profile": "dishwasher",
                         "lifecycle_state": "published",
-                        "confidence": 0.91,
+                        "feedback_evidence_score": 0.91,
+                        "confidence_kind": "feedback_evidence",
                         "publish_entities": True,
                         "created_device": True,
                     }

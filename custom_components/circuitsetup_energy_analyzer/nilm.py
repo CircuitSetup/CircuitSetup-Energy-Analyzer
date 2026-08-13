@@ -1357,7 +1357,12 @@ def _quality(source: Mapping[str, Any]) -> float:
     value = next(
         (
             _model_number(source.get(key))
-            for key in ("evidence_confidence", "power_confidence", "confidence")
+            for key in (
+                "evidence_confidence",
+                "power_confidence",
+                "pairing_confidence",
+                "confidence",
+            )
             if _model_number(source.get(key)) is not None
         ),
         0.0,
@@ -2010,20 +2015,14 @@ def evaluate_nilm_validation_readiness(
         if validation_total
         else 0.0
     )
-    # The long-standing top-level validation contract remains compatible with
-    # legacy confidence. The nested publication gate below requires typed,
-    # auditable feedback evidence instead of relabeling that legacy value.
     feedback_evidence_score = _nilm_number(assignment.get("feedback_evidence_score"))
-    compatibility_confidence = (
-        feedback_evidence_score
-        if feedback_evidence_score is not None
-        else _nilm_number(assignment.get("confidence")) or 0.0
-    )
+    validation_confidence = feedback_evidence_score or 0.0
     ready = (
         len(confirmed_ids) >= max(min_confirmed_sessions, 0)
         and len(confirmed_days) >= max(min_distinct_days, 0)
         and false_positive_rate <= max_false_positive_rate
-        and compatibility_confidence >= min_confidence
+        and feedback_evidence_score is not None
+        and feedback_evidence_score >= min_confidence
     )
     assignment_id = str(assignment.get("assignment_id") or "").strip()
     assigned_session_ids = {
@@ -2246,7 +2245,7 @@ def evaluate_nilm_validation_readiness(
         "confirmed_sessions": len(confirmed_ids),
         "distinct_confirmed_days": len(confirmed_days),
         "false_positive_rate": round(false_positive_rate, 3),
-        "confidence": round(compatibility_confidence, 3),
+        "confidence": round(validation_confidence, 3),
         "publication_readiness": publication_readiness,
     }
 

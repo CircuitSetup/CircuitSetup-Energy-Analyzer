@@ -227,7 +227,13 @@ def test_nilm_virtual_state_excludes_assigned_stop_boundary_ambiguity() -> None:
     assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
         "mains"
     ][0]
-    assignment.update({"lifecycle_state": "published", "confidence": 0.91})
+    assignment.update(
+        {
+            "lifecycle_state": "published",
+            "confidence": 0.91,
+            "feedback_evidence_score": 0.91,
+        }
+    )
     coordinator._nilm_unmatched_edges = {"mains": []}
     coordinator.store_data.nilm_session_history_by_circuit = {
         "mains": [{
@@ -277,7 +283,7 @@ def _nilm_session(
         "duration_seconds": duration_seconds,
         "median_power_w": 820.0,
         "estimated_energy_kwh": energy_kwh,
-        "confidence": 0.91,
+        "pairing_confidence": 0.91,
     }
 
 
@@ -1280,8 +1286,9 @@ def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
     assert detail["source_quality"]["label"] == "Estimated from aggregate circuit"
     assert "aggregate circuit power" in detail["expectations"][0]["why_it_matters"]
     assert payload["daily_totals"] == []
-    assert detail["confidence"] == 0.72
-    assert detail["confidence_kind"] == "legacy_mixed"
+    assert detail["confidence"] == 0.0
+    assert "confidence_kind" not in detail
+    assert "Legacy confidence" not in detail["expectations"][0]["observed"]
     assert detail["model_status"] == "needs_validation"
     assert detail["activity_state"] == "Idle"
     assert detail["health_state"] == "Needs validation"
@@ -1607,7 +1614,7 @@ def test_nilm_appliance_detail_derives_only_assignment_session_history() -> None
         "end": "2026-06-30T08:30:00+00:00",
         "duration_seconds": 1800.0,
         "estimated_energy_kwh": 0.2,
-        "confidence": 0.91,
+        "pairing_confidence": 0.91,
         "validation_result": None,
     }
     timeline_ids = {item["session_id"] for item in detail["recent_timeline"]["items"]}
@@ -1821,7 +1828,7 @@ def test_nilm_today_vs_normal_requires_validated_multi_day_history() -> None:
     assignment.update(
         {
             "lifecycle_state": "validated",
-            "confidence": 0.92,
+            "feedback_evidence_score": 0.92,
             "session_ids": [item["session_id"] for item in sessions],
             "confirmed_session_ids": [item["session_id"] for item in sessions],
             "false_positive_rate": 0.0,
