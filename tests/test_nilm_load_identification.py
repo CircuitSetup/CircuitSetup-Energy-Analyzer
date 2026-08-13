@@ -109,7 +109,7 @@ def test_low_evidence_remains_unknown_even_with_reactive_shape() -> None:
     assert "Limited recurring evidence" in result.evidence_reason
 
 
-def test_user_label_overrides_review_label_without_changing_estimated_inventory_name() -> None:
+def test_user_label_overrides_review_label_preserves_estimated_name() -> None:
     result = identify_estimated_load(
         median_delta_w=120.0,
         median_delta_var=5.0,
