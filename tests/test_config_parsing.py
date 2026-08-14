@@ -1112,6 +1112,93 @@ def test_config_parser_backfills_legacy_nilm_enablement() -> None:
     assert configs[1].nilm_detection_sensitivity == "sensitive"
 
 
+def test_config_parser_requires_explicit_mixed_nilm_enablement() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "legacy_mains",
+                    "name": "Legacy Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "sensors": ["sensor.mains_power"],
+                },
+                {
+                    "circuit_id": "network_rack",
+                    "name": "Network Rack",
+                    "mode": "mixed",
+                    "appliance_profile": "mixed",
+                    "sensors": ["sensor.network_rack_power"],
+                },
+                {
+                    "circuit_id": "hvac_blower",
+                    "name": "HVAC Blower",
+                    "mode": "mixed",
+                    "appliance_profile": "hvac_blower",
+                    "sensors": ["sensor.hvac_blower_power"],
+                },
+                {
+                    "circuit_id": "enabled_mixed",
+                    "name": "Enabled Mixed",
+                    "mode": "mixed",
+                    "appliance_profile": "mixed",
+                    CONF_NILM_DETECTION_ENABLED: True,
+                    "sensors": ["sensor.enabled_mixed_power"],
+                },
+            ],
+        }
+    )
+
+    enabled_by_id = {
+        config.circuit_id: config.nilm_detection_enabled for config in configs
+    }
+    assert enabled_by_id == {
+        "legacy_mains": True,
+        "network_rack": False,
+        "hvac_blower": False,
+        "enabled_mixed": True,
+    }
+
+
+def test_config_parser_preserves_legacy_untyped_mains_nilm_enablement() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Legacy Mains",
+                    "sensors": ["sensor.mains_power"],
+                },
+                {
+                    "circuit_id": "network_rack",
+                    "name": "Network Rack",
+                    "mode": "mixed",
+                    "appliance_profile": "mixed",
+                    "sensors": ["sensor.network_rack_power"],
+                },
+            ],
+        }
+    )
+
+    enabled_by_id = {
+        config.circuit_id: config.nilm_detection_enabled for config in configs
+    }
+    assert enabled_by_id == {
+        "mains": True,
+        "network_rack": False,
+    }
+
+
 def test_config_parser_backfills_legacy_synthetic_mains_nilm_enablement() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_parsing import (
         circuit_configs_from_entry_data,
