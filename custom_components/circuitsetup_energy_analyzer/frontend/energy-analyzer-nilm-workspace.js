@@ -3675,7 +3675,7 @@ export function createNilmWorkspaceMethods({
     const groups = this._nilmAmbiguityAuditGroups(audit);
     return `<section class="workspace-section section-surface nilm-ambiguity-audit" data-nilm-ambiguity-audit>
       <details class="nilm-evidence-details nilm-ambiguity-details" data-nilm-ambiguity-details ${expanded ? "open" : ""}>
-      <summary data-nilm-ambiguity-toggle="audit" aria-controls="${contentId}" aria-describedby="nilm_ambiguity_audit_summary nilm_ambiguity_audit_no_action">${this._escape(this._panelText("nilm_workspace.ambiguity_audit_title"))}</summary>
+      <summary data-nilm-ambiguity-toggle="audit" aria-expanded="${expanded}" aria-controls="${contentId}" aria-describedby="nilm_ambiguity_audit_summary nilm_ambiguity_audit_no_action">${this._escape(this._panelText("nilm_workspace.ambiguity_audit_title"))}</summary>
       <p id="nilm_ambiguity_audit_summary"><strong>${this._escape(this._panelTextFormat("nilm_workspace.ambiguity_audit_summary", { count: totalCount }))}</strong></p>
       <p class="muted" data-nilm-ambiguity-no-action>${this._escape(this._panelText("nilm_workspace.ambiguity_audit_no_action"))}</p>
       <p id="nilm_ambiguity_audit_no_action" class="sr-only">${this._escape(this._panelText("nilm_workspace.ambiguity_audit_no_action"))}</p>
