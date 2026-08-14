@@ -9628,30 +9628,26 @@ test("NILM session assignment keeps the selected existing appliance across reren
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
 
   const existingAssignment = panel.locator('[data-nilm-existing-assignment="sessions_0"]');
-  await expect(existingAssignment).toHaveCount(2);
-  await existingAssignment.last().selectOption("dishwasher");
-  await expect.poll(() => existingAssignment.evaluateAll((selects) => selects.map((select) => select.value)))
-    .toEqual(["dishwasher", "dishwasher"]);
+  await expect(existingAssignment).toHaveCount(1);
+  await existingAssignment.selectOption("dishwasher");
+  await expect(existingAssignment).toHaveValue("dishwasher");
   await page.evaluate(() => window.__panel._render());
-  await expect.poll(() => existingAssignment.evaluateAll((selects) => selects.map((select) => select.value)))
-    .toEqual(["dishwasher", "dishwasher"]);
-  await existingAssignment.first().selectOption("");
-  await expect.poll(() => existingAssignment.evaluateAll((selects) => selects.map((select) => select.value)))
-    .toEqual(["", ""]);
+  await expect(existingAssignment).toHaveValue("dishwasher");
+  await existingAssignment.selectOption("");
+  await expect(existingAssignment).toHaveValue("");
   await expect.poll(() => page.evaluate(() => window.__panel._nilmSessionAssignmentDrafts.get("nilm-session-0")))
     .toBe("");
   const applianceName = panel.locator('[data-nilm-session-label-key="nilm-session-0"]');
-  await applianceName.last().fill("Window AC");
-  await expect.poll(() => applianceName.evaluateAll((inputs) => inputs.map((input) => input.value)))
-    .toEqual(["Window AC", "Window AC"]);
-  await applianceName.first().fill("");
-  await expect.poll(() => applianceName.evaluateAll((inputs) => inputs.map((input) => input.value)))
-    .toEqual(["", ""]);
+  await expect(applianceName).toHaveCount(1);
+  await applianceName.fill("Window AC");
+  await expect(applianceName).toHaveValue("Window AC");
+  await applianceName.fill("");
+  await expect(applianceName).toHaveValue("");
   await expect.poll(() => page.evaluate(() => ({
     has: window.__panel._nilmSessionLabelDrafts.has("nilm-session-0"),
     value: window.__panel._nilmSessionLabelDrafts.get("nilm-session-0"),
   }))).toEqual({ has: true, value: "" });
-  await existingAssignment.last().selectOption("dishwasher");
+  await existingAssignment.selectOption("dishwasher");
   await panel.locator('[data-nilm-session-action="assign"]').last().click();
 
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
@@ -9719,8 +9715,9 @@ test("NILM session assignment preserves drafts when refreshed session ownership 
   await expect(panel.locator(".inline-feedback.success")).toHaveCount(0);
   await expect(panel.locator('[data-nilm-review-item="session:nilm-session-0"]'))
     .toHaveAttribute("aria-pressed", "true");
-  await expect(panel.locator('[data-nilm-session-label-key="nilm-session-0"]'))
-    .toHaveCount(2);
+  const applianceName = panel.locator('[data-nilm-session-label-key="nilm-session-0"]');
+  await expect(applianceName).toHaveCount(1);
+  await expect(applianceName).toHaveValue("Keep Window AC");
   await expect.poll(() => page.evaluate(() => ({
     assignment: window.__panel._nilmSessionAssignmentDrafts.get("nilm-session-0"),
     label: window.__panel._nilmSessionLabelDrafts.get("nilm-session-0"),
