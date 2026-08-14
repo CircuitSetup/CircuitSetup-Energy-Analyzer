@@ -2781,6 +2781,58 @@ def test_nilm_workspace_lanes_review_only_assignable_unassigned_sessions() -> No
     assert lanes["needs_review"]["session_ids"] == ["clean"]
 
 
+def test_nilm_workspace_payload_keeps_assigned_session_out_of_needs_review() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="Mains",
+        entity_id="sensor.mains_power",
+    )
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-dishwasher",
+                "mains_circuit_id": "mains",
+                "display_name": "Dishwasher",
+                "lifecycle_state": "assigned",
+                "signature_fingerprints": ["signature-dishwasher"],
+                "session_ids": ["session-dishwasher"],
+            }
+        ]
+    }
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [
+            {
+                "session_id": "session-dishwasher",
+                "mains_circuit_id": "mains",
+                "signature_fingerprint": "signature-dishwasher",
+                "assignment_id": "assignment-dishwasher",
+                "start": "2026-08-11T12:00:00+00:00",
+                "end": "2026-08-11T12:30:00+00:00",
+                "ambiguous": False,
+            }
+        ]
+    }
+
+    payload = nilm_workspace_payload(
+        [coordinator], circuit_id="mains", entry_id="entry-1"
+    )
+    session = next(
+        item
+        for item in payload["sessions"]
+        if item["session_id"] == "session-dishwasher"
+    )
+
+    assert session["assignment_id"] == "assignment-dishwasher"
+    assert (
+        "session-dishwasher"
+        not in payload["lanes"]["needs_review"]["session_ids"]
+    )
+
+
 def test_nilm_workspace_visible_sessions_exclude_ambiguous_evidence() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         _nilm_workspace_visible_sessions,

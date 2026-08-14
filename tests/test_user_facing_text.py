@@ -6481,7 +6481,20 @@ def test_nilm_decision_action_contracts() -> None:
       context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
       const calls = [];
       let focused = 0;
-      const refreshed = makeWorkspace({ assignments: row.results, sessions: row.sessions });
+      const refreshedSessions = row.kind === "merge" ? row.sessions : row.sessions.map(
+        (session) => ({ ...session, assignment_id: row.id }),
+      );
+      const refreshedAssignments = row.kind === "merge" ? row.results : row.results.map(
+        (assignment) => assignment.assignment_id === row.id
+          ? { ...assignment, session_ids: Array.from(new Set([
+            ...(assignment.session_ids || []), refreshedSessions[0].session_id,
+          ])) }
+          : assignment,
+      );
+      const refreshed = makeWorkspace({
+        assignments: refreshedAssignments,
+        sessions: refreshedSessions,
+      });
       refreshed.lanes[row.lane].assignment_ids = [row.id];
       if (row.kind === "reassign") refreshed.lanes.assigned.assignment_ids = ["assignment-old"];
       const panel = makePanel({

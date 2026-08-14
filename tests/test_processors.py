@@ -8862,6 +8862,79 @@ def test_nilm_history_invalidates_open_owner_when_ambiguous() -> None:
     assert merged[0]["assignment_id"] is None
 
 
+def test_nilm_session_history_preserves_explicit_owner_on_nonambiguous_refresh(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+    )
+
+    existing = {
+        "session_id": "session-pump",
+        "signature_fingerprint": "pump-fingerprint",
+        "assignment_id": "pump",
+        "on_edge_id": "edge-on",
+        "off_edge_id": "edge-off",
+        "start": "2026-08-13T11:31:55+00:00",
+        "end": "2026-08-13T11:54:36+00:00",
+        "ambiguous": False,
+    }
+    refreshed = {**existing, "assignment_id": None, "median_power_w": 96.0}
+
+    merged = _merge_nilm_session_history([existing], [refreshed])
+
+    assert merged[0]["assignment_id"] == "pump"
+    assert merged[0]["median_power_w"] == pytest.approx(96.0)
+
+
+def test_nilm_session_history_does_not_preserve_owner_from_ambiguous_existing_session(
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+    )
+
+    existing = {
+        "session_id": "session-pump",
+        "signature_fingerprint": "pump-fingerprint",
+        "assignment_id": "pump",
+        "on_edge_id": "edge-on",
+        "off_edge_id": "edge-off",
+        "start": "2026-08-13T11:31:55+00:00",
+        "end": None,
+        "ambiguous": True,
+    }
+    refreshed = {**existing, "assignment_id": None, "ambiguous": False}
+
+    merged = _merge_nilm_session_history([existing], [refreshed])
+
+    assert merged[0]["assignment_id"] is None
+
+
+def test_nilm_session_history_does_not_transfer_owner_across_session_ids() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+    )
+
+    existing = {
+        "session_id": "session-owner",
+        "assignment_id": "pump",
+        "on_edge_id": "edge-on",
+        "off_edge_id": "edge-off",
+        "ambiguous": False,
+    }
+    refreshed = {
+        "session_id": "session-refreshed",
+        "assignment_id": None,
+        "on_edge_id": "edge-on",
+        "off_edge_id": "edge-off",
+        "ambiguous": False,
+    }
+
+    merged = _merge_nilm_session_history([existing], [refreshed])
+
+    assert merged[0]["session_id"] == "session-refreshed"
+    assert merged[0]["assignment_id"] is None
+
+
 def test_nilm_session_history_closes_open_session_across_owner_fingerprints() -> None:
     from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
         _merge_nilm_session_history,

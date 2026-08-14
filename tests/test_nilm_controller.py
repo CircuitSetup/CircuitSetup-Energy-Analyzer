@@ -2769,7 +2769,17 @@ async def test_configured_primary_uses_configured_identity_and_role() -> None:
                         "confidence": 0.91,
                     }
                 ]
-            }
+            },
+            nilm_session_history_by_circuit={
+                "mixed": [
+                    {
+                        "session_id": "session-1",
+                        "signature_fingerprint": "fingerprint-1",
+                        "start": "2026-06-02T12:00:00+00:00",
+                        "end": "2026-06-02T12:15:00+00:00",
+                    }
+                ]
+            },
         ),
         now_fn=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
     )
@@ -2939,6 +2949,16 @@ async def test_primary_identity_survives_other_assignments(action: str) -> None:
                     {
                         "signature_id": "signature-1",
                         "feedback_fingerprint": "fp-1",
+                    }
+                ]
+            },
+            nilm_session_history_by_circuit={
+                "mixed": [
+                    {
+                        "session_id": "session-1",
+                        "signature_fingerprint": "fp-1",
+                        "start": "2026-06-02T12:00:00+00:00",
+                        "end": "2026-06-02T12:15:00+00:00",
                     }
                 ]
             },
