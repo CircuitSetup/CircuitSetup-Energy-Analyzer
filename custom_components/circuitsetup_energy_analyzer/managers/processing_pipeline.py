@@ -18,6 +18,7 @@ class ProcessingPipeline:
         self,
         *,
         event_processor: Any,
+        mains_power_quality_processor: Any,
         power_quality_processor: Any,
         energy_usage_processor: Any,
         energy_goal_processor: Any,
@@ -40,6 +41,7 @@ class ProcessingPipeline:
         hvac_efficiency_processor: Any | None = None,
     ) -> None:
         self._event_processor = event_processor
+        self._mains_power_quality_processor = mains_power_quality_processor
         self._power_quality_processor = power_quality_processor
         self._energy_usage_processor = energy_usage_processor
         self._energy_goal_processor = energy_goal_processor
@@ -95,6 +97,17 @@ class ProcessingPipeline:
         event_result = self._event_processor.process(sample, config, context)
         new_events, _ = await self._async_apply_feature_result(event_result)
         events.extend(new_events)
+
+        mains_quality_result = self._mains_power_quality_processor.process(
+            sample,
+            config,
+            context,
+        )
+        mains_quality_events, mains_quality_alerts = (
+            await self._async_apply_feature_result(mains_quality_result)
+        )
+        events.extend(mains_quality_events)
+        alerts.extend(mains_quality_alerts)
 
         power_quality_result = self._power_quality_processor.process(
             sample,

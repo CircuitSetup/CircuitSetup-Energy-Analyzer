@@ -7,6 +7,13 @@ from .balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
 from .capacity import DEFAULT_CAPACITY_WARNING_RATIO
 from .const import DEFAULT_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT
 from .load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
+from .mains_power_quality import (
+    DEFAULT_FREQUENCY_DROP_HZ,
+    DEFAULT_FREQUENCY_SPIKE_HZ,
+    DEFAULT_VOLTAGE_IMBALANCE_RATIO,
+    DEFAULT_VOLTAGE_SAG_RATIO,
+    DEFAULT_VOLTAGE_SWELL_RATIO,
+)
 from .metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
     DEFAULT_MIN_APPARENT_POWER_VA,
@@ -36,6 +43,11 @@ _SETTING_DEFAULTS: dict[str, Any] = {
     "standby_min_samples": 24,
     "leg_imbalance_warning_ratio": DEFAULT_LEG_IMBALANCE_WARNING_RATIO,
     "leg_imbalance_min_total_power_w": DEFAULT_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
+    "mains_voltage_sag_ratio": DEFAULT_VOLTAGE_SAG_RATIO,
+    "mains_voltage_swell_ratio": DEFAULT_VOLTAGE_SWELL_RATIO,
+    "mains_frequency_drop_hz": DEFAULT_FREQUENCY_DROP_HZ,
+    "mains_frequency_spike_hz": DEFAULT_FREQUENCY_SPIKE_HZ,
+    "mains_voltage_imbalance_ratio": DEFAULT_VOLTAGE_IMBALANCE_RATIO,
     "apparent_power_tolerance_percent": (
         DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT
     ),
@@ -97,6 +109,22 @@ _SETTING_EXPECTED_EFFECTS = {
     ),
     "leg_imbalance_min_total_power_w": (
         "Avoid imbalance alerts when the circuit is below meaningful total load."
+    ),
+    "mains_voltage_sag_ratio": (
+        "Tune mains voltage sag alerts toward observed voltage behavior."
+    ),
+    "mains_voltage_swell_ratio": (
+        "Tune mains voltage spike alerts toward observed voltage behavior."
+    ),
+    "mains_frequency_drop_hz": (
+        "Tune mains frequency drop alerts toward observed frequency behavior."
+    ),
+    "mains_frequency_spike_hz": (
+        "Tune mains frequency spike alerts toward observed frequency behavior."
+    ),
+    "mains_voltage_imbalance_ratio": (
+        "Tune mains leg-voltage mismatch alerts toward observed split-phase "
+        "voltage behavior."
     ),
     "apparent_power_tolerance_percent": (
         "Tune metric consistency checks for W, VA, current, and power-factor "
@@ -188,6 +216,22 @@ _SETTING_CONTROL_DESCRIPTIONS = {
     ),
     "leg_imbalance_min_total_power_w": (
         "Controls the minimum total power required before leg imbalance checks run."
+    ),
+    "mains_voltage_sag_ratio": (
+        "Controls how far mains voltage can sag below baseline before guidance."
+    ),
+    "mains_voltage_swell_ratio": (
+        "Controls how far mains voltage can spike above baseline before guidance."
+    ),
+    "mains_frequency_drop_hz": (
+        "Controls how far mains frequency can drop below baseline before guidance."
+    ),
+    "mains_frequency_spike_hz": (
+        "Controls how far mains frequency can spike above baseline before guidance."
+    ),
+    "mains_voltage_imbalance_ratio": (
+        "Controls how far apart the two mains leg-voltage readings can be before "
+        "voltage imbalance guidance appears."
     ),
     "apparent_power_tolerance_percent": (
         "Controls the allowed difference between reported real and apparent power."

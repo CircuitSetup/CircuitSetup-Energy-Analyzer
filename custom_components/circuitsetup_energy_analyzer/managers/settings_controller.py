@@ -285,6 +285,11 @@ class SettingsController:
             "current_samples": [],
             "current_sample_counts": [],
             "leg_imbalance_ratios": [],
+            "mains_voltage_imbalance_ratios": [],
+            "mains_voltage_sag_ratios": [],
+            "mains_voltage_swell_ratios": [],
+            "mains_frequency_drop_hz": [],
+            "mains_frequency_spike_hz": [],
             "dual_phase_total_power_w": [],
             "apparent_power_residual_percent": [],
             "power_factor_residual": [],
@@ -390,6 +395,57 @@ class SettingsController:
         )
         if total_power is not None:
             feature_history["dual_phase_total_power_w"] = [total_power]
+
+        feature_history["mains_voltage_imbalance_ratios"] = [
+            ratio
+            for event in coordinator.store_data.events
+            if event.circuit_id == circuit_id
+            and event.event_type is EventType.VOLTAGE_IMBALANCE
+            for ratio in _numeric_items(
+                [event.features],
+                keys=("voltage_imbalance_ratio",),
+            )
+        ]
+        feature_history["mains_voltage_sag_ratios"] = [
+            ratio
+            for event in coordinator.store_data.events
+            if event.circuit_id == circuit_id
+            and event.event_type is EventType.VOLTAGE_SAG
+            for ratio in _numeric_items(
+                [event.features],
+                keys=("sag_ratio",),
+            )
+        ]
+        feature_history["mains_voltage_swell_ratios"] = [
+            ratio
+            for event in coordinator.store_data.events
+            if event.circuit_id == circuit_id
+            and event.event_type is EventType.VOLTAGE_SWELL
+            for ratio in _numeric_items(
+                [event.features],
+                keys=("swell_ratio",),
+            )
+        ]
+        feature_history["mains_frequency_drop_hz"] = [
+            abs(delta_hz)
+            for event in coordinator.store_data.events
+            if event.circuit_id == circuit_id
+            and event.event_type is EventType.FREQUENCY_DROP
+            for delta_hz in _numeric_items(
+                [event.features],
+                keys=("frequency_delta_hz",),
+            )
+        ]
+        feature_history["mains_frequency_spike_hz"] = [
+            abs(delta_hz)
+            for event in coordinator.store_data.events
+            if event.circuit_id == circuit_id
+            and event.event_type is EventType.FREQUENCY_SPIKE
+            for delta_hz in _numeric_items(
+                [event.features],
+                keys=("frequency_delta_hz",),
+            )
+        ]
 
         metric_evidence = coordinator.state.metric_consistency_evidence_by_circuit.get(
             circuit_id,
@@ -2025,6 +2081,7 @@ class SettingsController:
         store_data.capacity_settings_by_circuit.pop(circuit_id, None)
         store_data.standby_settings_by_circuit.pop(circuit_id, None)
         store_data.leg_imbalance_settings_by_circuit.pop(circuit_id, None)
+        store_data.mains_power_quality_settings_by_circuit.pop(circuit_id, None)
         store_data.metric_consistency_settings_by_circuit.pop(circuit_id, None)
         store_data.balance_settings_by_circuit.pop(circuit_id, None)
         store_data.solar_flow_settings_by_circuit.pop(circuit_id, None)
@@ -2121,6 +2178,18 @@ class SettingsController:
                 "leg_imbalance_min_total_power_w": "minimum_total_power_w",
             },
         )
+        _replace_if_present_as(
+            store_data.mains_power_quality_settings_by_circuit,
+            circuit_id,
+            settings,
+            {
+                "mains_voltage_sag_ratio": "voltage_sag_ratio",
+                "mains_voltage_swell_ratio": "voltage_swell_ratio",
+                "mains_frequency_drop_hz": "frequency_drop_hz",
+                "mains_frequency_spike_hz": "frequency_spike_hz",
+                "mains_voltage_imbalance_ratio": "voltage_imbalance_ratio",
+            },
+        )
         _replace_if_present(
             store_data.metric_consistency_settings_by_circuit,
             circuit_id,
@@ -2199,6 +2268,31 @@ class SettingsController:
         if "minimum_total_power_w" in leg_imbalance:
             settings["leg_imbalance_min_total_power_w"] = leg_imbalance[
                 "minimum_total_power_w"
+            ]
+
+        mains_power_quality = store_data.mains_power_quality_settings_by_circuit.get(
+            circuit_id,
+            {},
+        )
+        if "voltage_sag_ratio" in mains_power_quality:
+            settings["mains_voltage_sag_ratio"] = mains_power_quality[
+                "voltage_sag_ratio"
+            ]
+        if "voltage_swell_ratio" in mains_power_quality:
+            settings["mains_voltage_swell_ratio"] = mains_power_quality[
+                "voltage_swell_ratio"
+            ]
+        if "frequency_drop_hz" in mains_power_quality:
+            settings["mains_frequency_drop_hz"] = mains_power_quality[
+                "frequency_drop_hz"
+            ]
+        if "frequency_spike_hz" in mains_power_quality:
+            settings["mains_frequency_spike_hz"] = mains_power_quality[
+                "frequency_spike_hz"
+            ]
+        if "voltage_imbalance_ratio" in mains_power_quality:
+            settings["mains_voltage_imbalance_ratio"] = mains_power_quality[
+                "voltage_imbalance_ratio"
             ]
 
         balance = store_data.balance_settings_by_circuit.get(circuit_id, {})
@@ -2282,6 +2376,17 @@ class SettingsController:
             {
                 "leg_imbalance_warning_ratio": "warning_ratio",
                 "leg_imbalance_min_total_power_w": "minimum_total_power_w",
+            }.get(setting_key, setting_key),
+        )
+        _remove_setting_key(
+            store_data.mains_power_quality_settings_by_circuit,
+            circuit_id,
+            {
+                "mains_voltage_sag_ratio": "voltage_sag_ratio",
+                "mains_voltage_swell_ratio": "voltage_swell_ratio",
+                "mains_frequency_drop_hz": "frequency_drop_hz",
+                "mains_frequency_spike_hz": "frequency_spike_hz",
+                "mains_voltage_imbalance_ratio": "voltage_imbalance_ratio",
             }.get(setting_key, setting_key),
         )
         _remove_setting_key(

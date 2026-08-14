@@ -49,6 +49,21 @@ def _is_self_mature_cold_storage_alert(alert: AlertEvidence) -> bool:
     )
 
 
+def _is_self_mature_mains_power_quality_alert(alert: AlertEvidence) -> bool:
+    return (
+        str(alert.features.get("source") or "") == "mains_power_quality"
+        and alert.event_type
+        in {
+            EventType.VOLTAGE_SAG,
+            EventType.VOLTAGE_SWELL,
+            EventType.VOLTAGE_IMBALANCE,
+            EventType.FREQUENCY_DROP,
+            EventType.FREQUENCY_SPIKE,
+        }
+        and alert.features.get("notification_eligible") is True
+    )
+
+
 class NotificationController:
     """Coordinate persistent notifications and duplicate suppression."""
 
@@ -115,6 +130,7 @@ class NotificationController:
         return (
             self._is_lifecycle_alert(alert)
             or _is_self_mature_cold_storage_alert(alert)
+            or _is_self_mature_mains_power_quality_alert(alert)
             or not self._circuit_is_learning(alert.circuit_id)
         )
 

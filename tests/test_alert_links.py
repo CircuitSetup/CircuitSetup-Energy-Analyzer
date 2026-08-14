@@ -250,6 +250,23 @@ def test_alert_graph_entities_uses_event_type_when_feature_missing() -> None:
     )
 
 
+def test_alert_graph_entities_uses_frequency_event_type_when_feature_missing() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        alert_graph_entities,
+    )
+
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 5, 12, 30, tzinfo=UTC),
+        circuit_id="panel",
+        severity=Severity.WARNING,
+        message="Frequency drop detected",
+        event_type=EventType.FREQUENCY_DROP,
+        feature="",
+    )
+
+    assert alert_graph_entities(alert, _config()) == ("sensor.hvac_frequency",)
+
+
 def test_alert_source_entities_returns_unique_configured_sources() -> None:
     from custom_components.circuitsetup_energy_analyzer.alert_links import (
         alert_source_entities,

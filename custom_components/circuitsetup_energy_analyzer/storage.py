@@ -153,6 +153,9 @@ class FeatureStoreData:
     leg_imbalance_settings_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
+    mains_power_quality_settings_by_circuit: dict[str, dict[str, Any]] = field(
+        default_factory=dict
+    )
     metric_consistency_settings_by_circuit: dict[str, dict[str, Any]] = field(
         default_factory=dict
     )
@@ -429,6 +432,9 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
         "leg_imbalance_settings_by_circuit": _dict_of_dicts(
             data.leg_imbalance_settings_by_circuit
         ),
+        "mains_power_quality_settings_by_circuit": _dict_of_dicts(
+            data.mains_power_quality_settings_by_circuit
+        ),
         "metric_consistency_settings_by_circuit": _dict_of_dicts(
             data.metric_consistency_settings_by_circuit
         ),
@@ -606,6 +612,9 @@ def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData
         ),
         leg_imbalance_settings_by_circuit=_dict_of_dicts(
             raw.get("leg_imbalance_settings_by_circuit", {}),
+        ),
+        mains_power_quality_settings_by_circuit=_dict_of_dicts(
+            raw.get("mains_power_quality_settings_by_circuit", {}),
         ),
         metric_consistency_settings_by_circuit=_dict_of_dicts(
             raw.get("metric_consistency_settings_by_circuit", {}),
@@ -821,6 +830,9 @@ def prune_events(
         demand_by_circuit=data.demand_by_circuit,
         capacity_settings_by_circuit=data.capacity_settings_by_circuit,
         leg_imbalance_settings_by_circuit=data.leg_imbalance_settings_by_circuit,
+        mains_power_quality_settings_by_circuit=(
+            data.mains_power_quality_settings_by_circuit
+        ),
         metric_consistency_settings_by_circuit=(
             data.metric_consistency_settings_by_circuit
         ),

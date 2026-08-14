@@ -6809,6 +6809,11 @@ def test_advanced_settings_schema_exposes_power_quality_balance_and_solar_contro
         {
             "leg_imbalance_warning_ratio": 0.4,
             "leg_imbalance_min_total_power_w": 800.0,
+            "mains_voltage_sag_ratio": 0.09,
+            "mains_voltage_swell_ratio": 0.1,
+            "mains_frequency_drop_hz": 0.7,
+            "mains_frequency_spike_hz": 0.8,
+            "mains_voltage_imbalance_ratio": 0.04,
             "apparent_power_tolerance_percent": 12.0,
             "power_factor_tolerance": 0.08,
             "minimum_apparent_power_va": 120.0,
@@ -6828,6 +6833,11 @@ def test_advanced_settings_schema_exposes_power_quality_balance_and_solar_contro
     )
 
     assert "dual_phase_settings" not in _schema_section_keys(schema)
+    assert _schema_default(schema, "mains_voltage_sag_ratio") == 0.09
+    assert _schema_default(schema, "mains_voltage_swell_ratio") == 0.1
+    assert _schema_default(schema, "mains_frequency_drop_hz") == 0.7
+    assert _schema_default(schema, "mains_frequency_spike_hz") == 0.8
+    assert _schema_default(schema, "mains_voltage_imbalance_ratio") == 0.04
     assert _schema_default(schema, "apparent_power_tolerance_percent") == 12.0
     assert _schema_default(schema, "power_factor_tolerance") == 0.08
     assert _schema_default(schema, "minimum_apparent_power_va") == 120.0

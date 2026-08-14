@@ -2963,6 +2963,7 @@ async def test_processing_pipeline_uses_injected_processors() -> None:
     pipeline = processing_pipeline.ProcessingPipeline(coordinator)
     pipeline.configure_processors(
         event_processor=_Processor("event"),
+        mains_power_quality_processor=_Processor("mains_power_quality"),
         power_quality_processor=_Processor(
             "power_quality",
             power_quality.PowerQualityResult(clear_power_quality_state="fridge"),
@@ -3005,6 +3006,7 @@ async def test_processing_pipeline_uses_injected_processors() -> None:
 
     processor_names = [
         "event",
+        "mains_power_quality",
         "power_quality",
         "usage",
         "goal",
@@ -3107,6 +3109,7 @@ async def test_processing_pipeline_applies_cross_circuit_feature_results() -> No
     pipeline = processing_pipeline.ProcessingPipeline(coordinator)
     pipeline.configure_processors(
         event_processor=_Processor(),
+        mains_power_quality_processor=_Processor(),
         power_quality_processor=_Processor(),
         energy_usage_processor=_Processor(),
         energy_goal_processor=_Processor(),
@@ -3207,6 +3210,52 @@ async def test_coordinator_applies_feature_result() -> None:
     assert coordinator.state.health_summary_by_circuit["fridge"] == "Running"
     assert notifications == [alert]
     assert coordinator._store_dirty is True
+
+
+@pytest.mark.asyncio
+async def test_coordinator_allows_self_mature_mains_power_quality_alert() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+    )
+
+    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
+    alert = AlertEvidence(
+        timestamp=now,
+        circuit_id="mains",
+        severity=Severity.WARNING,
+        message="Mains voltage sag detected.",
+        event_type=EventType.VOLTAGE_SAG,
+        feature="voltage_sag",
+        features={
+            "source": "mains_power_quality",
+            "notification_eligible": True,
+        },
+    )
+    notifications: list[AlertEvidence] = []
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={DOMAIN: {}}),
+        entry_data={},
+        store_data=FeatureStoreData(),
+        now_fn=lambda: now,
+    )
+
+    async def fake_notify(alert_to_notify: AlertEvidence) -> None:
+        notifications.append(alert_to_notify)
+
+    coordinator._notify_alert = fake_notify
+
+    _events, applied_alerts = await coordinator.async_apply_feature_result(
+        FeatureResult(
+            alerts=[alert],
+            notifications=[alert],
+        )
+    )
+
+    assert applied_alerts == [alert]
+    assert notifications == [alert]
 
 
 @pytest.mark.asyncio
@@ -5602,6 +5651,53 @@ def test_event_processor_retains_generic_events_for_non_mixed_circuits(
 
     assert [event.event_type for event in result.events] == [EventType.START]
     assert "source" in processor.detectors
+
+
+def test_event_processor_filters_legacy_voltage_sag_for_mains_nilm() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        ProcessingContext,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.events import (
+        CircuitEventProcessor,
+    )
+
+    context = ProcessingContext(
+        now=datetime(2026, 6, 11, 12, 0, tzinfo=UTC),
+        hass=SimpleNamespace(data={DOMAIN: {}}),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        options={},
+        entry_data={},
+        known_load_circuit_ids=frozenset(),
+        sensitivity="standard",
+    )
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    processor = CircuitEventProcessor()
+
+    processor.process(
+        replace(_sample(0, 5.0), circuit_id="mains"),
+        config,
+        context,
+    )
+    processor.process(
+        replace(_sample(10, 100.0), circuit_id="mains"),
+        config,
+        context,
+    )
+    result = processor.process(
+        replace(_sample(30, 100.0), circuit_id="mains", voltage=109.0),
+        config,
+        context,
+    )
+
+    assert [event.event_type for event in result.events] == [EventType.START]
+    assert result.store_dirty is True
 
 
 def test_run_cycle_processor_returns_observation_without_alert_when_policy_is_not_ready(
@@ -17392,6 +17488,7 @@ async def test_pipeline_applies_learning_transition_before_appliance_health() ->
     pipeline = processing_pipeline.ProcessingPipeline(_Coordinator())
     pipeline.configure_processors(
         event_processor=_NoopProcessor(),
+        mains_power_quality_processor=_NoopProcessor(),
         power_quality_processor=_NoopProcessor(power_quality.PowerQualityResult()),
         energy_usage_processor=_NoopProcessor(
             FeatureResult(

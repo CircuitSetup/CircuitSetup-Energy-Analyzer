@@ -53,6 +53,7 @@ from .processors import (
     HvacEfficiencyProcessor,
     LegImbalanceProcessor,
     MainsBalanceProcessor,
+    MainsPowerQualityProcessor,
     MetricConsistencyProcessor,
     NilmSampleProcessor,
     NilmTopologyProcessor,
@@ -148,6 +149,9 @@ def initialize_runtime(
     }
     self._baseline_values: defaultdict[str, list[float]] = defaultdict(list)
     self._event_processor = CircuitEventProcessor(self._detectors)
+    self._mains_power_quality_processor = MainsPowerQualityProcessor(
+        learning_mature=self.processor_runtime.mains_power_quality_learning_mature,
+    )
     self._power_quality_processor = PowerQualityProcessor(
         alert_policy_for_circuit=self.alert_policies.alert_policy_for_circuit,
         learning_mature=self.processor_runtime.learning_mature,
@@ -285,6 +289,7 @@ def initialize_runtime(
     )
     self.pipeline.configure_processors(
         event_processor=self._event_processor,
+        mains_power_quality_processor=self._mains_power_quality_processor,
         power_quality_processor=self._power_quality_processor,
         energy_usage_processor=self._energy_usage_processor,
         energy_goal_processor=self._energy_goal_processor,
@@ -377,6 +382,11 @@ def initialize_runtime(
         recommendation_decisions_max_age=RECOMMENDATION_DECISIONS_MAX_AGE,
         recommendation_decisions_max_items=RECOMMENDATION_DECISIONS_MAX_ITEMS,
     )
+    if self.processor_runtime.ensure_mains_power_quality_learning_epochs(
+        self.circuit_configs,
+        self._now_fn(),
+    ):
+        self.store_persistence.mark_dirty()
     self.notification_controller = NotificationController(self)
     self.setup_health = SetupHealthAggregator(self)
     self.paused_circuits: set[str] = set()

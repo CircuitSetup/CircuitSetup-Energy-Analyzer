@@ -64,6 +64,9 @@ _ALERT_VALUE_FORMATS = {
     "run_cycle_duration_s": ("seconds", "number"),
     "utility_energy_mismatch": ("energy", "number"),
     "water_flow_correlation": ("minutes", "number"),
+    "voltage": ("voltage", "number"),
+    "voltage_imbalance": ("percent", "percentage"),
+    "frequency": ("frequency", "number"),
 }
 
 

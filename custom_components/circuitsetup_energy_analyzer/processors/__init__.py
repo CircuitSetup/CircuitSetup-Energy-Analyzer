@@ -14,6 +14,7 @@ from .events import CircuitEventProcessor
 from .hvac_efficiency import HvacEfficiencyProcessor
 from .leg_imbalance import LegImbalanceProcessor
 from .mains_balance import MainsBalanceProcessor
+from .mains_power_quality import MainsPowerQualityProcessor
 from .metric_consistency import MetricConsistencyProcessor
 from .nilm_sample import NilmSampleProcessor
 from .nilm_topology import NilmTopologyProcessor
@@ -37,6 +38,7 @@ __all__ = [
     "HvacEfficiencyProcessor",
     "LegImbalanceProcessor",
     "MainsBalanceProcessor",
+    "MainsPowerQualityProcessor",
     "MetricConsistencyProcessor",
     "NilmSampleProcessor",
     "NilmTopologyProcessor",

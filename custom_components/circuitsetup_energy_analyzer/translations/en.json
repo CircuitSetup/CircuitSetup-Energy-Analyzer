@@ -455,16 +455,26 @@
             }
           },
           "power_quality_settings": {
-            "name": "Power Metric Consistency",
-            "description": "Tolerance settings for W, VA, current, and power-factor consistency checks.",
+            "name": "Power Quality",
+            "description": "Tolerance settings for mains power quality and W, VA, current, and power-factor consistency checks.",
             "data": {
               "reset_power_quality_settings_to_defaults": "Reset Power Quality To Defaults",
+              "mains_voltage_sag_ratio": "Mains Voltage Sag Ratio",
+              "mains_voltage_swell_ratio": "Mains Voltage Spike Ratio",
+              "mains_frequency_drop_hz": "Mains Frequency Drop Hz",
+              "mains_frequency_spike_hz": "Mains Frequency Spike Hz",
+              "mains_voltage_imbalance_ratio": "Mains Voltage Difference Ratio",
               "apparent_power_tolerance_percent": "Apparent Power Tolerance Percent",
               "power_factor_tolerance": "Power Factor Tolerance",
               "minimum_apparent_power_va": "Minimum Apparent Power VA"
             },
             "data_description": {
-              "reset_power_quality_settings_to_defaults": "Turn this on when saving to remove custom W, VA, current, and power-factor tolerance settings.",
+              "reset_power_quality_settings_to_defaults": "Turn this on when saving to remove custom mains power-quality and W, VA, current, and power-factor tolerance settings.",
+              "mains_voltage_sag_ratio": "For mains circuits with voltage sensors, alert when voltage drops below the learned baseline by more than this ratio. Default 0.08 means 8%.",
+              "mains_voltage_swell_ratio": "For mains circuits with voltage sensors, alert when voltage rises above the learned baseline by more than this ratio. Default 0.08 means 8%.",
+              "mains_frequency_drop_hz": "For mains circuits with frequency sensors, alert when frequency drops below the learned baseline by more than this many Hz. Default 0.5 Hz.",
+              "mains_frequency_spike_hz": "For mains circuits with frequency sensors, alert when frequency rises above the learned baseline by more than this many Hz. Default 0.5 Hz.",
+              "mains_voltage_imbalance_ratio": "For mains circuits with two leg voltage sensors, alert when the leg-to-leg voltage difference divided by their midpoint exceeds this ratio. Default 0.03 means 3%.",
               "apparent_power_tolerance_percent": "Allowed percent mismatch between reported VA and voltage-current VA.",
               "power_factor_tolerance": "Allowed mismatch between reported and expected power factor.",
               "minimum_apparent_power_va": "Minimum apparent power before W, VA, and power-factor consistency is evaluated."
@@ -916,6 +926,8 @@
           "energy_per_hour": "kWh/h",
           "energy_per_cycle": "kWh/cycle",
           "current": "A",
+          "voltage": "V",
+          "frequency": "Hz",
           "starts": "starts",
           "starts_per_hour": "starts/h",
           "minutes_per_degree": "min/\u00b0F",
@@ -954,7 +966,10 @@
           "run_cycle_daily_start_count": "Run cycle daily start count",
           "run_cycle_duration_s": "Run cycle duration",
           "utility_energy_mismatch": "Utility energy mismatch",
-          "water_flow_correlation": "Water flow correlation"
+          "water_flow_correlation": "Water flow correlation",
+          "voltage": "Voltage",
+          "voltage_imbalance": "Voltage imbalance",
+          "frequency": "Frequency"
         }
       },
       "lifecycle": {
@@ -1000,6 +1015,11 @@
         "always_on_alert_w": "Always On Power Alert",
         "leg_imbalance_warning_ratio": "Leg Imbalance Warning Ratio",
         "leg_imbalance_min_total_power_w": "Leg Imbalance Minimum Total Power",
+        "mains_voltage_sag_ratio": "Mains Voltage Sag Ratio",
+        "mains_voltage_swell_ratio": "Mains Voltage Spike Ratio",
+        "mains_frequency_drop_hz": "Mains Frequency Drop",
+        "mains_frequency_spike_hz": "Mains Frequency Spike",
+        "mains_voltage_imbalance_ratio": "Mains Voltage Imbalance Ratio",
         "apparent_power_tolerance_percent": "Apparent Power Tolerance Percent",
         "power_factor_tolerance": "Power Factor Tolerance",
         "minimum_apparent_power_va": "Minimum Apparent Power VA",
@@ -1030,6 +1050,7 @@
         "operating_detection": "Operating Detection",
         "dual_phase": "Dual Phase",
         "power_quality": "Power Quality",
+        "mains_power_quality": "Mains Power Quality",
         "mains_balance": "Mains Balance",
         "solar_flow": "Solar Flow",
         "hvac_efficiency": "Weather-Normalized HVAC Response"
@@ -1042,6 +1063,11 @@
         "operating_detection": "Observed {completed_cycles} qualified completed cycles across {learning_days} distinct days. Stable idle and running power are separated enough to tune the operating thresholds.",
         "dual_phase_ratio": "The paired legs have repeatedly run with a tighter balance than the current warning threshold. The suggestion stays above the observed high-end imbalance.",
         "dual_phase_minimum": "Dual-phase imbalance should be evaluated when the appliance is genuinely active, not while it is idle or lightly loaded.",
+        "mains_voltage_sag": "Observed mains voltage sag events have stayed below the current threshold. The suggestion keeps margin above the observed high-end sag.",
+        "mains_voltage_swell": "Observed mains voltage spike events have stayed below the current threshold. The suggestion keeps margin above the observed high-end spike.",
+        "mains_frequency_drop": "Observed mains frequency drops have stayed below the current threshold. The suggestion keeps margin above the observed high-end drop.",
+        "mains_frequency_spike": "Observed mains frequency spikes have stayed below the current threshold. The suggestion keeps margin above the observed high-end spike.",
+        "mains_voltage_imbalance": "Observed mains leg-voltage differences have stayed below the current threshold. The suggestion keeps margin above the observed high-end difference.",
         "apparent_power_tolerance": "Observed W, VA, current, and power-factor residuals are stable enough to tune the metric consistency tolerance.",
         "power_factor_tolerance": "Power-factor relationship checks have a stable residual pattern, so the tolerance can be tuned to the observed sensor behavior.",
         "minimum_apparent_power": "The observed apparent-power range supports a circuit specific minimum before metric consistency is evaluated.",

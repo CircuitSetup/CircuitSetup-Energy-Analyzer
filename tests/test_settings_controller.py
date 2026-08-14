@@ -103,6 +103,7 @@ class _SettingsCoordinator:
             utility_comparison_settings_by_circuit={},
             standby_settings_by_circuit={},
             leg_imbalance_settings_by_circuit={},
+            mains_power_quality_settings_by_circuit={},
             metric_consistency_settings_by_circuit={},
             balance_settings_by_circuit={},
             solar_flow_settings_by_circuit={},
@@ -479,7 +480,37 @@ def test_settings_controller_builds_advisor_feature_history(monkeypatch) -> None
             event_type=EventType.START,
             timestamp=coordinator.now,
             features={"startup_power_w": "610"},
-        )
+        ),
+        SimpleNamespace(
+            circuit_id="fridge",
+            event_type=EventType.VOLTAGE_IMBALANCE,
+            timestamp=coordinator.now,
+            features={"voltage_imbalance_ratio": "0.026"},
+        ),
+        SimpleNamespace(
+            circuit_id="fridge",
+            event_type=EventType.VOLTAGE_SAG,
+            timestamp=coordinator.now,
+            features={"sag_ratio": "0.09"},
+        ),
+        SimpleNamespace(
+            circuit_id="fridge",
+            event_type=EventType.VOLTAGE_SWELL,
+            timestamp=coordinator.now,
+            features={"swell_ratio": "0.11"},
+        ),
+        SimpleNamespace(
+            circuit_id="fridge",
+            event_type=EventType.FREQUENCY_DROP,
+            timestamp=coordinator.now,
+            features={"frequency_delta_hz": "-0.8"},
+        ),
+        SimpleNamespace(
+            circuit_id="fridge",
+            event_type=EventType.FREQUENCY_SPIKE,
+            timestamp=coordinator.now,
+            features={"frequency_delta_hz": "0.9"},
+        ),
     ]
     coordinator.learning_events = [
         SimpleNamespace(
@@ -574,6 +605,11 @@ def test_settings_controller_builds_advisor_feature_history(monkeypatch) -> None
     assert history["current_samples"] == [7.25, 8.5]
     assert history["current_sample_counts"] == [4, 1]
     assert history["leg_imbalance_ratios"] == [0.12]
+    assert history["mains_voltage_imbalance_ratios"] == [0.026]
+    assert history["mains_voltage_sag_ratios"] == [0.09]
+    assert history["mains_voltage_swell_ratios"] == [0.11]
+    assert history["mains_frequency_drop_hz"] == [0.8]
+    assert history["mains_frequency_spike_hz"] == [0.9]
     assert history["dual_phase_total_power_w"] == [780]
     assert history["apparent_power_residual_percent"] == [3.5]
     assert history["power_factor_residual"] == [0.04]
@@ -1144,6 +1180,11 @@ def test_settings_controller_replaces_advanced_settings() -> None:
             "min_samples": 12,
             "leg_imbalance_warning_ratio": 0.35,
             "leg_imbalance_min_total_power_w": 700.0,
+            "mains_voltage_sag_ratio": 0.09,
+            "mains_voltage_swell_ratio": 0.1,
+            "mains_frequency_drop_hz": 0.7,
+            "mains_frequency_spike_hz": 0.8,
+            "mains_voltage_imbalance_ratio": 0.04,
             "balance_negative_tolerance_w": 250.0,
             "solar_export_tolerance_w": 120.0,
         },
@@ -1159,6 +1200,13 @@ def test_settings_controller_replaces_advanced_settings() -> None:
     assert coordinator.store_data.leg_imbalance_settings_by_circuit["fridge"] == {
         "warning_ratio": 0.35,
         "minimum_total_power_w": 700.0,
+    }
+    assert coordinator.store_data.mains_power_quality_settings_by_circuit["fridge"] == {
+        "voltage_sag_ratio": 0.09,
+        "voltage_swell_ratio": 0.1,
+        "frequency_drop_hz": 0.7,
+        "frequency_spike_hz": 0.8,
+        "voltage_imbalance_ratio": 0.04
     }
     assert coordinator.store_data.balance_settings_by_circuit["fridge"] == {
         "negative_tolerance_w": 250.0
@@ -1209,6 +1257,13 @@ def test_settings_controller_clears_mapped_advanced_settings() -> None:
         "warning_ratio": 0.35,
         "minimum_total_power_w": 700.0,
     }
+    coordinator.store_data.mains_power_quality_settings_by_circuit["fridge"] = {
+        "voltage_sag_ratio": 0.09,
+        "voltage_swell_ratio": 0.1,
+        "frequency_drop_hz": 0.7,
+        "frequency_spike_hz": 0.8,
+        "voltage_imbalance_ratio": 0.04
+    }
     coordinator.store_data.balance_settings_by_circuit["fridge"] = {
         "negative_tolerance_w": 250.0
     }
@@ -1222,11 +1277,19 @@ def test_settings_controller_clears_mapped_advanced_settings() -> None:
         "fridge",
         "leg_imbalance_min_total_power_w",
     )
+    controller.clear_advanced_setting_value("fridge", "mains_voltage_sag_ratio")
+    controller.clear_advanced_setting_value("fridge", "mains_voltage_swell_ratio")
+    controller.clear_advanced_setting_value("fridge", "mains_frequency_drop_hz")
+    controller.clear_advanced_setting_value("fridge", "mains_frequency_spike_hz")
+    controller.clear_advanced_setting_value("fridge", "mains_voltage_imbalance_ratio")
     controller.clear_advanced_setting_value("fridge", "balance_negative_tolerance_w")
     controller.clear_advanced_setting_value("fridge", "solar_export_tolerance_w")
 
     assert "fridge" not in coordinator.store_data.standby_settings_by_circuit
     assert "fridge" not in coordinator.store_data.leg_imbalance_settings_by_circuit
+    assert (
+        "fridge" not in coordinator.store_data.mains_power_quality_settings_by_circuit
+    )
     assert "fridge" not in coordinator.store_data.balance_settings_by_circuit
     assert "fridge" not in coordinator.store_data.solar_flow_settings_by_circuit
 
@@ -1265,6 +1328,13 @@ def test_settings_controller_reads_advanced_settings_for_circuit() -> None:
         "warning_ratio": 0.35,
         "minimum_total_power_w": 700.0,
     }
+    coordinator.store_data.mains_power_quality_settings_by_circuit["fridge"] = {
+        "voltage_sag_ratio": 0.09,
+        "voltage_swell_ratio": 0.1,
+        "frequency_drop_hz": 0.7,
+        "frequency_spike_hz": 0.8,
+        "voltage_imbalance_ratio": 0.04
+    }
     coordinator.store_data.balance_settings_by_circuit["fridge"] = {
         "negative_tolerance_w": 250.0
     }
@@ -1281,6 +1351,11 @@ def test_settings_controller_reads_advanced_settings_for_circuit() -> None:
     assert settings["min_samples"] == 12
     assert settings["leg_imbalance_warning_ratio"] == 0.35
     assert settings["leg_imbalance_min_total_power_w"] == 700.0
+    assert settings["mains_voltage_sag_ratio"] == 0.09
+    assert settings["mains_voltage_swell_ratio"] == 0.1
+    assert settings["mains_frequency_drop_hz"] == 0.7
+    assert settings["mains_frequency_spike_hz"] == 0.8
+    assert settings["mains_voltage_imbalance_ratio"] == 0.04
     assert settings["balance_negative_tolerance_w"] == 250.0
     assert settings["solar_export_tolerance_w"] == 120.0
     assert settings["solar_surplus_threshold_w"] == 500.0

@@ -10,7 +10,13 @@ from ..capacity import CapacitySettings
 from ..cost import CostSettings
 from ..demand import DemandSettings
 from ..goals import EnergyGoalSettings
-from ..models import CircuitConfig, CircuitEvent, EventType
+from ..models import (
+    ApplianceProfile,
+    CircuitConfig,
+    CircuitEvent,
+    CircuitMode,
+    EventType,
+)
 from ..profiles import get_profile_definition
 from ..standby import StandbySettings
 from ..usage import EnergyUsageSettings
@@ -126,6 +132,39 @@ class ProcessorRuntimeManager:
         first_seen = min(event.timestamp for event in circuit_events)
         return now - first_seen >= timedelta(days=profile.minimum_learning_days)
 
+    def mains_power_quality_learning_mature(
+        self,
+        config: CircuitConfig,
+        now: datetime,
+    ) -> bool:
+        learning_started_at = self._learning_started_at(config, now)
+        if learning_started_at is None:
+            return False
+
+        profile = get_profile_definition(config.appliance_profile)
+        return now - learning_started_at >= timedelta(
+            days=profile.minimum_learning_days,
+        )
+
+    def ensure_mains_power_quality_learning_epochs(
+        self,
+        configs: Sequence[CircuitConfig],
+        now: datetime,
+    ) -> bool:
+        changed = False
+        for config in configs:
+            if not _is_mains_config(config):
+                continue
+            if config.circuit_id in (
+                self._coordinator.store_data.learning_started_at_by_circuit
+            ):
+                continue
+            self._coordinator.store_data.learning_started_at_by_circuit[
+                config.circuit_id
+            ] = now.isoformat()
+            changed = True
+        return changed
+
     def learning_events_since_restart(
         self,
         config: CircuitConfig,
@@ -133,6 +172,25 @@ class ProcessorRuntimeManager:
         events: Sequence[CircuitEvent] | None = None,
     ) -> list[CircuitEvent]:
         """Return circuit events retained for the current learning period."""
+        learning_started_at = self._learning_started_at(config, now)
+        return [
+            event
+            for event in (
+                self._coordinator.store_data.events if events is None else events
+            )
+            if event.circuit_id == config.circuit_id
+            and event.event_type in {EventType.START, EventType.STOP}
+            and (
+                learning_started_at is None
+                or event.timestamp >= learning_started_at
+            )
+        ]
+
+    def _learning_started_at(
+        self,
+        config: CircuitConfig,
+        now: datetime,
+    ) -> datetime | None:
         raw_learning_started_at = (
             self._coordinator.store_data.learning_started_at_by_circuit.get(
                 config.circuit_id
@@ -146,15 +204,11 @@ class ProcessorRuntimeManager:
                 pass
             if learning_started_at is not None and learning_started_at.tzinfo is None:
                 learning_started_at = learning_started_at.replace(tzinfo=now.tzinfo)
-        return [
-            event
-            for event in (
-                self._coordinator.store_data.events if events is None else events
-            )
-            if event.circuit_id == config.circuit_id
-            and event.event_type in {EventType.START, EventType.STOP}
-            and (
-                learning_started_at is None
-                or event.timestamp >= learning_started_at
-            )
-        ]
+        return learning_started_at
+
+
+def _is_mains_config(config: CircuitConfig) -> bool:
+    return (
+        config.mode is CircuitMode.MAINS_NILM
+        or config.appliance_profile is ApplianceProfile.MAINS_NILM
+    )
