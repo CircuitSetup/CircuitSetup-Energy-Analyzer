@@ -65,12 +65,22 @@ def _legacy_nilm_detection_enabled(
 ) -> bool:
     if isinstance(raw_circuit, Mapping) and CONF_NILM_DETECTION_ENABLED in raw_circuit:
         return False
-    return bool(
+    legacy_enabled = bool(
         options.get(
             CONF_ENABLE_EXPERIMENTAL_NILM,
             entry_data.get(CONF_ENABLE_EXPERIMENTAL_NILM, False),
         )
     )
+    if not legacy_enabled:
+        return False
+    if raw_circuit is None:
+        return True
+    if not isinstance(raw_circuit, Mapping):
+        return False
+    if str(raw_circuit.get("circuit_id", "")).strip().lower() == "mains":
+        return True
+    source_kind = nilm_source_kind(raw_circuit)
+    return bool(source_kind is not None and source_kind.value == "mains")
 
 
 def circuit_configs_from_entry_data(

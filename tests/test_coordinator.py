@@ -24,6 +24,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
     CONF_LINKED_THERMOSTAT_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
+    CONF_NILM_DETECTION_ENABLED,
     CONF_OUTDOOR_TEMPERATURE_ENTITY,
     CONF_RAIN_ACTIVITY_DELTA_THRESHOLD_PCT,
     CONF_RAIN_INTENSITY_ENTITY,
@@ -13819,6 +13820,7 @@ async def test_runtime_known_load_option_controls_nilm_masking() -> None:
                         "name": "HVAC 1",
                         "mode": "mixed",
                         "appliance_profile": "hvac_blower",
+                        CONF_NILM_DETECTION_ENABLED: True,
                         "sensors": [
                             {
                                 "entity_id": "sensor.mains_power",
