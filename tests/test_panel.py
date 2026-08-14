@@ -1440,6 +1440,7 @@ def test_alert_evidence_payload_includes_nilm_guided_actions() -> None:
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(alert, config=config)
     coordinator.state.nilm_unknown_loads_by_circuit = {
@@ -1500,6 +1501,7 @@ def test_alert_evidence_payload_links_explicit_nilm_duplicate() -> None:
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(
         alert,
@@ -1530,6 +1532,7 @@ def test_alert_evidence_payload_includes_selectable_nilm_merge_targets() -> None
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(alert, config=config)
     coordinator.state.nilm_unknown_loads_by_circuit = {
@@ -1592,6 +1595,7 @@ def test_alert_evidence_payload_overlays_saved_nilm_review_state_on_inventory() 
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(alert, config=config)
     coordinator.state.nilm_unknown_loads_by_circuit = {
@@ -1698,6 +1702,7 @@ def test_alert_evidence_payload_bounds_large_nilm_payloads() -> None:
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(alert, config=config)
     coordinator.state.nilm_unknown_loads_by_circuit = {
@@ -1789,6 +1794,7 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
             SensorRef("sensor.mains_power", SensorRole.REAL_POWER),
             SensorRef("sensor.mains_reactive_power", SensorRole.REACTIVE_POWER),
         ),
+        nilm_detection_enabled=True,
     )
     known_config = CircuitConfig(
         circuit_id="pool_pump",
@@ -2095,6 +2101,7 @@ def test_nilm_workspace_payload_groups_lanes_and_estimated_source_language() -> 
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=mains_config, configs=(mains_config,))
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {
@@ -2311,6 +2318,7 @@ def test_nilm_workspace_reviews_closed_components_and_maps_stale_assignment() ->
         appliance_profile=ApplianceProfile.HVAC_BLOWER,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.hvac_2_w", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     fingerprints = {
@@ -2399,6 +2407,7 @@ def test_nilm_workspace_payload_exposes_helper_evidence_and_scoped_actions() -> 
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_w", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     helper = CircuitConfig(
         circuit_id="ac2",
@@ -2521,6 +2530,7 @@ def test_nilm_workspace_reference_options_are_bounded_and_metadata_safe() -> Non
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_w", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=source)
     coordinator.entry_id = "entry-1"
@@ -3640,6 +3650,7 @@ def test_recurring_placeholder_sessions_promote_three_reviewable_components() ->
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_w", SensorRole.REAL_POWER, unit="W"),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.store_data.nilm_signatures = {
@@ -3855,6 +3866,7 @@ def test_nilm_workspace_exposes_configured_primary_lifecycle() -> None:
         appliance_profile=ApplianceProfile.HVAC_BLOWER,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     primary_id = "mixed-configured-primary"
@@ -3951,6 +3963,7 @@ def test_nilm_workspace_sessions_expose_signature_review_proxy() -> None:
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     fingerprint = "direction=on|watts=300-400"
@@ -4196,6 +4209,7 @@ def test_nilm_workspace_hidden_items_restore_and_publish_blockers_are_explicit()
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_w", SensorRole.REAL_POWER, unit="W"),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = "entry-1"
@@ -4352,6 +4366,7 @@ def test_nilm_signature_topology_is_capability_gated(
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
         sensors=sensors,
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.store_data.nilm_signatures = {
@@ -4426,6 +4441,7 @@ def _nilm_workspace_coordinator(
     entry_id: str,
     name: str,
     entity_id: str,
+    nilm_detection_enabled: bool = True,
 ) -> SimpleNamespace:
     config = CircuitConfig(
         circuit_id="mains",
@@ -4433,6 +4449,7 @@ def _nilm_workspace_coordinator(
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef(entity_id, SensorRole.REAL_POWER),),
+        nilm_detection_enabled=nilm_detection_enabled,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = entry_id
@@ -4579,6 +4596,7 @@ def test_nilm_workspace_only_offers_configured_primary_for_primary_mixed(
         appliance_profile=profile,
         mode=mode,
         sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = "entry-1"
@@ -4606,6 +4624,7 @@ def test_nilm_workspace_limits_known_loads_and_reuses_primary_options() -> None:
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     primary_mixed = CircuitConfig(
         circuit_id="hvac_1",
@@ -4613,6 +4632,7 @@ def test_nilm_workspace_limits_known_loads_and_reuses_primary_options() -> None:
         appliance_profile=ApplianceProfile.HVAC_BLOWER,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.hvac_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     pure_mixed = CircuitConfig(
         circuit_id="mixed",
@@ -4620,6 +4640,7 @@ def test_nilm_workspace_limits_known_loads_and_reuses_primary_options() -> None:
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     fridge = CircuitConfig(
         circuit_id="fridge",
@@ -4712,6 +4733,7 @@ def test_nilm_workspace_deduplicates_existing_configured_primary_target() -> Non
         appliance_profile=ApplianceProfile.HVAC_BLOWER,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = "entry-1"
@@ -4751,6 +4773,7 @@ def test_nilm_workspace_can_confirm_the_configured_primary_assignment() -> None:
         appliance_profile=ApplianceProfile.HVAC_BLOWER,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = "entry-1"
@@ -4796,6 +4819,7 @@ def test_nilm_workspace_suggests_largest_unassigned_recurring_primary() -> None:
         appliance_profile=ApplianceProfile.HVAC_BLOWER,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_w", SensorRole.REAL_POWER, unit="W"),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = "entry-1"
@@ -4882,6 +4906,7 @@ def test_nilm_workspace_suggests_larger_primary_when_current_binding_is_wrong() 
         appliance_profile=ApplianceProfile.HVAC_BLOWER,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_w", SensorRole.REAL_POWER, unit="W"),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = "entry-1"
@@ -4937,6 +4962,7 @@ def test_nilm_workspace_does_not_treat_off_edge_as_primary_binding() -> None:
         appliance_profile=ApplianceProfile.HVAC_BLOWER,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_w", SensorRole.REAL_POWER, unit="W"),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.store_data.nilm_signatures = {
@@ -4991,6 +5017,7 @@ def test_nilm_workspace_can_merge_a_reviewed_detection_into_configured_primary(
         appliance_profile=ApplianceProfile.HVAC_BLOWER,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.hvac_1_w", SensorRole.REAL_POWER, unit="W"),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = "entry-1"
@@ -5056,6 +5083,7 @@ def test_nilm_workspace_omits_configured_primary_for_pure_mixed() -> None:
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_w", SensorRole.REAL_POWER, unit="W"),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.store_data.nilm_signatures = {
@@ -5293,6 +5321,39 @@ def test_nilm_workspace_payload_lists_all_sources_for_requested_entry() -> None:
             ),
         },
     ]
+
+
+def test_nilm_workspace_payload_rejects_disabled_requested_source() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    mains = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
+    )
+    mixed = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed Loads",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=False,
+    )
+    coordinator = _coordinator(config=mains, configs=(mains, mixed))
+    coordinator.entry_id = "entry-1"
+
+    payload = nilm_workspace_payload(
+        [coordinator], circuit_id="mixed", entry_id="entry-1"
+    )
+
+    assert payload["status"] == "not_found"
+    assert payload["requested_circuit_id"] == "mixed"
+    assert "circuit" not in payload
 
 
 @pytest.mark.asyncio
@@ -5669,6 +5730,7 @@ def test_nilm_workspace_payload_accepts_sensor_backed_mixed_source() -> None:
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=fridge, configs=(fridge,))
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {
@@ -5698,6 +5760,7 @@ async def test_nilm_workspace_history_view_queries_mixed_source_entity(
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=fridge, configs=(fridge,))
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
@@ -5791,6 +5854,7 @@ async def test_nilm_history_returns_requested_current_entry_real_power_helpers(
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_w", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     helpers = tuple(
         CircuitConfig(
@@ -5879,6 +5943,7 @@ async def test_nilm_history_ignores_malformed_persisted_helper_containers(
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_w", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     helper = CircuitConfig(
         circuit_id="helper",
@@ -5943,6 +6008,7 @@ def test_nilm_workspace_payload_skips_non_nilm_mains_duplicate() -> None:
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
 
     payload = nilm_workspace_payload(
@@ -5965,6 +6031,7 @@ def test_nilm_workspace_payload_accepts_mixed_mains_with_sensors() -> None:
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
 
     payload = nilm_workspace_payload(
@@ -5994,6 +6061,7 @@ def test_nilm_workspace_payload_prefers_explicit_nilm_over_sensor_fallback() -> 
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.nilm_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
 
     payload = nilm_workspace_payload(
@@ -6022,6 +6090,7 @@ def test_nilm_workspace_payload_rejects_untyped_runtime_history_source() -> None
         appliance_profile="mixed",
         mode="mixed",
         sensors=(SimpleNamespace(entity_id="sensor.mains_power"),),
+        nilm_detection_enabled=True,
     )
 
     payload = nilm_workspace_payload(
@@ -6047,6 +6116,7 @@ def test_nilm_workspace_payload_adds_assignment_merge_targets() -> None:
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config)
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {
@@ -6105,6 +6175,7 @@ def test_nilm_workspace_payload_marks_open_virtual_appliance_running() -> None:
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=mains_config, configs=(mains_config,))
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {
@@ -6160,6 +6231,7 @@ def test_nilm_workspace_payload_exposes_reconciliation_health() -> None:
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=mains, configs=(mains,))
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {
@@ -6254,6 +6326,7 @@ def test_nilm_reference_state_overrides_running_without_replacing_estimated_powe
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=source)
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {
@@ -6316,6 +6389,7 @@ def test_nilm_workspace_payload_validates_sensor_labels_against_predictions() ->
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=mains_config, configs=(mains_config,))
     coordinator.store_data.nilm_label_intervals_by_circuit = {
@@ -6577,6 +6651,7 @@ def test_nilm_workspace_validation_uses_uncapped_data() -> None:
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=mains_config, configs=(mains_config,))
     coordinator.store_data.nilm_label_intervals_by_circuit = {
@@ -6660,6 +6735,7 @@ def test_nilm_workspace_payload_filters_sessions_by_assignment_signature() -> No
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=mains_config, configs=(mains_config,))
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {
@@ -6772,6 +6848,7 @@ def test_nilm_workspace_payload_filters_sessions_by_feedback_fingerprint() -> No
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=mains_config, configs=(mains_config,))
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {
@@ -6850,6 +6927,7 @@ def test_nilm_workspace_payload_restores_persisted_session_history() -> None:
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=mains_config, configs=(mains_config,))
     coordinator.store_data.nilm_session_history_by_circuit = {
@@ -6894,6 +6972,7 @@ def test_nilm_workspace_payload_hides_review_actions_for_reviewed_sessions() -> 
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=mains_config, configs=(mains_config,))
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {
@@ -6957,6 +7036,7 @@ def test_nilm_workspace_virtual_appliance_uses_assignment_session_ids() -> None:
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=mains_config, configs=(mains_config,))
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {
@@ -7024,6 +7104,7 @@ def test_nilm_workspace_payload_pairs_only_recent_bounded_edges() -> None:
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=mains_config, configs=(mains_config,))
     old_edges = []
@@ -8370,6 +8451,7 @@ async def test_nilm_workspace_history_rows_include_role_and_unit_metadata(
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER, unit="kW"),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = "entry-1"
@@ -8410,6 +8492,7 @@ async def test_nilm_workspace_history_uses_valid_bounded_target_window(
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER, unit="W"),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = "entry-1"
@@ -8446,6 +8529,7 @@ def test_nilm_workspace_history_payload_exposes_target_window_query() -> None:
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER, unit="W"),),
+        nilm_detection_enabled=True,
     )
 
     history = _nilm_workspace_history_payload(
@@ -8475,6 +8559,7 @@ async def test_nilm_workspace_history_invalid_target_uses_hours_fallback(
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER, unit="W"),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = "entry-1"
@@ -8540,6 +8625,7 @@ async def test_nilm_workspace_history_uses_live_real_power_unit(
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = "entry-1"
@@ -8589,6 +8675,7 @@ async def test_nilm_workspace_history_rejects_live_reactive_metadata(
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = "entry-1"
@@ -8644,6 +8731,7 @@ async def test_nilm_workspace_history_falls_through_to_live_watts(
             SensorRef("sensor.mixed_var", SensorRole.REAL_POWER),
             SensorRef("sensor.mixed_watts", SensorRole.REAL_POWER),
         ),
+        nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=config, configs=(config,))
     coordinator.entry_id = "entry-1"
