@@ -9102,6 +9102,53 @@ def test_nilm_session_history_preserves_close_across_open_fingerprints() -> None
     assert assignment["rejected_session_ids"] == ["open-new"]
 
 
+@pytest.mark.parametrize(
+    ("duplicate_assignment_id", "expected_session_ids"),
+    [
+        (None, {"assigned-open"}),
+        ("other-appliance", {"assigned-open", "duplicate"}),
+    ],
+)
+@pytest.mark.parametrize("duplicate_in_updates", [False, True])
+def test_nilm_session_history_reserves_duration_bound_close_edge(
+    duplicate_in_updates: bool,
+    duplicate_assignment_id: str | None,
+    expected_session_ids: set[str],
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+    )
+
+    assigned_open = {
+        "session_id": "assigned-open",
+        "signature_fingerprint": "pump",
+        "assignment_id": "pump",
+        "on_edge_id": "on-original",
+        "off_edge_id": None,
+        "_duration_bound_close": {
+            "session_id": "assigned-closed",
+            "off_edge_id": "off-shared",
+            "end": "2026-08-13T11:39:00+00:00",
+            "duration_seconds": 13980.0,
+        },
+    }
+    duplicate = {
+        "session_id": "duplicate",
+        "signature_fingerprint": "other-signature",
+        "assignment_id": duplicate_assignment_id,
+        "on_edge_id": "on-later",
+        "off_edge_id": "off-shared",
+        "end": "2026-08-13T11:39:00+00:00",
+        "ambiguous": False,
+    }
+    existing = [assigned_open] if duplicate_in_updates else [assigned_open, duplicate]
+    updates = [duplicate] if duplicate_in_updates else []
+
+    merged = _merge_nilm_session_history(existing, updates)
+
+    assert {session["session_id"] for session in merged} == expected_session_ids
+
+
 @pytest.mark.parametrize("existing_off_edge_id", ["off-1", "off-old"])
 def test_nilm_session_history_replaces_stale_closed_edge_pair(
     existing_off_edge_id: str,
