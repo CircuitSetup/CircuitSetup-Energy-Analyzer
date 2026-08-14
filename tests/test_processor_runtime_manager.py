@@ -8,7 +8,10 @@ from custom_components.circuitsetup_energy_analyzer.coordinator import (
     EnergyAnalyzerCoordinator,
 )
 from custom_components.circuitsetup_energy_analyzer.models import (
+    ApplianceProfile,
+    CircuitConfig,
     CircuitEvent,
+    CircuitMode,
     EventType,
 )
 from custom_components.circuitsetup_energy_analyzer.profiles import (
@@ -107,6 +110,125 @@ def test_power_transition_does_not_advance_lifecycle_learning() -> None:
     )
 
     assert not coordinator.processor_runtime.learning_mature(
+        coordinator.circuit_configs[0],
+        now,
+    )
+
+
+def test_mains_quality_learning_matures_from_learning_age_without_cycles() -> None:
+    now = datetime(2026, 7, 10, 12, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    store_data = FeatureStoreData(
+        learning_started_at_by_circuit={
+            "mains": (now - timedelta(days=8)).isoformat(),
+        },
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "sensors": [],
+                }
+            ],
+        },
+        store_data=store_data,
+        now_fn=lambda: now,
+    )
+
+    assert not coordinator.processor_runtime.learning_mature(config, now)
+    assert coordinator.processor_runtime.mains_power_quality_learning_mature(
+        config,
+        now,
+    )
+
+    store_data.learning_started_at_by_circuit["mains"] = (
+        now - timedelta(days=1)
+    ).isoformat()
+    assert not coordinator.processor_runtime.mains_power_quality_learning_mature(
+        config,
+        now,
+    )
+
+
+def test_mains_quality_learning_ignores_retained_start_cycles() -> None:
+    now = datetime(2026, 7, 10, 12, tzinfo=UTC)
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+    )
+    minimum_cycles = get_profile_definition(ApplianceProfile.MAINS_NILM).minimum_cycles
+    store_data = FeatureStoreData(
+        events=[
+            CircuitEvent(
+                timestamp=now - timedelta(minutes=index),
+                circuit_id="mains",
+                event_type=EventType.START,
+            )
+            for index in range(minimum_cycles)
+        ],
+        learning_started_at_by_circuit={
+            "mains": (now - timedelta(days=1)).isoformat(),
+        },
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "sensors": [],
+                }
+            ],
+        },
+        store_data=store_data,
+        now_fn=lambda: now,
+    )
+
+    assert coordinator.processor_runtime.learning_mature(config, now)
+    assert not coordinator.processor_runtime.mains_power_quality_learning_mature(
+        config,
+        now,
+    )
+
+
+def test_mains_quality_learning_epoch_is_seeded_when_missing() -> None:
+    now = datetime(2026, 7, 10, 12, tzinfo=UTC)
+    store_data = FeatureStoreData()
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "sensors": [],
+                }
+            ],
+        },
+        store_data=store_data,
+        now_fn=lambda: now,
+    )
+
+    assert store_data.learning_started_at_by_circuit["mains"] == now.isoformat()
+    assert coordinator.store_persistence.dirty is True
+    assert not coordinator.processor_runtime.mains_power_quality_learning_mature(
         coordinator.circuit_configs[0],
         now,
     )

@@ -10,6 +10,13 @@ from typing import Any
 
 from .balance import DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W
 from .localized_text import translation_text
+from .mains_power_quality import (
+    DEFAULT_FREQUENCY_DROP_HZ,
+    DEFAULT_FREQUENCY_SPIKE_HZ,
+    DEFAULT_VOLTAGE_IMBALANCE_RATIO,
+    DEFAULT_VOLTAGE_SAG_RATIO,
+    DEFAULT_VOLTAGE_SWELL_RATIO,
+)
 from .metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
     DEFAULT_MIN_APPARENT_POWER_VA,
@@ -69,6 +76,11 @@ _SETTING_KEYS = (
     "always_on_alert_w",
     "leg_imbalance_warning_ratio",
     "leg_imbalance_min_total_power_w",
+    "mains_voltage_sag_ratio",
+    "mains_voltage_swell_ratio",
+    "mains_frequency_drop_hz",
+    "mains_frequency_spike_hz",
+    "mains_voltage_imbalance_ratio",
     "apparent_power_tolerance_percent",
     "power_factor_tolerance",
     "minimum_apparent_power_va",
@@ -341,6 +353,7 @@ def build_settings_recommendations(
         _operating_detection_recommendations,
         _standby_recommendations,
         _dual_phase_recommendations,
+        _mains_power_quality_recommendations,
         _metric_consistency_recommendations,
         _mains_balance_recommendations,
         _solar_flow_recommendations,
@@ -775,6 +788,144 @@ def _dual_phase_recommendations(inputs: AdvisorInputs) -> list[SettingRecommenda
             )
         )
     return recommendations
+
+
+def _mains_power_quality_recommendations(
+    inputs: AdvisorInputs,
+) -> list[SettingRecommendation]:
+    if (
+        inputs.context.circuit_mode != "mains_nilm"
+        and inputs.context.appliance_profile != "mains_nilm"
+    ):
+        return []
+
+    recommendations: list[SettingRecommendation] = []
+    for candidate in (
+        _mains_power_quality_threshold_recommendation(
+            inputs,
+            setting_key="mains_voltage_sag_ratio",
+            history_key="mains_voltage_sag_ratios",
+            default_value=DEFAULT_VOLTAGE_SAG_RATIO,
+            minimum=0.01,
+            maximum=0.50,
+            precision=3,
+            min_delta=0.005,
+            feature="mains_voltage_sag",
+            reason_key="mains_voltage_sag",
+            evidence_key="p95_voltage_sag_ratio",
+            unit=None,
+        ),
+        _mains_power_quality_threshold_recommendation(
+            inputs,
+            setting_key="mains_voltage_swell_ratio",
+            history_key="mains_voltage_swell_ratios",
+            default_value=DEFAULT_VOLTAGE_SWELL_RATIO,
+            minimum=0.01,
+            maximum=0.50,
+            precision=3,
+            min_delta=0.005,
+            feature="mains_voltage_swell",
+            reason_key="mains_voltage_swell",
+            evidence_key="p95_voltage_swell_ratio",
+            unit=None,
+        ),
+        _mains_power_quality_threshold_recommendation(
+            inputs,
+            setting_key="mains_frequency_drop_hz",
+            history_key="mains_frequency_drop_hz",
+            default_value=DEFAULT_FREQUENCY_DROP_HZ,
+            minimum=0.10,
+            maximum=5.00,
+            precision=2,
+            min_delta=0.05,
+            feature="mains_frequency_drop",
+            reason_key="mains_frequency_drop",
+            evidence_key="p95_frequency_drop_hz",
+            unit="Hz",
+        ),
+        _mains_power_quality_threshold_recommendation(
+            inputs,
+            setting_key="mains_frequency_spike_hz",
+            history_key="mains_frequency_spike_hz",
+            default_value=DEFAULT_FREQUENCY_SPIKE_HZ,
+            minimum=0.10,
+            maximum=5.00,
+            precision=2,
+            min_delta=0.05,
+            feature="mains_frequency_spike",
+            reason_key="mains_frequency_spike",
+            evidence_key="p95_frequency_spike_hz",
+            unit="Hz",
+        ),
+        _mains_power_quality_threshold_recommendation(
+            inputs,
+            setting_key="mains_voltage_imbalance_ratio",
+            history_key="mains_voltage_imbalance_ratios",
+            default_value=DEFAULT_VOLTAGE_IMBALANCE_RATIO,
+            minimum=0.01,
+            maximum=0.50,
+            precision=3,
+            min_delta=0.005,
+            feature="mains_voltage_imbalance",
+            reason_key="mains_voltage_imbalance",
+            evidence_key="p95_voltage_imbalance_ratio",
+            unit=None,
+        ),
+    ):
+        if candidate is not None:
+            recommendations.append(candidate)
+    return recommendations
+
+
+def _mains_power_quality_threshold_recommendation(
+    inputs: AdvisorInputs,
+    *,
+    setting_key: str,
+    history_key: str,
+    default_value: float,
+    minimum: float,
+    maximum: float,
+    precision: int,
+    min_delta: float,
+    feature: str,
+    reason_key: str,
+    evidence_key: str,
+    unit: str | None,
+) -> SettingRecommendation | None:
+    values = _numeric_values(
+        inputs.feature_history.get(history_key),
+    )
+    if len(values) < MIN_ADVISOR_DAYS:
+        return None
+
+    p95 = _percentile(values, 95)
+    suggested_value = round(
+        _clamp(max(default_value, p95 * 2), minimum, maximum),
+        precision,
+    )
+    current_value = _float_setting(
+        inputs.context.advanced_settings,
+        setting_key,
+        default_value,
+    )
+    if suggested_value >= current_value - min_delta:
+        return None
+
+    return _make_recommendation(
+        inputs,
+        setting_key=setting_key,
+        current_value=current_value,
+        suggested_value=suggested_value,
+        unit=unit,
+        feature=feature,
+        group=_advisor_text("groups", "mains_power_quality"),
+        confidence=0.78,
+        reason=_advisor_text("reasons", reason_key),
+        evidence={
+            "observed_samples": len(values),
+            evidence_key: round(p95, 3),
+        },
+    )
 
 
 def _metric_consistency_recommendations(

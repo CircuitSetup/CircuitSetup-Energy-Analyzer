@@ -95,6 +95,9 @@ class EventType(StrEnum):
     STEADY_WINDOW = "steady_window"
     VOLTAGE_SAG = "voltage_sag"
     VOLTAGE_SWELL = "voltage_swell"
+    VOLTAGE_IMBALANCE = "voltage_imbalance"
+    FREQUENCY_DROP = "frequency_drop"
+    FREQUENCY_SPIKE = "frequency_spike"
     LEG_IMBALANCE = "leg_imbalance"
     DATA_QUALITY = "data_quality"
 

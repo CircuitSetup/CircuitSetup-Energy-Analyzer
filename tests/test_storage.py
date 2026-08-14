@@ -1893,6 +1893,42 @@ def test_feature_store_preserves_settings_recommendations() -> None:
     )
 
 
+def test_feature_store_preserves_mains_power_quality_settings() -> None:
+    data = FeatureStoreData(
+        mains_power_quality_settings_by_circuit={
+            "mains": {
+                "voltage_sag_ratio": 0.09,
+                "voltage_swell_ratio": 0.1,
+                "frequency_drop_hz": 0.7,
+                "frequency_spike_hz": 0.8,
+                "voltage_imbalance_ratio": 0.04,
+            }
+        }
+    )
+
+    raw = feature_store_data_to_dict(data)
+    restored = feature_store_data_from_dict(raw)
+
+    assert raw["mains_power_quality_settings_by_circuit"] == {
+        "mains": {
+            "voltage_sag_ratio": 0.09,
+            "voltage_swell_ratio": 0.1,
+            "frequency_drop_hz": 0.7,
+            "frequency_spike_hz": 0.8,
+            "voltage_imbalance_ratio": 0.04,
+        }
+    }
+    assert restored.mains_power_quality_settings_by_circuit == {
+        "mains": {
+            "voltage_sag_ratio": 0.09,
+            "voltage_swell_ratio": 0.1,
+            "frequency_drop_hz": 0.7,
+            "frequency_spike_hz": 0.8,
+            "voltage_imbalance_ratio": 0.04,
+        }
+    }
+
+
 def test_notification_preferences_and_digest_settings_round_trip() -> None:
     data = FeatureStoreData(
         learning_started_at_by_circuit={

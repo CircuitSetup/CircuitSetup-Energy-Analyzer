@@ -105,6 +105,7 @@ class CircuitEventProcessor:
                 },
             )
             for event in detector.process(sample)
+            if not _suppress_legacy_mains_power_quality_event(circuit_config, event)
         ]
         snapshot = detector.last_snapshot
         state_updates: list[StateUpdate] = []
@@ -129,6 +130,16 @@ class CircuitEventProcessor:
             state_updates=state_updates,
             store_dirty=bool(events),
         )
+
+
+def _suppress_legacy_mains_power_quality_event(
+    circuit_config: CircuitConfig,
+    event: CircuitEvent,
+) -> bool:
+    return event.event_type is EventType.VOLTAGE_SAG and (
+        circuit_config.mode is CircuitMode.MAINS_NILM
+        or circuit_config.appliance_profile is ApplianceProfile.MAINS_NILM
+    )
 
 
 def _baseline_eligible(event: CircuitEvent, maintenance: Any) -> bool:

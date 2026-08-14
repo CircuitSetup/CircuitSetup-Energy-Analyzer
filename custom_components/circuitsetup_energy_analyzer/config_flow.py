@@ -206,6 +206,13 @@ from .entity import (
 )
 from .entity_catalog import EntityGroup
 from .load_shift import FLEXIBLE_LOAD_RUNNING_THRESHOLD_W
+from .mains_power_quality import (
+    DEFAULT_FREQUENCY_DROP_HZ,
+    DEFAULT_FREQUENCY_SPIKE_HZ,
+    DEFAULT_VOLTAGE_IMBALANCE_RATIO,
+    DEFAULT_VOLTAGE_SAG_RATIO,
+    DEFAULT_VOLTAGE_SWELL_RATIO,
+)
 from .managers.source_samples import normalized_leg
 from .metric_consistency import (
     DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
@@ -353,6 +360,11 @@ FIELD_ALWAYS_ON_ALERT_W = "always_on_alert_w"
 FIELD_STANDBY_MIN_SAMPLES = "standby_min_samples"
 FIELD_LEG_IMBALANCE_WARNING_RATIO = "leg_imbalance_warning_ratio"
 FIELD_LEG_IMBALANCE_MIN_TOTAL_POWER_W = "leg_imbalance_min_total_power_w"
+FIELD_MAINS_VOLTAGE_SAG_RATIO = "mains_voltage_sag_ratio"
+FIELD_MAINS_VOLTAGE_SWELL_RATIO = "mains_voltage_swell_ratio"
+FIELD_MAINS_FREQUENCY_DROP_HZ = "mains_frequency_drop_hz"
+FIELD_MAINS_FREQUENCY_SPIKE_HZ = "mains_frequency_spike_hz"
+FIELD_MAINS_VOLTAGE_IMBALANCE_RATIO = "mains_voltage_imbalance_ratio"
 FIELD_APPARENT_POWER_TOLERANCE_PERCENT = "apparent_power_tolerance_percent"
 FIELD_POWER_FACTOR_TOLERANCE = "power_factor_tolerance"
 FIELD_MINIMUM_APPARENT_POWER_VA = "minimum_apparent_power_va"
@@ -459,6 +471,11 @@ _ADVANCED_RESET_SETTING_KEYS = {
         FIELD_LEG_IMBALANCE_MIN_TOTAL_POWER_W,
     ),
     "reset_power_quality_settings_to_defaults": (
+        FIELD_MAINS_VOLTAGE_SAG_RATIO,
+        FIELD_MAINS_VOLTAGE_SWELL_RATIO,
+        FIELD_MAINS_FREQUENCY_DROP_HZ,
+        FIELD_MAINS_FREQUENCY_SPIKE_HZ,
+        FIELD_MAINS_VOLTAGE_IMBALANCE_RATIO,
         FIELD_APPARENT_POWER_TOLERANCE_PERCENT,
         FIELD_POWER_FACTOR_TOLERANCE,
         FIELD_MINIMUM_APPARENT_POWER_VA,
@@ -2036,7 +2053,7 @@ def _advanced_settings_schema(
     _add_advanced_section(
         schema,
         SECTION_POWER_QUALITY_SETTINGS,
-        _power_quality_fields(settings),
+        _power_quality_fields(settings, circuit_context),
     )
     if _advanced_show_mains_settings(circuit_context):
         _add_advanced_section(
@@ -2325,36 +2342,99 @@ def _dual_phase_fields(settings: Mapping[str, Any]) -> dict[Any, Any]:
     }
 
 
-def _power_quality_fields(settings: Mapping[str, Any]) -> dict[Any, Any]:
-    return {
-        vol.Optional(
-            FIELD_APPARENT_POWER_TOLERANCE_PERCENT,
-            default=float(
-                settings.get(
-                    FIELD_APPARENT_POWER_TOLERANCE_PERCENT,
-                    DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
-                )
-            ),
-        ): _number_selector(minimum=0.1, maximum=100.0, step=0.1),
-        vol.Optional(
-            FIELD_POWER_FACTOR_TOLERANCE,
-            default=float(
-                settings.get(
-                    FIELD_POWER_FACTOR_TOLERANCE,
-                    DEFAULT_POWER_FACTOR_TOLERANCE,
-                )
-            ),
-        ): _number_selector(minimum=0.001, maximum=1.0, step=0.001),
-        vol.Optional(
-            FIELD_MINIMUM_APPARENT_POWER_VA,
-            default=float(
-                settings.get(
-                    FIELD_MINIMUM_APPARENT_POWER_VA,
-                    DEFAULT_MIN_APPARENT_POWER_VA,
-                )
-            ),
-        ): _number_selector(minimum=0.0, step=1),
-    }
+def _power_quality_fields(
+    settings: Mapping[str, Any],
+    context: Mapping[str, str],
+) -> dict[Any, Any]:
+    fields: dict[Any, Any] = {}
+    if _advanced_show_mains_settings(context):
+        fields[
+            vol.Optional(
+                FIELD_MAINS_VOLTAGE_SAG_RATIO,
+                default=float(
+                    settings.get(
+                        FIELD_MAINS_VOLTAGE_SAG_RATIO,
+                        DEFAULT_VOLTAGE_SAG_RATIO,
+                    )
+                ),
+            )
+        ] = _number_selector(minimum=0.01, maximum=0.5, step=0.001)
+        fields[
+            vol.Optional(
+                FIELD_MAINS_VOLTAGE_SWELL_RATIO,
+                default=float(
+                    settings.get(
+                        FIELD_MAINS_VOLTAGE_SWELL_RATIO,
+                        DEFAULT_VOLTAGE_SWELL_RATIO,
+                    )
+                ),
+            )
+        ] = _number_selector(minimum=0.01, maximum=0.5, step=0.001)
+        fields[
+            vol.Optional(
+                FIELD_MAINS_FREQUENCY_DROP_HZ,
+                default=float(
+                    settings.get(
+                        FIELD_MAINS_FREQUENCY_DROP_HZ,
+                        DEFAULT_FREQUENCY_DROP_HZ,
+                    )
+                ),
+            )
+        ] = _number_selector(minimum=0.1, maximum=5.0, step=0.1)
+        fields[
+            vol.Optional(
+                FIELD_MAINS_FREQUENCY_SPIKE_HZ,
+                default=float(
+                    settings.get(
+                        FIELD_MAINS_FREQUENCY_SPIKE_HZ,
+                        DEFAULT_FREQUENCY_SPIKE_HZ,
+                    )
+                ),
+            )
+        ] = _number_selector(minimum=0.1, maximum=5.0, step=0.1)
+        fields[
+            vol.Optional(
+                FIELD_MAINS_VOLTAGE_IMBALANCE_RATIO,
+                default=float(
+                    settings.get(
+                        FIELD_MAINS_VOLTAGE_IMBALANCE_RATIO,
+                        DEFAULT_VOLTAGE_IMBALANCE_RATIO,
+                    )
+                ),
+            )
+        ] = _number_selector(minimum=0.01, maximum=0.5, step=0.001)
+    fields.update(
+        {
+            vol.Optional(
+                FIELD_APPARENT_POWER_TOLERANCE_PERCENT,
+                default=float(
+                    settings.get(
+                        FIELD_APPARENT_POWER_TOLERANCE_PERCENT,
+                        DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
+                    )
+                ),
+            ): _number_selector(minimum=0.1, maximum=100.0, step=0.1),
+            vol.Optional(
+                FIELD_POWER_FACTOR_TOLERANCE,
+                default=float(
+                    settings.get(
+                        FIELD_POWER_FACTOR_TOLERANCE,
+                        DEFAULT_POWER_FACTOR_TOLERANCE,
+                    )
+                ),
+            ): _number_selector(minimum=0.001, maximum=1.0, step=0.001),
+            vol.Optional(
+                FIELD_MINIMUM_APPARENT_POWER_VA,
+                default=float(
+                    settings.get(
+                        FIELD_MINIMUM_APPARENT_POWER_VA,
+                        DEFAULT_MIN_APPARENT_POWER_VA,
+                    )
+                ),
+            ): _number_selector(minimum=0.0, step=1),
+        }
+    )
+    return fields
 
 
 def _mains_balance_fields(settings: Mapping[str, Any]) -> dict[Any, Any]:
@@ -6573,6 +6653,11 @@ def _advanced_settings_from_input(
     )
     _set_optional_float(settings, user_input, FIELD_LEG_IMBALANCE_WARNING_RATIO)
     _set_optional_float(settings, user_input, FIELD_LEG_IMBALANCE_MIN_TOTAL_POWER_W)
+    _set_optional_float(settings, user_input, FIELD_MAINS_VOLTAGE_SAG_RATIO)
+    _set_optional_float(settings, user_input, FIELD_MAINS_VOLTAGE_SWELL_RATIO)
+    _set_optional_float(settings, user_input, FIELD_MAINS_FREQUENCY_DROP_HZ)
+    _set_optional_float(settings, user_input, FIELD_MAINS_FREQUENCY_SPIKE_HZ)
+    _set_optional_float(settings, user_input, FIELD_MAINS_VOLTAGE_IMBALANCE_RATIO)
     _set_optional_float(settings, user_input, FIELD_APPARENT_POWER_TOLERANCE_PERCENT)
     _set_optional_float(settings, user_input, FIELD_POWER_FACTOR_TOLERANCE)
     _set_optional_float(settings, user_input, FIELD_MINIMUM_APPARENT_POWER_VA)

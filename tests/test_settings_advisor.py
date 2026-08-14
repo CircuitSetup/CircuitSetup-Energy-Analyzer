@@ -1027,6 +1027,196 @@ def test_dual_phase_recommendation_does_not_loosen_imbalance_ratio() -> None:
     assert "leg_imbalance_min_total_power_w" in setting_keys
 
 
+def test_mains_voltage_imbalance_recommendation_uses_observed_ratios() -> None:
+    advisor = _advisor()
+    inputs = advisor.AdvisorInputs(
+        now=datetime(2026, 6, 8, 12, 0, tzinfo=UTC),
+        context=advisor.AdvisorCircuitContext(
+            circuit_id="mains",
+            circuit_name="Mains",
+            appliance_profile="mains_nilm",
+            circuit_mode="mains_nilm",
+            power_flow="load",
+            advanced_settings={"mains_voltage_imbalance_ratio": 0.08},
+        ),
+        feature_history={
+            "mains_voltage_imbalance_ratios": [
+                0.008,
+                0.009,
+                0.01,
+                0.011,
+                0.012,
+                0.013,
+                0.014,
+            ],
+        },
+    )
+
+    recommendation = _only_setting(
+        advisor.build_settings_recommendations(inputs),
+        "mains_voltage_imbalance_ratio",
+    )
+
+    assert recommendation.suggested_value == 0.03
+    assert recommendation.feature == "mains_voltage_imbalance"
+    assert recommendation.group == "Mains Power Quality"
+    assert recommendation.evidence == {
+        "observed_samples": 7,
+        "p95_voltage_imbalance_ratio": 0.014,
+    }
+
+
+def test_mains_voltage_imbalance_recommendation_does_not_loosen_threshold() -> None:
+    advisor = _advisor()
+    inputs = advisor.AdvisorInputs(
+        now=datetime(2026, 6, 8, 12, 0, tzinfo=UTC),
+        context=advisor.AdvisorCircuitContext(
+            circuit_id="mains",
+            circuit_name="Mains",
+            appliance_profile="mains_nilm",
+            circuit_mode="mains_nilm",
+            power_flow="load",
+            advanced_settings={"mains_voltage_imbalance_ratio": 0.03},
+        ),
+        feature_history={
+            "mains_voltage_imbalance_ratios": [
+                0.04,
+                0.045,
+                0.042,
+                0.044,
+                0.041,
+                0.043,
+                0.046,
+            ],
+        },
+    )
+
+    assert "mains_voltage_imbalance_ratio" not in _setting_keys(
+        advisor.build_settings_recommendations(inputs)
+    )
+
+
+def test_mains_voltage_imbalance_recommendation_stays_above_high_history() -> None:
+    advisor = _advisor()
+    inputs = advisor.AdvisorInputs(
+        now=datetime(2026, 6, 8, 12, 0, tzinfo=UTC),
+        context=advisor.AdvisorCircuitContext(
+            circuit_id="mains",
+            circuit_name="Mains",
+            appliance_profile="mains_nilm",
+            circuit_mode="mains_nilm",
+            power_flow="load",
+            advanced_settings={"mains_voltage_imbalance_ratio": 0.4},
+        ),
+        feature_history={"mains_voltage_imbalance_ratios": [0.12] * 7},
+    )
+
+    recommendation = _only_setting(
+        advisor.build_settings_recommendations(inputs),
+        "mains_voltage_imbalance_ratio",
+    )
+
+    assert recommendation.suggested_value == 0.24
+    assert recommendation.evidence == {
+        "observed_samples": 7,
+        "p95_voltage_imbalance_ratio": 0.12,
+    }
+
+
+def test_mains_power_quality_threshold_recommendations_use_observed_margins(
+) -> None:
+    advisor = _advisor()
+    inputs = advisor.AdvisorInputs(
+        now=datetime(2026, 6, 8, 12, 0, tzinfo=UTC),
+        context=advisor.AdvisorCircuitContext(
+            circuit_id="mains",
+            circuit_name="Mains",
+            appliance_profile="mains_nilm",
+            circuit_mode="mains_nilm",
+            power_flow="load",
+            advanced_settings={
+                "mains_voltage_sag_ratio": 0.16,
+                "mains_voltage_swell_ratio": 0.15,
+                "mains_frequency_drop_hz": 1.2,
+                "mains_frequency_spike_hz": 1.1,
+            },
+        ),
+        feature_history={
+            "mains_voltage_sag_ratios": [0.025] * 7,
+            "mains_voltage_swell_ratios": [0.03] * 7,
+            "mains_frequency_drop_hz": [0.18] * 7,
+            "mains_frequency_spike_hz": [0.2] * 7,
+        },
+    )
+
+    recommendations = advisor.build_settings_recommendations(inputs)
+    sag = _only_setting(recommendations, "mains_voltage_sag_ratio")
+    swell = _only_setting(recommendations, "mains_voltage_swell_ratio")
+    drop = _only_setting(recommendations, "mains_frequency_drop_hz")
+    spike = _only_setting(recommendations, "mains_frequency_spike_hz")
+
+    assert sag.suggested_value == 0.08
+    assert sag.feature == "mains_voltage_sag"
+    assert sag.evidence == {
+        "observed_samples": 7,
+        "p95_voltage_sag_ratio": 0.025,
+    }
+    assert swell.suggested_value == 0.08
+    assert swell.feature == "mains_voltage_swell"
+    assert swell.evidence == {
+        "observed_samples": 7,
+        "p95_voltage_swell_ratio": 0.03,
+    }
+    assert drop.suggested_value == 0.5
+    assert drop.feature == "mains_frequency_drop"
+    assert drop.unit == "Hz"
+    assert drop.evidence == {
+        "observed_samples": 7,
+        "p95_frequency_drop_hz": 0.18,
+    }
+    assert spike.suggested_value == 0.5
+    assert spike.feature == "mains_frequency_spike"
+    assert spike.unit == "Hz"
+    assert spike.evidence == {
+        "observed_samples": 7,
+        "p95_frequency_spike_hz": 0.2,
+    }
+
+
+def test_mains_power_quality_threshold_recommendations_do_not_loosen_thresholds(
+) -> None:
+    advisor = _advisor()
+    inputs = advisor.AdvisorInputs(
+        now=datetime(2026, 6, 8, 12, 0, tzinfo=UTC),
+        context=advisor.AdvisorCircuitContext(
+            circuit_id="mains",
+            circuit_name="Mains",
+            appliance_profile="mains_nilm",
+            circuit_mode="mains_nilm",
+            power_flow="load",
+            advanced_settings={
+                "mains_voltage_sag_ratio": 0.08,
+                "mains_voltage_swell_ratio": 0.08,
+                "mains_frequency_drop_hz": 0.5,
+                "mains_frequency_spike_hz": 0.5,
+            },
+        ),
+        feature_history={
+            "mains_voltage_sag_ratios": [0.12] * 7,
+            "mains_voltage_swell_ratios": [0.11] * 7,
+            "mains_frequency_drop_hz": [0.8] * 7,
+            "mains_frequency_spike_hz": [0.9] * 7,
+        },
+    )
+
+    setting_keys = _setting_keys(advisor.build_settings_recommendations(inputs))
+
+    assert "mains_voltage_sag_ratio" not in setting_keys
+    assert "mains_voltage_swell_ratio" not in setting_keys
+    assert "mains_frequency_drop_hz" not in setting_keys
+    assert "mains_frequency_spike_hz" not in setting_keys
+
+
 def test_metric_consistency_recommendation_uses_residual_distribution() -> None:
     advisor = _advisor()
     inputs = advisor.AdvisorInputs(
@@ -1208,6 +1398,12 @@ def test_recommendation_guidance_covers_advanced_setting_families() -> None:
     from custom_components.circuitsetup_energy_analyzer.load_shift import (
         FLEXIBLE_LOAD_RUNNING_THRESHOLD_W,
     )
+    from custom_components.circuitsetup_energy_analyzer.mains_power_quality import (
+        DEFAULT_FREQUENCY_DROP_HZ,
+        DEFAULT_FREQUENCY_SPIKE_HZ,
+        DEFAULT_VOLTAGE_SAG_RATIO,
+        DEFAULT_VOLTAGE_SWELL_RATIO,
+    )
     from custom_components.circuitsetup_energy_analyzer.metric_consistency import (
         DEFAULT_APPARENT_POWER_TOLERANCE_PERCENT,
         DEFAULT_MIN_APPARENT_POWER_VA,
@@ -1233,6 +1429,10 @@ def test_recommendation_guidance_covers_advanced_setting_families() -> None:
         "power_factor_tolerance": DEFAULT_POWER_FACTOR_TOLERANCE,
         "minimum_apparent_power_va": DEFAULT_MIN_APPARENT_POWER_VA,
         "balance_negative_tolerance_w": DEFAULT_BALANCE_NEGATIVE_TOLERANCE_W,
+        "mains_voltage_sag_ratio": DEFAULT_VOLTAGE_SAG_RATIO,
+        "mains_voltage_swell_ratio": DEFAULT_VOLTAGE_SWELL_RATIO,
+        "mains_frequency_drop_hz": DEFAULT_FREQUENCY_DROP_HZ,
+        "mains_frequency_spike_hz": DEFAULT_FREQUENCY_SPIKE_HZ,
         "window_hours": DEFAULT_STANDBY_WINDOW_HOURS,
         "always_on_alert_w": 0.0,
         "solar_export_tolerance_w": EXPORT_TOLERANCE_W,
@@ -1252,6 +1452,10 @@ def test_recommendation_guidance_covers_advanced_setting_families() -> None:
         "power_factor_tolerance": "power-factor",
         "minimum_apparent_power_va": "low apparent-power",
         "balance_negative_tolerance_w": "mains-minus-load",
+        "mains_voltage_sag_ratio": "voltage sag",
+        "mains_voltage_swell_ratio": "voltage spike",
+        "mains_frequency_drop_hz": "frequency drop",
+        "mains_frequency_spike_hz": "frequency spike",
         "window_hours": "standby history",
         "always_on_alert_w": "always on",
         "solar_export_tolerance_w": "export",
