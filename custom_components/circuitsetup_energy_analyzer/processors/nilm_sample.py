@@ -4673,7 +4673,7 @@ def _merge_nilm_session_history(
                     or existing_session.get("assignment_id")
                     or ""
                 ).strip()
-                _replace_nilm_assignment_rejection(
+                _replace_nilm_assignment_session_id(
                     assignments_by_id.get(assignment_id),
                     old_session_id=(
                         _nilm_session_history_identity_alias(
@@ -5205,7 +5205,7 @@ def _reconcile_nilm_session_duration_bounds(
                 }
             )
             payload["_duration_bound_close"] = close_snapshot
-            _replace_nilm_assignment_rejection(
+            _replace_nilm_assignment_session_id(
                 assignment,
                 old_session_id=closed_session_id,
                 new_session_id=open_session_id,
@@ -5226,7 +5226,7 @@ def _reconcile_nilm_session_duration_bounds(
                 }
             )
         elif payload.get("end") is None and close_payload and not outside_bounds:
-            _replace_nilm_assignment_rejection(
+            _replace_nilm_assignment_session_id(
                 assignment,
                 old_session_id=(
                     _nilm_session_history_identity_alias(
@@ -5265,7 +5265,7 @@ def _remove_replaced_nilm_sessions(
             sessions.pop(session_id, None)
 
 
-def _replace_nilm_assignment_rejection(
+def _replace_nilm_assignment_session_id(
     assignment: Mapping[str, Any] | None,
     *,
     old_session_id: str,
@@ -5277,19 +5277,20 @@ def _replace_nilm_assignment_rejection(
         or not new_session_id
     ):
         return
-    rejected = [
-        str(value or "").strip()
-        for value in _list_items(assignment.get("rejected_session_ids"))
-        if str(value or "").strip()
-    ]
-    if old_session_id not in rejected:
-        return
-    assignment["rejected_session_ids"] = list(
-        dict.fromkeys(
-            new_session_id if session_id == old_session_id else session_id
-            for session_id in rejected
+    for key in ("session_ids", "confirmed_session_ids", "rejected_session_ids"):
+        session_ids = [
+            str(value or "").strip()
+            for value in _list_items(assignment.get(key))
+            if str(value or "").strip()
+        ]
+        if old_session_id not in session_ids:
+            continue
+        assignment[key] = list(
+            dict.fromkeys(
+                new_session_id if session_id == old_session_id else session_id
+                for session_id in session_ids
+            )
         )
-    )
 
 
 def _optional_float(*values: Any) -> float | None:

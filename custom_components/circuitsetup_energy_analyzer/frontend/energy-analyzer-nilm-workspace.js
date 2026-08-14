@@ -701,16 +701,22 @@ export function createNilmWorkspaceMethods({
 
   _nilmSessionAssignmentPersisted(sessionId, assignmentId, signatureFingerprint = "") {
     const workspace = this._nilmWorkspace || {};
-    const session = (workspace.sessions || []).find((item) => item.session_id === sessionId);
+    const sessions = workspace.sessions || [];
+    const session = sessions.find((item) => item.session_id === sessionId)
+      || sessions.find((item) => (
+        item && item._duration_bound_close
+        && item._duration_bound_close.session_id === sessionId
+      ));
     const persistedAssignmentId = assignmentId || (session && session.assignment_id);
     const assignment = (workspace.assignments || []).find(
       (item) => item.assignment_id === persistedAssignmentId,
     );
+    const persistedSessionId = session && session.session_id;
     const expectedFingerprint = String(signatureFingerprint || (session && session.signature_fingerprint) || "").trim();
     const signaturePersisted = !expectedFingerprint
       || (assignment && (assignment.signature_fingerprints || []).includes(expectedFingerprint));
     return session && persistedAssignmentId && session.assignment_id === persistedAssignmentId
-      && assignment && (assignment.session_ids || []).includes(sessionId)
+      && assignment && (assignment.session_ids || []).includes(persistedSessionId)
       && signaturePersisted;
   }
 

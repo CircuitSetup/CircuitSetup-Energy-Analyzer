@@ -11390,6 +11390,8 @@ def test_nilm_duration_reopen_uses_bounded_shared_id_and_restores_alias() -> Non
     assignment = {
         "assignment_id": "dryer",
         "max_duration_seconds": 60.0,
+        "session_ids": [legacy_closed_id],
+        "confirmed_session_ids": [legacy_closed_id],
         "rejected_session_ids": [legacy_closed_id],
     }
     closed = {
@@ -11430,6 +11432,8 @@ def test_nilm_duration_reopen_uses_bounded_shared_id_and_restores_alias() -> Non
     assert reopened[0]["session_id"] == expected_open_id
     assert len(expected_open_id) <= 256
     assert len(expected_open_id.encode("utf-8")) <= 256
+    assert assignment["session_ids"] == [expected_open_id]
+    assert assignment["confirmed_session_ids"] == [expected_open_id]
     assert assignment["rejected_session_ids"] == [expected_open_id]
     assert reopened[0]["_duration_bound_close"]["session_id"] == legacy_closed_id
     assert reopened[0]["_duration_bound_close"]["ambiguity_candidates"] == [
@@ -11450,6 +11454,8 @@ def test_nilm_duration_reopen_uses_bounded_shared_id_and_restores_alias() -> Non
         "mains", reopened, [assignment]
     )
     assert restored[0]["session_id"] == legacy_closed_id
+    assert assignment["session_ids"] == [legacy_closed_id]
+    assert assignment["confirmed_session_ids"] == [legacy_closed_id]
     assert assignment["rejected_session_ids"] == [legacy_closed_id]
     assert restored[0]["ambiguity_candidates"] == closed["ambiguity_candidates"]
 
