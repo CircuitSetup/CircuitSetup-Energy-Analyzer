@@ -1570,11 +1570,8 @@ def test_dynamic_alert_evidence_panel_asset_is_user_facing() -> None:
         '_panelText("nilm_workspace.known_load_overlays")',
         '_panelText("nilm_workspace.solar_net_overlays")',
         "_visibleNilmWorkspaceSeries",
-        '_panelText("nilm_workspace.estimated_appliances_title")',
         "data-nilm-appliance-detail-path",
         "_nilmApplianceDetailButton",
-        "estimated_daily_energy",
-        "model_status",
         "_renderNilmValidation",
         "ground_truth_entity_id",
         '_panelText("nilm_workspace.sessions_title")',
@@ -3434,23 +3431,32 @@ def test_nilm_lane_rendering_contracts() -> None:
       const panel = makePanel();
       const workspace = makeWorkspace({
         circuit: { circuit_id: "mains", name: "Whole Home Main" },
+        sources: [
+          { circuit_id: "mains", name: "Mains", path: "/nilm?circuit_id=mains" },
+          { circuit_id: "mixed", name: "Mixed Loads", path: "/nilm?circuit_id=mixed" },
+        ],
         lane_counts: { needs_review: 5, assigned: 1, published: 2, hidden: 0 },
       });
       workspace.lanes.needs_review.signature_ids = ["sig-1", "sig-2"];
       workspace.lanes.assigned.assignment_ids = ["assignment-1"];
       const summary = panel._renderNilmWorkspaceSummary(workspace);
       for (const expected of [
-        "Whole Home Main",
+        "data-nilm-source-picker",
+        "Load Separation source",
         "data-nilm-review-progress",
         'value="3"',
         'max="8"',
       ]) {
         assert.ok(summary.includes(expected));
       }
+      assert.ok(summary.indexOf("data-nilm-source-picker") < summary.indexOf("data-nilm-sensitivity"));
       assert.equal((summary.match(/<progress/g) || []).length, 1);
       for (const duplicate of [
         'class="metric"',
         "data-nilm-lane=",
+        "Circuit",
+        "Whole Home Main",
+        "Needs Review",
         "Assigned",
         "Needs Validation",
         "Ready to Publish",
@@ -3923,17 +3929,23 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
           start: "OWNED_SESSION", actions: { assign: {} } },
         { session_id: "unassigned", start: "RAW_SESSION",
           actions: { assign: {} } },
-      ] }));
-      assert.equal((html.match(/<details/g) || []).length, 0);
+      ],
+      collection_meta: {
+        sessions: { total_count: 2, returned_count: 2, truncated: false, next_cursor: null },
+      },
+      }));
+      assert.ok((html.match(/<details/g) || []).length >= 1);
       for (const expected of [
         "Sessions, validation, and technical details",
-        "Estimated Appliances",
         "NILM Sessions",
         "NILM Edges",
         "Validation",
+        'data-nilm-edges-details',
+        "Showing 1 of 1 sessions.",
       ]) {
         assert.ok(html.includes(expected));
       }
+      assert.ok(!html.includes("Estimated Appliances"));
       assert.ok(!html.includes("Manual Labels"));
       assert.ok(!html.includes("data-nilm-decision"));
       assert.ok(html.includes("OWNED_SESSION"));
@@ -4210,9 +4222,12 @@ assert.ok(!inspector.includes("internal detail"));
 assert.ok(inspector.includes("A helper circuit is a separately metered load"));
 assert.ok(inspector.includes("Choose a helper circuit"));
 assert.ok(!inspector.includes("Choose another helper circuit"));
+assert.ok(secondary.includes('data-nilm-edges-details'));
+assert.match(secondary, /<details[^>]*data-nilm-edges-details(?![^>]*open)/);
 assert.ok(secondary.includes("Uncertain events"));
-assert.ok(secondary.includes("Review uncertain events"));
-assert.ok(secondary.includes('class="nilm-evidence-summary"'));
+assert.ok(secondary.includes("1 events could not be identified confidently"));
+assert.ok(secondary.includes("No action is required."));
+assert.match(secondary, /<details[^>]*data-nilm-ambiguity-details(?![^>]*open)/);
 assert.ok(secondary.includes("Evidence quality and attribution"));
 assert.ok(secondary.indexOf("data-nilm-ambiguity-audit") > secondary.indexOf("data-nilm-secondary-collections"));
 assert.ok(secondary.indexOf("data-nilm-evidence-section") > secondary.indexOf("data-nilm-secondary-collections"));
@@ -5100,8 +5115,7 @@ reviewOnly._nilmWorkspace = {
   lane_counts: { needs_review: 1 }
 };
 reviewOnly._render();
-if (!reviewOnly.shadowRoot.innerHTML.includes("Whole Home Main")
-    || !reviewOnly.shadowRoot.innerHTML.includes("data-nilm-review-progress")
+if (!reviewOnly.shadowRoot.innerHTML.includes("data-nilm-review-progress")
     || reviewOnly.shadowRoot.innerHTML.includes("Review lanes")) {
   throw new Error("dashboard graph card should show compact live NILM review progress");
 }
@@ -5234,7 +5248,6 @@ for (const expected of [
   "data-dashboard-alert-detail",
   "View notification detail",
   "NILM mains power",
-  "Whole Home Main",
   "Review progress",
   "3 of 7 reviewed",
   "Pool Pump",

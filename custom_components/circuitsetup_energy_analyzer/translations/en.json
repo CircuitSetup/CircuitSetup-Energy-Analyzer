@@ -2053,7 +2053,7 @@
         "lane_assigned": "Assigned",
         "lane_published": "Published",
         "lane_hidden": "Removed",
-        "hidden_description": "Removed loads do not appear under Estimated Appliances and can be restored for review.",
+        "hidden_description": "Removed loads stay out of active review and can be restored for review.",
         "lane_empty": "No review items from {lane} are available in the current workspace.",
         "item_count": "{count} {noun}",
         "session_validation": "Session Validation",

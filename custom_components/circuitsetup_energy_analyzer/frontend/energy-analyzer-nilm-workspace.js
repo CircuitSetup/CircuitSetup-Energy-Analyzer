@@ -3121,19 +3121,11 @@ export function createNilmWorkspaceMethods({
       <button type="button" class="secondary" data-nilm-sensitivity-action>${this._escape(this._panelTextFormat("nilm_workspace.use_sensitivity", { setting: this._friendlyFeature(sensitivity.recommendation) }))}</button>` : "";
     return `
       <section class="workspace-summary section-surface" data-nilm-workspace-summary aria-label="${this._escape(this._panelText("nilm_workspace.workspace_summary"))}">
-        <div class="workspace-summary-item">
-          <span>${this._escape(this._panelText("nilm_workspace.circuit"))}</span>
-          <strong>${this._escape(circuit.name || circuit.circuit_id || this._panelText("common.unknown"))}</strong>
-        </div>
         ${sourcePicker}
         <div class="workspace-summary-item" data-nilm-sensitivity>
           <span>${this._escape(this._panelText("nilm_workspace.sensitivity"))}</span>
           <strong>${this._escape(this._friendlyFeature(sensitivity.current || "balanced"))} · ${this._escape(this._formatMetricValue(sensitivity.effective_minimum_edge_w))} W</strong>
           ${sensitivityAction}
-        </div>
-        <div class="workspace-summary-item">
-          <span>${this._escape(this._panelText("nilm_workspace.lane_needs_review"))}</span>
-          <strong>${needsReview}</strong>
         </div>
         <label class="workspace-progress">
           <span>${this._escape(this._panelText("nilm_workspace.review_progress"))}</span>
@@ -3682,17 +3674,16 @@ export function createNilmWorkspaceMethods({
                   : "";
     const groups = this._nilmAmbiguityAuditGroups(audit);
     return `<section class="workspace-section section-surface nilm-ambiguity-audit" data-nilm-ambiguity-audit>
-      <h2>${this._escape(this._panelText("nilm_workspace.ambiguity_audit_title"))}</h2>
+      <details class="nilm-evidence-details nilm-ambiguity-details" data-nilm-ambiguity-details ${expanded ? "open" : ""}>
+      <summary data-nilm-ambiguity-toggle="audit" aria-expanded="${expanded}" aria-controls="${contentId}" aria-describedby="nilm_ambiguity_audit_summary nilm_ambiguity_audit_no_action">${this._escape(this._panelText("nilm_workspace.ambiguity_audit_title"))}</summary>
       <p id="nilm_ambiguity_audit_summary"><strong>${this._escape(this._panelTextFormat("nilm_workspace.ambiguity_audit_summary", { count: totalCount }))}</strong></p>
       <p class="muted" data-nilm-ambiguity-no-action>${this._escape(this._panelText("nilm_workspace.ambiguity_audit_no_action"))}</p>
-      <button type="button" class="nilm-evidence-summary" data-nilm-ambiguity-toggle="audit" aria-expanded="${expanded}" aria-controls="${contentId}" aria-describedby="nilm_ambiguity_audit_summary nilm_ambiguity_audit_no_action">
-        ${this._escape(this._panelText("nilm_workspace.ambiguity_audit_review"))}
-      </button>
       <p id="nilm_ambiguity_audit_no_action" class="sr-only">${this._escape(this._panelText("nilm_workspace.ambiguity_audit_no_action"))}</p>
       <p data-nilm-ambiguity-live aria-live="polite" aria-atomic="true" class="sr-only">${this._escape(status)}</p>
       <div id="${contentId}" data-nilm-ambiguity-content role="region" aria-label="${this._escape(this._panelText("nilm_workspace.ambiguity_audit_title"))}" ${expanded ? "" : "hidden"}>
         ${this._renderNilmAmbiguityAuditContent(groups, audit)}
       </div>
+      </details>
     </section>`;
   }
 
@@ -3871,15 +3862,20 @@ export function createNilmWorkspaceMethods({
     return null;
   }
 
-  _renderNilmSessionPagination(workspace) {
+  _renderNilmSessionPagination(workspace, visibleSessionCount = null) {
     const meta = this._nilmSessionCollectionMeta(workspace);
-    const shown = Array.isArray(workspace && workspace.sessions)
+    const loaded = Array.isArray(workspace && workspace.sessions)
       ? workspace.sessions.length
       : 0;
+    const visible = Number.isFinite(Number(visibleSessionCount))
+      ? Math.max(0, Number(visibleSessionCount))
+      : loaded;
     if (!meta.totalCount && !meta.nextCursor) return "";
+    const hiddenLoaded = Math.max(0, loaded - visible);
+    const visibleTotal = Math.max(visible, meta.totalCount - hiddenLoaded);
     const summary = this._panelTextFormat("nilm_workspace.sessions_showing", {
-      shown: Math.min(shown, meta.totalCount),
-      total: meta.totalCount,
+      shown: Math.min(visible, visibleTotal),
+      total: visibleTotal,
     });
     const loadMore = meta.nextCursor
       ? `<button type="button" class="secondary" data-nilm-load-more-sessions ${this._nilmSessionPageLoading ? "disabled" : ""}>${this._escape(this._panelText("nilm_workspace.sessions_load_more"))}</button>`
@@ -3910,17 +3906,6 @@ export function createNilmWorkspaceMethods({
     return `<section class="workspace-section section-surface" data-nilm-secondary-collections>
       <h2>${this._escape(this._panelText("nilm_workspace.secondary_details"))}</h2>
         ${this._renderNilmSessionValidationCards(workspace)}
-        ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.estimated_appliances_title"), workspace.virtual_appliances, this._panelText("nilm_workspace.estimated_appliances_empty"), (item) => {
-          const modelFit = this._nilmConfidenceDescriptor(item, "virtual");
-          return `
-        <div class="metric">
-          <span>${this._escape(item.model_status || this._panelText("common.candidate"))}</span>
-          <strong>${this._escape(item.display_name || item.appliance_id || this._panelText("common.estimated_appliance"))} - ${this._escape(item.is_running ? this._panelText("common.running") : this._panelText("common.idle"))}</strong>
-          <p class="muted" data-field="estimated_daily_energy">${this._escape(this._panelTextFormat("nilm_workspace.estimated_appliance_summary", { power: this._formatMetricValue(item.estimated_power_w), energy: this._formatMetricValue(item.estimated_energy_kwh_today), evidence: modelFit ? modelFit.text : this._panelText("common.unknown") }))}</p>
-          <div class="actions">${this._nilmApplianceDetailButton(item)}</div>
-        </div>
-      `;
-        }, this._panelText("nilm_workspace.estimated_appliances_description"))}
         ${this._renderNilmValidation(workspace.validation)}
         ${workspace.source && workspace.source.source_kind === "mains" ? this._renderNilmWorkspaceList(this._panelText("nilm_workspace.known_load_overlays"), workspace.known_load_overlays, this._panelText("nilm_workspace.known_load_overlays_empty"), (item) => `
         <div class="metric">
@@ -3969,14 +3954,14 @@ export function createNilmWorkspaceMethods({
         </div>
       `;
         }, this._panelText("nilm_workspace.sessions_description"))}
-        ${this._renderNilmSessionPagination(workspace)}
-        ${this._renderNilmWorkspaceList(this._panelText("nilm_workspace.edges_title"), workspace.edges, this._panelText("nilm_workspace.edges_empty"), (item) => `
+        ${this._renderNilmSessionPagination(workspace, unassignedSessions.length)}
+        ${this._renderNilmWorkspaceDetails(this._panelText("nilm_workspace.edges_title"), workspace.edges, this._panelText("nilm_workspace.edges_empty"), (item) => `
         <div class="metric">
           <strong>${this._escape(this._friendlyFeature(item.direction))}: ${this._escape(this._formatNilmWatts(item.delta_w))} W</strong>
           <span>${this._escape(this._formatDateTime(item.timestamp))}</span>
           ${showDominantLeg ? `<p class="muted">${this._escape(this._panelText("nilm_workspace.fact_dominant_leg"))}: ${this._escape(String(item.dominant_leg || "").trim() || this._panelText("nilm_workspace.no_dominant_leg"))}</p>` : ""}
         </div>
-        `, this._panelText("nilm_workspace.edges_description"))}
+        `, this._panelText("nilm_workspace.edges_description"), "data-nilm-edges-details")}
         ${this._renderNilmAmbiguityAudit(workspace)}
         ${this._renderNilmEvidenceDetails(workspace)}
     </section>`;
@@ -5063,6 +5048,18 @@ export function createNilmWorkspaceMethods({
       <h3>${this._escape(title)}</h3>
       ${description ? `<p class="muted">${this._escape(description)}</p>` : ""}
       ${safeItems.length ? `<div class="entity-list">${safeItems.map(renderItem).join("")}</div>` : `<p class="muted">${this._escape(emptyText)}</p>`}
+    `;
+  }
+
+  _renderNilmWorkspaceDetails(title, items, emptyText, renderItem, description = "", dataAttribute = "") {
+    const safeItems = Array.isArray(items) ? items : [];
+    const attribute = String(dataAttribute || "").trim();
+    return `
+      <details class="nilm-evidence-details" ${attribute}>
+        <summary>${this._escape(title)}</summary>
+        ${description ? `<p class="muted">${this._escape(description)}</p>` : ""}
+        ${safeItems.length ? `<div class="entity-list">${safeItems.map(renderItem).join("")}</div>` : `<p class="muted">${this._escape(emptyText)}</p>`}
+      </details>
     `;
   }
 

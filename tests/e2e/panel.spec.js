@@ -7840,7 +7840,7 @@ test("NILM workspace separates hidden lanes and restores hidden assignments", as
   await expect(panel.locator("[data-nilm-lane]")).toHaveCount(4);
   await expect(panel.getByText("Expected", { exact: true })).toHaveCount(0);
   await panel.locator('[data-nilm-lane="hidden"]').click();
-  await expect(panel.getByText("Removed loads do not appear under Estimated Appliances and can be restored for review.")).toBeVisible();
+  await expect(panel.getByText("Removed loads stay out of active review and can be restored for review.")).toBeVisible();
   await expect(panel.locator('[data-nilm-review-item="assignment:ignored-load"]')).toBeVisible();
   await expect(panel.locator('[data-nilm-review-item="assignment:retired-load"]')).toBeVisible();
   const descriptionBox = await panel.locator("[data-nilm-lane-description]").boundingBox();
