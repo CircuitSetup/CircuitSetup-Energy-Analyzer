@@ -179,10 +179,14 @@
         "description": "Select optional aggregate mains sensors used for whole-home comparison features. When a Load Separation source is enabled in Appliance Circuit Assignments, choose known-load circuits here.",
         "data": {
           "mains_source_entities": "Mains Source Entities",
+          "nilm_detection_enabled": "Enable NILM Detection",
+          "nilm_detection_sensitivity": "NILM Detection Sensitivity",
           "known_load_circuits": "Known Load Circuits"
         },
         "data_description": {
           "mains_source_entities": "Optional aggregate mains sensors for whole-home analysis. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
+          "nilm_detection_enabled": "Turns on NILM edge detection for the aggregate mains source. Leave off unless you want Load Separation to discover unknown loads from whole-home power changes.",
+          "nilm_detection_sensitivity": "Controls how small a power transition NILM should try to detect. Quiet detects larger transitions, Balanced is the default, and Sensitive detects smaller transitions.",
           "known_load_circuits": "Select individual load circuits, not mains circuits. These known loads help separate expected events from unknown aggregate mains events."
         }
       },

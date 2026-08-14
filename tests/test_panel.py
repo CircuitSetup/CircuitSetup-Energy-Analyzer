@@ -5229,6 +5229,7 @@ def test_nilm_workspace_payload_lists_all_sources_for_requested_entry() -> None:
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
         sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     mixed = CircuitConfig(
         circuit_id="mixed",
@@ -5243,6 +5244,7 @@ def test_nilm_workspace_payload_lists_all_sources_for_requested_entry() -> None:
         appliance_profile=ApplianceProfile.HVAC,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.hvac_2_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
     )
     dedicated = CircuitConfig(
         circuit_id="fridge",
@@ -5278,16 +5280,6 @@ def test_nilm_workspace_payload_lists_all_sources_for_requested_entry() -> None:
             "path": (
                 "/circuitsetup-energy-analyzer-evidence?"
                 "nilm_workspace=1&entry_id=entry-1&circuit_id=mains"
-            ),
-        },
-        {
-            "entry_id": "entry-1",
-            "circuit_id": "mixed",
-            "name": "Mixed Loads",
-            "source_kind": "pure_mixed",
-            "path": (
-                "/circuitsetup-energy-analyzer-evidence?"
-                "nilm_workspace=1&entry_id=entry-1&circuit_id=mixed"
             ),
         },
         {

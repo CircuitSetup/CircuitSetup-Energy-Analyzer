@@ -18,7 +18,7 @@ from .const import (
 )
 from .localized_text import translation_section, translation_text
 from .managers.source_samples import normalized_leg
-from .profiles import nilm_source_kind
+from .profiles import nilm_detection_enabled, nilm_source_kind
 
 
 def _dashboard_text(*keys: str) -> str:
@@ -85,6 +85,7 @@ class DashboardCircuit:
     area: str | None
     is_mains: bool
     is_hvac: bool
+    nilm_detection_enabled: bool
     detail_path: str
     power_entities: tuple[str, ...]
     chart_power_entities: tuple[str, ...]
@@ -409,6 +410,7 @@ def _dashboard_circuit(
         area=str(_circuit_value(circuit, "area") or "").strip() or None,
         is_mains=is_mains,
         is_hvac=_is_hvac_circuit(circuit),
+        nilm_detection_enabled=nilm_detection_enabled(circuit),
         detail_path=(
             f"{DEFAULT_ALERT_EVIDENCE_PATH}?"
             f"{urlencode({'circuit_id': circuit_id, 'appliance_detail': '1'})}"
@@ -863,7 +865,8 @@ def _nilm_sources(context: DashboardContext) -> tuple[DashboardCircuit, ...]:
     return tuple(
         circuit
         for circuit in context.circuits
-        if nilm_source_kind(
+        if circuit.nilm_detection_enabled
+        and nilm_source_kind(
             {"mode": circuit.mode, "appliance_profile": circuit.profile}
         )
         is not None

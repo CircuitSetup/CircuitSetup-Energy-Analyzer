@@ -66,6 +66,7 @@ def _circuits() -> tuple[CircuitConfig, ...]:
             appliance_profile=ApplianceProfile.MAINS_NILM,
             mode=CircuitMode.MAINS_NILM,
             sensors=(),
+            nilm_detection_enabled=True,
         ),
     )
 
@@ -98,6 +99,7 @@ def _example_circuits() -> tuple[CircuitConfig, ...]:
             appliance_profile=ApplianceProfile.MAINS_NILM,
             mode=CircuitMode.MAINS_NILM,
             sensors=(),
+            nilm_detection_enabled=True,
         ),
     )
 
@@ -1174,6 +1176,7 @@ def test_mains_view_identifies_primary_and_additional_mains_channels() -> None:
         sensors=(
             SensorRef("sensor.garage_mains_power", SensorRole.REAL_POWER),
         ),
+        nilm_detection_enabled=True,
     )
     dashboard = build_recommended_dashboard(
         (*_example_circuits(), second_mains),
@@ -1583,6 +1586,14 @@ def test_dashboard_load_separation_navigation_covers_all_sources() -> None:
             name="HVAC 2",
             appliance_profile=ApplianceProfile.HVAC,
             mode=CircuitMode.MIXED,
+            nilm_detection_enabled=True,
+        ),
+        CircuitConfig(
+            circuit_id="shared",
+            name="Shared Loads",
+            appliance_profile=ApplianceProfile.MIXED,
+            mode=CircuitMode.MIXED,
+            nilm_detection_enabled=True,
         ),
     )
 
@@ -1600,12 +1611,12 @@ def test_dashboard_load_separation_navigation_covers_all_sources() -> None:
         if card.get("name", "").startswith("Open Load Separation:")
     ]
     assert [card["name"] for card in source_cards] == [
-        "Open Load Separation: Mixed Loads",
         "Open Load Separation: HVAC 2",
+        "Open Load Separation: Shared Loads",
     ]
     assert [card["tap_action"]["navigation_path"] for card in source_cards] == [
-        "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&entry_id=entry-1&circuit_id=mixed",
         "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&entry_id=entry-1&circuit_id=hvac_2",
+        "/circuitsetup-energy-analyzer-evidence?nilm_workspace=1&entry_id=entry-1&circuit_id=shared",
     ]
     assert not [card for card in cards if card.get("type") == HOUSE_FLOW_CARD]
 

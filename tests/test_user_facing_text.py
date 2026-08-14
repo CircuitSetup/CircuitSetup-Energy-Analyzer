@@ -282,6 +282,8 @@ EXPECTED_OPTIONS_LABELS = {
 
 EXPECTED_MAINS_LABELS = {
     "mains_source_entities": "Mains Source Entities",
+    "nilm_detection_enabled": "Enable NILM Detection",
+    "nilm_detection_sensitivity": "NILM Detection Sensitivity",
     "known_load_circuits": "Known Load Circuits",
 }
 
@@ -637,6 +639,10 @@ def test_mains_and_utility_flow_labels_are_human_readable_and_described() -> Non
     assert mains_descriptions.keys() == EXPECTED_MAINS_LABELS.keys()
     assert "optional" in mains_descriptions["mains_source_entities"].lower()
     assert "whole-home" in mains_descriptions["mains_source_entities"].lower()
+    assert "edge detection" in mains_descriptions["nilm_detection_enabled"].lower()
+    assert "power transition" in mains_descriptions[
+        "nilm_detection_sensitivity"
+    ].lower()
     assert "known loads" in mains_descriptions["known_load_circuits"].lower()
 
 
