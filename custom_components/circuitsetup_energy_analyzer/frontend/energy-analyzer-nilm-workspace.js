@@ -3889,9 +3889,19 @@ export function createNilmWorkspaceMethods({
   }
 
   _renderNilmSecondaryCollections(workspace) {
+    const needsReviewSessionIds = new Set(
+      (Array.isArray(workspace?.lanes?.needs_review?.session_ids)
+        ? workspace.lanes.needs_review.session_ids
+        : [])
+        .map((sessionId) => String(sessionId || "").trim())
+        .filter(Boolean),
+    );
     const unassignedSessions = (Array.isArray(workspace.sessions) ? workspace.sessions : [])
       .map((item, index) => ({ ...item, workspace_index: index }))
-      .filter((item) => !String(item && item.assignment_id || "").trim());
+      .filter((item) => (
+        !String(item && item.assignment_id || "").trim()
+        && !needsReviewSessionIds.has(String(item && item.session_id || "").trim())
+      ));
     const showDominantLeg = workspace.source && workspace.source.source_kind === "mains";
     return `<section class="workspace-section section-surface" data-nilm-secondary-collections>
       <h2>${this._escape(this._panelText("nilm_workspace.secondary_details"))}</h2>

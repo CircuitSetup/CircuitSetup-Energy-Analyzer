@@ -4633,7 +4633,28 @@ def _merge_nilm_session_history(
                 payload = dict(session)
                 payload["session_id"] = session_alias[1]
                 merged[session_alias[1]] = payload
+    reserved_close_edges = {
+        off_edge_id
+        for session in merged.values()
+        if (
+            off_edge_id := _nilm_duration_bound_close_edge(session)
+        ) is not None
+    }
+    if reserved_close_edges:
+        merged = {
+            session_id: session
+            for session_id, session in merged.items()
+            if str(session.get("assignment_id") or "").strip()
+            or _nilm_session_history_text(session.get("off_edge_id"))
+            not in reserved_close_edges
+        }
     for update in updates:
+        if (
+            not str(update.get("assignment_id") or "").strip()
+            and _nilm_session_history_text(update.get("off_edge_id"))
+            in reserved_close_edges
+        ):
+            continue
         session_alias = _nilm_session_history_identity_alias(
             "session", update.get("session_id")
         )
@@ -4719,6 +4740,13 @@ def _merge_nilm_session_history(
         key=lambda session: str(session.get("end") or session.get("start") or ""),
         reverse=True,
     )
+
+
+def _nilm_duration_bound_close_edge(session: Mapping[str, Any]) -> str | None:
+    stored_close = session.get("_duration_bound_close")
+    if not isinstance(stored_close, Mapping):
+        return None
+    return _nilm_session_history_text(stored_close.get("off_edge_id"))
 
 
 _NILM_TRACE_ENERGY_SOURCE_RANK = {

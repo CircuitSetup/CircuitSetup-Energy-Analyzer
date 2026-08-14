@@ -4287,6 +4287,47 @@ assert.ok(!sessions.includes("Low pairing confidence"));
     )
 
 
+def test_nilm_secondary_sessions_exclude_needs_review_duplicates() -> None:
+    _run_panel_node_script(
+        r'''
+const workspace = makeWorkspace({
+  sessions: [
+    {
+      session_id: "review-session",
+      display_label: "Duplicate review session",
+      start: "2026-08-12T12:00:00Z",
+      end: "2026-08-12T12:15:00Z",
+      median_power_w: 123,
+      estimated_energy_kwh: 0.03,
+    },
+    {
+      session_id: "open-session",
+      display_label: "Independent open session",
+      start: "2026-08-12T13:00:00Z",
+      end: null,
+      median_power_w: 456,
+      estimated_energy_kwh: 0,
+    },
+  ],
+  lanes: {
+    needs_review: {
+      label: "Needs Review",
+      signature_ids: [],
+      assignment_ids: [],
+      interval_ids: [],
+      session_ids: ["review-session"],
+    },
+  },
+});
+const panel = makePanel({ _nilmWorkspace: workspace });
+const html = panel._renderNilmSecondaryCollections(workspace);
+
+assert.ok(!html.includes("Duplicate review session"));
+assert.ok(html.includes("Independent open session"));
+''',
+    )
+
+
 def test_nilm_evidence_quality_pagination_and_deep_links_are_bounded() -> None:
     _run_panel_node_script(
         r'''
