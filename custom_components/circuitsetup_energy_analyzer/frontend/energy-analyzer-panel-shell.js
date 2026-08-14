@@ -1198,6 +1198,9 @@ export class PanelShellMethods {
         .workspace-summary-item strong {
           overflow-wrap: anywhere;
         }
+        .workspace-summary .nilm-label-field {
+          margin-top: 0;
+        }
         .workspace-progress {
           grid-template-columns: minmax(0, 1fr) auto;
         }
@@ -1339,6 +1342,9 @@ export class PanelShellMethods {
         }
         .nilm-ambiguity-audit > h2,
         .nilm-ambiguity-audit > p {
+          margin: 0;
+        }
+        .nilm-ambiguity-details > p {
           margin: 0;
         }
         .nilm-ambiguity-groups,
