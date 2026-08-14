@@ -3441,7 +3441,7 @@ export function createNilmWorkspaceMethods({
 
   async _applyNilmSensitivity() {
     const action = this._nilmWorkspace && this._nilmWorkspace.sensitivity && this._nilmWorkspace.sensitivity.action;
-    if (!this._guardActionCall(action, "NILM sensitivity", "nilm-sensitivity")) return;
+    if (!this._guardActionCall(action, "NILM detection sensitivity", "nilm-sensitivity")) return;
     await this._hass.callService(action.domain || "circuitsetup_energy_analyzer", action.service, { ...(action.data || {}) });
     await this._refreshNilmWorkspaceData();
     this._render();

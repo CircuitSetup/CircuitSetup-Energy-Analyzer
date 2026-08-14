@@ -8,9 +8,6 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from custom_components.circuitsetup_energy_analyzer.const import (
-    CONF_ENABLE_EXPERIMENTAL_NILM,
-)
 from custom_components.circuitsetup_energy_analyzer.managers.nilm_controller import (
     NilmController,
     configured_primary_assignment_id,
@@ -473,26 +470,28 @@ def test_nilm_source_kind_never_uses_circuit_name() -> None:
         SimpleNamespace(
             mode=CircuitMode.SINGLE_PHASE,
             appliance_profile=ApplianceProfile.MIXED,
+            nilm_detection_enabled=True,
         ),
         SimpleNamespace(
             mode=CircuitMode.MIXED,
             appliance_profile=ApplianceProfile.MOTOR_LOAD,
+            nilm_detection_enabled=True,
         ),
     ),
 )
-def test_nilm_controller_enables_mixed_sources_only_when_experimental(
+def test_nilm_controller_enables_mixed_sources_only_when_circuit_enabled(
     config: SimpleNamespace,
 ) -> None:
     disabled = _nilm_controller(SimpleNamespace(options={}, entry_data={}))
-    enabled = _nilm_controller(
-        SimpleNamespace(
-            options={CONF_ENABLE_EXPERIMENTAL_NILM: True},
-            entry_data={},
-        )
+
+    off_config = SimpleNamespace(
+        mode=config.mode,
+        appliance_profile=config.appliance_profile,
+        nilm_detection_enabled=False,
     )
 
-    assert disabled.enabled_for_config(config) is False
-    assert enabled.enabled_for_config(config) is True
+    assert disabled.enabled_for_config(off_config) is False
+    assert disabled.enabled_for_config(config) is True
 
 
 @pytest.mark.parametrize(

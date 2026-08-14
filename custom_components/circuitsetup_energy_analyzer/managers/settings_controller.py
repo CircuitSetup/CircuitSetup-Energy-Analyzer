@@ -23,6 +23,7 @@ from ..const import (
     CONF_ADVANCED_SETTINGS,
     CONF_SENSITIVITY,
     CONF_UTILITY_COMPARISON_SETTINGS,
+    DEFAULT_NILM_DETECTION_SENSITIVITY,
     DEFAULT_SENSITIVITY,
 )
 from ..context_sources import thermostat_mappings_for_settings
@@ -86,7 +87,12 @@ from ..utility_comparison import (
     DEFAULT_UTILITY_STATISTIC_PERIOD,
     UtilityComparisonSettings,
 )
-from ..ux import alert_policy_name_for_sensitivity, normalize_sensitivity
+from ..ux import (
+    alert_policy_name_for_sensitivity,
+    nilm_detection_min_delta_w,
+    normalize_nilm_detection_sensitivity,
+    normalize_sensitivity,
+)
 
 ALERT_UNHELPFUL_RECOMMENDATION_MIN_COUNT = 2
 _COMPLETED_CYCLE_RECOMMENDATION_FEATURES = {
@@ -627,6 +633,37 @@ class SettingsController:
             )
         )
 
+    async def async_set_nilm_detection_sensitivity(
+        self,
+        circuit_id: str,
+        preset: str,
+    ) -> None:
+        """Persist a NILM detection sensitivity preset for one circuit."""
+        await self._async_save_circuit_settings(
+            circuit_id,
+            self._coordinator.store_data.nilm_detection_sensitivity_by_circuit,
+            normalize_nilm_detection_sensitivity(preset),
+        )
+
+    def nilm_detection_sensitivity_for_circuit(self, circuit_id: str) -> str:
+        """Return normalized NILM detection sensitivity for one circuit."""
+        store_sensitivities = getattr(
+            self._coordinator.store_data,
+            "nilm_detection_sensitivity_by_circuit",
+            {},
+        )
+        configured = DEFAULT_NILM_DETECTION_SENSITIVITY
+        config = self._coordinator.circuit_registry.config_for_circuit(circuit_id)
+        if config is not None:
+            configured = getattr(
+                config,
+                "nilm_detection_sensitivity",
+                DEFAULT_NILM_DETECTION_SENSITIVITY,
+            )
+        return normalize_nilm_detection_sensitivity(
+            store_sensitivities.get(circuit_id, configured)
+        )
+
     def alert_policy_for_circuit(self, circuit_id: str) -> ConservativeAlertPolicy:
         """Return the default alert policy for one circuit."""
         sensitivity = self.sensitivity_for_circuit(circuit_id)
@@ -813,12 +850,9 @@ class SettingsController:
 
     def nilm_min_delta_w(self, circuit_id: str) -> float:
         """Return the NILM edge detector minimum delta for one circuit."""
-        policy_name = self._alert_policy_name_for_circuit(circuit_id)
-        if policy_name == "high":
-            return 50.0
-        if policy_name == "low":
-            return 150.0
-        return 100.0
+        return nilm_detection_min_delta_w(
+            self.nilm_detection_sensitivity_for_circuit(circuit_id)
+        )
 
     def clear_nilm_topology_alert_policies(self, circuit_id: str) -> None:
         """Clear cached NILM topology policies for one circuit."""

@@ -255,7 +255,6 @@ EXPECTED_FLOW_LABELS = {
     "source_devices": "Source Devices",
     "extra_source_entities": "Extra Source Entities",
     "demo_source_bundle_enabled": "Load Bundled Demo Sources",
-    "enable_experimental_nilm": "Enable Experimental NILM",
     "mains_source_entities": "Mains Source Entities",
     "outdoor_temperature_entity": "Outdoor Temperature or Weather Entity",
     "rain_sensor_entity": "Rain or Weather Entity",
@@ -263,7 +262,7 @@ EXPECTED_FLOW_LABELS = {
     "water_flow_sensor_entities": "Water Flow Sensors",
     "thermostat_entities": "Thermostats",
     "thermostat_temperature_sensor_entities": "Indoor Temperature Sensors",
-    "sensitivity": "Sensitivity",
+    "sensitivity": "Alert Sensitivity",
     "retention_mode": "Retention Mode",
 }
 
@@ -277,12 +276,11 @@ EXPECTED_OPTIONS_LABELS = {
     "water_flow_sensor_entities": "Water Flow Sensors",
     "thermostat_entities": "Thermostats",
     "thermostat_temperature_sensor_entities": "Indoor Temperature Sensors",
-    "sensitivity": "Sensitivity",
+    "sensitivity": "Alert Sensitivity",
     "retention_mode": "Retention Mode",
 }
 
 EXPECTED_MAINS_LABELS = {
-    "enable_experimental_nilm": "Enable Experimental NILM",
     "mains_source_entities": "Mains Source Entities",
     "known_load_circuits": "Known Load Circuits",
 }
@@ -527,7 +525,7 @@ def test_options_flow_labels_are_human_readable_and_described() -> None:
     assert init_step["menu_options"] == {
         "sources": "🔌 Edit Source Selection",
         "refresh_sources": "🔄 Refresh Source Sensors",
-        "mains": "⚡ Edit Mains Sensors & NILM Setting",
+        "mains": "⚡ Edit Mains Sensors & Known Loads",
         "assign": "🏷️ Appliance Circuit Assignments",
         "utility": "📊 Utility / Opower Comparison",
         "dashboard": "📋 Create Or Update Dashboard",
@@ -637,9 +635,8 @@ def test_mains_and_utility_flow_labels_are_human_readable_and_described() -> Non
     mains_descriptions = strings["options"]["step"]["mains"]["data_description"]
     assert mains_data == EXPECTED_MAINS_LABELS
     assert mains_descriptions.keys() == EXPECTED_MAINS_LABELS.keys()
-    assert "experimental" in mains_descriptions["enable_experimental_nilm"].lower()
     assert "optional" in mains_descriptions["mains_source_entities"].lower()
-    assert "mains nilm" in mains_descriptions["mains_source_entities"].lower()
+    assert "whole-home" in mains_descriptions["mains_source_entities"].lower()
     assert "known loads" in mains_descriptions["known_load_circuits"].lower()
 
 
@@ -713,6 +710,8 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
             "circuit_name": "Circuit Name",
             "appliance_profile": "Appliance Type",
             "circuit_composition": "Circuit Composition",
+            "nilm_detection_enabled": "Enable NILM Detection",
+            "nilm_detection_sensitivity": "NILM Detection Sensitivity",
             "circuit_retention_mode": "Circuit Retention",
         }
         assert descriptions.keys() == data.keys()
@@ -729,6 +728,11 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
         assert (
             "primary appliance plus other loads"
             in descriptions["circuit_composition"].lower()
+        )
+        assert "edge detection" in descriptions["nilm_detection_enabled"].lower()
+        assert (
+            "power transition"
+            in descriptions["nilm_detection_sensitivity"].lower()
         )
         assert "diagnostic history" in descriptions["circuit_retention_mode"].lower()
         for days in ("18 days", "45 days", "180 days"):

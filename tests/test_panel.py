@@ -457,7 +457,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260813-7"
+    assert PANEL_MODULE_VERSION == "20260813-8"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -1812,7 +1812,7 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         configs=(mains_config, known_config, solar_config),
     )
     coordinator.settings_controller = SimpleNamespace(
-        sensitivity_for_circuit=lambda _circuit_id: "balanced",
+        nilm_detection_sensitivity_for_circuit=lambda _circuit_id: "balanced",
         nilm_min_delta_w=lambda _circuit_id: 100.0,
     )
     coordinator.store_data.nilm_label_intervals_by_circuit = {
@@ -1920,7 +1920,7 @@ def test_nilm_workspace_payload_includes_label_interval_actions_and_is_bounded()
         "recommendation": "sensitive",
         "action": {
             "domain": DOMAIN,
-            "service": "set_circuit_sensitivity",
+            "service": "set_nilm_detection_sensitivity",
             "data": {
                 "circuit_id": "mains",
                 "preset": "sensitive",
@@ -7445,28 +7445,40 @@ def test_setup_health_payload_exposes_checklist_and_next_step() -> None:
 
 
 def test_setup_health_payload_surfaces_nilm_review_without_safety_severity() -> None:
-    from custom_components.circuitsetup_energy_analyzer.const import (
-        CONF_ENABLE_EXPERIMENTAL_NILM,
-    )
     from custom_components.circuitsetup_energy_analyzer.panel import (
         setup_health_payload,
     )
 
-    config = CircuitConfig(
+    disabled_config = CircuitConfig(
         circuit_id="mixed",
         name="Mixed Loads",
         appliance_profile=ApplianceProfile.MIXED,
         mode=CircuitMode.MIXED,
         sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
     )
-    coordinator = _coordinator(config=config)
+    enabled_config = CircuitConfig(
+        circuit_id="mixed",
+        name="Mixed Loads",
+        appliance_profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+        sensors=(SensorRef("sensor.mixed_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
+    )
+    coordinator = _coordinator(config=disabled_config)
     coordinator.entry_id = "entry-1"
-    coordinator.options = {CONF_ENABLE_EXPERIMENTAL_NILM: True}
+    coordinator.options = {}
     coordinator.data = SimpleNamespace()
     coordinator.store_data.nilm_signatures = {"mixed": [{"signature_id": "sig-1"}]}
     coordinator.state.nilm_reconciliation_by_circuit = {
         "mixed": {"status": "conflict", "conflict_reason": "over_allocation"}
     }
+
+    disabled = setup_health_payload([coordinator])
+    assert not [
+        item for item in disabled["issues"] if item["issue"].startswith("nilm_")
+    ]
+
+    coordinator.circuit_configs = (enabled_config,)
 
     payload = setup_health_payload([coordinator])
     nilm_issues = [

@@ -150,6 +150,30 @@ def test_feature_store_preserves_empty_nilm_unmatched_edge_marker() -> None:
     assert restored.nilm_unmatched_edges_by_circuit == {"mains": []}
 
 
+def test_feature_store_round_trips_nilm_detection_sensitivity() -> None:
+    data = FeatureStoreData(
+        sensitivity_by_circuit={"mains": "quiet"},
+        nilm_detection_sensitivity_by_circuit={
+            "mains": "sensitive",
+            "legacy": "unexpected",
+        },
+    )
+
+    payload = feature_store_data_to_dict(data)
+    restored = feature_store_data_from_dict(payload)
+
+    assert payload["sensitivity_by_circuit"] == {"mains": "quiet"}
+    assert payload["nilm_detection_sensitivity_by_circuit"] == {
+        "mains": "sensitive",
+        "legacy": "balanced",
+    }
+    assert restored.sensitivity_by_circuit == {"mains": "quiet"}
+    assert restored.nilm_detection_sensitivity_by_circuit == {
+        "mains": "sensitive",
+        "legacy": "balanced",
+    }
+
+
 def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
     now = datetime(2026, 6, 2, tzinfo=UTC)
     old = CircuitEvent(
@@ -189,6 +213,7 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
         ]
     }
     sensitivity_by_circuit = {"fridge": "quiet"}
+    nilm_detection_sensitivity_by_circuit = {"mains": "sensitive"}
     maintenance_by_circuit = {"fridge": {"active": True}}
     alert_feedback = {"fridge:reactive_power": {"action": "expected"}}
     nilm_label_intervals = {
@@ -292,6 +317,7 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
         nilm_label_intervals_by_circuit=nilm_label_intervals,
         nilm_appliance_assignments_by_circuit=nilm_assignments,
         sensitivity_by_circuit=sensitivity_by_circuit,
+        nilm_detection_sensitivity_by_circuit=nilm_detection_sensitivity_by_circuit,
         maintenance_by_circuit=maintenance_by_circuit,
         alert_feedback=alert_feedback,
         energy_usage_settings_by_circuit=energy_usage_settings_by_circuit,
@@ -329,6 +355,10 @@ def test_prune_events_uses_retention_mode_and_preserves_other_data() -> None:
         is data.nilm_appliance_assignments_by_circuit
     )
     assert pruned.sensitivity_by_circuit is data.sensitivity_by_circuit
+    assert (
+        pruned.nilm_detection_sensitivity_by_circuit
+        is data.nilm_detection_sensitivity_by_circuit
+    )
     assert pruned.maintenance_by_circuit is data.maintenance_by_circuit
     assert pruned.alert_feedback is data.alert_feedback
     assert (

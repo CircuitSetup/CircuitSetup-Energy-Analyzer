@@ -15527,6 +15527,7 @@ def test_nilm_sample_processor_keeps_mixed_known_load_edges_unmatched() -> None:
         name="Mixed",
         appliance_profile=ApplianceProfile.MOTOR_LOAD,
         mode=CircuitMode.MIXED,
+        nilm_detection_enabled=True,
     )
     controller = nilm_controller.NilmController(
         SimpleNamespace(
@@ -15903,6 +15904,7 @@ def test_nilm_sample_processor_processes_only_configured_source_kinds(
         name="Source",
         appliance_profile=profile,
         mode=mode,
+        nilm_detection_enabled=expected_events > 0,
     )
     context = ProcessingContext(
         now=now,

@@ -11,6 +11,7 @@ from .alert_links import (
     alert_graph_window,
     alert_source_entities,
 )
+from .const import DEFAULT_NILM_DETECTION_SENSITIVITY
 from .localized_text import translation_text
 from .models import (
     AlertEvidence,
@@ -42,6 +43,11 @@ POLICY_NAME_BY_SENSITIVITY = {
     "quiet": "low",
     "balanced": "standard",
     "sensitive": "high",
+}
+NILM_DETECTION_MIN_DELTA_W_BY_SENSITIVITY = {
+    "quiet": 150.0,
+    "balanced": 100.0,
+    "sensitive": 50.0,
 }
 SENSITIVITY_LABELS = {
     key: _ux_text("sensitivity_labels", key)
@@ -84,6 +90,18 @@ def normalize_sensitivity(value: Any) -> str:
 def alert_policy_name_for_sensitivity(value: Any) -> str:
     """Return the existing alert policy name for a friendly sensitivity value."""
     return POLICY_NAME_BY_SENSITIVITY[normalize_sensitivity(value)]
+
+
+def normalize_nilm_detection_sensitivity(value: Any) -> str:
+    """Return a supported NILM detection sensitivity preset."""
+    return normalize_sensitivity(value or DEFAULT_NILM_DETECTION_SENSITIVITY)
+
+
+def nilm_detection_min_delta_w(value: Any) -> float:
+    """Return the NILM edge detector threshold for one detection sensitivity."""
+    return NILM_DETECTION_MIN_DELTA_W_BY_SENSITIVITY[
+        normalize_nilm_detection_sensitivity(value)
+    ]
 
 
 def friendly_sensitivity_label(value: Any) -> str:

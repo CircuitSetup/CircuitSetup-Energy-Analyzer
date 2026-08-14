@@ -9,7 +9,6 @@
           "source_devices": "Source Devices",
           "extra_source_entities": "Extra Source Entities",
           "demo_source_bundle_enabled": "Load Bundled Demo Sources",
-          "enable_experimental_nilm": "Enable Experimental NILM",
           "mains_source_entities": "Mains Source Entities",
           "outdoor_temperature_entity": "Outdoor Temperature or Weather Entity",
           "rain_sensor_entity": "Rain or Weather Entity",
@@ -17,15 +16,14 @@
           "water_flow_sensor_entities": "Water Flow Sensors",
           "thermostat_entities": "Thermostats",
           "thermostat_temperature_sensor_entities": "Indoor Temperature Sensors",
-          "sensitivity": "Sensitivity",
+          "sensitivity": "Alert Sensitivity",
           "retention_mode": "Retention Mode"
         },
         "data_description": {
           "source_devices": "Select ESPHome meter devices to include their matching energy sensors.",
           "extra_source_entities": "Optional individual sensors for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
           "demo_source_bundle_enabled": "Adds every bundled demo source sensor for testing. Turn this off to remove demo sources and demo appliance assignments.",
-          "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
-          "mains_source_entities": "Optional aggregate mains sensors for NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
+          "mains_source_entities": "Optional aggregate mains sensors for whole-home analysis. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
           "outdoor_temperature_entity": "Optional outdoor temperature sensor or weather entity used for HVAC context. Its humidity attribute also helps explain air-conditioner condensate reaching a sump pump.",
           "rain_sensor_entity": "Optional binary rain sensor or weather entity. Rain conditions and available precipitation attributes explain expected sump, well pump, or water pump activity.",
           "rain_intensity_entity": "Optional precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain.",
@@ -46,6 +44,8 @@
           "circuit_name": "Circuit Name",
         "appliance_profile": "Appliance Type",
         "circuit_composition": "Circuit Composition",
+          "nilm_detection_enabled": "Enable NILM Detection",
+          "nilm_detection_sensitivity": "NILM Detection Sensitivity",
           "circuit_retention_mode": "Circuit Retention"
         },
         "data_description": {
@@ -55,11 +55,13 @@
           "circuit_name": "Edit the display name used for this analyzed circuit.",
         "appliance_profile": "Choose the appliance type used for automatic analysis and alerts. This is ignored for Several loads with no primary.",
         "circuit_composition": "Choose One appliance, A primary appliance plus other loads, or Several loads with no primary.",
+          "nilm_detection_enabled": "Turns on NILM edge detection for this mixed or aggregate circuit. Leave off unless this circuit contains multiple loads you want to separate.",
+          "nilm_detection_sensitivity": "Controls how small a power transition NILM should try to detect. Quiet detects larger transitions, Balanced is the default, and Sensitive detects smaller transitions.",
           "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 18 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       },
       "nilm": {
-        "title": "Experimental NILM Settings",
+        "title": "NILM Known Loads",
         "description": "Optional: choose configured appliance circuits whose known events should be masked from mains NILM discovery.",
         "data": {
           "known_load_circuits": "Known Load Circuits"
@@ -113,11 +115,11 @@
     "step": {
       "init": {
         "title": "CircuitSetup Energy Analyzer options",
-        "description": "Choose an options area to configure. Start with source selection, then mains sensors and NILM settings, and circuit assignments before optional analysis, dashboard, entity, recommendation, and advanced settings.",
+        "description": "Choose an options area to configure. Start with source selection, then mains sensors and circuit assignments before optional analysis, dashboard, entity, recommendation, and advanced settings.",
         "menu_options": {
           "sources": "🔌 Edit Source Selection",
           "refresh_sources": "🔄 Refresh Source Sensors",
-          "mains": "⚡ Edit Mains Sensors & NILM Setting",
+          "mains": "⚡ Edit Mains Sensors & Known Loads",
           "assign": "🏷️ Appliance Circuit Assignments",
           "utility": "📊 Utility / Opower Comparison",
           "dashboard": "📋 Create Or Update Dashboard",
@@ -139,7 +141,7 @@
           "water_flow_sensor_entities": "Water Flow Sensors",
           "thermostat_entities": "Thermostats",
           "thermostat_temperature_sensor_entities": "Indoor Temperature Sensors",
-          "sensitivity": "Sensitivity",
+          "sensitivity": "Alert Sensitivity",
           "retention_mode": "Retention Mode"
         },
         "data_description": {
@@ -168,26 +170,24 @@
           "mains_source_entities": "Mains Source Entities"
         },
         "data_description": {
-          "mains_source_entities": "Select the current whole-panel or aggregate sensors used for mains analysis, utility comparison, and experimental NILM."
+          "mains_source_entities": "Select the current whole-panel or aggregate sensors used for mains analysis and utility comparison."
         },
         "submit": "Continue Source Refresh"
       },
       "mains": {
-        "title": "Edit Mains Sensors & NILM Setting",
-        "description": "Select optional aggregate mains sensors used for Mains NILM and whole-home comparison features, and choose the experimental NILM settings that use them.",
+        "title": "Edit Mains Sensors & Known Loads",
+        "description": "Select optional aggregate mains sensors used for whole-home comparison features. When a Load Separation source is enabled in Appliance Circuit Assignments, choose known-load circuits here.",
         "data": {
-          "enable_experimental_nilm": "Enable Experimental NILM",
           "mains_source_entities": "Mains Source Entities",
           "known_load_circuits": "Known Load Circuits"
         },
         "data_description": {
-          "enable_experimental_nilm": "Turns on experimental mains disaggregation features for aggregate load analysis.",
-          "mains_source_entities": "Optional aggregate mains sensors for Mains NILM. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
+          "mains_source_entities": "Optional aggregate mains sensors for whole-home analysis. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
           "known_load_circuits": "Select individual load circuits, not mains circuits. These known loads help separate expected events from unknown aggregate mains events."
         }
       },
       "nilm": {
-        "title": "Experimental NILM Settings",
+        "title": "NILM Known Loads",
         "description": "Choose configured appliance circuits whose known events should be masked from mains NILM discovery.",
         "data": {
           "known_load_circuits": "Known Load Circuits"
@@ -530,6 +530,8 @@
           "circuit_name": "Circuit Name",
         "appliance_profile": "Appliance Type",
         "circuit_composition": "Circuit Composition",
+          "nilm_detection_enabled": "Enable NILM Detection",
+          "nilm_detection_sensitivity": "NILM Detection Sensitivity",
           "circuit_retention_mode": "Circuit Retention"
         },
         "data_description": {
@@ -539,6 +541,8 @@
           "circuit_name": "Edit the display name used for this analyzed circuit.",
         "appliance_profile": "Choose the appliance type used for automatic analysis and alerts. This is ignored for Several loads with no primary.",
         "circuit_composition": "Choose One appliance, A primary appliance plus other loads, or Several loads with no primary.",
+          "nilm_detection_enabled": "Turns on NILM edge detection for this mixed or aggregate circuit. Leave off unless this circuit contains multiple loads you want to separate.",
+          "nilm_detection_sensitivity": "Controls how small a power transition NILM should try to detect. Quiet detects larger transitions, Balanced is the default, and Sensitive detects smaller transitions.",
           "circuit_retention_mode": "Overrides retained diagnostic history for this circuit. Lightweight keeps 18 days, Standard keeps 45 days, and Diagnostic keeps 180 days; longer retention uses more storage."
         }
       }
@@ -1848,7 +1852,7 @@
       "nilm_workspace": {
         "average_power": "Average power",
         "source_picker_label": "Load Separation source",
-        "sensitivity": "Detection sensitivity and effective minimum edge",
+        "sensitivity": "NILM detection sensitivity and effective minimum edge",
         "use_sensitivity": "Use {setting}",
         "loading": "Loading NILM workspace...",
         "unavailable": "No NILM workspace is available for this circuit.",

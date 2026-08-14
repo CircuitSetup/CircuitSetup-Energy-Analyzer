@@ -10,6 +10,7 @@ from ..const import (
     CONF_ENTITY_DETAIL_LEVEL,
     CONF_EXTRA_SOURCE_ENTITIES,
     CONF_MAINS_SOURCE_ENTITIES,
+    CONF_NILM_DETECTION_ENABLED,
     CONF_SOURCE_ENTITIES,
     CONF_UTILITY_COMPARISON_SETTINGS,
 )
@@ -317,8 +318,9 @@ def _setup_health_checklist(
         if isinstance(dashboard_request, Mapping)
         else ""
     )
-    nilm_enabled = bool(
-        _setup_health_config_value(coordinator, CONF_ENABLE_EXPERIMENTAL_NILM)
+    nilm_enabled = any(
+        _setup_health_nilm_enabled_for_circuit(coordinator, raw_circuit, circuit)
+        for raw_circuit, circuit in circuits
     )
     entity_detail_level = _setup_health_config_value(
         coordinator,
@@ -557,6 +559,51 @@ def _setup_health_config_value(coordinator: Any, key: str) -> Any:
     return None
 
 
+def _setup_health_nilm_enabled_for_circuit(
+    coordinator: Any,
+    raw_circuit: Any,
+    circuit: Any,
+) -> bool:
+    if _setup_health_nilm_source_kind(raw_circuit, circuit) is None:
+        return False
+    raw_config = (
+        raw_circuit
+        if isinstance(raw_circuit, Mapping)
+        else _setup_health_raw_circuit_config(coordinator, circuit.circuit_id)
+    )
+    if (
+        isinstance(raw_config, Mapping)
+        and CONF_NILM_DETECTION_ENABLED in raw_config
+    ):
+        return bool(raw_config.get(CONF_NILM_DETECTION_ENABLED))
+    if bool(getattr(raw_circuit, CONF_NILM_DETECTION_ENABLED, False)):
+        return True
+    return bool(_setup_health_config_value(coordinator, CONF_ENABLE_EXPERIMENTAL_NILM))
+
+
+def _setup_health_nilm_source_kind(raw_circuit: Any, circuit: Any) -> Any | None:
+    return nilm_source_kind(raw_circuit) or nilm_source_kind(circuit)
+
+
+def _setup_health_raw_circuit_config(
+    coordinator: Any,
+    circuit_id: str,
+) -> Mapping[str, Any] | None:
+    for source_name in ("options", "entry_data"):
+        source = getattr(coordinator, source_name, {})
+        if not isinstance(source, Mapping):
+            continue
+        for raw_circuit in source.get(CONF_CIRCUITS, ()) or ():
+            if not isinstance(raw_circuit, Mapping):
+                continue
+            raw_circuit_id = str(
+                raw_circuit.get("circuit_id") or raw_circuit.get("id") or ""
+            )
+            if raw_circuit_id == circuit_id:
+                return raw_circuit
+    return None
+
+
 def _bounded_setup_health_list(values: list[str]) -> list[str]:
     return [
         _bounded_setup_health_string(value)
@@ -787,16 +834,21 @@ def _setup_health_issues(coordinator: Any) -> list[dict[str, Any]]:
         )
         if utility_comparison_issue is not None:
             issues.append(utility_comparison_issue)
-        issues.extend(_setup_health_nilm_issues(coordinator, circuit))
+        issues.extend(_setup_health_nilm_issues(coordinator, raw_circuit, circuit))
 
     return _dedupe_setup_health_issues(issues)
 
 
 def _setup_health_nilm_issues(
     coordinator: Any,
+    raw_circuit: Any,
     circuit: Any,
 ) -> list[dict[str, Any]]:
-    if nilm_source_kind(circuit) is None:
+    if not _setup_health_nilm_enabled_for_circuit(
+        coordinator,
+        raw_circuit,
+        circuit,
+    ):
         return []
     circuit_id = circuit.circuit_id
     store = getattr(coordinator, "store_data", None)

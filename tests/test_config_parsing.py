@@ -6,7 +6,10 @@ import pytest
 
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_CIRCUITS,
+    CONF_ENABLE_EXPERIMENTAL_NILM,
     CONF_MAINS_SOURCE_ENTITIES,
+    CONF_NILM_DETECTION_ENABLED,
+    CONF_NILM_DETECTION_SENSITIVITY,
     CONF_SOURCE_ENTITIES,
 )
 from custom_components.circuitsetup_energy_analyzer.coordinator import (
@@ -1068,9 +1071,61 @@ def test_config_parser_creates_mains_config_without_experimental_nilm() -> None:
     assert configs[0].circuit_id == "mains"
     assert configs[0].mode is CircuitMode.MAINS_NILM
     assert configs[0].appliance_profile is ApplianceProfile.MAINS_NILM
+    assert configs[0].nilm_detection_enabled is False
     assert [sensor.entity_id for sensor in configs[0].sensors] == [
         "sensor.mains_power"
     ]
+
+
+def test_config_parser_backfills_legacy_nilm_enablement() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "legacy_mains",
+                    "name": "Legacy Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    "sensors": ["sensor.mains_power"],
+                },
+                {
+                    "circuit_id": "explicit_mains",
+                    "name": "Explicit Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    CONF_NILM_DETECTION_ENABLED: False,
+                    CONF_NILM_DETECTION_SENSITIVITY: "sensitive",
+                    "sensors": ["sensor.other_mains_power"],
+                },
+            ],
+        }
+    )
+
+    assert configs[0].nilm_detection_enabled is True
+    assert configs[0].nilm_detection_sensitivity == "balanced"
+    assert configs[1].nilm_detection_enabled is False
+    assert configs[1].nilm_detection_sensitivity == "sensitive"
+
+
+def test_config_parser_backfills_legacy_synthetic_mains_nilm_enablement() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_parsing import (
+        circuit_configs_from_entry_data,
+    )
+
+    configs = circuit_configs_from_entry_data(
+        {
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.mains_power"],
+        }
+    )
+
+    assert configs[0].circuit_id == "mains"
+    assert configs[0].nilm_detection_enabled is True
 
 
 def test_config_parser_treats_solar_inverter_sources_as_dual_phase() -> None:

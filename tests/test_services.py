@@ -4930,6 +4930,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
         SERVICE_SET_LEG_IMBALANCE_SETTINGS,
         SERVICE_SET_MAINS_BALANCE_SETTINGS,
         SERVICE_SET_METRIC_CONSISTENCY_SETTINGS,
+        SERVICE_SET_NILM_DETECTION_SENSITIVITY,
         SERVICE_SET_SOLAR_FLOW_SETTINGS,
         SERVICE_SET_STANDBY_SETTINGS,
         SERVICE_SET_UTILITY_COMPARISON_SETTINGS,
@@ -4968,6 +4969,15 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
             preset: str,
         ) -> None:
             self.calls.append(("async_set_circuit_sensitivity", (circuit_id, preset)))
+
+        async def async_set_nilm_detection_sensitivity(
+            self,
+            circuit_id: str,
+            preset: str,
+        ) -> None:
+            self.calls.append(
+                ("async_set_nilm_detection_sensitivity", (circuit_id, preset))
+            )
 
         async def async_set_energy_usage_settings(
             self,
@@ -5237,6 +5247,9 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
     await hass.services.registered[(DOMAIN, SERVICE_SET_CIRCUIT_SENSITIVITY)](
         SimpleNamespace(data={"circuit_id": "fridge", "preset": "quiet"})
     )
+    await hass.services.registered[
+        (DOMAIN, SERVICE_SET_NILM_DETECTION_SENSITIVITY)
+    ](SimpleNamespace(data={"circuit_id": "mains", "preset": "sensitive"}))
     await hass.services.registered[(DOMAIN, SERVICE_SET_ENERGY_USAGE_SETTINGS)](
         SimpleNamespace(
             data={
@@ -5399,6 +5412,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
 
     assert coordinator.calls == [
         ("async_set_circuit_sensitivity", ("fridge", "quiet")),
+        ("async_set_nilm_detection_sensitivity", ("mains", "sensitive")),
         ("async_set_energy_usage_settings", ("fridge", 14, 0.2)),
         ("async_set_energy_goal_settings", ("fridge", 12.0, 1.0)),
         ("async_set_demand_settings", ("fridge", 30, 4500.0)),
@@ -5484,6 +5498,55 @@ async def test_set_circuit_sensitivity_service_rejects_unknown_preset() -> None:
         await hass.services.registered[(DOMAIN, SERVICE_SET_CIRCUIT_SENSITIVITY)](
             SimpleNamespace(data={"circuit_id": "fridge", "preset": "noisy"})
         )
+
+    assert coordinator.calls == []
+
+
+@pytest.mark.asyncio
+async def test_set_nilm_detection_sensitivity_service_rejects_unknown_preset() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        SERVICE_SET_NILM_DETECTION_SENSITIVITY,
+        HomeAssistantError,
+        async_setup_services,
+    )
+
+    class FakeServices:
+        def __init__(self) -> None:
+            self.registered: dict[tuple[str, str], object] = {}
+
+        def async_register(self, domain, service, handler, schema=None) -> None:
+            self.registered[(domain, service)] = handler
+
+    class FakeCoordinator:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str]] = []
+
+        def async_set_updated_data(self, data) -> None:
+            return None
+
+        def has_circuit(self, circuit_id: str) -> bool:
+            return circuit_id == "mains"
+
+        async def async_set_nilm_detection_sensitivity(
+            self,
+            circuit_id: str,
+            preset: str,
+        ) -> None:
+            self.calls.append((circuit_id, preset))
+
+    coordinator = FakeCoordinator()
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": coordinator}},
+        services=FakeServices(),
+        bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
+    )
+
+    await async_setup_services(hass)
+
+    with pytest.raises(HomeAssistantError, match="NILM detection sensitivity"):
+        await hass.services.registered[
+            (DOMAIN, SERVICE_SET_NILM_DETECTION_SENSITIVITY)
+        ](SimpleNamespace(data={"circuit_id": "mains", "preset": "noisy"}))
 
     assert coordinator.calls == []
 

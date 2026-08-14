@@ -2985,7 +2985,7 @@ def test_nilm_controller_exposes_history_validation_action() -> None:
     assert callable(coordinator.nilm_controller.async_validate_nilm_assignment_history)
 
 
-def test_nilm_controller_reports_enabled_mains_nilm_configs() -> None:
+def test_nilm_controller_requires_circuit_level_enablement() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
     )
@@ -2999,15 +2999,19 @@ def test_nilm_controller_reports_enabled_mains_nilm_configs() -> None:
         name="Mains NILM",
         appliance_profile=ApplianceProfile.MAINS_NILM,
         mode=CircuitMode.MAINS_NILM,
+        nilm_detection_enabled=False,
     )
+    enabled_mains_config = replace(mains_config, nilm_detection_enabled=True)
     direct_config = CircuitConfig(
         circuit_id="fridge",
         name="Fridge",
         appliance_profile=ApplianceProfile.REFRIGERATOR,
         mode=CircuitMode.SINGLE_PHASE,
+        nilm_detection_enabled=True,
     )
 
-    assert coordinator.nilm_controller.enabled_for_config(mains_config) is True
+    assert coordinator.nilm_controller.enabled_for_config(mains_config) is False
+    assert coordinator.nilm_controller.enabled_for_config(enabled_mains_config) is True
     assert coordinator.nilm_controller.enabled_for_config(direct_config) is False
 
 
