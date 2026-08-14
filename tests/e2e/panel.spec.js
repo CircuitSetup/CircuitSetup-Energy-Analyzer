@@ -9388,6 +9388,78 @@ test("Needs Review session assignment uses the canonical session action", async 
   });
 });
 
+test("Needs Review session assignment accepts a duration-bound session alias", async ({ page }) => {
+  const originalSessionId = "nilm-session-0";
+  const reopenedSessionId = "nilm-session-reopened";
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: [] });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const assignmentCalled = await page.evaluate(() => window.__serviceCalls?.some((call) => (
+      call.service === "assign_session_to_appliance"
+      && call.data?.session_id === "nilm-session-0"
+    )) || false);
+    const payload = structuredClone(apiPayload(url.pathname));
+    const session = payload.sessions.find((item) => item.session_id === originalSessionId);
+    session.signature_review.actions.assign.assignment_options = [
+      { value: "dishwasher", label: "Dishwasher" },
+    ];
+    session.actions = {
+      assign: {
+        domain: "circuitsetup_energy_analyzer",
+        service: "assign_session_to_appliance",
+        data: {
+          circuit_id: "mains",
+          session_id: originalSessionId,
+          signature_fingerprint: "signature-1",
+        },
+        requires: ["label"],
+        assignment_options: [{ value: "dishwasher", label: "Dishwasher" }],
+      },
+    };
+    payload.lanes.needs_review = {
+      ...payload.lanes.needs_review,
+      signature_ids: [],
+      session_ids: assignmentCalled ? [] : [originalSessionId],
+    };
+    if (assignmentCalled) {
+      session.session_id = reopenedSessionId;
+      session.assignment_id = "dishwasher";
+      session.end = null;
+      session._duration_bound_close = { session_id: originalSessionId };
+      delete session.actions;
+      delete session.signature_review;
+      payload.assignments[0].session_ids = [reopenedSessionId];
+      payload.assignments[0].signature_fingerprints = ["signature-1"];
+    }
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+
+  await panel.locator('[data-nilm-decision][value="identify"]').check();
+  await panel.locator('[data-nilm-existing-assignment="session_0"]').selectOption("dishwasher");
+  await panel.locator("[data-nilm-apply-decision]").click();
+
+  await expect.poll(() => page.evaluate(({ originalSessionId, reopenedSessionId }) => ({
+    persisted: window.__panel._nilmSessionAssignmentPersisted(
+      originalSessionId,
+      "dishwasher",
+      "signature-1",
+    ),
+    sessionIds: window.__panel._nilmWorkspace.assignments[0].session_ids,
+  }), { originalSessionId, reopenedSessionId })).toEqual({
+    persisted: true,
+    sessionIds: [reopenedSessionId],
+  });
+  await expect(panel.getByText(
+    "The NILM session assignment was not retained after refresh. Try again.",
+    { exact: true },
+  )).toHaveCount(0);
+});
+
 test("Needs Review session assignment preserves review state when assignment membership is missing", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (url.pathname.endsWith("/nilm_workspace_history")) {
