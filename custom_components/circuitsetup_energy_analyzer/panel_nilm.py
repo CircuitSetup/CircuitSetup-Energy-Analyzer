@@ -2334,14 +2334,15 @@ def _nilm_workspace_target(
         ):
             continue
         source_configs = _nilm_workspace_source_configs(coordinator)
-        sources = [
-            source
+        enabled_source_configs = [
+            (config, source)
             for config, source in source_configs
             if nilm_detection_enabled(config)
         ]
+        sources = [source for _config, source in enabled_source_configs]
         candidates = [
             config
-            for config, source in source_configs
+            for config, source in enabled_source_configs
             if not requested_circuit_id or source["circuit_id"] == requested_circuit_id
         ]
         if candidates:
