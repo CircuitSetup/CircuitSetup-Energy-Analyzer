@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -1994,6 +1995,7 @@ def test_appliance_detail_offers_load_separation_for_each_source(
     )
 
     config = _config("source", profile=profile, mode=mode)
+    config = replace(config, nilm_detection_enabled=True)
     coordinator = SimpleNamespace(
         circuit_configs=(config,),
         state=AnalyzerState(),
@@ -2019,6 +2021,28 @@ def test_appliance_detail_omits_load_separation_for_dedicated_circuit() -> None:
     )
 
     payload = appliance_detail_payload([_direct_coordinator()], circuit_id="fridge")
+
+    assert "open_load_separation" not in payload["actions"]
+
+
+def test_appliance_detail_omits_load_separation_for_disabled_nilm_source() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    config = _config(
+        "mixed",
+        profile=ApplianceProfile.MIXED,
+        mode=CircuitMode.MIXED,
+    )
+    coordinator = SimpleNamespace(
+        circuit_configs=(config,),
+        state=AnalyzerState(),
+        store_data=FeatureStoreData(),
+        entry_id="entry-1",
+    )
+
+    payload = appliance_detail_payload([coordinator], circuit_id="mixed")
 
     assert "open_load_separation" not in payload["actions"]
 

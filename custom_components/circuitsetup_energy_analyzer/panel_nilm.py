@@ -73,7 +73,7 @@ from .processors.nilm_sample import (
     ensure_nilm_tracked_collection,
     nilm_tracked_collection_revision,
 )
-from .profiles import nilm_source_kind
+from .profiles import nilm_detection_enabled, nilm_source_kind
 from .services import (
     ATTR_APPLIANCE_PROFILE,
     ATTR_ASSIGNMENT_ID,
@@ -2334,7 +2334,11 @@ def _nilm_workspace_target(
         ):
             continue
         source_configs = _nilm_workspace_source_configs(coordinator)
-        sources = [source for _config, source in source_configs]
+        sources = [
+            source
+            for config, source in source_configs
+            if nilm_detection_enabled(config)
+        ]
         candidates = [
             config
             for config, source in source_configs

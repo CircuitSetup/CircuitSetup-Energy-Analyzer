@@ -4,7 +4,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .const import MIN_LEARNING_DAYS
+from .const import (
+    CONF_NILM_DETECTION_ENABLED,
+    DEFAULT_NILM_DETECTION_ENABLED,
+    MIN_LEARNING_DAYS,
+)
 from .models import (
     ApplianceProfile,
     CircuitConfig,
@@ -43,6 +47,19 @@ def nilm_source_kind(
     if profile is ApplianceProfile.MIXED:
         return NilmSourceKind.PURE_MIXED
     return None
+
+
+def nilm_detection_enabled(
+    config: CircuitConfig | Mapping[str, Any],
+    *,
+    default: bool = DEFAULT_NILM_DETECTION_ENABLED,
+) -> bool:
+    """Return whether a configured NILM source is enabled for user workflows."""
+    if nilm_source_kind(config) is None:
+        return False
+    if isinstance(config, Mapping):
+        return bool(config.get(CONF_NILM_DETECTION_ENABLED, default))
+    return bool(getattr(config, CONF_NILM_DETECTION_ENABLED, default))
 
 
 def supports_direct_appliance_analysis(config: CircuitConfig) -> bool:
