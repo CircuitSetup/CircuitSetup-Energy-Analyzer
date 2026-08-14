@@ -7972,6 +7972,7 @@ test("NILM workspace shows and confirms a configured primary only for primary mi
   await expect(primary).toContainText("900 W · 14 matched cycles · follows AC2 calls");
   primaryConfirmed = true;
   await primary.locator("[data-nilm-primary-confirm]").click();
+  await expect(primary).toContainText("Configured primary assignment updated.");
   await expect(primary).toContainText("Signature: Blower signature is established (14 recurring detections).");
   await expect(primary).toContainText("Attribution: 2 matching detections are assigned automatically.");
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
@@ -7985,6 +7986,136 @@ test("NILM workspace shows and confirms a configured primary only for primary mi
   await expect(page.locator("circuitsetup-energy-analyzer-panel [data-nilm-configured-primary]")).toHaveCount(0);
   await expect(page.locator("circuitsetup-energy-analyzer-panel").getByRole("heading", { name: "Known Load Overlays" })).toHaveCount(0);
   await expect(page.locator("circuitsetup-energy-analyzer-panel").getByRole("heading", { name: "Solar/Net Overlays" })).toHaveCount(0);
+});
+
+test("NILM workspace verifies configured primary signature replacement", async ({ page }) => {
+  let replacementPersisted = false;
+  const sessionIds = ["session-condensate-1", "session-condensate-2"];
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.circuit = { circuit_id: "hvac_1", name: "HVAC 1" };
+    payload.source = { ...payload.source, source_kind: "primary_mixed" };
+    payload.assignments = [{
+      assignment_id: "hvac_1-configured-primary",
+      display_name: "HVAC 1",
+      appliance_profile: "hvac_blower",
+      session_ids: [...sessionIds],
+      signature_fingerprints: [replacementPersisted ? "blower-fingerprint" : "condensate-fingerprint"],
+      lifecycle_state: "assigned",
+    }];
+    payload.configured_primary = {
+      assignment_id: "hvac_1-configured-primary",
+      display_name: "HVAC 1",
+      appliance_profile: "hvac_blower",
+      current_binding: replacementPersisted
+        ? { signature_id: "signature-blower", display_label: "Blower signature" }
+        : { signature_id: "signature-condensate", display_label: "Condensate signature" },
+      evidence: { confirmed_interval_count: 2 },
+      signature: replacementPersisted
+        ? { status: "established", signature_id: "signature-blower", display_label: "Blower signature", recurrence_count: 14 }
+        : { status: "established", signature_id: "signature-condensate", display_label: "Condensate signature", recurrence_count: 9 },
+      attribution: { status: "active", matching_detection_count: 2 },
+      suggestion: replacementPersisted ? null : {
+        signature_id: "signature-blower",
+        display_label: "Blower signature",
+        confidence: 0.94,
+        evidence_summary: "900 W · 14 matched cycles · follows AC2 calls",
+        action: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "assign_signature_to_appliance",
+          data: {
+            entry_id: "entry-1",
+            circuit_id: "hvac_1",
+            signature_id: "signature-blower",
+            assignment_id: "hvac_1-configured-primary",
+            label: "HVAC 1",
+          },
+        },
+      },
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=hvac_1");
+  const primary = panel.locator("[data-nilm-configured-primary]");
+  await expect(primary).toContainText("Current signature: Condensate signature");
+  await expect(primary).toContainText("Suggested signature: Blower signature");
+  const changeButton = primary.getByRole("button", { name: "Change primary signature to Blower signature" });
+  await expect(changeButton).toBeVisible();
+
+  replacementPersisted = true;
+  await changeButton.click();
+
+  await expect(primary).toContainText("Changed primary signature from Condensate signature to Blower signature.");
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
+    service: "assign_signature_to_appliance",
+    data: {
+      entry_id: "entry-1",
+      circuit_id: "hvac_1",
+      assignment_id: "hvac_1-configured-primary",
+      signature_id: "signature-blower",
+    },
+  });
+});
+
+test("NILM workspace keeps the configured primary signature replacement suggestion when refresh does not persist it", async ({ page }) => {
+  let replacementRequested = false;
+  const sessionIds = ["session-condensate-1", "session-condensate-2"];
+  const suggestion = {
+    signature_id: "signature-blower",
+    display_label: "Blower signature",
+    confidence: 0.94,
+    evidence_summary: "900 W · 14 matched cycles · follows AC2 calls",
+    action: {
+      domain: "circuitsetup_energy_analyzer",
+      service: "assign_signature_to_appliance",
+      data: {
+        entry_id: "entry-1",
+        circuit_id: "hvac_1",
+        signature_id: "signature-blower",
+        assignment_id: "hvac_1-configured-primary",
+        label: "HVAC 1",
+      },
+    },
+  };
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.circuit = { circuit_id: "hvac_1", name: "HVAC 1" };
+    payload.source = { ...payload.source, source_kind: "primary_mixed" };
+    payload.assignments = [{
+      assignment_id: "hvac_1-configured-primary",
+      display_name: "HVAC 1",
+      appliance_profile: "hvac_blower",
+      session_ids: [...sessionIds],
+      signature_fingerprints: ["condensate-fingerprint"],
+      lifecycle_state: "assigned",
+    }];
+    payload.configured_primary = {
+      assignment_id: "hvac_1-configured-primary",
+      display_name: "HVAC 1",
+      appliance_profile: "hvac_blower",
+      current_binding: { signature_id: "signature-condensate", display_label: "Condensate signature" },
+      evidence: { confirmed_interval_count: 2 },
+      signature: { status: "established", signature_id: "signature-condensate", display_label: "Condensate signature", recurrence_count: 9 },
+      attribution: { status: "active", matching_detection_count: 2 },
+      suggestion: replacementRequested ? null : suggestion,
+    };
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  const panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=hvac_1");
+  const primary = panel.locator("[data-nilm-configured-primary]");
+  const changeButton = primary.getByRole("button", { name: "Change primary signature to Blower signature" });
+  replacementRequested = true;
+  await changeButton.click();
+
+  await expect(primary).toContainText("The configured primary signature change was not retained after refresh. Try again.");
+  await expect(primary).toContainText("Suggested signature: Blower signature");
+  await expect(primary.getByRole("button", { name: "Change primary signature to Blower signature" })).toBeVisible();
 });
 
 test("NILM workspace lets the configured primary assignment be approved from Needs Review", async ({ page }) => {
@@ -9049,13 +9180,51 @@ test("NILM review supports decisions, validation, and interval labeling", async 
       return true;
     }
     if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const assignmentCalled = await page.evaluate(() => window.__serviceCalls?.some((call) => (
+      call.service === "assign_session_to_appliance"
+      && call.data?.session_id === "nilm-session-0"
+    )) || false);
     const payload = structuredClone(apiPayload(url.pathname));
     payload.source = { ...payload.source, source_kind: "mains" };
+    const session = payload.sessions.find((item) => item.session_id === "nilm-session-0");
+    session.actions = {
+      assign: {
+        domain: "circuitsetup_energy_analyzer",
+        service: "assign_session_to_appliance",
+        data: {
+          circuit_id: "mains",
+          session_id: "nilm-session-0",
+          signature_fingerprint: "signature-1",
+        },
+        requires: ["label"],
+        assignment_options: [
+          { value: "mains-configured-primary", label: "Configured primary: HVAC 2" },
+        ],
+      },
+    };
     payload.lanes.needs_review = {
       ...payload.lanes.needs_review,
       signature_ids: [],
-      session_ids: ["nilm-session-0"],
+      session_ids: assignmentCalled ? [] : ["nilm-session-0"],
     };
+    if (assignmentCalled) {
+      session.assignment_id = "mains-configured-primary";
+      payload.assignments.push({
+        ...payload.assignments[0],
+        assignment_id: "mains-configured-primary",
+        appliance_id: "mains-configured-primary",
+        display_name: "HVAC 2",
+        session_ids: ["nilm-session-0"],
+        signature_fingerprints: ["signature-1"],
+        label_interval_ids: [],
+      });
+      payload.lanes.assigned.assignment_ids = [
+        ...payload.lanes.assigned.assignment_ids,
+        "mains-configured-primary",
+      ];
+      payload.lane_counts.needs_review = 0;
+      payload.lane_counts.assigned = 2;
+    }
     payload.known_load_overlays = [{ circuit_id: "fridge", name: "Fridge", entity_ids: ["sensor.fridge_power"] }];
     payload.history = {
       ...payload.history,
@@ -9145,7 +9314,7 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   await panel.locator('[data-nilm-label-interval-action="save"]').click();
 
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.map((call) => call.service))).toEqual([
-    "assign_signature_to_appliance",
+    "assign_session_to_appliance",
     "validate_nilm_session",
     "validate_nilm_assignment_history",
     "set_nilm_detection_sensitivity",
@@ -9160,20 +9329,85 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   await toHaveNoViolations(page);
 });
 
-test("NILM session assignment keeps the selected existing appliance across rerenders", async ({ page }) => {
+test("Needs Review session assignment uses the canonical session action", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (url.pathname.endsWith("/nilm_workspace_history")) {
       await route.fulfill({ json: [] });
       return true;
     }
     if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const assignmentCalled = await page.evaluate(() => window.__serviceCalls?.some((call) => (
+      call.service === "assign_session_to_appliance"
+      && call.data?.session_id === "nilm-session-0"
+    )) || false);
     const payload = structuredClone(apiPayload(url.pathname));
     const session = payload.sessions.find((item) => item.session_id === "nilm-session-0");
-    delete session.signature_review;
+    session.signature_review.actions.assign.assignment_options = [
+      { value: "dishwasher", label: "Dishwasher" },
+    ];
     session.actions = {
       assign: {
         domain: "circuitsetup_energy_analyzer",
-        service: "assign_nilm_session",
+        service: "assign_session_to_appliance",
+        data: {
+          circuit_id: "mains",
+          session_id: "nilm-session-0",
+          signature_fingerprint: "signature-1",
+        },
+        requires: ["label"],
+        assignment_options: [{ value: "dishwasher", label: "Dishwasher" }],
+      },
+    };
+    payload.lanes.needs_review = {
+      ...payload.lanes.needs_review,
+      signature_ids: [],
+      session_ids: assignmentCalled ? [] : ["nilm-session-0"],
+    };
+    if (assignmentCalled) {
+      session.assignment_id = "dishwasher";
+      payload.assignments[0].session_ids = ["nilm-session-0"];
+      payload.assignments[0].signature_fingerprints = ["signature-1"];
+    }
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+
+  await panel.locator('[data-nilm-decision][value="identify"]').check();
+  await panel.locator('[data-nilm-existing-assignment="session_0"]').selectOption("dishwasher");
+  await panel.locator("[data-nilm-apply-decision]").click();
+
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
+    service: "assign_session_to_appliance",
+    data: {
+      session_id: "nilm-session-0",
+      signature_fingerprint: "signature-1",
+      assignment_id: "dishwasher",
+      label: "Dishwasher",
+    },
+  });
+});
+
+test("Needs Review session assignment preserves review state when assignment membership is missing", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: [] });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const assignmentCalled = await page.evaluate(() => window.__serviceCalls?.some((call) => (
+      call.service === "assign_session_to_appliance"
+      && call.data?.session_id === "nilm-session-0"
+    )) || false);
+    const payload = structuredClone(apiPayload(url.pathname));
+    const session = payload.sessions.find((item) => item.session_id === "nilm-session-0");
+    session.signature_review.actions.assign.assignment_options = [
+      { value: "dishwasher", label: "Dishwasher" },
+    ];
+    session.actions = {
+      assign: {
+        domain: "circuitsetup_energy_analyzer",
+        service: "assign_session_to_appliance",
         data: {
           circuit_id: "mains",
           session_id: "nilm-session-0",
@@ -9188,6 +9422,134 @@ test("NILM session assignment keeps the selected existing appliance across reren
       signature_ids: [],
       session_ids: ["nilm-session-0"],
     };
+    if (assignmentCalled) {
+      session.assignment_id = "dishwasher";
+      payload.assignments[0].session_ids = [];
+      payload.assignments[0].signature_fingerprints = ["signature-1"];
+    }
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+
+  await panel.locator('[data-nilm-decision][value="identify"]').check();
+  await panel.locator('#nilm_label_session_0').fill("Keep this review label");
+  await panel.locator('[data-nilm-existing-assignment="session_0"]').selectOption("dishwasher");
+  await panel.locator("[data-nilm-apply-decision]").click();
+
+  await expect(panel.getByText(
+    "The NILM session assignment was not retained after refresh. Try again.",
+    { exact: true },
+  )).toBeVisible();
+  await expect(panel.locator(".inline-feedback.success")).toHaveCount(0);
+  await expect(panel.locator('[data-nilm-review-item="session:nilm-session-0"]'))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(panel.locator('#nilm_label_session_0')).toHaveValue("Keep this review label");
+  await expect.poll(() => page.evaluate(() => ({
+    decision: window.__panel._nilmDecisionDrafts.get("signature-1"),
+    label: window.__panel._nilmLabelDrafts.get("signature-1"),
+  }))).toMatchObject({
+    decision: { decision: "identify", identifyMode: "assign", assignmentId: "dishwasher" },
+    label: "Keep this review label",
+  });
+});
+
+test("Needs Review session assignment preserves review state when signature membership is missing", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: [] });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const assignmentCalled = await page.evaluate(() => window.__serviceCalls?.some((call) => (
+      call.service === "assign_session_to_appliance"
+      && call.data?.session_id === "nilm-session-0"
+    )) || false);
+    const payload = structuredClone(apiPayload(url.pathname));
+    const session = payload.sessions.find((item) => item.session_id === "nilm-session-0");
+    session.signature_review.actions.assign.assignment_options = [
+      { value: "dishwasher", label: "Dishwasher" },
+    ];
+    session.actions = {
+      assign: {
+        domain: "circuitsetup_energy_analyzer",
+        service: "assign_session_to_appliance",
+        data: {
+          circuit_id: "mains",
+          session_id: "nilm-session-0",
+          signature_fingerprint: "signature-1",
+        },
+        requires: ["label"],
+        assignment_options: [{ value: "dishwasher", label: "Dishwasher" }],
+      },
+    };
+    payload.lanes.needs_review = {
+      ...payload.lanes.needs_review,
+      signature_ids: [],
+      session_ids: ["nilm-session-0"],
+    };
+    if (assignmentCalled) {
+      session.assignment_id = "dishwasher";
+      payload.assignments[0].session_ids = ["nilm-session-0"];
+      payload.assignments[0].signature_fingerprints = [];
+    }
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+
+  await panel.locator('[data-nilm-decision][value="identify"]').check();
+  await panel.locator('#nilm_label_session_0').fill("Keep this review label");
+  await panel.locator('[data-nilm-existing-assignment="session_0"]').selectOption("dishwasher");
+  await panel.locator("[data-nilm-apply-decision]").click();
+
+  await expect(panel.getByText(
+    "The NILM session assignment was not retained after refresh. Try again.",
+    { exact: true },
+  )).toBeVisible();
+  await expect(panel.locator(".inline-feedback.success")).toHaveCount(0);
+  await expect(panel.locator('[data-nilm-review-item="session:nilm-session-0"]'))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(panel.locator('#nilm_label_session_0')).toHaveValue("Keep this review label");
+});
+
+test("NILM session assignment keeps the selected existing appliance across rerenders", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: [] });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const assignmentCalled = await page.evaluate(() => window.__serviceCalls?.some((call) => (
+      call.service === "assign_session_to_appliance"
+      && call.data?.session_id === "nilm-session-0"
+    )) || false);
+    const payload = structuredClone(apiPayload(url.pathname));
+    const session = payload.sessions.find((item) => item.session_id === "nilm-session-0");
+    delete session.signature_review;
+    session.actions = {
+      assign: {
+        domain: "circuitsetup_energy_analyzer",
+        service: "assign_session_to_appliance",
+        data: {
+          circuit_id: "mains",
+          session_id: "nilm-session-0",
+          signature_fingerprint: "signature-1",
+        },
+        requires: ["label"],
+        assignment_options: [{ value: "dishwasher", label: "Dishwasher" }],
+      },
+    };
+    payload.lanes.needs_review = {
+      ...payload.lanes.needs_review,
+      signature_ids: [],
+      session_ids: assignmentCalled ? [] : ["nilm-session-0"],
+    };
+    if (assignmentCalled) {
+      session.assignment_id = "dishwasher";
+      payload.assignments[0].session_ids = ["nilm-session-0"];
+      payload.assignments[0].signature_fingerprints = ["signature-1"];
+    }
     await route.fulfill({ json: payload });
     return true;
   });
@@ -9221,13 +9583,76 @@ test("NILM session assignment keeps the selected existing appliance across reren
   await panel.locator('[data-nilm-session-action="assign"]').last().click();
 
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
-    service: "assign_nilm_session",
+    service: "assign_session_to_appliance",
     data: {
       assignment_id: "dishwasher",
       label: "Dishwasher",
       session_id: "nilm-session-0",
     },
   });
+  await expect(panel.locator('[data-nilm-session-label-key="nilm-session-0"]')).toHaveCount(0);
+  await expect(panel.locator('[data-nilm-review-item="session:nilm-session-0"]')).toHaveCount(0);
+});
+
+test("NILM session assignment preserves drafts when refreshed session ownership is missing", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: [] });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const assignmentCalled = await page.evaluate(() => window.__serviceCalls?.some((call) => (
+      call.service === "assign_session_to_appliance"
+      && call.data?.session_id === "nilm-session-0"
+    )) || false);
+    const payload = structuredClone(apiPayload(url.pathname));
+    const session = payload.sessions.find((item) => item.session_id === "nilm-session-0");
+    delete session.signature_review;
+    session.actions = {
+      assign: {
+        domain: "circuitsetup_energy_analyzer",
+        service: "assign_session_to_appliance",
+        data: {
+          circuit_id: "mains",
+          session_id: "nilm-session-0",
+          signature_fingerprint: "signature-1",
+        },
+        requires: ["label"],
+        assignment_options: [{ value: "dishwasher", label: "Dishwasher" }],
+      },
+    };
+    payload.lanes.needs_review = {
+      ...payload.lanes.needs_review,
+      signature_ids: [],
+      session_ids: ["nilm-session-0"],
+    };
+    if (assignmentCalled) {
+      delete session.assignment_id;
+      payload.assignments[0].session_ids = ["nilm-session-0"];
+      payload.assignments[0].signature_fingerprints = ["signature-1"];
+    }
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+
+  await panel.locator('[data-nilm-session-label-key="nilm-session-0"]').last().fill("Keep Window AC");
+  await panel.locator('[data-nilm-existing-assignment="sessions_0"]').last().selectOption("dishwasher");
+  await panel.locator('[data-nilm-session-action="assign"]').last().click();
+
+  await expect(panel.getByText(
+    "The NILM session assignment was not retained after refresh. Try again.",
+    { exact: true },
+  )).toBeVisible();
+  await expect(panel.locator(".inline-feedback.success")).toHaveCount(0);
+  await expect(panel.locator('[data-nilm-review-item="session:nilm-session-0"]'))
+    .toHaveAttribute("aria-pressed", "true");
+  await expect(panel.locator('[data-nilm-session-label-key="nilm-session-0"]'))
+    .toHaveCount(2);
+  await expect.poll(() => page.evaluate(() => ({
+    assignment: window.__panel._nilmSessionAssignmentDrafts.get("nilm-session-0"),
+    label: window.__panel._nilmSessionLabelDrafts.get("nilm-session-0"),
+  }))).toEqual({ assignment: "dishwasher", label: "Keep Window AC" });
 });
 
 test("assigned NILM intervals can be labeled, inspected, and removed", async ({ page }) => {

@@ -699,6 +699,21 @@ export function createNilmWorkspaceMethods({
     return sessions[Number.parseInt(match[1], 10)] || null;
   }
 
+  _nilmSessionAssignmentPersisted(sessionId, assignmentId, signatureFingerprint = "") {
+    const workspace = this._nilmWorkspace || {};
+    const session = (workspace.sessions || []).find((item) => item.session_id === sessionId);
+    const persistedAssignmentId = assignmentId || (session && session.assignment_id);
+    const assignment = (workspace.assignments || []).find(
+      (item) => item.assignment_id === persistedAssignmentId,
+    );
+    const expectedFingerprint = String(signatureFingerprint || (session && session.signature_fingerprint) || "").trim();
+    const signaturePersisted = !expectedFingerprint
+      || (assignment && (assignment.signature_fingerprints || []).includes(expectedFingerprint));
+    return session && persistedAssignmentId && session.assignment_id === persistedAssignmentId
+      && assignment && (assignment.session_ids || []).includes(sessionId)
+      && signaturePersisted;
+  }
+
   async _applyNilmDecision(sourceKey) {
     const signature = this._decisionSignature(sourceKey);
     if (!signature) {
@@ -720,7 +735,10 @@ export function createNilmWorkspaceMethods({
   }
 
   async _callNilmAction(signature, sourceKey, actionKey, feedbackScope = sourceKey) {
-    const action = signature && signature.actions && signature.actions[actionKey];
+    const sourceSession = this._nilmDecisionSession(sourceKey);
+    const action = sourceSession && actionKey === "assign"
+      ? sourceSession.actions && sourceSession.actions.assign
+      : signature && signature.actions && signature.actions[actionKey];
     if (!this._guardActionCall(action, `NILM ${actionKey}`, feedbackScope)) {
       return;
     }
@@ -751,7 +769,6 @@ export function createNilmWorkspaceMethods({
     }
     const actionContext = this._nilmWorkspaceActionContext();
     const previousItems = this._nilmLaneItems(this._nilmWorkspace);
-    const sourceSession = this._nilmDecisionSession(sourceKey);
     const previousKey = sourceSession
       ? `session:${sourceSession.session_id || sourceKey}`
       : `signature:${signature.signature_id || this._nilmSignatureFingerprint(signature)}`;
@@ -784,10 +801,13 @@ export function createNilmWorkspaceMethods({
         return;
       }
       if (this._busyAction === busyKey) this._busyAction = "";
-      if (actionKey === "label" || actionKey === "assign") {
-        this._nilmLabelDrafts.delete(this._nilmLabelDraftKey(signature));
+      const requiresPersistedSessionAssignment = sourceSession && actionKey === "assign";
+      if (!requiresPersistedSessionAssignment) {
+        if (actionKey === "label" || actionKey === "assign") {
+          this._nilmLabelDrafts.delete(this._nilmLabelDraftKey(signature));
+        }
+        this._nilmDecisionDrafts.delete(this._nilmDecisionDraftKey(signature));
       }
-      this._nilmDecisionDrafts.delete(this._nilmDecisionDraftKey(signature));
       if (!refreshed) {
         this._setInlineFeedback(
           feedbackScope,
@@ -795,6 +815,23 @@ export function createNilmWorkspaceMethods({
           this._panelTextFormat("messages.nilm_interval_action_refresh_failed", { message }),
         );
         return;
+      }
+      if (requiresPersistedSessionAssignment
+        && !this._nilmSessionAssignmentPersisted(
+          sourceSession.session_id,
+          data.assignment_id,
+          data.signature_fingerprint,
+        )) {
+        this._setInlineFeedback(
+          feedbackScope,
+          "error",
+          this._panelText("errors.nilm_session_assignment_not_persisted"),
+        );
+        return;
+      }
+      if (requiresPersistedSessionAssignment) {
+        this._nilmLabelDrafts.delete(this._nilmLabelDraftKey(signature));
+        this._nilmDecisionDrafts.delete(this._nilmDecisionDraftKey(signature));
       }
       const remainingItems = this._nilmLaneItems(this._nilmWorkspace)
         .filter((item) => this._nilmReviewKey(item) !== previousKey);
@@ -1199,6 +1236,20 @@ export function createNilmWorkspaceMethods({
         return;
       }
       if (this._busyAction === busyKey) this._busyAction = "";
+      if (refreshed && collectionKey === "sessions" && actionKey === "assign"
+        && !this._nilmSessionAssignmentPersisted(
+          item.session_id,
+          data.assignment_id,
+          data.signature_fingerprint,
+        )) {
+        this._setInlineFeedback(
+          "nilm-review",
+          "error",
+          this._panelText("errors.nilm_session_assignment_not_persisted"),
+        );
+        this._restoreNilmIntervalScroll(scrollTop);
+        return;
+      }
       const feedbackScope = refreshed
         ? this._selectRefreshedNilmAssignment(item, data)
         : "nilm-review";
@@ -2821,19 +2872,34 @@ export function createNilmWorkspaceMethods({
 
   async _callNilmConfiguredPrimaryAction() {
     const primary = this._nilmWorkspace && this._nilmWorkspace.configured_primary;
-    const action = primary && primary.suggestion && primary.suggestion.action;
+    const previous = primary && primary.current_binding;
+    const suggestion = primary && primary.suggestion;
+    const action = suggestion && suggestion.action;
     if (!this._guardActionCall(action, "NILM configured primary", "nilm-primary")) return;
     const actionContext = this._nilmWorkspaceActionContext();
     this._busyAction = "nilm_primary";
     this._render();
     try {
       await this._hass.callService(action.domain || "circuitsetup_energy_analyzer", action.service, { ...(action.data || {}) });
-      const refreshed = await this._refreshNilmWorkspaceData(actionContext.requestId, actionContext.routeKey);
+      await this._refreshNilmWorkspaceData(actionContext.requestId, actionContext.routeKey);
       if (!actionContext.isCurrent()) return;
       if (this._busyAction === "nilm_primary") this._busyAction = "";
-      this._setInlineFeedback("nilm-primary", refreshed ? "success" : "error", refreshed
-        ? this._panelText("messages.nilm_primary_confirmed")
-        : this._panelText("errors.load_nilm_workspace"));
+      const resulting = this._nilmWorkspace
+        && this._nilmWorkspace.configured_primary
+        && this._nilmWorkspace.configured_primary.current_binding;
+      const persisted = resulting && resulting.signature_id === suggestion.signature_id;
+      if (!persisted) {
+        const refreshedPrimary = this._nilmWorkspace && this._nilmWorkspace.configured_primary;
+        if (refreshedPrimary && !refreshedPrimary.suggestion) refreshedPrimary.suggestion = suggestion;
+      }
+      this._setInlineFeedback("nilm-primary", persisted ? "success" : "error", persisted
+        ? previous
+          ? this._panelTextFormat("messages.nilm_primary_signature_changed", {
+            previous: previous.display_label || previous.signature_id || "",
+            current: resulting.display_label || resulting.signature_id || "",
+          })
+          : this._panelText("messages.nilm_primary_confirmed")
+        : this._panelText("errors.nilm_primary_signature_not_persisted"));
       this._render();
     } catch (error) {
       if (!actionContext.isCurrent()) return;
@@ -3096,6 +3162,8 @@ export function createNilmWorkspaceMethods({
         count: Number(attribution.matching_detection_count || 0),
       })
       : this._panelText("nilm_workspace.primary_attribution_inactive");
+    const currentLabel = current && (current.display_label || current.signature_id || "");
+    const suggestionLabel = suggestion && (suggestion.display_label || suggestion.signature_id || "");
     const suggestionEvidence = this._nilmConfidenceDescriptor(suggestion, "signature");
     return `<section class="workspace-section section-surface" data-nilm-configured-primary>
       <h2>${this._escape(this._panelText("nilm_workspace.configured_primary"))}</h2>
@@ -3104,11 +3172,15 @@ export function createNilmWorkspaceMethods({
       <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.primary_evidence", { count: Number(evidence.confirmed_interval_count || 0) }))}</p>
       <p class="muted">${this._escape(signatureText)}</p>
       <p class="muted">${this._escape(attributionText)}</p>
+      ${current && suggestion ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.primary_current_signature", { load: currentLabel }))}</p>
+        <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.primary_suggested_signature", { load: suggestionLabel }))}</p>` : ""}
       ${suggestion ? `<div data-nilm-primary-suggestion>
-        <p><strong>${this._escape(suggestion.display_label || suggestion.signature_id || "")}</strong></p>
+        ${current ? "" : `<p><strong>${this._escape(suggestionLabel)}</strong></p>`}
         ${suggestion.evidence_summary ? `<p class="muted">${this._escape(suggestion.evidence_summary)}</p>` : ""}
         ${suggestionEvidence ? `<p class="muted">${this._escape(suggestionEvidence.text)}</p>` : ""}
-        ${suggestion.action ? `<button type="button" data-nilm-primary-confirm ${this._busyAction === "nilm_primary" ? "disabled" : ""}>${this._escape(this._panelText(current ? "nilm_workspace.primary_change" : "nilm_workspace.primary_confirm"))}</button>` : ""}
+        ${suggestion.action ? `<button type="button" data-nilm-primary-confirm ${this._busyAction === "nilm_primary" ? "disabled" : ""}>${this._escape(current
+          ? this._panelTextFormat("nilm_workspace.primary_change", { load: suggestionLabel })
+          : this._panelText("nilm_workspace.primary_confirm"))}</button>` : ""}
       </div>` : ""}
       ${this._renderInlineFeedback("nilm-primary")}
     </section>`;

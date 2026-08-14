@@ -4685,6 +4685,21 @@ def _merge_nilm_session_history(
                 )
         if (
             existing_session is not None
+            and _nilm_session_history_identity_alias(
+                "session", existing_session.get("session_id")
+            )
+            == ("session", session_id)
+            and not bool(existing_session.get("ambiguous"))
+            and not bool(payload.get("ambiguous"))
+            and not str(payload.get("assignment_id") or "").strip()
+        ):
+            existing_assignment_id = str(
+                existing_session.get("assignment_id") or ""
+            ).strip()
+            if existing_assignment_id:
+                payload["assignment_id"] = existing_assignment_id
+        if (
+            existing_session is not None
             and _nilm_session_history_same_closed_interval(
                 existing_session,
                 payload,

@@ -1990,6 +1990,55 @@ class NilmController:
         assignment_id: str | None = None,
     ) -> dict[str, Any]:
         """Assign a NILM signature to a durable appliance assignment."""
+        async with self._review_transaction_lock:
+            store_data = self._coordinator.store_data
+            snapshots = {
+                name: deepcopy(getattr(store_data, name))
+                for name in (
+                    "nilm_appliance_assignments_by_circuit",
+                    "nilm_signatures",
+                    "nilm_session_history_by_circuit",
+                )
+            }
+            ignored_signatures = getattr(
+                self._coordinator, "ignored_nilm_signatures", None
+            )
+            ignored_signatures_snapshot = (
+                deepcopy(ignored_signatures)
+                if isinstance(ignored_signatures, set)
+                else None
+            )
+            try:
+                return await self._async_assign_nilm_signature(
+                    circuit_id,
+                    signature_id,
+                    label=label,
+                    appliance_id=appliance_id,
+                    appliance_profile=appliance_profile,
+                    assignment_id=assignment_id,
+                )
+            except Exception:
+                for name, snapshot in snapshots.items():
+                    setattr(store_data, name, snapshot)
+                if isinstance(ignored_signatures_snapshot, set) and isinstance(
+                    ignored_signatures, set
+                ):
+                    ignored_signatures.clear()
+                    ignored_signatures.update(ignored_signatures_snapshot)
+                self._refresh_nilm_review_state(circuit_id)
+                raise
+
+    async def _async_assign_nilm_signature(
+        self,
+        circuit_id: str,
+        signature_id: str,
+        *,
+        label: str,
+        appliance_id: str | None = None,
+        appliance_profile: str | None = None,
+        assignment_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Apply one durable NILM signature assignment."""
         signature = self.signature_for_review(circuit_id, signature_id)
         fingerprint = self._signature_fingerprint_value(signature, signature_id)
         assignment = self.upsert_assignment(
@@ -2024,26 +2073,130 @@ class NilmController:
         assignment_id: str | None = None,
     ) -> dict[str, Any]:
         """Assign a NILM session to a durable appliance assignment."""
-        session_id_text = str(session_id or "").strip()
-        if not session_id_text:
-            raise ValueError("Missing session_id.")
         if signature_fingerprint is not None and not nilm_signature_is_assignable(
             signature_fingerprint
         ):
             raise ValueError(
                 "Assign a complete detected component, not a raw edge session."
             )
-        self._assert_nilm_session_is_actionable(circuit_id, session_id_text)
+        async with self._review_transaction_lock:
+            store_data = self._coordinator.store_data
+            snapshots = {
+                name: deepcopy(getattr(store_data, name))
+                for name in (
+                    "nilm_appliance_assignments_by_circuit",
+                    "nilm_signatures",
+                    "nilm_session_history_by_circuit",
+                )
+            }
+            ignored_signatures = getattr(
+                self._coordinator, "ignored_nilm_signatures", None
+            )
+            ignored_signatures_snapshot = (
+                deepcopy(ignored_signatures)
+                if isinstance(ignored_signatures, set)
+                else None
+            )
+            try:
+                return await self._async_assign_nilm_session(
+                    circuit_id,
+                    session_id,
+                    label=label,
+                    signature_fingerprint=signature_fingerprint,
+                    appliance_id=appliance_id,
+                    appliance_profile=appliance_profile,
+                    assignment_id=assignment_id,
+                )
+            except Exception:
+                for name, snapshot in snapshots.items():
+                    setattr(store_data, name, snapshot)
+                if isinstance(ignored_signatures_snapshot, set) and isinstance(
+                    ignored_signatures, set
+                ):
+                    ignored_signatures.clear()
+                    ignored_signatures.update(ignored_signatures_snapshot)
+                self._refresh_nilm_review_state(circuit_id)
+                raise
+
+    async def _async_assign_nilm_session(
+        self,
+        circuit_id: str,
+        session_id: str,
+        *,
+        label: str,
+        signature_fingerprint: str | None = None,
+        appliance_id: str | None = None,
+        appliance_profile: str | None = None,
+        assignment_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Apply one durable NILM session and signature assignment."""
+        session_id_text = str(session_id or "").strip()
+        if not session_id_text:
+            raise ValueError("Missing session_id.")
         coordinator = self._coordinator
+        sessions = [
+            session
+            for session in coordinator.store_data.nilm_session_history_by_circuit.get(
+                circuit_id, ()
+            )
+            if isinstance(session, dict)
+            and str(session.get("session_id") or "").strip() == session_id_text
+        ]
+        if len(sessions) != 1:
+            raise ValueError(f"Unknown or ambiguous session_id '{session_id_text}'.")
+        session = sessions[0]
+        self._assert_nilm_session_is_actionable(circuit_id, session_id_text)
+        fingerprint = str(session.get("signature_fingerprint") or "").strip()
+        if not nilm_signature_is_assignable(fingerprint):
+            raise ValueError(
+                "Assign a complete detected component, not a raw edge session."
+            )
+        supplied_fingerprint = str(signature_fingerprint or "").strip()
+        if supplied_fingerprint and supplied_fingerprint != fingerprint:
+            raise ValueError(
+                "Session signature_fingerprint does not match retained evidence."
+            )
+        signatures = []
+        for signature in coordinator.store_data.nilm_signatures.get(circuit_id, ()):
+            if not isinstance(signature, dict):
+                continue
+            review_state = str(signature.get("review_state") or "").strip().lower()
+            if (
+                signature.get("ignored")
+                or signature.get("merged_into")
+                or review_state in {"ignored", "merged"}
+            ):
+                continue
+            if fingerprint in {
+                str(signature.get(key) or "").strip()
+                for key in (
+                    "signature_id",
+                    "signature_fingerprint",
+                    "feedback_fingerprint",
+                )
+            }:
+                signatures.append(signature)
+        if len(signatures) != 1:
+            raise ValueError(
+                "Unknown or ambiguous retained signature for session "
+                f"'{session_id_text}'."
+            )
+        signature = signatures[0]
         assignment = self.upsert_assignment(
             circuit_id,
             label=label,
             appliance_id=appliance_id,
             appliance_profile=appliance_profile,
             assignment_id=assignment_id,
-            signature_fingerprint=signature_fingerprint,
             session_id=session_id_text,
             lifecycle_state="assigned",
+        )
+        self._bind_nilm_signature_to_assignment(
+            circuit_id,
+            signature,
+            assignment,
+            fingerprint,
+            replace_primary=True,
         )
         assignment_id_text = str(assignment.get("assignment_id") or "").strip()
         assignments = coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
@@ -2058,20 +2211,8 @@ class NilmController:
                 for value in self._clean_string_list(candidate.get("session_ids"))
                 if value != session_id_text
             ]
-        for session in coordinator.store_data.nilm_session_history_by_circuit.get(
-            circuit_id,
-            (),
-        ):
-            if (
-                isinstance(session, dict)
-                and str(session.get("session_id") or "").strip() == session_id_text
-            ):
-                session["assignment_id"] = assignment_id_text
-        coordinator.store_persistence.mark_dirty()
-        coordinator.async_set_updated_data(coordinator.state)
-        await coordinator.store_persistence.async_save_if_dirty(
-            coordinator.current_time()
-        )
+        session["assignment_id"] = assignment_id_text
+        await self._async_save_nilm_review_change(circuit_id)
         return dict(assignment)
 
     async def async_assign_nilm_interval(
@@ -3497,14 +3638,26 @@ class NilmController:
     async def _async_save_nilm_review_change(self, circuit_id: str) -> None:
         coordinator = self._coordinator
         coordinator.store_persistence.mark_dirty()
+        self._refresh_nilm_review_state(circuit_id)
+
+        await coordinator.store_persistence.async_save_if_dirty(
+            coordinator.current_time()
+        )
+
+    def _refresh_nilm_review_state(self, circuit_id: str) -> None:
+        """Refresh and publish state derived from retained NILM review data."""
+        coordinator = self._coordinator
+        if not callable(
+            getattr(getattr(coordinator, "state_reducer", None), "apply_updates", None)
+        ):
+            return
         self.refresh_state(circuit_id)
         refresh_ux = getattr(coordinator, "refresh_ux_state_for_circuit", None)
         if callable(refresh_ux):
             refresh_ux(circuit_id, coordinator.current_time())
-        coordinator.async_set_updated_data(coordinator.state)
-        await coordinator.store_persistence.async_save_if_dirty(
-            coordinator.current_time()
-        )
+        publish_state = getattr(coordinator, "async_set_updated_data", None)
+        if callable(publish_state):
+            publish_state(coordinator.state)
 
     async def async_rename_nilm_appliance(
         self,
