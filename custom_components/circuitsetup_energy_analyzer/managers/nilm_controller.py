@@ -2134,18 +2134,36 @@ class NilmController:
         if not session_id_text:
             raise ValueError("Missing session_id.")
         coordinator = self._coordinator
-        sessions = [
+        history = [
             session
             for session in coordinator.store_data.nilm_session_history_by_circuit.get(
                 circuit_id, ()
             )
             if isinstance(session, dict)
-            and str(session.get("session_id") or "").strip() == session_id_text
         ]
+        sessions = [
+            session
+            for session in history
+            if str(session.get("session_id") or "").strip() == session_id_text
+        ]
+        if not sessions:
+            sessions = [
+                session
+                for session in history
+                if str(session.get("session_id") or "").strip()
+                and isinstance(session.get("_duration_bound_close"), Mapping)
+                and str(
+                    session["_duration_bound_close"].get("session_id") or ""
+                ).strip()
+                == session_id_text
+            ]
         if len(sessions) != 1:
             raise ValueError(f"Unknown or ambiguous session_id '{session_id_text}'.")
         session = sessions[0]
+        persisted_session_id = str(session.get("session_id") or "").strip()
         self._assert_nilm_session_is_actionable(circuit_id, session_id_text)
+        if persisted_session_id != session_id_text:
+            self._assert_nilm_session_is_actionable(circuit_id, persisted_session_id)
         fingerprint = str(session.get("signature_fingerprint") or "").strip()
         if not nilm_signature_is_assignable(fingerprint):
             raise ValueError(
@@ -2182,13 +2200,26 @@ class NilmController:
                 f"'{session_id_text}'."
             )
         signature = signatures[0]
+        assignments = (
+            coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
+                circuit_id,
+                [],
+            )
+        )
+        if persisted_session_id != session_id_text:
+            for candidate in assignments:
+                candidate["session_ids"] = [
+                    value
+                    for value in self._clean_string_list(candidate.get("session_ids"))
+                    if value != session_id_text
+                ]
         assignment = self.upsert_assignment(
             circuit_id,
             label=label,
             appliance_id=appliance_id,
             appliance_profile=appliance_profile,
             assignment_id=assignment_id,
-            session_id=session_id_text,
+            session_id=persisted_session_id,
             lifecycle_state="assigned",
         )
         self._bind_nilm_signature_to_assignment(
@@ -2199,17 +2230,13 @@ class NilmController:
             replace_primary=True,
         )
         assignment_id_text = str(assignment.get("assignment_id") or "").strip()
-        assignments = coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
-            circuit_id,
-            [],
-        )
         for candidate in assignments:
             if candidate is assignment:
                 continue
             candidate["session_ids"] = [
                 value
                 for value in self._clean_string_list(candidate.get("session_ids"))
-                if value != session_id_text
+                if value != persisted_session_id
             ]
         session["assignment_id"] = assignment_id_text
         await self._async_save_nilm_review_change(circuit_id)
@@ -3386,11 +3413,20 @@ class NilmController:
             circuit_id,
             (),
         ):
-            if (
-                isinstance(session, Mapping)
-                and str(session.get("session_id") or "").strip() == session_id
+            if not isinstance(session, Mapping):
+                continue
+            close = session.get("_duration_bound_close")
+            close = close if isinstance(close, Mapping) else None
+            session_is_ambiguous = (
+                str(session.get("session_id") or "").strip() == session_id
                 and bool(session.get("ambiguous"))
-            ):
+            )
+            close_is_ambiguous = (
+                close is not None
+                and str(close.get("session_id") or "").strip() == session_id
+                and bool(close.get("ambiguous"))
+            )
+            if session_is_ambiguous or close_is_ambiguous:
                 raise ValueError(
                     "Ambiguous NILM evidence is read-only; create a manual "
                     "interval before assigning or validating it."

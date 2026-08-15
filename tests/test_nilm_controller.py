@@ -143,6 +143,35 @@ async def test_ambiguous_session_cannot_be_assigned_or_validated() -> None:
         )
 
 
+@pytest.mark.asyncio
+async def test_ambiguous_duration_bound_close_alias_cannot_be_assigned() -> None:
+    controller = _nilm_controller(
+        SimpleNamespace(
+            store_data=FeatureStoreData(
+                nilm_session_history_by_circuit={
+                    "mains": [
+                        {
+                            "session_id": "session-open",
+                            "signature_fingerprint": "pump-fingerprint",
+                            "_duration_bound_close": {
+                                "session_id": "session-ambiguous-close",
+                                "ambiguous": True,
+                            },
+                        }
+                    ]
+                }
+            )
+        )
+    )
+
+    with pytest.raises(ValueError, match="(?i)ambiguous"):
+        await controller.async_assign_nilm_session(
+            "mains",
+            "session-ambiguous-close",
+            label="Pump",
+        )
+
+
 def test_ambiguous_finished_alert_feedback_is_rejected() -> None:
     """A stale ambiguous finished alert cannot mutate its assignment."""
     assignment = {
