@@ -8386,12 +8386,12 @@ test("NILM assignment links authoritative state and separate power history", asy
   await toHaveNoViolations(page);
 });
 
-test("NILM validation shows setup guidance instead of zero-score metrics without reference intervals", async ({ page }) => {
+test("NILM validation hides when no reference intervals exist", async ({ page }) => {
   await mockPanelApi(page);
   const panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=mains");
 
-  await expect(panel.getByText("Validation compares saved labels with NILM's predicted sessions.")).toBeVisible();
-  await expect(panel.getByText("No reference sensor intervals are saved yet.")).toBeVisible();
+  await expect(panel.getByText("Validation compares saved labels with NILM's predicted sessions.")).toHaveCount(0);
+  await expect(panel.getByText("No reference sensor intervals are saved yet.")).toHaveCount(0);
   await expect(panel.getByText("Reference intervals")).toHaveCount(0);
   await expect(panel.getByText(/Validation precision \(n=0\)/)).toHaveCount(0);
   await expect(panel.getByText("Recall")).toHaveCount(0);
