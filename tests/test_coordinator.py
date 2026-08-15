@@ -3159,6 +3159,75 @@ def test_coordinator_discards_disabled_nilm_state_before_hydration() -> None:
     assert coordinator._startup_store_dirty is True
 
 
+@pytest.mark.asyncio
+async def test_start_dismisses_notifications_for_purged_nilm_alerts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 8, 14, 12, 0, tzinfo=UTC)
+    nilm_alert = AlertEvidence(
+        now,
+        "office_1",
+        Severity.WARNING,
+        "Unknown load",
+        feature="nilm_unknown_load",
+    )
+    alert_id = notifications_module.notification_id_for_alert(nilm_alert)
+    dismissed: list[str] = []
+
+    async def dismiss(_hass: Any, notification_id: str) -> None:
+        dismissed.append(notification_id)
+
+    monkeypatch.setattr(
+        notifications_module,
+        "async_dismiss_persistent_notification",
+        dismiss,
+    )
+    store_data = FeatureStoreData(
+        nilm_signatures={"office_1": [{}]},
+        alerts=[nilm_alert],
+        notification_delivery_state={
+            "deferred": [{"alert_id": alert_id}],
+            "daily": [{"alert_id": alert_id}],
+            "weekly": [{"alert_id": alert_id}],
+            "summary_recovery_alert_ids": [alert_id],
+        },
+    )
+    store = SimpleNamespace(data=None, async_save=AsyncMock())
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store=store,
+        store_data=store_data,
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "office_1",
+                    "name": "Office 1",
+                    "mode": "mixed",
+                    "appliance_profile": "mixed",
+                    CONF_NILM_DETECTION_ENABLED: False,
+                    "sensors": [],
+                }
+            ]
+        },
+    )
+    coordinator.source_updates.async_start = AsyncMock()
+
+    await coordinator.async_start(())
+
+    assert dismissed == [alert_id]
+    assert store_data.notification_delivery_state == {
+        "deferred": [],
+        "daily": [],
+        "weekly": [],
+        "summary_recovery_alert_ids": [],
+    }
+    store.async_save.assert_awaited_once()
+
+
 def test_nilm_controller_clears_topology_state_and_policy() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
@@ -4182,6 +4251,61 @@ async def test_coordinator_stop_force_saves_dirty_store() -> None:
 
     assert saved == 1
     assert coordinator.store_persistence.dirty is False
+
+
+@pytest.mark.asyncio
+async def test_coordinator_stop_waits_for_source_update_before_final_save() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    processing_started = asyncio.Event()
+    cancellation_finished = asyncio.Event()
+    saved = 0
+
+    class FakeStore:
+        data: FeatureStoreData | None = None
+
+        async def async_save(self) -> None:
+            nonlocal saved
+            assert cancellation_finished.is_set()
+            saved += 1
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(),
+        store=FakeStore(),
+        store_data=FeatureStoreData(),
+    )
+
+    async def slow_update(*, changed_entities=None):
+        del changed_entities
+        processing_started.set()
+        try:
+            await asyncio.Future()
+        finally:
+            await asyncio.sleep(0)
+            coordinator.store_persistence.mark_dirty()
+            cancellation_finished.set()
+
+    coordinator.async_process_update = slow_update
+    coordinator.started = True
+    coordinator.source_updates._pending_source_update_entities.add(
+        "sensor.office_power"
+    )
+    loop_time = asyncio.get_running_loop().time()
+    coordinator.source_updates._batch_started_at = loop_time
+    coordinator.source_updates._latest_source_update_at = loop_time - 1.0
+    task = asyncio.create_task(
+        coordinator.source_updates.async_process_debounced_source_update()
+    )
+    coordinator.source_updates._source_update_task = task
+    await processing_started.wait()
+
+    await coordinator.async_stop()
+
+    assert task.done()
+    assert cancellation_finished.is_set()
+    assert saved == 1
 
 
 def _source_scoped_coordinator(

@@ -258,13 +258,19 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             max_batch_seconds=SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS,
         )
         self._startup_store_dirty = False
-        self._mixed_startup_direct_alert_ids: set[str] = set()
+        self._startup_alert_notification_ids: set[str] = set()
         explicitly_disabled_nilm_circuit_ids = _explicitly_disabled_nilm_circuit_ids(
             self.entry_data,
             self.options,
         )
         for config in self.circuit_configs:
             if config.circuit_id in explicitly_disabled_nilm_circuit_ids:
+                self._startup_alert_notification_ids.update(
+                    notification_id_for_alert(alert)
+                    for alert in self.store_data.alerts
+                    if alert.circuit_id == config.circuit_id
+                    and str(alert.feature or "").startswith("nilm_")
+                )
                 self._startup_store_dirty |= (
                     self.store_persistence.clear_nilm_state_for_circuit(
                         config.circuit_id
@@ -274,7 +280,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 config.mode is CircuitMode.MIXED
                 or config.appliance_profile is ApplianceProfile.MIXED
             ):
-                self._mixed_startup_direct_alert_ids.update(
+                self._startup_alert_notification_ids.update(
                     notification_id_for_alert(alert)
                     for alert in self.store_data.alerts
                     if alert.circuit_id == config.circuit_id
@@ -305,11 +311,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     async def async_start(self: Self, source_entities: Iterable[str]) -> None:
         """Start listening to configured source entity state changes."""
         await self.evidence_actions.async_expire_maintenance_if_due(self.current_time())
-        if self._mixed_startup_direct_alert_ids:
+        if self._startup_alert_notification_ids:
             await self.notification_controller.async_dismiss_alert_notification_ids(
-                self._mixed_startup_direct_alert_ids
+                self._startup_alert_notification_ids
             )
-            self._mixed_startup_direct_alert_ids.clear()
+            self._startup_alert_notification_ids.clear()
         if self._startup_store_dirty:
             await self._async_save_store(self.current_time())
             self._startup_store_dirty = False
