@@ -2132,7 +2132,7 @@ class NilmController:
         appliance_profile: str | None = None,
         assignment_id: str | None = None,
     ) -> dict[str, Any]:
-        """Apply one durable NILM session and signature assignment."""
+        """Apply one durable NILM session assignment."""
         session_id_text = str(session_id or "").strip()
         if not session_id_text:
             raise ValueError("Missing session_id.")
@@ -2242,18 +2242,11 @@ class NilmController:
             in self._clean_string_list(candidate.get("signature_fingerprints"))
             for candidate in assignments
         )
-        if not matching_signatures and not blocked_by_ignored_owner:
-            # A retained session can outlive the source cluster that created it.
-            signature = self.signature_for_review(circuit_id, fingerprint)
-            signature["feedback_fingerprint"] = fingerprint
-            signature["created_at"] = coordinator.current_time().isoformat()
-            signatures.append(signature)
-        if len(signatures) != 1:
+        if (matching_signatures or blocked_by_ignored_owner) and not signatures:
             raise ValueError(
                 "Unknown or ambiguous retained signature for session "
                 f"'{session_id_text}'."
             )
-        signature = signatures[0]
         if persisted_session_id != session_id_text:
             for candidate in assignments:
                 candidate["session_ids"] = [
@@ -2269,13 +2262,6 @@ class NilmController:
             assignment_id=assignment_id,
             session_id=persisted_session_id,
             lifecycle_state="assigned",
-        )
-        self._bind_nilm_signature_to_assignment(
-            circuit_id,
-            signature,
-            assignment,
-            fingerprint,
-            replace_primary=True,
         )
         assignment_id_text = str(assignment.get("assignment_id") or "").strip()
         for candidate in assignments:

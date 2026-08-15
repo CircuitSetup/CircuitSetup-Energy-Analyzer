@@ -635,6 +635,7 @@ def nilm_workspace_payload(
     stored_sessions = _nilm_session_history_for_circuit(
         coordinator,
         config.circuit_id,
+        assignments=assignments,
         reviewed_session_ids=reviewed_session_ids,
     )
     all_generated_sessions = _nilm_workspace_sessions(
@@ -648,6 +649,7 @@ def nilm_workspace_payload(
     merged_sessions = _merge_nilm_session_payloads(
         all_generated_sessions,
         stored_sessions,
+        reviewed_session_ids=reviewed_session_ids,
     )
     all_sessions = _nilm_workspace_visible_sessions(
         merged_sessions,
@@ -873,8 +875,10 @@ def nilm_workspace_collection_payload(
             _nilm_session_history_for_circuit(
                 coordinator,
                 config.circuit_id,
+                assignments=assignments,
                 reviewed_session_ids=reviewed_session_ids,
             ),
+            reviewed_session_ids=reviewed_session_ids,
         ),
         signatures,
         assignments,
@@ -1228,18 +1232,22 @@ class _NilmWorkspaceReadSource:
                 _nilm_session_history_for_circuit(
                     self.coordinator,
                     self.circuit_id,
+                    assignments=assignments,
                     reviewed_session_ids=reviewed_ids,
                 ),
+                reviewed_session_ids=reviewed_ids,
             )
         return self._merged_sessions
 
     def retained_sessions(self) -> list[dict[str, Any]]:
         """Return persisted sessions without generating edge-derived sessions."""
 
-        reviewed_ids = _nilm_reviewed_session_ids_by_assignment(self._assignments())
+        assignments = self._assignments()
+        reviewed_ids = _nilm_reviewed_session_ids_by_assignment(assignments)
         return _nilm_session_history_for_circuit(
             self.coordinator,
             self.circuit_id,
+            assignments=assignments,
             reviewed_session_ids=reviewed_ids,
         )
 
@@ -5158,20 +5166,59 @@ def _nilm_session_history_for_circuit(
     coordinator: Any,
     circuit_id: str,
     *,
+    assignments: Iterable[Mapping[str, Any]] = (),
     reviewed_session_ids: Mapping[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
     store_data = getattr(coordinator, "store_data", None)
     sessions_by_circuit = getattr(store_data, "nilm_session_history_by_circuit", {})
     if not isinstance(sessions_by_circuit, Mapping):
         return []
-    return [
-        _nilm_session_payload_with_actions(
-            dict(session),
-            reviewed_session_ids=reviewed_session_ids,
+    signature_list = _nilm_signatures_for_circuit(coordinator, circuit_id)
+    session_owners: dict[str, set[str]] = {}
+    fingerprint_owners: dict[str, set[str]] = {}
+    for assignment in assignments:
+        assignment_id = str(assignment.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        if not assignment_id:
+            continue
+        for key in ("session_ids", "confirmed_session_ids", "rejected_session_ids"):
+            for value in _iter_items(assignment.get(key)):
+                session_id = str(value or "").strip()
+                if session_id:
+                    session_owners.setdefault(session_id, set()).add(assignment_id)
+        for value in _iter_items(assignment.get("signature_fingerprints")):
+            fingerprint = str(value or "").strip()
+            if fingerprint:
+                resolved = (
+                    resolve_nilm_signature_fingerprint(fingerprint, signature_list)
+                    or fingerprint
+                )
+                fingerprint_owners.setdefault(resolved, set()).add(assignment_id)
+    sessions: list[dict[str, Any]] = []
+    for session in _iter_items(sessions_by_circuit.get(circuit_id)):
+        if not isinstance(session, Mapping):
+            continue
+        payload = dict(session)
+        session_id = str(payload.get(ATTR_SESSION_ID) or "").strip()
+        assignment_id = str(payload.get(ATTR_ASSIGNMENT_ID) or "").strip()
+        fingerprint = str(payload.get("signature_fingerprint") or "").strip()
+        fingerprint = (
+            resolve_nilm_signature_fingerprint(fingerprint, signature_list)
+            or fingerprint
         )
-        for session in _iter_items(sessions_by_circuit.get(circuit_id))
-        if isinstance(session, Mapping)
-    ]
+        owners = session_owners.get(session_id, set())
+        if not owners:
+            owners = fingerprint_owners.get(fingerprint, set())
+        if len(owners) == 1:
+            payload[ATTR_ASSIGNMENT_ID] = next(iter(owners))
+        elif assignment_id not in owners:
+            payload.pop(ATTR_ASSIGNMENT_ID, None)
+        sessions.append(
+            _nilm_session_payload_with_actions(
+                payload,
+                reviewed_session_ids=reviewed_session_ids,
+            )
+        )
+    return sessions
 
 
 def _nilm_reviewed_session_ids_by_assignment(
@@ -5257,15 +5304,28 @@ def _add_nilm_session_display_labels(
 def _merge_nilm_session_payloads(
     primary: Iterable[Mapping[str, Any]],
     fallback: Iterable[Mapping[str, Any]],
+    *,
+    reviewed_session_ids: Mapping[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
     merged: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    indexes: dict[str, int] = {}
     for session in (*list(primary), *list(fallback)):
         session_id = str(session.get("session_id") or "").strip()
-        if not session_id or session_id in seen:
+        if not session_id:
             continue
+        existing_index = indexes.get(session_id)
+        if existing_index is not None:
+            assignment_id = str(session.get(ATTR_ASSIGNMENT_ID) or "").strip()
+            if assignment_id:
+                payload = dict(merged[existing_index])
+                payload[ATTR_ASSIGNMENT_ID] = assignment_id
+                merged[existing_index] = _nilm_session_payload_with_actions(
+                    payload,
+                    reviewed_session_ids=reviewed_session_ids,
+                )
+            continue
+        indexes[session_id] = len(merged)
         merged.append(dict(session))
-        seen.add(session_id)
     return merged
 
 
