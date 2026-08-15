@@ -4973,11 +4973,7 @@ export function createNilmWorkspaceMethods({
     const groundTruthCount = Number(metrics.ground_truth_interval_count ?? preview.length);
     const hasReferenceIntervals = preview.length > 0 || (Number.isFinite(groundTruthCount) && groundTruthCount > 0);
     if (!hasReferenceIntervals) {
-      return `
-        <h3>${this._escape(this._panelText("nilm_workspace.validation"))}</h3>
-        <p class="muted">${this._escape(this._panelText("nilm_workspace.validation_description"))}</p>
-        <p class="muted">${this._escape(this._panelText("nilm_workspace.prediction_preview_empty"))}</p>
-      `;
+      return "";
     }
     const validationCount = Number(
       metrics.evaluable_prediction_count
