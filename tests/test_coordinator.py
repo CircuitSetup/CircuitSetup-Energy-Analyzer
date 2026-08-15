@@ -8869,6 +8869,223 @@ async def test_session_assignment_resolves_duration_bound_close_alias() -> None:
 
 
 @pytest.mark.asyncio
+async def test_session_assignment_resolves_revised_id_by_on_edge() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {
+                        "signature_id": "signature-pump",
+                        "feedback_fingerprint": "pump-fingerprint",
+                    }
+                ]
+            },
+            nilm_session_history_by_circuit={
+                "mains": [
+                    {
+                        "session_id": "session-pump-revised",
+                        "signature_fingerprint": "pump-fingerprint",
+                        "on_edge_id": "pump-on",
+                        "off_edge_id": "pump-off-revised",
+                        "start": "2026-06-02T12:00:00+00:00",
+                        "end": "2026-06-02T12:15:00+00:00",
+                    }
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "condensate-pump",
+                        "display_name": "Condensate pump",
+                        "signature_fingerprints": [],
+                        "session_ids": [],
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: datetime(2026, 6, 2, 13, 0, tzinfo=UTC),
+    )
+
+    await coordinator.async_assign_nilm_session(
+        "mains",
+        "session-pump-original",
+        label="Condensate pump",
+        signature_fingerprint="pump-fingerprint",
+        on_edge_id="pump-on",
+        assignment_id="condensate-pump",
+    )
+
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ][0]
+    session = coordinator.store_data.nilm_session_history_by_circuit["mains"][0]
+    signature = coordinator.store_data.nilm_signatures["mains"][0]
+    assert assignment["session_ids"] == ["session-pump-revised"]
+    assert assignment["signature_fingerprints"] == ["pump-fingerprint"]
+    assert session["assignment_id"] == "condensate-pump"
+    assert signature["assignment_id"] == "condensate-pump"
+    assert signature["review_state"] == "assigned"
+
+
+@pytest.mark.asyncio
+async def test_session_assignment_materializes_panel_projected_session() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_session_payload_with_actions,
+        _nilm_workspace_sessions,
+    )
+
+    fingerprint = (
+        "revision=2|direction=on|watts=50-100|var=0-25|va=50-100|"
+        "pf=0.000-0.025|split=unknown|leg=unknown|leg_a=unknown|"
+        "leg_b=unknown|balance=unknown"
+    )
+    start = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
+    edges = [
+        NilmEdge(start, 57.792, 0.0, 57.792, 0.0, "on"),
+        NilmEdge(
+            start + timedelta(minutes=10),
+            -57.792,
+            0.0,
+            -57.792,
+            0.0,
+            "off",
+        ),
+    ]
+    signatures = [
+        {
+            "signature_id": "signature-pump",
+            "feedback_fingerprint": fingerprint,
+        }
+    ]
+    assignments = [
+        {
+            "assignment_id": "condensate-pump",
+            "display_name": "Condensate pump",
+            "signature_fingerprints": [],
+            "session_ids": [],
+        }
+    ]
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={"mains": signatures},
+            nilm_session_history_by_circuit={"mains": []},
+            nilm_appliance_assignments_by_circuit={"mains": assignments},
+        ),
+        now_fn=lambda: datetime(2026, 6, 2, 13, 0, tzinfo=UTC),
+    )
+    coordinator._nilm_unmatched_edges["mains"] = edges
+    projected = _nilm_workspace_sessions(
+        edges,
+        "mains",
+        signatures=signatures,
+        assignments=assignments,
+        limit=None,
+    )
+    action = _nilm_session_payload_with_actions(projected[0])["actions"]["assign"]
+
+    await coordinator.async_assign_nilm_session(
+        action["data"]["circuit_id"],
+        action["data"]["session_id"],
+        label="Condensate pump",
+        signature_fingerprint=action["data"]["signature_fingerprint"],
+        on_edge_id=action["data"]["on_edge_id"],
+        assignment_id="condensate-pump",
+    )
+
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ][0]
+    history = coordinator.store_data.nilm_session_history_by_circuit["mains"]
+    assert assignment["session_ids"] == [action["data"]["session_id"]]
+    assert history[0]["assignment_id"] == "condensate-pump"
+
+
+@pytest.mark.asyncio
+async def test_session_assignment_materializes_missing_retained_signature() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.runtime_factory import (
+        NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT,
+    )
+
+    fingerprint = (
+        "revision=2|direction=on|watts=50-100|var=0-25|va=150-200|"
+        "pf=0.025-0.050|split=unknown|leg=unknown|leg_a=unknown|"
+        "leg_b=unknown|balance=unknown"
+    )
+    now = datetime(2026, 6, 2, 13, 0, tzinfo=UTC)
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {"signature_id": f"retained-{index}"}
+                    for index in range(NILM_SIGNATURES_MAX_ITEMS_PER_CIRCUIT)
+                ]
+            },
+            nilm_session_history_by_circuit={
+                "mains": [
+                    {
+                        "session_id": "session-pump",
+                        "signature_fingerprint": fingerprint,
+                        "start": "2026-06-02T12:00:00+00:00",
+                        "end": "2026-06-02T12:15:00+00:00",
+                    }
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "condensate-pump",
+                        "display_name": "Condensate pump",
+                        "signature_fingerprints": [],
+                        "session_ids": [],
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+
+    await coordinator.async_assign_nilm_session(
+        "mains",
+        "session-pump",
+        label="Condensate pump",
+        assignment_id="condensate-pump",
+    )
+    coordinator.store_persistence.prune_nilm_history(now)
+
+    assignment = coordinator.store_data.nilm_appliance_assignments_by_circuit[
+        "mains"
+    ][0]
+    session = coordinator.store_data.nilm_session_history_by_circuit["mains"][0]
+    signature = next(
+        item
+        for item in coordinator.store_data.nilm_signatures["mains"]
+        if item.get("feedback_fingerprint") == fingerprint
+    )
+    assert assignment["session_ids"] == ["session-pump"]
+    assert assignment["signature_fingerprints"] == [fingerprint]
+    assert session["assignment_id"] == "condensate-pump"
+    assert signature["signature_id"] == fingerprint
+    assert signature["feedback_fingerprint"] == fingerprint
+    assert signature["created_at"] == now.isoformat()
+    assert signature["assignment_id"] == "condensate-pump"
+    assert signature["review_state"] == "assigned"
+
+
+@pytest.mark.asyncio
 async def test_session_assignment_ignores_merged_signature_duplicate() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -8965,6 +9182,65 @@ async def test_session_assignment_rejects_ignored_signature_only_match() -> None
 
     assert "mains" not in coordinator.store_data.nilm_appliance_assignments_by_circuit
     assert "assignment_id" not in coordinator.store_data.nilm_signatures["mains"][0]
+
+
+@pytest.mark.asyncio
+async def test_session_assignment_rejects_pruned_ignored_signature_owner() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    fingerprint = "revision=2|direction=on|watts=50-100"
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={"mains": []},
+            nilm_session_history_by_circuit={
+                "mains": [
+                    {
+                        "session_id": "session-pump",
+                        "signature_fingerprint": fingerprint,
+                        "start": "2026-06-02T12:00:00+00:00",
+                        "end": "2026-06-02T12:15:00+00:00",
+                    }
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "ignored-load",
+                        "display_name": "Ignored load",
+                        "lifecycle_state": "ignored",
+                        "signature_fingerprints": [fingerprint],
+                        "session_ids": [],
+                    },
+                    {
+                        "assignment_id": "condensate-pump",
+                        "display_name": "Condensate pump",
+                        "signature_fingerprints": [],
+                        "session_ids": [],
+                    },
+                ]
+            },
+        ),
+        now_fn=lambda: datetime(2026, 6, 2, 13, 0, tzinfo=UTC),
+    )
+
+    with pytest.raises(ValueError, match="Unknown or ambiguous retained signature"):
+        await coordinator.async_assign_nilm_session(
+            "mains",
+            "session-pump",
+            label="Condensate pump",
+            assignment_id="condensate-pump",
+        )
+
+    ignored, target = (
+        coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"]
+    )
+    assert ignored["signature_fingerprints"] == [fingerprint]
+    assert target["signature_fingerprints"] == []
+    assert target["session_ids"] == []
+    assert coordinator.store_data.nilm_signatures["mains"] == []
 
 
 @pytest.mark.asyncio

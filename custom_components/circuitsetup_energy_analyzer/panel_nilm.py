@@ -86,6 +86,7 @@ from .services import (
     ATTR_INTERVALS,
     ATTR_LABEL,
     ATTR_MAINS_ENTITY_ID,
+    ATTR_ON_EDGE_ID,
     ATTR_PRESET,
     ATTR_REFERENCE_POWER_ENTITY_ID,
     ATTR_RELATIONSHIP,
@@ -5286,6 +5287,7 @@ def _nilm_session_payload_with_actions(
 ) -> dict[str, Any]:
     session_id = str(payload.get("session_id") or "").strip()
     circuit_id = str(payload.get("mains_circuit_id") or "").strip()
+    on_edge_id = str(payload.get(ATTR_ON_EDGE_ID) or "").strip()
     signature_fingerprint = str(payload.get("signature_fingerprint") or "").strip()
     if signature_fingerprint and not nilm_signature_is_assignable(
         signature_fingerprint
@@ -5306,6 +5308,8 @@ def _nilm_session_payload_with_actions(
             and bool(payload.get("end"))
         ):
             data[ATTR_SIGNATURE_FINGERPRINT] = signature_fingerprint
+            if on_edge_id:
+                data[ATTR_ON_EDGE_ID] = on_edge_id
             actions["assign"] = {
                 "domain": DOMAIN,
                 "service": SERVICE_ASSIGN_SESSION_TO_APPLIANCE,

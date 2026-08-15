@@ -2068,6 +2068,7 @@ class NilmController:
         *,
         label: str,
         signature_fingerprint: str | None = None,
+        on_edge_id: str | None = None,
         appliance_id: str | None = None,
         appliance_profile: str | None = None,
         assignment_id: str | None = None,
@@ -2103,6 +2104,7 @@ class NilmController:
                     session_id,
                     label=label,
                     signature_fingerprint=signature_fingerprint,
+                    on_edge_id=on_edge_id,
                     appliance_id=appliance_id,
                     appliance_profile=appliance_profile,
                     assignment_id=assignment_id,
@@ -2125,6 +2127,7 @@ class NilmController:
         *,
         label: str,
         signature_fingerprint: str | None = None,
+        on_edge_id: str | None = None,
         appliance_id: str | None = None,
         appliance_profile: str | None = None,
         assignment_id: str | None = None,
@@ -2133,34 +2136,63 @@ class NilmController:
         session_id_text = str(session_id or "").strip()
         if not session_id_text:
             raise ValueError("Missing session_id.")
+        on_edge_id_text = str(on_edge_id or "").strip()
         coordinator = self._coordinator
-        history = [
-            session
-            for session in coordinator.store_data.nilm_session_history_by_circuit.get(
-                circuit_id, ()
-            )
-            if isinstance(session, dict)
-        ]
-        sessions = [
-            session
-            for session in history
-            if str(session.get("session_id") or "").strip() == session_id_text
-        ]
-        if not sessions:
+
+        def retained_sessions() -> list[dict[str, Any]]:
+            history = [
+                session
+                for session in (
+                    coordinator.store_data.nilm_session_history_by_circuit.get(
+                        circuit_id, ()
+                    )
+                )
+                if isinstance(session, dict)
+            ]
             sessions = [
                 session
                 for session in history
-                if str(session.get("session_id") or "").strip()
-                and isinstance(session.get("_duration_bound_close"), Mapping)
-                and str(
-                    session["_duration_bound_close"].get("session_id") or ""
-                ).strip()
-                == session_id_text
+                if str(session.get("session_id") or "").strip() == session_id_text
             ]
+            if not sessions:
+                sessions = [
+                    session
+                    for session in history
+                    if str(session.get("session_id") or "").strip()
+                    and isinstance(session.get("_duration_bound_close"), Mapping)
+                    and str(
+                        session["_duration_bound_close"].get("session_id") or ""
+                    ).strip()
+                    == session_id_text
+                ]
+            if on_edge_id_text:
+                on_edge_sessions = [
+                    session
+                    for session in history
+                    if str(session.get("session_id") or "").strip()
+                    and str(session.get("on_edge_id") or "").strip()
+                    == on_edge_id_text
+                ]
+                if len(on_edge_sessions) != 1:
+                    return on_edge_sessions
+                if not sessions:
+                    sessions = on_edge_sessions
+            return sessions
+
+        sessions = retained_sessions()
+        if not sessions and self._sample_processor is not None:
+            self._sample_processor.refresh_session_history(
+                circuit_id,
+                coordinator.store_data,
+            )
+            sessions = retained_sessions()
         if len(sessions) != 1:
             raise ValueError(f"Unknown or ambiguous session_id '{session_id_text}'.")
         session = sessions[0]
         persisted_session_id = str(session.get("session_id") or "").strip()
+        persisted_on_edge_id = str(session.get("on_edge_id") or "").strip()
+        if on_edge_id_text and persisted_on_edge_id != on_edge_id_text:
+            raise ValueError("Session on_edge_id does not match retained evidence.")
         self._assert_nilm_session_is_actionable(circuit_id, session_id_text)
         if persisted_session_id != session_id_text:
             self._assert_nilm_session_is_actionable(circuit_id, persisted_session_id)
@@ -2174,18 +2206,18 @@ class NilmController:
             raise ValueError(
                 "Session signature_fingerprint does not match retained evidence."
             )
+        assignments = (
+            coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
+                circuit_id,
+                [],
+            )
+        )
+        matching_signatures = []
         signatures = []
         for signature in coordinator.store_data.nilm_signatures.get(circuit_id, ()):
             if not isinstance(signature, dict):
                 continue
-            review_state = str(signature.get("review_state") or "").strip().lower()
-            if (
-                signature.get("ignored")
-                or signature.get("merged_into")
-                or review_state in {"ignored", "merged"}
-            ):
-                continue
-            if fingerprint in {
+            if fingerprint not in {
                 str(signature.get(key) or "").strip()
                 for key in (
                     "signature_id",
@@ -2193,19 +2225,35 @@ class NilmController:
                     "feedback_fingerprint",
                 )
             }:
-                signatures.append(signature)
+                continue
+            matching_signatures.append(signature)
+            review_state = str(signature.get("review_state") or "").strip().lower()
+            if (
+                signature.get("ignored")
+                or signature.get("merged_into")
+                or review_state in {"ignored", "merged"}
+            ):
+                continue
+            signatures.append(signature)
+        blocked_by_ignored_owner = any(
+            isinstance(candidate, Mapping)
+            and not nilm_assignment_is_active(candidate)
+            and fingerprint
+            in self._clean_string_list(candidate.get("signature_fingerprints"))
+            for candidate in assignments
+        )
+        if not matching_signatures and not blocked_by_ignored_owner:
+            # A retained session can outlive the source cluster that created it.
+            signature = self.signature_for_review(circuit_id, fingerprint)
+            signature["feedback_fingerprint"] = fingerprint
+            signature["created_at"] = coordinator.current_time().isoformat()
+            signatures.append(signature)
         if len(signatures) != 1:
             raise ValueError(
                 "Unknown or ambiguous retained signature for session "
                 f"'{session_id_text}'."
             )
         signature = signatures[0]
-        assignments = (
-            coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
-                circuit_id,
-                [],
-            )
-        )
         if persisted_session_id != session_id_text:
             for candidate in assignments:
                 candidate["session_ids"] = [

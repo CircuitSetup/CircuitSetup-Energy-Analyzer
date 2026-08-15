@@ -457,7 +457,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260815-1"
+    assert PANEL_MODULE_VERSION == "20260815-2"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -2758,6 +2758,31 @@ def test_nilm_workspace_open_session_is_not_assignable() -> None:
     )
 
     assert "assign" not in payload.get("actions", {})
+
+
+def test_nilm_workspace_session_assignment_includes_on_edge_id() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        _nilm_session_payload_with_actions,
+    )
+
+    payload = _nilm_session_payload_with_actions(
+        {
+            "session_id": "session-original",
+            "mains_circuit_id": "mains",
+            "signature_fingerprint": "direction=on|watts=800-900",
+            "on_edge_id": "pump-on",
+            "start": "2026-08-11T12:00:00+00:00",
+            "end": "2026-08-11T12:30:00+00:00",
+            "ambiguous": False,
+        }
+    )
+
+    assert payload["actions"]["assign"]["data"] == {
+        "circuit_id": "mains",
+        "session_id": "session-original",
+        "signature_fingerprint": "direction=on|watts=800-900",
+        "on_edge_id": "pump-on",
+    }
 
 
 def test_nilm_workspace_lanes_review_only_assignable_unassigned_sessions() -> None:

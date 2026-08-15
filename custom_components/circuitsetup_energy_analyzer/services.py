@@ -111,6 +111,7 @@ ATTR_INTERVAL_ID = "interval_id"
 ATTR_INTERVALS = "intervals"
 ATTR_REMOVED_INTERVAL_IDS = "removed_interval_ids"
 ATTR_SESSION_ID = "session_id"
+ATTR_ON_EDGE_ID = "on_edge_id"
 ATTR_ASSIGNMENT_ID = "assignment_id"
 ATTR_LABEL = "label"
 ATTR_APPLIANCE_PROFILE = "appliance_profile"
@@ -454,6 +455,7 @@ NILM_ASSIGN_SESSION_SERVICE_SCHEMA = _schema(
         ATTR_ENTITY_ID,
         ATTR_ASSIGNMENT_ID,
         ATTR_SIGNATURE_FINGERPRINT,
+        ATTR_ON_EDGE_ID,
         ATTR_APPLIANCE_ID,
         ATTR_APPLIANCE_PROFILE,
     ),
@@ -1273,6 +1275,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 data.get(ATTR_SESSION_ID),
                 label=data.get(ATTR_LABEL),
                 signature_fingerprint=data.get(ATTR_SIGNATURE_FINGERPRINT),
+                on_edge_id=data.get(ATTR_ON_EDGE_ID),
                 appliance_id=data.get(ATTR_APPLIANCE_ID),
                 appliance_profile=data.get(ATTR_APPLIANCE_PROFILE),
                 assignment_id=data.get(ATTR_ASSIGNMENT_ID),
