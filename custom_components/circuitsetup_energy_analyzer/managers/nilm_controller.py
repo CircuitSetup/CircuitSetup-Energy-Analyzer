@@ -2206,6 +2206,12 @@ class NilmController:
             raise ValueError(
                 "Session signature_fingerprint does not match retained evidence."
             )
+        assignments = (
+            coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
+                circuit_id,
+                [],
+            )
+        )
         matching_signatures = []
         signatures = []
         for signature in coordinator.store_data.nilm_signatures.get(circuit_id, ()):
@@ -2229,10 +2235,18 @@ class NilmController:
             ):
                 continue
             signatures.append(signature)
-        if not matching_signatures:
+        blocked_by_ignored_owner = any(
+            isinstance(candidate, Mapping)
+            and not nilm_assignment_is_active(candidate)
+            and fingerprint
+            in self._clean_string_list(candidate.get("signature_fingerprints"))
+            for candidate in assignments
+        )
+        if not matching_signatures and not blocked_by_ignored_owner:
             # A retained session can outlive the source cluster that created it.
             signature = self.signature_for_review(circuit_id, fingerprint)
             signature["feedback_fingerprint"] = fingerprint
+            signature["created_at"] = coordinator.current_time().isoformat()
             signatures.append(signature)
         if len(signatures) != 1:
             raise ValueError(
@@ -2240,12 +2254,6 @@ class NilmController:
                 f"'{session_id_text}'."
             )
         signature = signatures[0]
-        assignments = (
-            coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
-                circuit_id,
-                [],
-            )
-        )
         if persisted_session_id != session_id_text:
             for candidate in assignments:
                 candidate["session_ids"] = [
