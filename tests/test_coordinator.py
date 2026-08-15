@@ -2864,6 +2864,112 @@ def test_coordinator_exposes_store_persistence_manager() -> None:
     assert coordinator._store_dirty is False
 
 
+def test_coordinator_runtime_performance_is_bounded_and_rate_limits_warnings(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    warning_times = iter((100.0, 101.0, 500.0))
+    monkeypatch.setattr(coordinator_module, "monotonic", lambda: next(warning_times))
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
+
+    with caplog.at_level("WARNING"):
+        coordinator._record_runtime_performance("source_update", 0.025)
+        coordinator._record_runtime_performance(
+            "nilm", 0.125, circuit_id="hvac_1"
+        )
+        coordinator._record_runtime_performance(
+            "nilm", 0.150, circuit_id="hvac_1"
+        )
+        coordinator._record_runtime_performance(
+            "nilm", 0.175, circuit_id="hvac_1"
+        )
+
+    assert coordinator.runtime_performance_snapshot() == {
+        "slow_operation_threshold_ms": 100.0,
+        "source_update": {"count": 1, "last_ms": 25.0, "max_ms": 25.0},
+        "nilm_by_circuit": {
+            "hvac_1": {"count": 3, "last_ms": 175.0, "max_ms": 175.0}
+        },
+    }
+    warning_messages = [
+        record.message for record in caplog.records if record.levelname == "WARNING"
+    ]
+    assert warning_messages == [
+        "Slow CSEA nilm operation for hvac_1: 125.0 ms",
+        "Slow CSEA nilm operation for hvac_1: 175.0 ms",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_source_update_manager_records_pipeline_duration() -> None:
+    from custom_components.circuitsetup_energy_analyzer.managers.source_updates import (
+        SourceUpdateManager,
+    )
+
+    recorded: list[tuple[str, float]] = []
+    coordinator = SimpleNamespace(
+        started=True,
+        async_process_update=AsyncMock(),
+        _record_runtime_performance=lambda operation, duration: recorded.append(
+            (operation, duration)
+        ),
+    )
+    manager = SourceUpdateManager(
+        coordinator,
+        track_state_change_event=None,
+        debounce_seconds=0.0,
+    )
+    manager._pending_source_update_entities.add("sensor.office_power")
+
+    await manager.async_process_debounced_source_update()
+
+    assert coordinator.async_process_update.await_args.kwargs == {
+        "changed_entities": ("sensor.office_power",)
+    }
+    assert len(recorded) == 1
+    assert recorded[0][0] == "source_update"
+    assert recorded[0][1] >= 0.0
+
+
+@pytest.mark.asyncio
+async def test_enabled_nilm_processing_records_circuit_duration() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac_1",
+                    "name": "HVAC 1",
+                    "mode": "mixed",
+                    "appliance_profile": "mixed",
+                    CONF_NILM_DETECTION_ENABLED: True,
+                    "sensors": [],
+                }
+            ]
+        },
+    )
+    recorded: list[tuple[str, str | None, float]] = []
+    coordinator._record_runtime_performance = (
+        lambda operation, duration, *, circuit_id=None: recorded.append(
+            (operation, circuit_id, duration)
+        )
+    )
+
+    await coordinator.async_process_update()
+
+    assert len(recorded) == 1
+    assert recorded[0][0:2] == ("nilm", "hvac_1")
+    assert recorded[0][2] >= 0.0
+
+
 def test_coordinator_exposes_notification_controller() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
@@ -3014,6 +3120,43 @@ def test_nilm_controller_requires_circuit_level_enablement() -> None:
     assert coordinator.nilm_controller.enabled_for_config(mains_config) is False
     assert coordinator.nilm_controller.enabled_for_config(enabled_mains_config) is True
     assert coordinator.nilm_controller.enabled_for_config(direct_config) is False
+
+
+def test_coordinator_discards_disabled_nilm_state_before_hydration() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    circuits = [
+        {
+            "circuit_id": circuit_id,
+            "name": circuit_id,
+            "mode": "mixed",
+            "appliance_profile": "mixed",
+            CONF_NILM_DETECTION_ENABLED: enabled,
+            "sensors": [],
+        }
+        for circuit_id, enabled in (("office_1", False), ("hvac_1", True))
+    ]
+    store_data = FeatureStoreData(
+        nilm_signatures={"office_1": [{}], "hvac_1": [{}]},
+        nilm_session_history_by_circuit={
+            "office_1": [{"session_id": "discard"}],
+            "hvac_1": [{"session_id": "retain"}],
+        },
+        demand_by_circuit={"office_1": {"peak": 20.0}},
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=store_data,
+        entry_data={CONF_CIRCUITS: circuits},
+    )
+
+    assert set(store_data.nilm_signatures) == {"hvac_1"}
+    assert set(store_data.nilm_session_history_by_circuit) == {"hvac_1"}
+    assert "office_1" in store_data.demand_by_circuit
+    assert coordinator._startup_store_dirty is True
 
 
 def test_nilm_controller_clears_topology_state_and_policy() -> None:
@@ -4013,6 +4156,34 @@ async def test_coordinator_stop_cancels_pending_source_state_update(
     assert coordinator.last_source_update_entities == ()
 
 
+@pytest.mark.asyncio
+async def test_coordinator_stop_force_saves_dirty_store() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    saved = 0
+
+    class FakeStore:
+        data: FeatureStoreData | None = None
+
+        async def async_save(self) -> None:
+            nonlocal saved
+            saved += 1
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(),
+        store=FakeStore(),
+        store_data=FeatureStoreData(),
+    )
+    coordinator.store_persistence.mark_dirty()
+
+    await coordinator.async_stop()
+
+    assert saved == 1
+    assert coordinator.store_persistence.dirty is False
+
+
 def _source_scoped_coordinator(
     coordinator_module: Any,
     now_holder: dict[str, datetime],
@@ -4682,9 +4853,15 @@ async def test_source_dirty_store_save_is_throttled(
         now + timedelta(seconds=35),
         force=False,
     )
+    assert saved == 1
+    assert coordinator.store_persistence.dirty is True
+    await coordinator.store_persistence.async_save_if_dirty(
+        now + timedelta(seconds=120),
+        force=False,
+    )
 
     assert saved == 2
-    assert retention_calls == [now]
+    assert retention_calls == [now, now + timedelta(seconds=120)]
     assert coordinator.store_persistence.dirty is False
 
 

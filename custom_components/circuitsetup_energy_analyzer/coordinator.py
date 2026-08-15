@@ -6,6 +6,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from dataclasses import replace
 from datetime import datetime, timedelta
+from time import monotonic
 from typing import Any, Self
 
 from .activity_timeline import (
@@ -21,6 +22,7 @@ from .config_parsing import (
 from .const import (
     CONF_CIRCUITS,
     CONF_MAINS_SOURCE_ENTITIES,
+    CONF_NILM_DETECTION_ENABLED,
     DOMAIN,
     EVENT_HVAC_ASSOCIATION_UPDATED,
 )
@@ -67,6 +69,8 @@ _LOGGER = logging.getLogger(__name__)
 SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS = 0.5
 SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS = 5.0
 SETTINGS_RECOMMENDATION_SOURCE_REFRESH_INTERVAL = timedelta(minutes=5)
+SLOW_RUNTIME_OPERATION_SECONDS = 0.1
+SLOW_RUNTIME_WARNING_INTERVAL_SECONDS = 300.0
 _EXPECTED_SCHEDULE_ALERT_FEATURES = frozenset(
     {"expected_schedule_missed", "running_outside_expected_schedule"}
 )
@@ -154,6 +158,26 @@ def _source_circuit_ids_by_entity(
     }
 
 
+def _explicitly_disabled_nilm_circuit_ids(
+    entry_data: Mapping[str, Any],
+    options: Mapping[str, Any],
+) -> frozenset[str]:
+    """Return circuit ids whose persisted configuration explicitly disables NILM."""
+    raw_circuits = (
+        options[CONF_CIRCUITS]
+        if CONF_CIRCUITS in options
+        else entry_data.get(CONF_CIRCUITS, ())
+    )
+    return frozenset(
+        circuit_id
+        for raw in raw_circuits
+        if isinstance(raw, Mapping)
+        and CONF_NILM_DETECTION_ENABLED in raw
+        and not bool(raw[CONF_NILM_DETECTION_ENABLED])
+        and (circuit_id := str(raw.get("circuit_id") or "").strip())
+    )
+
+
 class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     """Runtime coordinator for source sensor updates and analyzer state."""
 
@@ -220,6 +244,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self.circuit_configs
         )
         self._known_source_entity_ids = frozenset(self._source_circuit_ids_by_entity)
+        self._runtime_performance_by_operation: dict[str, dict[str, int | float]] = {}
+        self._last_slow_runtime_warning_at: dict[str, float] = {}
         initialize_runtime(
             self,
             hass=hass,
@@ -231,9 +257,19 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             debounce_seconds=SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS,
             max_batch_seconds=SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS,
         )
-        self._mixed_startup_store_dirty = False
+        self._startup_store_dirty = False
         self._mixed_startup_direct_alert_ids: set[str] = set()
+        explicitly_disabled_nilm_circuit_ids = _explicitly_disabled_nilm_circuit_ids(
+            self.entry_data,
+            self.options,
+        )
         for config in self.circuit_configs:
+            if config.circuit_id in explicitly_disabled_nilm_circuit_ids:
+                self._startup_store_dirty |= (
+                    self.store_persistence.clear_nilm_state_for_circuit(
+                        config.circuit_id
+                    )
+                )
             if (
                 config.mode is CircuitMode.MIXED
                 or config.appliance_profile is ApplianceProfile.MIXED
@@ -244,7 +280,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                     if alert.circuit_id == config.circuit_id
                     and not mixed_circuit_allows_alert(alert.feature)
                 )
-                self._mixed_startup_store_dirty |= (
+                self._startup_store_dirty |= (
                     self.store_persistence.clear_direct_appliance_state_for_circuit(
                         config.circuit_id, self._baseline_values
                     )
@@ -274,9 +310,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 self._mixed_startup_direct_alert_ids
             )
             self._mixed_startup_direct_alert_ids.clear()
-        if self._mixed_startup_store_dirty:
+        if self._startup_store_dirty:
             await self._async_save_store(self.current_time())
-            self._mixed_startup_store_dirty = False
+            self._startup_store_dirty = False
         entities = [
             str(entity_id)
             for entity_id in source_entities
@@ -307,6 +343,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._unsub_expected_schedule_interval()
             self._unsub_expected_schedule_interval = None
         await self.source_updates.async_stop()
+        await self._async_save_store(self.current_time())
 
     def refresh_maintenance_expiry_listener(self: Self) -> None:
         """Schedule the next timed maintenance expiry."""
@@ -459,6 +496,66 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         """Return the coordinator's current runtime timestamp."""
         return self._now_fn()
 
+    def _record_runtime_performance(
+        self: Self,
+        operation: str,
+        elapsed_seconds: float,
+        *,
+        circuit_id: str | None = None,
+    ) -> None:
+        """Record bounded runtime timing and rate-limit slow-operation warnings."""
+        key = f"{operation}:{circuit_id}" if circuit_id else operation
+        elapsed_ms = round(max(float(elapsed_seconds), 0.0) * 1000.0, 3)
+        bucket = self._runtime_performance_by_operation.setdefault(
+            key,
+            {"count": 0, "last_ms": 0.0, "max_ms": 0.0},
+        )
+        bucket["count"] = int(bucket["count"]) + 1
+        bucket["last_ms"] = elapsed_ms
+        bucket["max_ms"] = max(float(bucket["max_ms"]), elapsed_ms)
+
+        if elapsed_seconds < SLOW_RUNTIME_OPERATION_SECONDS:
+            return
+        observed_at = monotonic()
+        previous_warning_at = self._last_slow_runtime_warning_at.get(key)
+        if (
+            previous_warning_at is not None
+            and observed_at - previous_warning_at
+            < SLOW_RUNTIME_WARNING_INTERVAL_SECONDS
+        ):
+            return
+        self._last_slow_runtime_warning_at[key] = observed_at
+        if circuit_id:
+            _LOGGER.warning(
+                "Slow CSEA %s operation for %s: %.1f ms",
+                operation,
+                circuit_id,
+                elapsed_ms,
+            )
+        else:
+            _LOGGER.warning(
+                "Slow CSEA %s operation: %.1f ms",
+                operation,
+                elapsed_ms,
+            )
+
+    def runtime_performance_snapshot(self: Self) -> dict[str, Any]:
+        """Return JSON-safe bounded runtime performance diagnostics."""
+        return {
+            "slow_operation_threshold_ms": SLOW_RUNTIME_OPERATION_SECONDS * 1000.0,
+            "source_update": dict(
+                self._runtime_performance_by_operation.get(
+                    "source_update",
+                    {"count": 0, "last_ms": 0.0, "max_ms": 0.0},
+                )
+            ),
+            "nilm_by_circuit": {
+                key.removeprefix("nilm:"): dict(value)
+                for key, value in self._runtime_performance_by_operation.items()
+                if key.startswith("nilm:")
+            },
+        }
+
     def _processing_configs_for_changed_entities(
         self: Self,
         changed_entities: Iterable[str] | None,
@@ -606,12 +703,23 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         for config, sample in samples:
             if config.circuit_id not in processing_circuit_ids:
                 continue
-            for nilm_alert in self.nilm_controller.process_sample(
-                config,
-                sample,
-                events,
-                context,
-            ):
+            nilm_enabled = self.nilm_controller.enabled_for_config(config)
+            nilm_started_at = monotonic() if nilm_enabled else None
+            try:
+                nilm_alerts = self.nilm_controller.process_sample(
+                    config,
+                    sample,
+                    events,
+                    context,
+                )
+            finally:
+                if nilm_started_at is not None:
+                    self._record_runtime_performance(
+                        "nilm",
+                        monotonic() - nilm_started_at,
+                        circuit_id=config.circuit_id,
+                    )
+            for nilm_alert in nilm_alerts:
                 if not self.notification_controller.learning_allows_alert(nilm_alert):
                     continue
                 nilm_alert = self.evidence_actions.alert_with_feedback(nilm_alert)

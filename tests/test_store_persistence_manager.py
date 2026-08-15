@@ -281,6 +281,100 @@ def test_store_persistence_clears_direct_state_idempotently() -> None:
     assert store_data.alert_feedback
 
 
+def test_store_persistence_clears_only_nilm_state_for_circuit() -> None:
+    now = datetime(2026, 8, 14, 12, 0, tzinfo=UTC)
+    nilm_fields = {
+        "nilm_signatures": {"office_1": [{}], "hvac_1": [{}]},
+        "nilm_unknown_loads_by_circuit": {
+            "office_1": {"unknown": {}},
+            "hvac_1": {"unknown": {}},
+        },
+        "nilm_unmatched_edges_by_circuit": {
+            "office_1": [{}],
+            "hvac_1": [{}],
+        },
+        "nilm_session_history_by_circuit": {
+            "office_1": [{}],
+            "hvac_1": [{}],
+        },
+        "nilm_known_load_attributions_by_circuit": {
+            "office_1": [{}],
+            "hvac_1": [{}],
+        },
+        "nilm_session_history_ingress_by_circuit": {
+            "office_1": {"count": 1},
+            "hvac_1": {"count": 1},
+        },
+        "nilm_label_intervals_by_circuit": {
+            "office_1": [{}],
+            "hvac_1": [{}],
+        },
+        "nilm_appliance_assignments_by_circuit": {
+            "office_1": [{}],
+            "hvac_1": [{}],
+        },
+        "nilm_detection_sensitivity_by_circuit": {
+            "office_1": "balanced",
+            "hvac_1": "sensitive",
+        },
+    }
+    store_data = FeatureStoreData(
+        **nilm_fields,
+        alerts=[
+            AlertEvidence(
+                now,
+                "office_1",
+                Severity.WARNING,
+                "NILM alert",
+                feature="nilm_unknown_load",
+            ),
+            AlertEvidence(
+                now,
+                "office_1",
+                Severity.WARNING,
+                "Normal alert",
+                feature="energy_usage",
+            ),
+            AlertEvidence(
+                now,
+                "hvac_1",
+                Severity.WARNING,
+                "Enabled NILM alert",
+                feature="nilm_topology_mismatch",
+            ),
+        ],
+        events=[CircuitEvent(now, "office_1", EventType.START)],
+        baselines={
+            "office_1:real_power": BaselineStats(
+                "real_power", 1, 20.0, 0.0, 20.0, 20.0, 1.0
+            )
+        },
+        energy_usage_by_circuit={"office_1": {"days": []}},
+        demand_by_circuit={"office_1": {"peak": 20.0}},
+        standby_by_circuit={"office_1": {"median": 4.0}},
+    )
+    manager = object.__new__(StorePersistenceManager)
+    manager._coordinator = SimpleNamespace(store_data=store_data)
+    manager._dirty_generation = 0
+    manager.dirty = False
+
+    assert manager.clear_nilm_state_for_circuit("office_1") is True
+    assert manager.clear_nilm_state_for_circuit("office_1") is False
+
+    for field_name in nilm_fields:
+        assert set(getattr(store_data, field_name)) == {"hvac_1"}
+    assert [alert.feature for alert in store_data.alerts] == [
+        "energy_usage",
+        "nilm_topology_mismatch",
+    ]
+    assert [event.circuit_id for event in store_data.events] == ["office_1"]
+    assert set(store_data.baselines) == {"office_1:real_power"}
+    assert "office_1" in store_data.energy_usage_by_circuit
+    assert "office_1" in store_data.demand_by_circuit
+    assert "office_1" in store_data.standby_by_circuit
+    assert manager.dirty is True
+
+
 def test_store_persistence_manager_owns_retention_helper_behavior() -> None:
     now = datetime(2026, 6, 30, 12, 0, tzinfo=UTC)
     store_data = FeatureStoreData(

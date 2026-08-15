@@ -15,7 +15,18 @@ from ..storage import RETENTION_WINDOWS, prune_contextual_baseline_state
 from .recommendation_episodes import compact_settings_recommendation_episode_key
 
 STORE_RETENTION_SAVE_INTERVAL = timedelta(minutes=1)
-STORE_DIRTY_SAVE_INTERVAL = timedelta(seconds=30)
+STORE_DIRTY_SAVE_INTERVAL = timedelta(minutes=2)
+_NILM_CIRCUIT_STORE_FIELDS = (
+    "nilm_signatures",
+    "nilm_unknown_loads_by_circuit",
+    "nilm_unmatched_edges_by_circuit",
+    "nilm_session_history_by_circuit",
+    "nilm_known_load_attributions_by_circuit",
+    "nilm_session_history_ingress_by_circuit",
+    "nilm_label_intervals_by_circuit",
+    "nilm_appliance_assignments_by_circuit",
+    "nilm_detection_sensitivity_by_circuit",
+)
 _DIRECT_SETTING_KEYS = frozenset(
     {
         "max_active_minutes",
@@ -253,6 +264,30 @@ class StorePersistenceManager:
                     recommendation, status=RecommendationStatus.STALE
                 )
                 changed = True
+        if changed:
+            self.mark_dirty()
+        return changed
+
+    def clear_nilm_state_for_circuit(self, circuit_id: str) -> bool:
+        """Remove NILM-derived state without touching direct circuit history."""
+        store = self._coordinator.store_data
+        changed = False
+        for field_name in _NILM_CIRCUIT_STORE_FIELDS:
+            mapping = getattr(store, field_name)
+            if circuit_id in mapping:
+                mapping.pop(circuit_id)
+                changed = True
+
+        retained_alerts = [
+            alert
+            for alert in store.alerts
+            if alert.circuit_id != circuit_id
+            or not str(alert.feature or "").startswith("nilm_")
+        ]
+        if len(retained_alerts) != len(store.alerts):
+            store.alerts = retained_alerts
+            changed = True
+
         if changed:
             self.mark_dirty()
         return changed

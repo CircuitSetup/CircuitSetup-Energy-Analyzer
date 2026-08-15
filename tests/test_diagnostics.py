@@ -87,6 +87,36 @@ async def test_diagnostics_reports_runtime_loaded_without_ha() -> None:
 
 
 @pytest.mark.asyncio
+async def test_diagnostics_includes_runtime_performance_without_ha() -> None:
+    from custom_components.circuitsetup_energy_analyzer.diagnostics import (
+        async_get_config_entry_diagnostics,
+    )
+
+    performance = {
+        "slow_operation_threshold_ms": 100.0,
+        "source_update": {"count": 2, "last_ms": 12.5, "max_ms": 20.0},
+        "nilm_by_circuit": {
+            "hvac_1": {"count": 2, "last_ms": 8.0, "max_ms": 9.0}
+        },
+    }
+    coordinator = SimpleNamespace(
+        store_data=FeatureStoreData(),
+        runtime_performance_snapshot=lambda: performance,
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(
+        entry_id="entry-1",
+        title="Panel Analyzer",
+        data={},
+        options={},
+    )
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["runtime"]["performance"] == performance
+
+
+@pytest.mark.asyncio
 async def test_diagnostics_includes_redacted_runtime_summaries_without_ha() -> None:
     from custom_components.circuitsetup_energy_analyzer.diagnostics import (
         async_get_config_entry_diagnostics,

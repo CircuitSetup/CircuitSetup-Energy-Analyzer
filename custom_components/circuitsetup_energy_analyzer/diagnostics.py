@@ -76,7 +76,7 @@ def _runtime_summary(hass: Any, entry_id: str) -> dict[str, Any] | None:
     if store_data is None:
         return None
 
-    return {
+    summary = {
         "events": _count_by_circuit(getattr(store_data, "events", [])),
         "baselines": _baseline_summary(getattr(store_data, "baselines", {})),
         "alerts": _count_by_circuit(getattr(store_data, "alerts", [])),
@@ -93,6 +93,10 @@ def _runtime_summary(hass: Any, entry_id: str) -> dict[str, Any] | None:
             getattr(coordinator, "last_exported_diagnostics", {}) or {}
         ),
     }
+    performance_snapshot = getattr(coordinator, "runtime_performance_snapshot", None)
+    if callable(performance_snapshot):
+        summary["performance"] = performance_snapshot()
+    return summary
 
 
 def _appliance_details(coordinator: Any) -> list[dict[str, Any]]:

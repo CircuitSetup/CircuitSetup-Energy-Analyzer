@@ -98,9 +98,17 @@ class SourceUpdateManager:
             self.last_source_update_entities = changed_entities
             if not self._coordinator.started:
                 return
-            await self._coordinator.async_process_update(
-                changed_entities=changed_entities
-            )
+            loop = asyncio.get_running_loop()
+            started_at = loop.time()
+            try:
+                await self._coordinator.async_process_update(
+                    changed_entities=changed_entities
+                )
+            finally:
+                self._coordinator._record_runtime_performance(
+                    "source_update",
+                    loop.time() - started_at,
+                )
         except asyncio.CancelledError:
             self._pending_source_update_entities.clear()
             self.pending_source_update_entities = ()
