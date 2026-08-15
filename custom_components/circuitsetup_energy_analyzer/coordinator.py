@@ -173,7 +173,7 @@ def _explicitly_disabled_nilm_circuit_ids(
         for raw in raw_circuits
         if isinstance(raw, Mapping)
         and CONF_NILM_DETECTION_ENABLED in raw
-        and not bool(raw[CONF_NILM_DETECTION_ENABLED])
+        and raw[CONF_NILM_DETECTION_ENABLED] is False
         and (circuit_id := str(raw.get("circuit_id") or "").strip())
     )
 
@@ -520,7 +520,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         bucket["last_ms"] = elapsed_ms
         bucket["max_ms"] = max(float(bucket["max_ms"]), elapsed_ms)
 
-        if elapsed_seconds < SLOW_RUNTIME_OPERATION_SECONDS:
+        if elapsed_seconds <= SLOW_RUNTIME_OPERATION_SECONDS:
             return
         observed_at = monotonic()
         previous_warning_at = self._last_slow_runtime_warning_at.get(key)

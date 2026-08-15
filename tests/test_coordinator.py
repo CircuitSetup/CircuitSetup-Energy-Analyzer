@@ -2904,6 +2904,29 @@ def test_coordinator_runtime_performance_is_bounded_and_rate_limits_warnings(
     ]
 
 
+def test_runtime_performance_does_not_warn_at_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import (
+        coordinator as coordinator_module,
+    )
+
+    monkeypatch.setattr(
+        coordinator_module,
+        "monotonic",
+        lambda: pytest.fail("threshold duration should not emit a warning"),
+    )
+    coordinator = coordinator_module.EnergyAnalyzerCoordinator(SimpleNamespace())
+
+    with caplog.at_level("WARNING"):
+        coordinator._record_runtime_performance("nilm", 0.1, circuit_id="hvac_1")
+
+    assert not [
+        record for record in caplog.records if record.levelname == "WARNING"
+    ]
+
+
 @pytest.mark.asyncio
 async def test_source_update_manager_records_pipeline_duration() -> None:
     from custom_components.circuitsetup_energy_analyzer.managers.source_updates import (
@@ -3157,6 +3180,41 @@ def test_coordinator_discards_disabled_nilm_state_before_hydration() -> None:
     assert set(store_data.nilm_session_history_by_circuit) == {"hvac_1"}
     assert "office_1" in store_data.demand_by_circuit
     assert coordinator._startup_store_dirty is True
+
+
+@pytest.mark.parametrize(
+    "stored_value",
+    (None, 0, "", []),
+    ids=("none", "zero", "empty-string", "empty-list"),
+)
+def test_coordinator_preserves_nilm_state_for_non_boolean_falsey_values(
+    stored_value: Any,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    store_data = FeatureStoreData(nilm_signatures={"office_1": [{}]})
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=store_data,
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "office_1",
+                    "name": "Office 1",
+                    "mode": "mixed",
+                    "appliance_profile": "mixed",
+                    CONF_NILM_DETECTION_ENABLED: stored_value,
+                    "sensors": [],
+                }
+            ]
+        },
+    )
+
+    assert set(store_data.nilm_signatures) == {"office_1"}
+    assert coordinator._startup_store_dirty is False
 
 
 @pytest.mark.asyncio
