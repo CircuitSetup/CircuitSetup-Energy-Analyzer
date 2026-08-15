@@ -8721,6 +8721,7 @@ async def test_session_assignment_claims_only_selected_session() -> None:
                     {
                         "session_id": "session-pump",
                         "signature_fingerprint": "pump-fingerprint",
+                        "assignment_id": "condensate-pump",
                         "start": "2026-06-02T12:00:00+00:00",
                         "end": "2026-06-02T12:15:00+00:00",
                     },

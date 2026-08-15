@@ -6182,6 +6182,57 @@ async def test_nilm_identity_actions_scope_duplicate_circuit_to_entry(
 
 
 @pytest.mark.asyncio
+async def test_assign_session_dispatches_through_entry_nilm_controller() -> None:
+    """Session assignment must not silently disappear at the coordinator facade."""
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        ATTR_ASSIGNMENT_ID,
+        ATTR_CIRCUIT_ID,
+        ATTR_ENTRY_ID,
+        ATTR_LABEL,
+        ATTR_SESSION_ID,
+        SERVICE_ASSIGN_SESSION_TO_APPLIANCE,
+        _dispatch_service,
+    )
+
+    manager = SimpleNamespace(
+        async_assign_nilm_session=AsyncMock(
+            return_value={"assignment_id": "assignment-1"}
+        )
+    )
+    coordinator = SimpleNamespace(
+        async_set_updated_data=lambda data: None,
+        circuit_configs=[SimpleNamespace(circuit_id="mains")],
+        nilm_controller=manager,
+        async_assign_nilm_session=AsyncMock(return_value=None),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    await _dispatch_service(
+        hass,
+        SERVICE_ASSIGN_SESSION_TO_APPLIANCE,
+        {
+            ATTR_ENTRY_ID: "entry-1",
+            ATTR_CIRCUIT_ID: "mains",
+            ATTR_SESSION_ID: "session-1",
+            ATTR_LABEL: "Pump",
+            ATTR_ASSIGNMENT_ID: "assignment-1",
+        },
+    )
+
+    coordinator.async_assign_nilm_session.assert_not_awaited()
+    manager.async_assign_nilm_session.assert_awaited_once_with(
+        "mains",
+        "session-1",
+        label="Pump",
+        signature_fingerprint=None,
+        on_edge_id=None,
+        appliance_id=None,
+        appliance_profile=None,
+        assignment_id="assignment-1",
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("entry_id", "circuit_id", "message"),
     (
