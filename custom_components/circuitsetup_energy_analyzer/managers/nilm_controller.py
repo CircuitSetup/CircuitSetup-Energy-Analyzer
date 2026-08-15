@@ -2138,36 +2138,50 @@ class NilmController:
             raise ValueError("Missing session_id.")
         on_edge_id_text = str(on_edge_id or "").strip()
         coordinator = self._coordinator
-        history = [
-            session
-            for session in coordinator.store_data.nilm_session_history_by_circuit.get(
-                circuit_id, ()
+
+        def retained_sessions() -> list[dict[str, Any]]:
+            history = [
+                session
+                for session in (
+                    coordinator.store_data.nilm_session_history_by_circuit.get(
+                        circuit_id, ()
+                    )
+                )
+                if isinstance(session, dict)
+            ]
+            sessions = [
+                session
+                for session in history
+                if str(session.get("session_id") or "").strip() == session_id_text
+            ]
+            if not sessions:
+                sessions = [
+                    session
+                    for session in history
+                    if str(session.get("session_id") or "").strip()
+                    and isinstance(session.get("_duration_bound_close"), Mapping)
+                    and str(
+                        session["_duration_bound_close"].get("session_id") or ""
+                    ).strip()
+                    == session_id_text
+                ]
+            if not sessions and on_edge_id_text:
+                sessions = [
+                    session
+                    for session in history
+                    if str(session.get("session_id") or "").strip()
+                    and str(session.get("on_edge_id") or "").strip()
+                    == on_edge_id_text
+                ]
+            return sessions
+
+        sessions = retained_sessions()
+        if not sessions and self._sample_processor is not None:
+            self._sample_processor.refresh_session_history(
+                circuit_id,
+                coordinator.store_data,
             )
-            if isinstance(session, dict)
-        ]
-        sessions = [
-            session
-            for session in history
-            if str(session.get("session_id") or "").strip() == session_id_text
-        ]
-        if not sessions:
-            sessions = [
-                session
-                for session in history
-                if str(session.get("session_id") or "").strip()
-                and isinstance(session.get("_duration_bound_close"), Mapping)
-                and str(
-                    session["_duration_bound_close"].get("session_id") or ""
-                ).strip()
-                == session_id_text
-            ]
-        if not sessions and on_edge_id_text:
-            sessions = [
-                session
-                for session in history
-                if str(session.get("session_id") or "").strip()
-                and str(session.get("on_edge_id") or "").strip() == on_edge_id_text
-            ]
+            sessions = retained_sessions()
         if len(sessions) != 1:
             raise ValueError(f"Unknown or ambiguous session_id '{session_id_text}'.")
         session = sessions[0]
