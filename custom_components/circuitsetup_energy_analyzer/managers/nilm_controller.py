@@ -2206,18 +2206,12 @@ class NilmController:
             raise ValueError(
                 "Session signature_fingerprint does not match retained evidence."
             )
+        matching_signatures = []
         signatures = []
         for signature in coordinator.store_data.nilm_signatures.get(circuit_id, ()):
             if not isinstance(signature, dict):
                 continue
-            review_state = str(signature.get("review_state") or "").strip().lower()
-            if (
-                signature.get("ignored")
-                or signature.get("merged_into")
-                or review_state in {"ignored", "merged"}
-            ):
-                continue
-            if fingerprint in {
+            if fingerprint not in {
                 str(signature.get(key) or "").strip()
                 for key in (
                     "signature_id",
@@ -2225,7 +2219,21 @@ class NilmController:
                     "feedback_fingerprint",
                 )
             }:
-                signatures.append(signature)
+                continue
+            matching_signatures.append(signature)
+            review_state = str(signature.get("review_state") or "").strip().lower()
+            if (
+                signature.get("ignored")
+                or signature.get("merged_into")
+                or review_state in {"ignored", "merged"}
+            ):
+                continue
+            signatures.append(signature)
+        if not matching_signatures:
+            # A retained session can outlive the source cluster that created it.
+            signature = self.signature_for_review(circuit_id, fingerprint)
+            signature["feedback_fingerprint"] = fingerprint
+            signatures.append(signature)
         if len(signatures) != 1:
             raise ValueError(
                 "Unknown or ambiguous retained signature for session "
