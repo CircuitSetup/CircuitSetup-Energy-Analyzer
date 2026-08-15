@@ -435,6 +435,7 @@ EXPECTED_SERVICE_FIELD_NAMES = {
     "measured_energy_entities": "Measured Energy Entities",
     "negative_tolerance_w": "Negative Tolerance W",
     "note": "Note",
+    "on_edge_id": "On-edge ID",
     "power_factor_tolerance": "Power Factor Tolerance",
     "preset": "Preset",
     "recommendation_id": "Recommendation ID",

@@ -172,6 +172,39 @@ async def test_ambiguous_duration_bound_close_alias_cannot_be_assigned() -> None
         )
 
 
+@pytest.mark.asyncio
+async def test_duplicate_on_edge_revisions_cannot_be_assigned() -> None:
+    controller = _nilm_controller(
+        SimpleNamespace(
+            store_data=FeatureStoreData(
+                nilm_session_history_by_circuit={
+                    "mains": [
+                        {
+                            "session_id": "session-one",
+                            "signature_fingerprint": "pump-fingerprint",
+                            "on_edge_id": "pump-on",
+                        },
+                        {
+                            "session_id": "session-two",
+                            "signature_fingerprint": "pump-fingerprint",
+                            "on_edge_id": "pump-on",
+                        },
+                    ]
+                }
+            )
+        )
+    )
+
+    with pytest.raises(ValueError, match="Unknown or ambiguous session_id"):
+        await controller.async_assign_nilm_session(
+            "mains",
+            "session-replaced",
+            label="Pump",
+            signature_fingerprint="pump-fingerprint",
+            on_edge_id="pump-on",
+        )
+
+
 def test_ambiguous_finished_alert_feedback_is_rejected() -> None:
     """A stale ambiguous finished alert cannot mutate its assignment."""
     assignment = {

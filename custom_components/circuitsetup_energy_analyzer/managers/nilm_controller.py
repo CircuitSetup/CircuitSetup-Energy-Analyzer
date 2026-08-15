@@ -2068,6 +2068,7 @@ class NilmController:
         *,
         label: str,
         signature_fingerprint: str | None = None,
+        on_edge_id: str | None = None,
         appliance_id: str | None = None,
         appliance_profile: str | None = None,
         assignment_id: str | None = None,
@@ -2103,6 +2104,7 @@ class NilmController:
                     session_id,
                     label=label,
                     signature_fingerprint=signature_fingerprint,
+                    on_edge_id=on_edge_id,
                     appliance_id=appliance_id,
                     appliance_profile=appliance_profile,
                     assignment_id=assignment_id,
@@ -2125,6 +2127,7 @@ class NilmController:
         *,
         label: str,
         signature_fingerprint: str | None = None,
+        on_edge_id: str | None = None,
         appliance_id: str | None = None,
         appliance_profile: str | None = None,
         assignment_id: str | None = None,
@@ -2133,6 +2136,7 @@ class NilmController:
         session_id_text = str(session_id or "").strip()
         if not session_id_text:
             raise ValueError("Missing session_id.")
+        on_edge_id_text = str(on_edge_id or "").strip()
         coordinator = self._coordinator
         history = [
             session
@@ -2157,10 +2161,20 @@ class NilmController:
                 ).strip()
                 == session_id_text
             ]
+        if not sessions and on_edge_id_text:
+            sessions = [
+                session
+                for session in history
+                if str(session.get("session_id") or "").strip()
+                and str(session.get("on_edge_id") or "").strip() == on_edge_id_text
+            ]
         if len(sessions) != 1:
             raise ValueError(f"Unknown or ambiguous session_id '{session_id_text}'.")
         session = sessions[0]
         persisted_session_id = str(session.get("session_id") or "").strip()
+        persisted_on_edge_id = str(session.get("on_edge_id") or "").strip()
+        if on_edge_id_text and persisted_on_edge_id != on_edge_id_text:
+            raise ValueError("Session on_edge_id does not match retained evidence.")
         self._assert_nilm_session_is_actionable(circuit_id, session_id_text)
         if persisted_session_id != session_id_text:
             self._assert_nilm_session_is_actionable(circuit_id, persisted_session_id)
