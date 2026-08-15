@@ -701,7 +701,7 @@ def nilm_workspace_payload(
     )
     virtual_appliances = _nilm_virtual_appliances_for_assignments(
         assignments,
-        sessions,
+        all_sessions,
         edges,
         coordinator=coordinator,
     )
@@ -1295,7 +1295,7 @@ def _nilm_workspace_collection_timestamp(
 def _nilm_workspace_collection_sort_key(
     collection: str,
     item: Mapping[str, Any],
-) -> tuple[int, float, str]:
+) -> tuple[int, int, float, str]:
     timestamp = _nilm_workspace_collection_timestamp(collection, item)
     timestamp_key = -timestamp.timestamp() if timestamp is not None else float("inf")
     completion_key = (
@@ -1304,10 +1304,27 @@ def _nilm_workspace_collection_sort_key(
         else 1
     )
     return (
+        _nilm_workspace_session_review_priority(item)
+        if collection == "sessions"
+        else 0,
         completion_key,
         timestamp_key,
         _nilm_workspace_collection_identity(collection, item),
     )
+
+
+def _nilm_workspace_session_review_priority(item: Mapping[str, Any]) -> int:
+    actions = item.get("actions")
+    action_keys = set(actions) if isinstance(actions, Mapping) else set()
+    assignment_id = str(item.get(ATTR_ASSIGNMENT_ID) or "").strip()
+    is_complete = _datetime_from_iso(item.get("end")) is not None
+    if not is_complete:
+        return 3
+    if assignment_id and {"validate", "reject"} <= action_keys:
+        return 0
+    if not assignment_id and "assign" in action_keys:
+        return 1
+    return 2
 
 
 def _nilm_workspace_generic_collection_cursor(
@@ -1327,6 +1344,9 @@ def _nilm_workspace_generic_collection_cursor(
             collection,
             str(circuit_id or ""),
             str(entry_id or ""),
+            _nilm_workspace_session_review_priority(item)
+            if collection == "sessions"
+            else 0,
             0
             if collection != "sessions"
             or _datetime_from_iso(item.get("end")) is not None
@@ -1343,15 +1363,16 @@ def _nilm_workspace_generic_collection_cursor_key(
     collection: str,
     circuit_id: str,
     entry_id: str,
-) -> tuple[int, float, str] | None:
+) -> tuple[int, int, float, str] | None:
     value = _nilm_ambiguity_cursor_value(cursor)
-    if not isinstance(value, list) or len(value) != 7:
+    if not isinstance(value, list) or len(value) != 8:
         return None
     (
         kind,
         cursor_collection,
         cursor_circuit_id,
         cursor_entry_id,
+        priority,
         completion,
         raw_time,
         item_id,
@@ -1361,6 +1382,9 @@ def _nilm_workspace_generic_collection_cursor_key(
         or cursor_collection != collection
         or cursor_circuit_id != str(circuit_id or "")
         or cursor_entry_id != str(entry_id or "")
+        or not isinstance(priority, int)
+        or isinstance(priority, bool)
+        or priority < 0
         or completion not in {0, 1}
         or not isinstance(raw_time, str)
         or not (normalized_item_id := _nilm_ambiguity_text(item_id))
@@ -1368,6 +1392,7 @@ def _nilm_workspace_generic_collection_cursor_key(
         return None
     timestamp = _datetime_from_iso(raw_time) if raw_time else None
     return (
+        priority,
         completion,
         -timestamp.timestamp() if timestamp is not None else float("inf"),
         normalized_item_id,
@@ -4458,13 +4483,6 @@ def _nilm_workspace_sessions(
                 spec.get(key) is not None for key in ("typical_watts", "median_delta_w")
             ):
                 spec["typical_watts"] = first_on_w
-        if not matcher_specs:
-            matcher_specs.append(
-                {
-                    "signature_fingerprint": "unassigned",
-                    "typical_watts": first_on_w,
-                }
-            )
     sessions = pair_nilm_sessions_for_signatures(
         edges,
         signature_specs=matcher_specs,

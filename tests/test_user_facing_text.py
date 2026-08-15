@@ -3939,12 +3939,12 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
         "Sessions, validation, and technical details",
         "NILM Sessions",
         "NILM Edges",
-        "Validation",
         'data-nilm-edges-details',
         "Showing 1 of 1 sessions.",
       ]) {
         assert.ok(html.includes(expected));
       }
+      assert.ok(!html.includes("Validation compares saved labels"));
       assert.ok(!html.includes("Estimated Appliances"));
       assert.ok(!html.includes("Manual Labels"));
       assert.ok(!html.includes("data-nilm-decision"));
@@ -3952,6 +3952,16 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       assert.ok(html.includes("RAW_SESSION"));
       assert.ok(html.includes('data-nilm-session-index="1" data-nilm-session-action="assign"'));
       assert.ok(!html.includes('data-nilm-session-index="0" data-nilm-session-action="assign"'));
+    }
+
+    name = "test_nilm_validation_hides_without_reference_intervals";
+    {
+      const panel = makePanel();
+      const empty = panel._renderNilmValidation({
+        metrics: { ground_truth_interval_count: 0 },
+        prediction_preview: [],
+      });
+      assert.equal(empty, "");
     }
 
     name = "test_nilm_full_workspace_has_one_owner";
