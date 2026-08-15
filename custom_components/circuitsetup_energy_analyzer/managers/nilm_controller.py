@@ -689,6 +689,7 @@ class NilmController:
         else:
             assignments[:] = [item for item in assignments if item is not assignment]
             assignments.append(assignment)
+            assignment = assignments[-1]
             assignment["display_name"] = label_text
             if appliance_profile:
                 assignment["appliance_profile"] = str(appliance_profile).strip()
