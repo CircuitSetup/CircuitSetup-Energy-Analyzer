@@ -2594,6 +2594,21 @@ class NilmController:
             )
         assignment["confirmed_session_ids"] = confirmed
         assignment["rejected_session_ids"] = rejected
+        store_finished_feedback = self._async_store_finished_session_feedback
+        for session_id in confirmed:
+            await store_finished_feedback(
+                circuit_id,
+                assignment,
+                session_id,
+                "correct",
+            )
+        for session_id in rejected:
+            await store_finished_feedback(
+                circuit_id,
+                assignment,
+                session_id,
+                "wrong_appliance",
+            )
         evaluated_history_session_ids = [
             *matched_session_ids,
             *conflicting_session_ids,
@@ -2774,6 +2789,28 @@ class NilmController:
         await coordinator.store_persistence.async_save_if_dirty(now_dt)
         return dict(assignment)
 
+    async def _async_store_finished_session_feedback(
+        self,
+        circuit_id: str,
+        assignment: Mapping[str, Any],
+        session_id: str,
+        action: str,
+    ) -> tuple[str, ...]:
+        evidence_actions = getattr(self._coordinator, "evidence_actions", None)
+        store_finished_feedback = getattr(
+            evidence_actions,
+            "async_store_nilm_finished_session_feedback",
+            None,
+        )
+        if store_finished_feedback is None:
+            return ()
+        return await store_finished_feedback(
+            circuit_id,
+            str(assignment.get("assignment_id") or ""),
+            session_id,
+            action,
+        )
+
     def _history_validation_session_ids(
         self,
         assignment: Mapping[str, Any],
@@ -2880,8 +2917,16 @@ class NilmController:
         else:
             self._append_unique(rejected, session_id_text)
             confirmed = [value for value in confirmed if value != session_id_text]
+        store_finished_feedback = self._async_store_finished_session_feedback
+        retired_alert_ids = await store_finished_feedback(
+            circuit_id,
+            assignment,
+            session_id_text,
+            "correct" if correct else "wrong_appliance",
+        )
         if (
             not feedback_changed
+            and not retired_alert_ids
             and not session_ids_changed
             and confirmed == previous_confirmed
             and rejected == previous_rejected
