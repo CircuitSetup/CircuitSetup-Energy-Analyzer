@@ -1291,6 +1291,84 @@ def test_setup_health_source_checklist_surfaces_invalid_source_issues(
     assert checklist["source_data_found"]["affected_circuits"] == ["fridge"]
 
 
+def test_setup_health_waits_for_learning_before_reporting_stale_source() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+        setup_health_value,
+    )
+
+    circuit = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+    )
+
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            learning_by_circuit={"fridge": True},
+            data_quality_by_circuit={"fridge": "sensor.fridge_power stale"},
+            data_quality_checklist_by_circuit={
+                "fridge": {
+                    "sample_observed": True,
+                    "required_sensors_present": True,
+                    "numeric_states_valid": True,
+                    "source_data_fresh": False,
+                    "quality_issues": ["sensor.fridge_power stale"],
+                }
+            },
+        ),
+        circuit_configs=(circuit,),
+    )
+
+    assert setup_health_value(coordinator) == "Let analyzer learn"
+    attrs = setup_health_attributes(coordinator)
+    assert [issue["issue"] for issue in attrs["issues"]] == ["learning"]
+    assert attrs["learning_circuits"] == ["fridge"]
+    assert attrs["stale_sources"] == []
+    checklist = {item["item_id"]: item for item in attrs["checklist"]}
+    assert checklist["source_data_found"]["status"] == "learning"
+
+
+def test_setup_health_reports_stale_source_after_learning_is_complete() -> None:
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        setup_health_attributes,
+        setup_health_value,
+    )
+
+    circuit = CircuitConfig(
+        circuit_id="fridge",
+        name="Kitchen Fridge",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),),
+    )
+    coordinator = SimpleNamespace(
+        data=AnalyzerState(
+            learning_by_circuit={"fridge": False},
+            data_quality_by_circuit={"fridge": "sensor.fridge_power stale"},
+            data_quality_checklist_by_circuit={
+                "fridge": {
+                    "sample_observed": True,
+                    "required_sensors_present": True,
+                    "numeric_states_valid": True,
+                    "source_data_fresh": False,
+                    "quality_issues": ["sensor.fridge_power stale"],
+                }
+            },
+        ),
+        circuit_configs=(circuit,),
+    )
+
+    assert setup_health_value(coordinator) == "Fix stale source sensor"
+    attrs = setup_health_attributes(coordinator)
+    assert attrs["issues"][0]["issue"] == "stale_source"
+    assert attrs["stale_sources"] == ["sensor.fridge_power"]
+    checklist = {item["item_id"]: item for item in attrs["checklist"]}
+    assert checklist["source_data_found"]["status"] == "needs_attention"
+
+
 @pytest.mark.parametrize(
     ("quality_issues", "checklist_overrides", "expected_issue", "expected_entity"),
     [

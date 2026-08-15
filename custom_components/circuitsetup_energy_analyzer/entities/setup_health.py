@@ -328,16 +328,7 @@ def _setup_health_checklist(
     )
     compact = len(issues) > _MAX_SETUP_HEALTH_ISSUES
     source_data_observed = bool(circuits) and all(
-        (checklist := _setup_health_mapping(
-            state,
-            "data_quality_checklist_by_circuit",
-            circuit.circuit_id,
-        ))
-        is not None
-        and checklist.get("sample_observed") is True
-        and checklist.get("required_sensors_present") is True
-        and checklist.get("numeric_states_valid") is True
-        and checklist.get("source_data_fresh") is True
+        _setup_health_source_data_observed(state, circuit)
         for _, circuit in circuits
     )
     source_data_status = (
@@ -999,6 +990,57 @@ def _setup_health_issue_key(state: str) -> str:
     return str(state).strip().lower().replace(" ", "_").replace("-", "_")
 
 
+def _setup_health_source_data_observed(
+    state: Any,
+    circuit: Any,
+) -> bool:
+    checklist = _setup_health_mapping(
+        state,
+        "data_quality_checklist_by_circuit",
+        circuit.circuit_id,
+    )
+    if (
+        checklist is None
+        or checklist.get("sample_observed") is not True
+        or checklist.get("required_sensors_present") is not True
+        or checklist.get("numeric_states_valid") is not True
+    ):
+        return False
+    return checklist.get("source_data_fresh") is True
+
+
+def _setup_health_data_quality_issue_details(
+    state: Any,
+    checklist: Mapping[str, Any] | None,
+    circuit: Any,
+) -> list[str]:
+    return [
+        _setup_health_data_quality_text(state, circuit),
+        *_setup_health_quality_issues(checklist),
+    ]
+
+
+def _setup_health_data_quality_text(state: Any, circuit: Any) -> str:
+    return str(
+        getattr(state, "data_quality_by_circuit", {}).get(circuit.circuit_id, "")
+        if state is not None
+        else ""
+    )
+
+
+def _setup_health_quality_issues(
+    checklist: Mapping[str, Any] | None,
+) -> list[str]:
+    return [
+        str(issue)
+        for issue in (
+            checklist.get("quality_issues_full") or checklist.get("quality_issues", [])
+            if checklist is not None
+            else []
+        )
+    ]
+
+
 def _setup_health_data_quality_issue(
     state: Any,
     circuit: Any,
@@ -1008,20 +1050,30 @@ def _setup_health_data_quality_issue(
         "data_quality_checklist_by_circuit",
         circuit.circuit_id,
     )
-    data_quality = str(
-        getattr(state, "data_quality_by_circuit", {}).get(circuit.circuit_id, "")
-        if state is not None
-        else ""
+    quality_issues = _setup_health_quality_issues(checklist)
+    issue_details = _setup_health_data_quality_issue_details(
+        state,
+        checklist,
+        circuit,
     )
-    quality_issues = [
-        str(issue)
-        for issue in (
-            checklist.get("quality_issues_full") or checklist.get("quality_issues", [])
-            if checklist is not None
-            else []
+    stale_sources_waiting_for_learning = (
+        _setup_health_stale_sources_waiting_for_learning(
+            state,
+            circuit,
+            issue_details,
         )
-    ]
-    issue_details = [data_quality, *quality_issues]
+    )
+    if stale_sources_waiting_for_learning:
+        issue_details = [
+            detail
+            for detail in issue_details
+            if not _setup_health_is_stale_issue_text(detail)
+        ]
+        quality_issues = [
+            issue
+            for issue in quality_issues
+            if not _setup_health_is_stale_issue_text(issue)
+        ]
     issue_text = " ".join(issue_details).lower()
 
     if "missing_source_entities" in issue_text:
@@ -1045,6 +1097,11 @@ def _setup_health_data_quality_issue(
         )
     if checklist is None or checklist.get("sample_observed") is False:
         return None
+    source_data_fresh = checklist.get("source_data_fresh")
+    if source_data_fresh is False and stale_sources_waiting_for_learning:
+        source_data_fresh = not any(
+            _setup_health_is_stale_issue_text(detail) for detail in issue_details
+        )
     if "naive_timestamp" in issue_text or "future_timestamp" in issue_text:
         return _setup_health_issue(
             "Fix source sensor timestamps",
@@ -1080,7 +1137,9 @@ def _setup_health_data_quality_issue(
                 ),
             ),
         )
-    if checklist.get("source_data_fresh") is False or "stale" in issue_text:
+    if source_data_fresh is False or any(
+        _setup_health_is_stale_issue_text(detail) for detail in issue_details
+    ):
         return _setup_health_issue(
             "Fix stale source sensor",
             f"Fix stale source sensor data for {circuit.name}",
@@ -1109,6 +1168,25 @@ def _setup_health_data_quality_issue(
             issue="source_data_quality",
         )
     return None
+
+
+def _setup_health_stale_sources_waiting_for_learning(
+    state: Any,
+    circuit: Any,
+    issue_details: Iterable[str],
+) -> bool:
+    return circuit_is_learning(
+        state,
+        getattr(circuit, "circuit_id", ""),
+        default=False,
+    ) and any(_setup_health_is_stale_issue_text(detail) for detail in issue_details)
+
+
+def _setup_health_is_stale_issue_text(issue: Any) -> bool:
+    text = str(issue).strip().lower()
+    if text in {"stale_source", "stale_source_sensor"}:
+        return True
+    return "stale" in text.split()
 
 
 def _setup_health_status(state: Any, field_name: str, circuit_id: str) -> str | None:
