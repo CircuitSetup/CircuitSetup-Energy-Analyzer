@@ -203,6 +203,14 @@ async def test_duplicate_on_edge_revisions_cannot_be_assigned() -> None:
             signature_fingerprint="pump-fingerprint",
             on_edge_id="pump-on",
         )
+    with pytest.raises(ValueError, match="Unknown or ambiguous session_id"):
+        await controller.async_assign_nilm_session(
+            "mains",
+            "session-one",
+            label="Pump",
+            signature_fingerprint="pump-fingerprint",
+            on_edge_id="pump-on",
+        )
 
 
 def test_ambiguous_finished_alert_feedback_is_rejected() -> None:

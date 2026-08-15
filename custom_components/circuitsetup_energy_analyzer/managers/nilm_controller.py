@@ -2165,14 +2165,18 @@ class NilmController:
                     ).strip()
                     == session_id_text
                 ]
-            if not sessions and on_edge_id_text:
-                sessions = [
+            if on_edge_id_text:
+                on_edge_sessions = [
                     session
                     for session in history
                     if str(session.get("session_id") or "").strip()
                     and str(session.get("on_edge_id") or "").strip()
                     == on_edge_id_text
                 ]
+                if len(on_edge_sessions) != 1:
+                    return on_edge_sessions
+                if not sessions:
+                    sessions = on_edge_sessions
             return sessions
 
         sessions = retained_sessions()
