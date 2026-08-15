@@ -457,7 +457,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260815-2"
+    assert PANEL_MODULE_VERSION == "20260815-3"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -2868,13 +2868,14 @@ def test_nilm_workspace_prioritizes_validation_sessions_on_initial_page() -> Non
     )
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {
         "mains": [
-            {
-                "assignment_id": "assignment-hvac",
-                "mains_circuit_id": "mains",
-                "display_name": "HVAC",
-                "lifecycle_state": "assigned",
-                "signature_fingerprints": ["direction=on|watts=500-550"],
-            }
+                {
+                    "assignment_id": "assignment-hvac",
+                    "mains_circuit_id": "mains",
+                    "display_name": "HVAC",
+                    "lifecycle_state": "assigned",
+                    "signature_fingerprints": ["direction=on|watts=500-550"],
+                    "session_ids": ["old-validation-session"],
+                }
         ]
     }
     start = datetime(2026, 8, 12, tzinfo=UTC)
@@ -4006,6 +4007,7 @@ def test_nilm_workspace_exposes_configured_primary_lifecycle() -> None:
         "role": "primary",
         "lifecycle_state": "assigned",
         "signature_fingerprints": [],
+        "session_ids": ["session-0", "session-1"],
         "label_interval_ids": ["interval-1", "interval-2"],
     }
     signature = {
@@ -7058,6 +7060,16 @@ def test_nilm_workspace_payload_restores_persisted_session_history() -> None:
         nilm_detection_enabled=True,
     )
     coordinator = _coordinator(config=mains_config, configs=(mains_config,))
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-dishwasher",
+                "display_name": "Dishwasher",
+                "signature_fingerprints": [],
+                "session_ids": ["session-dishwasher"],
+            }
+        ]
+    }
     coordinator.store_data.nilm_session_history_by_circuit = {
         "mains": [
             {
@@ -7089,6 +7101,131 @@ def test_nilm_workspace_payload_restores_persisted_session_history() -> None:
     assert payload["sessions"][0]["assignment_id"] == "assignment-dishwasher"
 
 
+def test_nilm_workspace_payload_keeps_shared_signature_sibling_in_review() -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
+    )
+    coordinator = _coordinator(config=mains_config, configs=(mains_config,))
+    coordinator.state.nilm_unknown_loads_by_circuit = {
+        "mains": {
+            "unknown_loads": [
+                {
+                    "signature_id": "signature-pump",
+                    "feedback_fingerprint": "signature-pump",
+                    "typical_watts": 100.0,
+                    "confidence": 0.8,
+                }
+            ]
+        }
+    }
+    start = datetime(2026, 6, 6, 8, 0, tzinfo=UTC)
+    coordinator._nilm_unmatched_edges = {
+        "mains": [
+            NilmEdge(start, 100.0, 0.0, 100.0, 0.0, "on"),
+            NilmEdge(
+                start + timedelta(minutes=10),
+                -100.0,
+                0.0,
+                -100.0,
+                0.0,
+                "off",
+            ),
+            NilmEdge(
+                start + timedelta(minutes=20),
+                100.0,
+                0.0,
+                100.0,
+                0.0,
+                "on",
+            ),
+            NilmEdge(
+                start + timedelta(minutes=30),
+                -100.0,
+                0.0,
+                -100.0,
+                0.0,
+                "off",
+            ),
+        ]
+    }
+    initial = nilm_workspace_payload([coordinator], circuit_id="mains")
+    assert len(initial["sessions"]) == 2
+    selected, sibling = initial["sessions"]
+    selected_id = selected["session_id"]
+    sibling_id = sibling["session_id"]
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-pump",
+                "display_name": "Pump",
+                "signature_fingerprints": [],
+                "session_ids": [selected_id],
+                "label_interval_ids": [],
+                "lifecycle_state": "assigned",
+                "confidence": 1.0,
+            }
+        ]
+    }
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [
+            {
+                **selected,
+                "assignment_id": "assignment-pump",
+                "end": None,
+                "duration_seconds": None,
+            }
+        ]
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+
+    sessions = {session["session_id"]: session for session in payload["sessions"]}
+    assert sessions[selected_id]["assignment_id"] == "assignment-pump"
+    assert sessions[selected_id]["end"] == selected["end"]
+    assert sessions[selected_id]["duration_seconds"] == selected["duration_seconds"]
+    assert not sessions[sibling_id].get("assignment_id")
+    assert payload["lanes"]["needs_review"]["session_ids"] == [sibling_id]
+
+    coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"].append(
+        {
+            "assignment_id": "signature-owner",
+            "display_name": "Signature owner",
+            "signature_fingerprints": ["signature-pump"],
+            "session_ids": [],
+            "label_interval_ids": [],
+            "lifecycle_state": "assigned",
+            "confidence": 1.0,
+        }
+    )
+    competing = nilm_workspace_payload([coordinator], circuit_id="mains")
+    competing_sessions = {
+        session["session_id"]: session for session in competing["sessions"]
+    }
+    assert competing_sessions[selected_id]["assignment_id"] == "assignment-pump"
+    assert competing_sessions[sibling_id]["assignment_id"] == "signature-owner"
+
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mains": []}
+    orphaned = nilm_workspace_payload([coordinator], circuit_id="mains")
+    orphaned_sessions = {
+        session["session_id"]: session for session in orphaned["sessions"]
+    }
+    assert not orphaned_sessions[selected_id].get("assignment_id")
+    assert set(orphaned["lanes"]["needs_review"]["session_ids"]) == {
+        selected_id,
+        sibling_id,
+    }
+
+
 def test_nilm_workspace_payload_hides_review_actions_for_reviewed_sessions() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
@@ -7110,6 +7247,7 @@ def test_nilm_workspace_payload_hides_review_actions_for_reviewed_sessions() -> 
                 "appliance_id": "dishwasher",
                 "display_name": "Dishwasher",
                 "mains_circuit_id": "mains",
+                "session_ids": ["session-pending"],
                 "confirmed_session_ids": ["session-confirmed", "session-merged"],
                 "rejected_session_ids": ["session-rejected"],
             }
@@ -7141,6 +7279,14 @@ def test_nilm_workspace_payload_hides_review_actions_for_reviewed_sessions() -> 
                 "end": "2026-06-06T10:45:00+00:00",
                 "assignment_id": "assignment-dishwasher",
             },
+            {
+                "session_id": "session-rejected",
+                "mains_circuit_id": "mains",
+                "signature_fingerprint": "signature_1",
+                "start": "2026-06-06T11:00:00+00:00",
+                "end": "2026-06-06T11:45:00+00:00",
+                "assignment_id": "assignment-before-rejection",
+            },
         ]
     }
 
@@ -7149,8 +7295,63 @@ def test_nilm_workspace_payload_hides_review_actions_for_reviewed_sessions() -> 
     sessions = {session["session_id"]: session for session in payload["sessions"]}
     assert "actions" not in sessions["session-confirmed"]
     assert "actions" not in sessions["session-merged"]
+    assert sessions["session-rejected"]["assignment_id"] == "assignment-dishwasher"
+    assert "actions" not in sessions["session-rejected"]
     assert "validate" in sessions["session-pending"]["actions"]
     assert "reject" in sessions["session-pending"]["actions"]
+    assert "session-rejected" not in payload["lanes"]["needs_review"]["session_ids"]
+
+
+def test_nilm_workspace_history_resolves_legacy_signature_owner() -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
+        nilm_workspace_payload,
+    )
+
+    mains_config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+        nilm_detection_enabled=True,
+    )
+    coordinator = _coordinator(config=mains_config, configs=(mains_config,))
+    coordinator.store_data.nilm_signatures = {
+        "mains": [
+            {
+                "signature_id": "signature-pump",
+                "feedback_fingerprint": "current-pump",
+                "legacy_feedback_fingerprint": "legacy-pump",
+            }
+        ]
+    }
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "assignment-pump",
+                "display_name": "Pump",
+                "signature_fingerprints": ["legacy-pump"],
+                "session_ids": [],
+            }
+        ]
+    }
+    coordinator.store_data.nilm_session_history_by_circuit = {
+        "mains": [
+            {
+                "session_id": "session-pump",
+                "mains_circuit_id": "mains",
+                "signature_fingerprint": "current-pump",
+                "assignment_id": "assignment-pump",
+                "start": "2026-06-06T08:00:00+00:00",
+                "end": "2026-06-06T08:15:00+00:00",
+            }
+        ]
+    }
+
+    payload = nilm_workspace_payload([coordinator], circuit_id="mains")
+
+    assert payload["sessions"][0]["assignment_id"] == "assignment-pump"
+    assert payload["lanes"]["needs_review"]["session_ids"] == []
 
 
 def test_nilm_workspace_virtual_appliance_uses_assignment_session_ids() -> None:

@@ -699,7 +699,7 @@ export function createNilmWorkspaceMethods({
     return sessions[Number.parseInt(match[1], 10)] || null;
   }
 
-  _nilmSessionAssignmentPersisted(sessionId, assignmentId, signatureFingerprint = "", onEdgeId = "") {
+  _nilmSessionAssignmentPersisted(sessionId, assignmentId, onEdgeId = "") {
     const workspace = this._nilmWorkspace || {};
     const sessions = workspace.sessions || [];
     const stableOnEdgeId = String(onEdgeId || "").trim();
@@ -717,14 +717,8 @@ export function createNilmWorkspaceMethods({
       const assignment = (workspace.assignments || []).find(
         (item) => item.assignment_id === persistedAssignmentId,
       );
-      const expectedFingerprint = String(
-        signatureFingerprint || session.signature_fingerprint || "",
-      ).trim();
-      const signaturePersisted = !expectedFingerprint
-        || (assignment && (assignment.signature_fingerprints || []).includes(expectedFingerprint));
       return persistedAssignmentId && session.assignment_id === persistedAssignmentId
-        && assignment && (assignment.session_ids || []).includes(session.session_id)
-        && signaturePersisted;
+        && assignment && (assignment.session_ids || []).includes(session.session_id);
     });
     return persistedCandidates.length === 1;
   }
@@ -835,7 +829,6 @@ export function createNilmWorkspaceMethods({
         && !this._nilmSessionAssignmentPersisted(
           sourceSession.session_id,
           data.assignment_id,
-          data.signature_fingerprint,
           data.on_edge_id,
         )) {
         this._setInlineFeedback(
@@ -1256,7 +1249,6 @@ export function createNilmWorkspaceMethods({
         && !this._nilmSessionAssignmentPersisted(
           item.session_id,
           data.assignment_id,
-          data.signature_fingerprint,
           data.on_edge_id,
         )) {
         this._setInlineFeedback(

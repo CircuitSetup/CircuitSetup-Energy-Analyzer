@@ -9447,7 +9447,6 @@ test("Needs Review session assignment accepts a duration-bound session alias", a
     persisted: window.__panel._nilmSessionAssignmentPersisted(
       originalSessionId,
       "dishwasher",
-      "signature-1",
     ),
     sessionIds: window.__panel._nilmWorkspace.assignments[0].session_ids,
   }), { originalSessionId, reopenedSessionId })).toEqual({
@@ -9524,7 +9523,6 @@ test("Needs Review session assignment accepts a revised on-edge session", async 
     persisted: window.__panel._nilmSessionAssignmentPersisted(
       expected.originalSessionId,
       "dishwasher",
-      "signature-1",
       expected.onEdgeId,
     ),
     onEdgeId: window.__serviceCalls.find(
@@ -9606,7 +9604,7 @@ test("Needs Review session assignment preserves review state when assignment mem
   });
 });
 
-test("Needs Review session assignment preserves review state when signature membership is missing", async ({ page }) => {
+test("Needs Review session assignment leaves shared-signature siblings queued", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (url.pathname.endsWith("/nilm_workspace_history")) {
       await route.fulfill({ json: [] });
@@ -9619,6 +9617,15 @@ test("Needs Review session assignment preserves review state when signature memb
     )) || false);
     const payload = structuredClone(apiPayload(url.pathname));
     const session = payload.sessions.find((item) => item.session_id === "nilm-session-0");
+    const sibling = {
+      ...structuredClone(session),
+      session_id: "nilm-session-sibling",
+      on_edge_id: "nilm-on-edge-sibling",
+      off_edge_id: "nilm-off-edge-sibling",
+      start: "2026-06-02T13:00:00+00:00",
+      end: "2026-06-02T13:15:00+00:00",
+    };
+    payload.sessions.push(sibling);
     session.signature_review.actions.assign.assignment_options = [
       { value: "dishwasher", label: "Dishwasher" },
     ];
@@ -9638,7 +9645,9 @@ test("Needs Review session assignment preserves review state when signature memb
     payload.lanes.needs_review = {
       ...payload.lanes.needs_review,
       signature_ids: [],
-      session_ids: ["nilm-session-0"],
+      session_ids: assignmentCalled
+        ? ["nilm-session-sibling"]
+        : ["nilm-session-0", "nilm-session-sibling"],
     };
     if (assignmentCalled) {
       session.assignment_id = "dishwasher";
@@ -9658,11 +9667,16 @@ test("Needs Review session assignment preserves review state when signature memb
   await expect(panel.getByText(
     "The NILM session assignment was not retained after refresh. Try again.",
     { exact: true },
-  )).toBeVisible();
-  await expect(panel.locator(".inline-feedback.success")).toHaveCount(0);
+  )).toHaveCount(0);
   await expect(panel.locator('[data-nilm-review-item="session:nilm-session-0"]'))
+    .toHaveCount(0);
+  await expect(panel.locator('[data-nilm-review-item="session:nilm-session-sibling"]'))
     .toHaveAttribute("aria-pressed", "true");
-  await expect(panel.locator('#nilm_label_session_0')).toHaveValue("Keep this review label");
+  await expect.poll(() => page.evaluate(() => window.__panel._inlineFeedback))
+    .toMatchObject({ kind: "success" });
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.filter((call) => (
+    call.service === "assign_session_to_appliance"
+  )).length)).toBe(1);
 });
 
 test("NILM session assignment keeps the selected existing appliance across rerenders", async ({ page }) => {
