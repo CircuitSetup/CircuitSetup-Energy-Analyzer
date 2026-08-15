@@ -8776,6 +8776,99 @@ async def test_session_assignment_claims_exact_signature() -> None:
 
 
 @pytest.mark.asyncio
+async def test_session_assignment_resolves_duration_bound_close_alias() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={
+                "mains": [
+                    {
+                        "signature_id": "signature-pump",
+                        "feedback_fingerprint": "pump-fingerprint",
+                        "assignment_id": "competing-load",
+                        "review_state": "assigned",
+                    }
+                ]
+            },
+            nilm_session_history_by_circuit={
+                "mains": [
+                    {
+                        "session_id": "session-pump-open",
+                        "signature_fingerprint": "pump-fingerprint",
+                        "assignment_id": "competing-load",
+                        "on_edge_id": "pump-on",
+                        "start": "2026-06-02T12:00:00+00:00",
+                        "end": None,
+                        "_duration_bound_close": {
+                            "session_id": "session-pump-closed",
+                            "off_edge_id": "pump-off",
+                            "end": "2026-06-02T12:15:00+00:00",
+                            "duration_seconds": 900.0,
+                            "ambiguous": False,
+                        },
+                    }
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "condensate-pump",
+                        "display_name": "Condensate pump",
+                        "signature_fingerprints": [],
+                        "session_ids": [],
+                    },
+                    {
+                        "assignment_id": "competing-load",
+                        "display_name": "Competing load",
+                        "signature_fingerprints": ["pump-fingerprint"],
+                        "session_ids": [
+                            "session-pump-closed",
+                            "session-pump-open",
+                        ],
+                    },
+                ]
+            },
+        ),
+        now_fn=lambda: datetime(2026, 6, 2, 13, 0, tzinfo=UTC),
+    )
+
+    await coordinator.async_assign_nilm_session(
+        "mains",
+        "session-pump-closed",
+        label="Condensate pump",
+        assignment_id="condensate-pump",
+    )
+
+    assignments = coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"]
+    target = next(
+        assignment
+        for assignment in assignments
+        if assignment["assignment_id"] == "condensate-pump"
+    )
+    competing = next(
+        assignment
+        for assignment in assignments
+        if assignment["assignment_id"] == "competing-load"
+    )
+    session = coordinator.store_data.nilm_session_history_by_circuit["mains"][0]
+    signature = coordinator.store_data.nilm_signatures["mains"][0]
+    assert target["session_ids"] == ["session-pump-open"]
+    assert target["signature_fingerprints"] == ["pump-fingerprint"]
+    assert competing["session_ids"] == []
+    assert competing["signature_fingerprints"] == []
+    assert session["assignment_id"] == "condensate-pump"
+    assert signature["assignment_id"] == "condensate-pump"
+    assert signature["review_state"] == "assigned"
+    published_signature = coordinator.data.nilm_review_by_circuit["mains"][0]
+    assert published_signature["assignment_id"] == "condensate-pump"
+    assert published_signature["review_state"] == "assigned"
+
+
+@pytest.mark.asyncio
 async def test_session_assignment_ignores_merged_signature_duplicate() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
