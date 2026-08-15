@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Iterable, Mapping
+from contextlib import suppress
 from typing import Any
 
 
@@ -63,8 +64,17 @@ class SourceUpdateManager:
         if self._unsub_state_change is not None:
             self._unsub_state_change()
             self._unsub_state_change = None
-        self.cancel_pending_source_update()
         self._coordinator.started = False
+        pending_task = self._source_update_task
+        if (
+            pending_task is not None
+            and pending_task is not asyncio.current_task()
+            and not pending_task.done()
+        ):
+            pending_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await pending_task
+        self.cancel_pending_source_update()
 
     async def async_handle_source_state_change(self, event: Any) -> None:
         """Handle Home Assistant source state changes."""
@@ -98,9 +108,17 @@ class SourceUpdateManager:
             self.last_source_update_entities = changed_entities
             if not self._coordinator.started:
                 return
-            await self._coordinator.async_process_update(
-                changed_entities=changed_entities
-            )
+            loop = asyncio.get_running_loop()
+            started_at = loop.time()
+            try:
+                await self._coordinator.async_process_update(
+                    changed_entities=changed_entities
+                )
+            finally:
+                self._coordinator._record_runtime_performance(
+                    "source_update",
+                    loop.time() - started_at,
+                )
         except asyncio.CancelledError:
             self._pending_source_update_entities.clear()
             self.pending_source_update_entities = ()
