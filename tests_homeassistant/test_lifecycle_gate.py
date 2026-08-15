@@ -694,6 +694,17 @@ async def test_config_entry_setup_registers_published_nilm_device(
     mains_entities = ["sensor.published_mains_l1", "sensor.published_mains_l2"]
     for entity_id in mains_entities:
         _set_source_state(hass, entity_id, "1800", "W", "power")
+    session_anchor = datetime.now(UTC).replace(
+        hour=12,
+        minute=0,
+        second=0,
+        microsecond=0,
+    ) - timedelta(days=4)
+    published_sessions = [
+        (f"published-session-{index}", session_anchor + timedelta(days=index))
+        for index in range(1, 4)
+    ]
+    published_session_ids = [session_id for session_id, _start in published_sessions]
 
     store = FeatureStore(hass, entry_id)
     store.data.nilm_appliance_assignments_by_circuit = {
@@ -705,16 +716,8 @@ async def test_config_entry_setup_registers_published_nilm_device(
                 "appliance_profile": "washer",
                 "mains_circuit_id": "mains",
                 "signature_fingerprints": ["washer-signature"],
-                "session_ids": [
-                    "published-session-1",
-                    "published-session-2",
-                    "published-session-3",
-                ],
-                "confirmed_session_ids": [
-                    "published-session-1",
-                    "published-session-2",
-                    "published-session-3",
-                ],
+                "session_ids": list(published_session_ids),
+                "confirmed_session_ids": list(published_session_ids),
                 "rejected_session_ids": [],
                 "label_interval_ids": [],
                 "lifecycle_state": "published",
@@ -732,10 +735,10 @@ async def test_config_entry_setup_registers_published_nilm_device(
     store.data.nilm_session_history_by_circuit = {
         "mains": [
             {
-                "session_id": f"published-session-{index}",
+                "session_id": session_id,
                 "assignment_id": "assignment-washer",
-                "start": f"2026-07-0{index}T12:00:00+00:00",
-                "end": f"2026-07-0{index}T12:20:00+00:00",
+                "start": start.isoformat(),
+                "end": (start + timedelta(minutes=20)).isoformat(),
                 "ambiguous": False,
                 "energy_source": "residual_trace_measured",
                 "known_source_coverage_min": 1.0,
@@ -744,7 +747,7 @@ async def test_config_entry_setup_registers_published_nilm_device(
                 "partial_residual_point_count": 0,
                 "negative_residual_point_count": 0,
             }
-            for index in range(1, 4)
+            for session_id, start in published_sessions
         ]
     }
     await store.async_save()

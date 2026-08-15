@@ -274,6 +274,31 @@ class EvidenceActionController:
         await coordinator.store_persistence.async_save_if_dirty(now)
         return True
 
+    async def async_store_nilm_finished_session_feedback(
+        self,
+        circuit_id: str,
+        assignment_id: str,
+        session_id: str,
+        action: str,
+    ) -> tuple[str, ...]:
+        """Apply a NILM session decision to matching finished-run alerts."""
+        if action not in {"correct", "wrong_appliance"}:
+            return ()
+        circuit_id = str(circuit_id or "").strip()
+        assignment_id = str(assignment_id or "").strip()
+        session_id = str(session_id or "").strip()
+        if not circuit_id or not assignment_id or not session_id:
+            return ()
+        stored: list[str] = []
+        for alert_id in self._nilm_finished_alert_ids_for_session(
+            circuit_id,
+            assignment_id,
+            session_id,
+        ):
+            if await self.async_store_alert_feedback(alert_id, action):
+                stored.append(alert_id)
+        return tuple(stored)
+
     def apply_hvac_alert_feedback(
         self,
         alert: AlertEvidence,
@@ -462,6 +487,37 @@ class EvidenceActionController:
                 return alert
         return None
 
+    def _nilm_finished_alert_ids_for_session(
+        self,
+        circuit_id: str,
+        assignment_id: str,
+        session_id: str,
+    ) -> tuple[str, ...]:
+        alerts = list(self._coordinator.store_data.alerts)
+        for active_alerts in getattr(
+            self._coordinator.state,
+            "active_alerts_by_circuit",
+            {},
+        ).values():
+            alerts.extend(active_alerts)
+        alert_ids: list[str] = []
+        seen: set[str] = set()
+        for alert in alerts:
+            features = alert.features
+            if (
+                alert.circuit_id != circuit_id
+                or _alert_feature(alert) != "nilm_appliance_finished"
+                or features.get("source") != "nilm"
+                or str(features.get("assignment_id") or "").strip() != assignment_id
+                or _nilm_finished_session_id(alert) != session_id
+            ):
+                continue
+            alert_id = notifications.notification_id_for_alert(alert)
+            if alert_id not in seen:
+                seen.add(alert_id)
+                alert_ids.append(alert_id)
+        return tuple(alert_ids)
+
 
 def _alert_feature(alert: AlertEvidence) -> str:
     if alert.feature:
@@ -469,6 +525,15 @@ def _alert_feature(alert: AlertEvidence) -> str:
     if alert.event_type is not None:
         return alert.event_type.value
     return "alert"
+
+
+def _nilm_finished_session_id(alert: AlertEvidence) -> str:
+    session_id = str(alert.features.get("session_id") or "").strip()
+    if session_id:
+        return session_id
+    notification_key = str(alert.features.get("notification_key") or "").strip()
+    _assignment_id, separator, session_id = notification_key.partition(":")
+    return session_id.strip() if separator else ""
 
 
 def _alert_feedback_effect(status: str) -> str:

@@ -9184,6 +9184,90 @@ async def test_nilm_session_validation_updates_assignment_metrics() -> None:
 
 
 @pytest.mark.asyncio
+async def test_nilm_session_validation_retires_matching_finished_alert(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    now = datetime(2026, 6, 2, 14, 0, tzinfo=UTC)
+    alert = AlertEvidence(
+        timestamp=datetime(2026, 6, 2, 13, 50, tzinfo=UTC),
+        circuit_id="mains",
+        severity=Severity.INFO,
+        message="Dishwasher: a detected estimated run ended.",
+        feature="nilm_appliance_finished",
+        observed_value=0.9,
+        baseline_value=0.8,
+        features={
+            "source": "nilm",
+            "assignment_id": "assignment-dishwasher",
+            "notification_key": "assignment-dishwasher:session_1",
+            "session_id": "session_1",
+        },
+    )
+    alert_id = notifications_module.notification_id_for_alert(alert)
+    dismissed: list[str] = []
+
+    async def dismiss_notification(hass: Any, notification_id: str) -> None:
+        del hass
+        dismissed.append(notification_id)
+
+    monkeypatch.setattr(
+        notifications_module,
+        "async_dismiss_persistent_notification",
+        dismiss_notification,
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            alerts=[alert],
+            nilm_session_history_by_circuit={
+                "mains": [
+                    {
+                        "session_id": "session_1",
+                        "assignment_id": "assignment-dishwasher",
+                        "start": "2026-06-02T12:00:00+00:00",
+                        "end": "2026-06-02T12:45:00+00:00",
+                    }
+                ]
+            },
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "assignment-dishwasher",
+                        "appliance_id": "dishwasher",
+                        "display_name": "Dishwasher",
+                        "appliance_profile": "dishwasher",
+                        "mains_circuit_id": "mains",
+                        "signature_fingerprints": ["fingerprint_1"],
+                        "session_ids": ["session_1"],
+                        "label_interval_ids": [],
+                        "lifecycle_state": "assigned",
+                        "confidence": 0.9,
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+    coordinator.state.active_alerts_by_circuit["mains"] = [alert]
+    coordinator.notification_controller.notified_alert_ids.add(alert_id)
+
+    await coordinator.async_validate_nilm_session("mains", "session_1")
+
+    assert coordinator.store_data.alerts == []
+    assert coordinator.state.active_alerts_by_circuit == {}
+    assert dismissed == [alert_id]
+    assert coordinator.notification_controller.notified_alert_ids == set()
+    feedback = tuple(coordinator.store_data.alert_feedback.values())
+    assert len(feedback) == 1
+    assert feedback[0]["status"] == "correct"
+    assert feedback[0]["source_alert_id"] == alert_id
+
+
+@pytest.mark.asyncio
 async def test_nilm_session_validation_keeps_duration_bounds_ordered() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
