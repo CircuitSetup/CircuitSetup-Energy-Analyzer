@@ -8523,6 +8523,64 @@ async def test_nilm_appliance_assignment_registry_assigns_sources() -> None:
 
 
 @pytest.mark.asyncio
+async def test_session_assignment_updates_live_tracked_assignment() -> None:
+    """Panel revision tracking must not detach the assignment being updated."""
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        ensure_nilm_tracked_collection,
+    )
+
+    store_data = FeatureStoreData(
+        nilm_appliance_assignments_by_circuit={
+            "mains": [
+                {
+                    "assignment_id": "assignment-pump",
+                    "appliance_id": "pump",
+                    "display_name": "Pump",
+                    "session_ids": ["session-existing"],
+                }
+            ]
+        },
+        nilm_session_history_by_circuit={
+            "mains": [
+                {
+                    "session_id": "session-new",
+                    "signature_fingerprint": "fingerprint-1",
+                    "start": "2026-06-02T12:00:00+00:00",
+                    "end": "2026-06-02T12:45:00+00:00",
+                }
+            ]
+        },
+    )
+    ensure_nilm_tracked_collection(
+        store_data.nilm_appliance_assignments_by_circuit,
+        "mains",
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=store_data,
+        now_fn=lambda: datetime(2026, 6, 2, 13, 0, tzinfo=UTC),
+    )
+
+    result = await coordinator.async_assign_nilm_session(
+        "mains",
+        "session-new",
+        label="Pump",
+        signature_fingerprint="fingerprint-1",
+        assignment_id="assignment-pump",
+    )
+
+    live_assignment = store_data.nilm_appliance_assignments_by_circuit["mains"][0]
+    assert result["session_ids"] == ["session-existing", "session-new"]
+    assert live_assignment["session_ids"] == ["session-existing", "session-new"]
+    assert store_data.nilm_session_history_by_circuit["mains"][0][
+        "assignment_id"
+    ] == "assignment-pump"
+
+
+@pytest.mark.asyncio
 async def test_primary_signature_replacement_preserves_assignment_history() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -8721,6 +8779,7 @@ async def test_session_assignment_claims_only_selected_session() -> None:
                     {
                         "session_id": "session-pump",
                         "signature_fingerprint": "pump-fingerprint",
+                        "assignment_id": "condensate-pump",
                         "start": "2026-06-02T12:00:00+00:00",
                         "end": "2026-06-02T12:15:00+00:00",
                     },

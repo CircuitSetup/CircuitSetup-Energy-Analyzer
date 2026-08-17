@@ -1268,8 +1268,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
         for coordinator in _target_nilm_coordinators(
             hass, circuit_id, data.get(ATTR_ENTRY_ID)
         ):
-            await _call_if_present(
-                coordinator,
+            controller = getattr(coordinator, "nilm_controller", None)
+            result = await _call_if_present(
+                controller if controller is not None else coordinator,
                 "async_assign_nilm_session",
                 circuit_id,
                 data.get(ATTR_SESSION_ID),
@@ -1280,6 +1281,11 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 appliance_profile=data.get(ATTR_APPLIANCE_PROFILE),
                 assignment_id=data.get(ATTR_ASSIGNMENT_ID),
             )
+            if controller is not None and not isinstance(result, Mapping):
+                raise HomeAssistantError(
+                    "The NILM session assignment was not applied. "
+                    "Refresh the evidence panel and try again."
+                )
         return
 
     if service == SERVICE_ASSIGN_INTERVAL_TO_APPLIANCE:
