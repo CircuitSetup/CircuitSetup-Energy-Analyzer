@@ -36,6 +36,3 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC", "T20"]
-
-[tool.ruff.lint.per-file-ignores]
-"docs/codegraph/generate_codegraph.py" = ["E501", "T201", "UP017", "UP035"]

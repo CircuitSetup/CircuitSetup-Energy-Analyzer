@@ -583,9 +583,7 @@ def _nilm_session_detail(
             "estimated_energy_kwh": _number_or_none(
                 session.get("estimated_energy_kwh")
             ),
-            "pairing_confidence": _number_or_none(
-                session.get("pairing_confidence")
-            ),
+            "pairing_confidence": _number_or_none(session.get("pairing_confidence")),
             "validation_result": _nilm_session_validation_result(
                 state,
                 session_id,
@@ -1241,7 +1239,6 @@ def _primary_appliance_expectations_for_circuit(
 
     if profile in {
         ApplianceProfile.HVAC,
-        ApplianceProfile.HVAC_SYSTEM,
         ApplianceProfile.HEAT_PUMP,
         ApplianceProfile.MINI_SPLIT,
     } and _is_higher(runtime):

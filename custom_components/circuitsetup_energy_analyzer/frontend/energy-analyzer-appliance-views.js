@@ -614,7 +614,7 @@ export function createApplianceViewMethods({
   }
 
   _renderApplianceInsightsBody() {
-    return this._applianceInsightsComponent.render();
+    return this._renderApplianceInsightsContent();
   }
 
   _renderApplianceInsightsContent() {
@@ -740,7 +740,7 @@ export function createApplianceViewMethods({
   }
 
   _renderSetupHealth() {
-    return this._setupHealthComponent.render();
+    return this._renderSetupHealthContent();
   }
 
   _renderSetupHealthContent() {
@@ -953,7 +953,7 @@ export function createApplianceViewMethods({
   }
 
   _renderApplianceDetail() {
-    return this._applianceDetailComponent.render();
+    return this._renderApplianceDetailContent();
   }
 
   _renderApplianceDetailContent() {

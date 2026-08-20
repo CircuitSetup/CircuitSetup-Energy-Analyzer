@@ -37,10 +37,6 @@ STANDBY_POWER_FEATURE = "standby_power_w"
 
 type StandbySettingsProvider = Callable[[CircuitConfig | None, str], StandbySettings]
 type StandbyAlertPolicyProvider = Callable[[str], AlertPolicy]
-type DemoStandbySeeder = Callable[
-    [CircuitConfig, NormalizedCircuitSample, ProcessingContext, StandbySettings],
-    None,
-]
 
 
 class StandbyProcessor:
@@ -53,11 +49,9 @@ class StandbyProcessor:
         *,
         settings_for_config: StandbySettingsProvider,
         alert_policy_for_circuit: StandbyAlertPolicyProvider,
-        seed_demo_history: DemoStandbySeeder | None = None,
     ) -> None:
         self._settings_for_config = settings_for_config
         self._alert_policy_for_circuit = alert_policy_for_circuit
-        self._seed_demo_history = seed_demo_history
 
     def process(
         self,
@@ -70,8 +64,6 @@ class StandbyProcessor:
             return FeatureResult()
         power_w = _standby_power_w(sample)
         settings = self._settings_for_config(circuit_config, circuit_config.circuit_id)
-        if self._seed_demo_history is not None:
-            self._seed_demo_history(circuit_config, sample, context, settings)
         result = record_standby_sample(
             context.store_data.standby_by_circuit.setdefault(
                 circuit_config.circuit_id,

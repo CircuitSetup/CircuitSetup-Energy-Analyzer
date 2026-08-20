@@ -17,7 +17,6 @@ from .managers.circuit_registry import CircuitRegistry
 from .managers.config_entry_controller import ConfigEntryController
 from .managers.context import ProcessingContextBuilder
 from .managers.dashboard_controller import DashboardController
-from .managers.demo_data import DemoDataSeeder
 from .managers.entity_profile_controller import EntityProfileController
 from .managers.environmental_context import (
     WATER_CONTEXT_HISTORY_MAX_SAMPLES,
@@ -105,7 +104,7 @@ def initialize_runtime(
         self.entry_data,
         self.options,
     )
-    self.source_samples = SourceSampleBuilder(hass, entry_id=entry_id)
+    self.source_samples = SourceSampleBuilder(hass)
     self.dashboard_layout = normalize_dashboard_layout(
         self.options.get(
             CONF_DASHBOARD_LAYOUT,
@@ -133,7 +132,6 @@ def initialize_runtime(
     self.processor_runtime = ProcessorRuntimeManager(self)
     self.export_manager = ExportManager(self)
     self.context_builder = ProcessingContextBuilder(self)
-    self.demo_data = DemoDataSeeder(self)
     self.pipeline = ProcessingPipeline(self)
     self.state_reducer = StateReducer()
     self.utility_energy_sources = UtilityEnergySourceManager(
@@ -144,8 +142,7 @@ def initialize_runtime(
     self.environment_context = EnvironmentalContextManager(self)
     self.settings_controller.apply_config_entry_settings()
     self._detectors = {
-        config.circuit_id: CircuitEventDetector()
-        for config in self.circuit_configs
+        config.circuit_id: CircuitEventDetector() for config in self.circuit_configs
     }
     self._baseline_values: defaultdict[str, list[float]] = defaultdict(list)
     self._event_processor = CircuitEventProcessor(self._detectors)
@@ -155,21 +152,14 @@ def initialize_runtime(
     self._power_quality_processor = PowerQualityProcessor(
         alert_policy_for_circuit=self.alert_policies.alert_policy_for_circuit,
         learning_mature=self.processor_runtime.learning_mature,
-        seed_demo_event_history=self.demo_data.seed_event_history,
-        seed_demo_power_quality_baselines=(
-            self.demo_data.seed_power_quality_baselines
-        ),
         baseline_values=self._baseline_values,
     )
     self._energy_usage_processor = EnergyUsageProcessor(
-        settings_for_config=(
-            self.processor_runtime.energy_usage_settings_for_config
+        settings_for_config=(self.processor_runtime.energy_usage_settings_for_config),
+        retention_days_for_circuit=lambda circuit_id: (
+            RETENTION_WINDOWS[self._retention_mode_for_circuit(circuit_id)].days
         ),
-        retention_days_for_circuit=lambda circuit_id: RETENTION_WINDOWS[
-            self._retention_mode_for_circuit(circuit_id)
-        ].days,
         alert_policy_for_circuit=self.alert_policies.usage_alert_policy_for_circuit,
-        seed_demo_history=self.demo_data.seed_energy_usage_history,
     )
     self._energy_goal_processor = EnergyGoalProcessor(
         settings_for_config=self.processor_runtime.energy_goal_settings_for_config,
@@ -195,20 +185,14 @@ def initialize_runtime(
         ),
     )
     self._activity_alert_processor = ActivityAlertProcessor(
-        settings_for_config=(
-            self.processor_runtime.activity_alert_settings_for_config
-        ),
+        settings_for_config=(self.processor_runtime.activity_alert_settings_for_config),
         alert_policy_for_circuit=(
             self.alert_policies.activity_alert_policy_for_circuit
         ),
     )
     self._billing_cycle_processor = BillingCycleProcessor(
-        settings_for_config=(
-            self.processor_runtime.billing_cycle_settings_for_config
-        ),
-        alert_policy_for_circuit=(
-            self.alert_policies.billing_alert_policy_for_circuit
-        ),
+        settings_for_config=(self.processor_runtime.billing_cycle_settings_for_config),
+        alert_policy_for_circuit=(self.alert_policies.billing_alert_policy_for_circuit),
     )
     self._cost_processor = CostProcessor(
         settings_for_config=self.processor_runtime.cost_settings_for_config,
@@ -222,18 +206,18 @@ def initialize_runtime(
     self._demand_processor = DemandProcessor(
         settings_for_config=self.processor_runtime.demand_settings_for_config,
         alert_policy_for_circuit=self.alert_policies.demand_alert_policy_for_circuit,
-        retention_days_for_circuit=lambda circuit_id: RETENTION_WINDOWS[
-            self._retention_mode_for_circuit(circuit_id)
-        ].days,
+        retention_days_for_circuit=lambda circuit_id: (
+            RETENTION_WINDOWS[self._retention_mode_for_circuit(circuit_id)].days
+        ),
     )
     self._capacity_processor = CapacityProcessor(
         settings_for_config=self.processor_runtime.capacity_settings_for_config,
         alert_policy_for_circuit=(
             self.alert_policies.capacity_alert_policy_for_circuit
         ),
-        retention_days_for_circuit=lambda circuit_id: RETENTION_WINDOWS[
-            self._retention_mode_for_circuit(circuit_id)
-        ].days,
+        retention_days_for_circuit=lambda circuit_id: (
+            RETENTION_WINDOWS[self._retention_mode_for_circuit(circuit_id)].days
+        ),
         source_states_for=self._source_states_for,
     )
     self._leg_imbalance_processor = LegImbalanceProcessor(
@@ -244,10 +228,7 @@ def initialize_runtime(
     self._metric_consistency_processor = MetricConsistencyProcessor()
     self._standby_processor = StandbyProcessor(
         settings_for_config=self.processor_runtime.standby_settings_for_config,
-        alert_policy_for_circuit=(
-            self.alert_policies.standby_alert_policy_for_circuit
-        ),
-        seed_demo_history=self.demo_data.seed_standby_history,
+        alert_policy_for_circuit=(self.alert_policies.standby_alert_policy_for_circuit),
     )
     self._utility_comparison_processor = UtilityComparisonProcessor(
         settings_for_circuit=(
@@ -283,9 +264,9 @@ def initialize_runtime(
         alert_policy_for_circuit=(
             self.alert_policies.hvac_efficiency_alert_policy_for_circuit
         ),
-        retention_days_for_circuit=lambda circuit_id: RETENTION_WINDOWS[
-            self._retention_mode_for_circuit(circuit_id)
-        ].days,
+        retention_days_for_circuit=lambda circuit_id: (
+            RETENTION_WINDOWS[self._retention_mode_for_circuit(circuit_id)].days
+        ),
     )
     self.pipeline.configure_processors(
         event_processor=self._event_processor,
@@ -310,8 +291,8 @@ def initialize_runtime(
         clear_power_quality_state=lambda circuit_id: (
             self.state_reducer.clear_power_quality_state(self.state, circuit_id)
         ),
-        clear_standby_state=lambda circuit_id: (
-            self.state_reducer.clear_standby_state(self.state, circuit_id)
+        clear_standby_state=lambda circuit_id: self.state_reducer.clear_standby_state(
+            self.state, circuit_id
         ),
         sync_setup_health_repairs=self._sync_setup_health_repairs,
     )
@@ -327,7 +308,6 @@ def initialize_runtime(
     self.ignored_nilm_signatures: set[tuple[str, str]] = set()
     self._nilm_sample_processor = NilmSampleProcessor(
         nilm_enabled=self.nilm_controller.enabled_for_config,
-        seed_demo_nilm_state=self.nilm_controller.seed_demo_state,
         min_delta_w_for_circuit=self.settings_controller.nilm_min_delta_w,
         detectors=self._nilm_detectors,
         total_events_by_circuit=self._nilm_total_events_by_circuit,

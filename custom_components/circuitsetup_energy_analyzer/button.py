@@ -4,6 +4,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from homeassistant.components.button import ButtonEntity
+
 from .const import DOMAIN
 from .entity import (
     CircuitAnalyzerEntity,
@@ -17,13 +19,6 @@ from .entity import (
     supports_daily_circuit_controls,
 )
 from .entity_catalog import compact_descriptions_for_setup
-
-try:
-    from homeassistant.components.button import ButtonEntity
-except ModuleNotFoundError:
-
-    class ButtonEntity:
-        """Fallback button base for tests without Home Assistant."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +84,7 @@ GLOBAL_BUTTON_DESCRIPTIONS: tuple[GlobalButtonDescription, ...] = (
     ),
 )
 
+
 class CircuitAnalyzerButton(CircuitAnalyzerEntity, ButtonEntity):
     """Button entity exposing a daily circuit action."""
 
@@ -126,10 +122,13 @@ class CircuitAnalyzerButton(CircuitAnalyzerEntity, ButtonEntity):
     @property
     def available(self) -> bool:
         """Return whether the action is currently usable."""
-        return _button_availability_reason(
-            self.entity_description.key,
-            self.coordinator,
-        ) is None
+        return (
+            _button_availability_reason(
+                self.entity_description.key,
+                self.coordinator,
+            )
+            is None
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, str] | None:

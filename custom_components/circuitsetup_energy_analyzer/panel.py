@@ -72,6 +72,9 @@ from .panel_nilm import (
     _nilm_workspace_target,
 )
 from .panel_views import (
+    KEY_HASS as KEY_HASS,
+)
+from .panel_views import (
     AlertEvidenceView,
     ApplianceDetailView,
     ApplianceInsightsView,
@@ -82,6 +85,9 @@ from .panel_views import (
     NilmWorkspaceItemView,
     NilmWorkspaceView,
     SetupHealthView,
+)
+from .panel_views import (
+    web as web,
 )
 from .profiles import (
     nilm_detection_enabled,
@@ -141,20 +147,6 @@ _PANEL_SETUP_KEY = "_panel_setup"
 _PANEL_SKIPPED_VALUE = "skipped_existing_panel"
 _PANEL_REGISTERED_VALUE = "registered"
 _FRONTEND_DIR = Path(__file__).parent / "frontend"
-
-
-try:
-    from aiohttp import web
-    from homeassistant.components.http import KEY_HASS
-except ModuleNotFoundError:
-    KEY_HASS = "hass"
-
-    class _FallbackWeb:
-        @staticmethod
-        def json_response(data: dict[str, Any]) -> dict[str, Any]:
-            return data
-
-    web = _FallbackWeb()  # type: ignore[assignment]
 
 
 async def async_setup_panel(hass: Any) -> bool:
@@ -1226,9 +1218,7 @@ def _nilm_embedded_history_series(
     for session in _iter_items(sessions_by_circuit.get(detail.circuit_id)):
         if not isinstance(session, Mapping):
             continue
-        session_fingerprint = str(
-            session.get("signature_fingerprint") or ""
-        ).strip()
+        session_fingerprint = str(session.get("signature_fingerprint") or "").strip()
         if session_fingerprint and not nilm_signature_is_assignable(
             session_fingerprint
         ):
@@ -2154,9 +2144,8 @@ def _nilm_interval_evidence_window(
             return None
         start_at = start_at.astimezone(UTC)
         end_at = end_at.astimezone(UTC)
-        if (
-            end_at <= start_at
-            or end_at - start_at > timedelta(hours=MAX_NILM_WORKSPACE_HISTORY_HOURS)
+        if end_at <= start_at or end_at - start_at > timedelta(
+            hours=MAX_NILM_WORKSPACE_HISTORY_HOURS
         ):
             return None
     except (TypeError, ValueError, OverflowError):
@@ -2203,10 +2192,8 @@ async def _async_history_rows(
 
 
 def _recorder_get_instance(hass: Any) -> Any:
-    try:
-        from homeassistant.components.recorder import get_instance
-    except ModuleNotFoundError:
-        return None
+    from homeassistant.components.recorder import get_instance
+
     try:
         return get_instance(hass)
     except Exception:
@@ -2214,10 +2201,8 @@ def _recorder_get_instance(hass: Any) -> Any:
 
 
 def _history_get_significant_states() -> Any:
-    try:
-        from homeassistant.components.recorder.history import get_significant_states
-    except ModuleNotFoundError:
-        return None
+    from homeassistant.components.recorder.history import get_significant_states
+
     return get_significant_states
 
 
@@ -2424,10 +2409,8 @@ async def _async_register_static_paths(hass: Any) -> None:
 
 
 def _static_path_config() -> Any:
-    try:
-        from homeassistant.components.http import StaticPathConfig
-    except ModuleNotFoundError:
-        return (STATIC_URL_PATH, str(_FRONTEND_DIR), True)
+    from homeassistant.components.http import StaticPathConfig
+
     return StaticPathConfig(STATIC_URL_PATH, str(_FRONTEND_DIR), True)
 
 
@@ -2509,12 +2492,9 @@ def _frontend_registration_component(hass: Any) -> Any:
     frontend = _frontend_component(hass)
     if getattr(frontend, "async_register_built_in_panel", None) is not None:
         return frontend
-    try:
-        from homeassistant.components import frontend as frontend_module
+    from homeassistant.components import frontend as frontend_module
 
-        return frontend_module
-    except ModuleNotFoundError:
-        return frontend
+    return frontend_module
 
 
 async def _async_remove_existing_panel(hass: Any) -> None:
@@ -2568,19 +2548,13 @@ def _panel_custom_component(hass: Any) -> Any:
         return component
     if components is None:
         return None
-    try:
-        from homeassistant.components import panel_custom
+    from homeassistant.components import panel_custom
 
-        return panel_custom
-    except ModuleNotFoundError:
-        return getattr(getattr(hass, "components", None), "panel_custom", None)
+    return panel_custom
 
 
 def _frontend_component(hass: Any) -> Any:
-    try:
-        from homeassistant.components import frontend
-    except ModuleNotFoundError:
-        frontend = None
+    from homeassistant.components import frontend
 
     components = getattr(hass, "components", None)
     if components is None:

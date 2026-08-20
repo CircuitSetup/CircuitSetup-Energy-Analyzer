@@ -488,7 +488,6 @@ def replay_fixture_processors(fixture: CalibrationFixture) -> ReplayResult:
             CircuitEventProcessor(),
             NilmSampleProcessor(
                 nilm_enabled=lambda config: nilm_source_kind(config) is not None,
-                seed_demo_nilm_state=lambda _config, _now: None,
                 min_delta_w_for_circuit=lambda _circuit_id: fixture.min_delta_w,
                 detectors={},
                 total_events_by_circuit=defaultdict(int),

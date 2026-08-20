@@ -19,9 +19,9 @@ def test_mixed_water_context_clears_stale_direct_state() -> None:
     cleared: list[str] = []
 
     def clear(name):
-        return lambda _state, _store, circuit_id: cleared.append(
-            f"{name}:{circuit_id}"
-        ) or True
+        return lambda _state, _store, circuit_id: (
+            cleared.append(f"{name}:{circuit_id}") or True
+        )
 
     coordinator = SimpleNamespace(
         state=SimpleNamespace(),
@@ -168,9 +168,6 @@ def test_heat_pump_weather_context_keeps_heating_history_separate() -> None:
         store_data=SimpleNamespace(
             weather_context_history_by_circuit={},
             weather_context_by_circuit={},
-        ),
-        demo_data=SimpleNamespace(
-            seed_weather_context_history=lambda *args, **kwargs: None
         ),
         context_builder=SimpleNamespace(
             outdoor_temperature_entity=lambda: "sensor.outdoor_temperature",

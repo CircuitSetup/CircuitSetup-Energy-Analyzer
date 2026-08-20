@@ -732,63 +732,6 @@ async def test_user_flow_mains_only_sources_skip_assignment_review() -> None:
     ]
 
 
-def test_validate_setup_input_adds_demo_source_bundle_when_enabled() -> None:
-    from custom_components.circuitsetup_energy_analyzer.config_flow import (
-        assignment_groups_from_sources,
-        validate_setup_input,
-    )
-    from custom_components.circuitsetup_energy_analyzer.demo import (
-        DEMO_SOURCE_ENTITY_IDS,
-    )
-
-    validated = validate_setup_input({CONF_DEMO_SOURCE_BUNDLE_ENABLED: True})
-    demo_mains_source_entity_ids = {
-        entity_id for entity_id in DEMO_SOURCE_ENTITY_IDS if "_demo_mains_" in entity_id
-    }
-    demo_assignable_source_entity_ids = (
-        set(DEMO_SOURCE_ENTITY_IDS) - demo_mains_source_entity_ids
-    )
-
-    assert validated[CONF_DEMO_SOURCE_BUNDLE_ENABLED] is True
-    assert demo_assignable_source_entity_ids <= set(
-        validated[CONF_EXTRA_SOURCE_ENTITIES]
-    )
-    assert demo_assignable_source_entity_ids <= set(validated[CONF_SOURCE_ENTITIES])
-    assert demo_mains_source_entity_ids <= set(validated[CONF_MAINS_SOURCE_ENTITIES])
-
-    groups = assignment_groups_from_sources(validated[CONF_SOURCE_ENTITIES])
-    car_charger = next(
-        group
-        for group in groups
-        if group["group_id"] == "cs_energy_analyzer_demo_car_charger"
-    )
-
-    assert car_charger["name"] == "Car Charger"
-    assert car_charger["appliance_profile"] == "ev_charger"
-    assert car_charger["mode"] == "dual_phase"
-    assert (
-        "sensor.cs_energy_analyzer_demo_car_charger_l1_active_power"
-        in (car_charger["entity_ids"])
-    )
-    assert (
-        "sensor.cs_energy_analyzer_demo_car_charger_l2_active_power"
-        in (car_charger["entity_ids"])
-    )
-    sump_pump = next(
-        group
-        for group in groups
-        if group["group_id"] == "cs_energy_analyzer_demo_sump_pump"
-    )
-
-    assert sump_pump["name"] == "Sump Pump"
-    assert sump_pump["appliance_profile"] == "sump_pump"
-    assert sump_pump["mode"] == "single_phase"
-    assert (
-        "sensor.cs_energy_analyzer_demo_sump_pump_active_power"
-        in (sump_pump["entity_ids"])
-    )
-
-
 def test_validate_setup_input_preserves_outdoor_temperature_entity() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         validate_setup_input,
@@ -1855,46 +1798,6 @@ async def test_options_refresh_sources_preserves_options_on_failure(
     assert entry.options == original_options
 
 
-def test_demo_source_bundle_toggle_defaults_off_for_new_setup() -> None:
-    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
-
-    entry = SimpleNamespace(data={}, options={})
-
-    assert CONF_DEMO_SOURCE_BUNDLE_ENABLED in _schema_keys(config_flow.DATA_SCHEMA)
-    assert (
-        _schema_default(config_flow.DATA_SCHEMA, CONF_DEMO_SOURCE_BUNDLE_ENABLED)
-        is False
-    )
-    assert (
-        _schema_default(
-            config_flow._options_schema(entry),
-            CONF_DEMO_SOURCE_BUNDLE_ENABLED,
-        )
-        is False
-    )
-
-
-def test_options_schema_checks_demo_source_bundle_when_demo_sources_exist() -> None:
-    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
-
-    entry = SimpleNamespace(
-        data={},
-        options={
-            CONF_EXTRA_SOURCE_ENTITIES: [
-                "sensor.cs_energy_analyzer_demo_washer_active_power",
-            ],
-        },
-    )
-
-    assert (
-        _schema_default(
-            config_flow._options_schema(entry),
-            CONF_DEMO_SOURCE_BUNDLE_ENABLED,
-        )
-        is True
-    )
-
-
 def test_setup_schema_exposes_outdoor_temperature_entity() -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
 
@@ -2609,218 +2512,6 @@ async def test_options_sources_step_auto_routes_new_mains_sources() -> None:
         "sensor.main_l1_power",
         "sensor.main_l2_power",
     ]
-
-
-@pytest.mark.asyncio
-async def test_options_flow_adds_complete_demo_bundle_from_toggle() -> None:
-    from types import SimpleNamespace
-
-    from custom_components.circuitsetup_energy_analyzer.config_flow import (
-        CircuitSetupEnergyAnalyzerOptionsFlow,
-    )
-    from custom_components.circuitsetup_energy_analyzer.demo import (
-        DEMO_SOURCE_ENTITY_IDS,
-    )
-
-    entry = SimpleNamespace(
-        data={},
-        options={
-            CONF_EXTRA_SOURCE_ENTITIES: [
-                "sensor.cs_energy_analyzer_demo_washer_active_power",
-            ],
-            CONF_SOURCE_ENTITIES: [
-                "sensor.cs_energy_analyzer_demo_washer_active_power",
-            ],
-        },
-    )
-    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
-
-    result = await flow.async_step_sources(
-        {
-            CONF_DEMO_SOURCE_BUNDLE_ENABLED: True,
-            CONF_RETENTION_MODE: "standard",
-        }
-    )
-
-    assert result["type"] == "create_entry"
-    assert result["data"][CONF_DEMO_SOURCE_BUNDLE_ENABLED] is True
-    demo_mains_source_entity_ids = {
-        entity_id for entity_id in DEMO_SOURCE_ENTITY_IDS if "_demo_mains_" in entity_id
-    }
-    demo_assignable_source_entity_ids = (
-        set(DEMO_SOURCE_ENTITY_IDS) - demo_mains_source_entity_ids
-    )
-    assert demo_assignable_source_entity_ids <= set(
-        result["data"][CONF_EXTRA_SOURCE_ENTITIES]
-    )
-    assert demo_assignable_source_entity_ids <= set(
-        result["data"][CONF_SOURCE_ENTITIES]
-    )
-    assert demo_mains_source_entity_ids <= set(
-        result["data"][CONF_MAINS_SOURCE_ENTITIES]
-    )
-
-
-@pytest.mark.asyncio
-async def test_options_flow_removes_demo_bundle_and_demo_assignments() -> None:
-    from types import SimpleNamespace
-
-    from custom_components.circuitsetup_energy_analyzer.config_flow import (
-        CircuitSetupEnergyAnalyzerOptionsFlow,
-    )
-
-    real_circuit = {
-        "circuit_id": "kitchen_refrigerator",
-        "name": "Kitchen Refrigerator",
-        "appliance_profile": "refrigerator",
-        "mode": "single_phase",
-        "sensors": [
-            {
-                "entity_id": "sensor.kitchen_refrigerator_active_power",
-                "role": "real_power",
-            }
-        ],
-    }
-    entry = SimpleNamespace(
-        data={},
-        options={
-            CONF_DEMO_SOURCE_BUNDLE_ENABLED: True,
-            CONF_EXTRA_SOURCE_ENTITIES: [
-                "sensor.kitchen_refrigerator_active_power",
-                "sensor.cs_energy_analyzer_demo_washer_active_power",
-            ],
-            CONF_SOURCE_ENTITIES: [
-                "sensor.kitchen_refrigerator_active_power",
-                "sensor.cs_energy_analyzer_demo_washer_active_power",
-            ],
-            CONF_MAINS_SOURCE_ENTITIES: [
-                "sensor.real_mains_power",
-                "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
-            ],
-            CONF_CIRCUITS: [
-                real_circuit,
-                {
-                    "circuit_id": "cs_energy_analyzer_demo_washer",
-                    "name": "Washer",
-                    "appliance_profile": "washer",
-                    "mode": "single_phase",
-                    "sensors": [
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_washer_active_power"
-                            ),
-                            "role": "real_power",
-                        }
-                    ],
-                },
-            ],
-            CONF_KNOWN_LOAD_CIRCUITS: [
-                "kitchen_refrigerator",
-                "cs_energy_analyzer_demo_washer",
-            ],
-        },
-    )
-    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
-
-    result = await flow.async_step_sources(
-        {
-            CONF_DEMO_SOURCE_BUNDLE_ENABLED: False,
-            CONF_SOURCE_DEVICES: [],
-            CONF_EXTRA_SOURCE_ENTITIES: ["sensor.kitchen_refrigerator_active_power"],
-            CONF_MAINS_SOURCE_ENTITIES: ["sensor.real_mains_power"],
-            CONF_RETENTION_MODE: "standard",
-        }
-    )
-
-    assert result["type"] == "create_entry"
-    assert result["data"][CONF_DEMO_SOURCE_BUNDLE_ENABLED] is False
-    assert result["data"][CONF_EXTRA_SOURCE_ENTITIES] == [
-        "sensor.kitchen_refrigerator_active_power"
-    ]
-    assert result["data"][CONF_SOURCE_ENTITIES] == [
-        "sensor.kitchen_refrigerator_active_power"
-    ]
-    assert result["data"][CONF_MAINS_SOURCE_ENTITIES] == ["sensor.real_mains_power"]
-    assert result["data"][CONF_CIRCUITS] == [real_circuit]
-    assert result["data"][CONF_KNOWN_LOAD_CIRCUITS] == ["kitchen_refrigerator"]
-    assert (
-        "cs_energy_analyzer_demo_washer" not in result["data"][CONF_CIRCUIT_ASSIGNMENTS]
-    )
-
-
-@pytest.mark.asyncio
-async def test_options_flow_removing_demo_bundle_preserves_data_circuits() -> None:
-    from types import SimpleNamespace
-
-    from custom_components.circuitsetup_energy_analyzer.config_flow import (
-        CircuitSetupEnergyAnalyzerOptionsFlow,
-    )
-
-    real_circuit = {
-        "circuit_id": "kitchen_refrigerator",
-        "name": "Kitchen Refrigerator",
-        "appliance_profile": "refrigerator",
-        "mode": "single_phase",
-        "sensors": [
-            {
-                "entity_id": "sensor.kitchen_refrigerator_active_power",
-                "role": "real_power",
-            }
-        ],
-    }
-    entry = SimpleNamespace(
-        data={
-            CONF_DEMO_SOURCE_BUNDLE_ENABLED: True,
-            CONF_EXTRA_SOURCE_ENTITIES: [
-                "sensor.kitchen_refrigerator_active_power",
-                "sensor.cs_energy_analyzer_demo_washer_active_power",
-            ],
-            CONF_SOURCE_ENTITIES: [
-                "sensor.kitchen_refrigerator_active_power",
-                "sensor.cs_energy_analyzer_demo_washer_active_power",
-            ],
-            CONF_CIRCUITS: [
-                real_circuit,
-                {
-                    "circuit_id": "cs_energy_analyzer_demo_washer",
-                    "name": "Washer",
-                    "appliance_profile": "washer",
-                    "mode": "single_phase",
-                    "sensors": [
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_washer_active_power"
-                            ),
-                            "role": "real_power",
-                        }
-                    ],
-                },
-            ],
-            CONF_KNOWN_LOAD_CIRCUITS: [
-                "kitchen_refrigerator",
-                "cs_energy_analyzer_demo_washer",
-            ],
-        },
-        options={},
-    )
-    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
-
-    result = await flow.async_step_sources(
-        {
-            CONF_DEMO_SOURCE_BUNDLE_ENABLED: False,
-            CONF_SOURCE_DEVICES: [],
-            CONF_EXTRA_SOURCE_ENTITIES: ["sensor.kitchen_refrigerator_active_power"],
-            CONF_RETENTION_MODE: "standard",
-        }
-    )
-
-    assert result["type"] == "create_entry"
-    assert result["data"][CONF_CIRCUITS] == [real_circuit]
-    assert result["data"][CONF_KNOWN_LOAD_CIRCUITS] == ["kitchen_refrigerator"]
-    assert "kitchen_refrigerator" in result["data"][CONF_CIRCUIT_ASSIGNMENTS]
-    assert (
-        "cs_energy_analyzer_demo_washer" not in result["data"][CONF_CIRCUIT_ASSIGNMENTS]
-    )
 
 
 @pytest.mark.asyncio
@@ -6132,29 +5823,6 @@ async def test_assignment_step_uses_friendly_name_only_as_profile_fallback(
     )
 
 
-@pytest.mark.asyncio
-async def test_assignment_step_uses_clean_demo_circuit_names() -> None:
-    from custom_components.circuitsetup_energy_analyzer.config_flow import (
-        CircuitSetupEnergyAnalyzerConfigFlow,
-    )
-
-    flow = CircuitSetupEnergyAnalyzerConfigFlow()
-
-    result = await flow.async_step_user(
-        {
-            CONF_EXTRA_SOURCE_ENTITIES: [
-                "sensor.cs_energy_analyzer_demo_washer_active_power",
-                "sensor.cs_energy_analyzer_demo_washer_current",
-            ],
-        }
-    )
-
-    assert result["type"] == "form"
-    assert result["step_id"] == "assign"
-    assert _schema_default(result["data_schema"], "circuit_name") == "Washer"
-    assert result["description_placeholders"]["circuit_name"] == "Washer"
-
-
 def test_advanced_settings_schema_renders_optional_zero_defaults() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         ApplianceProfile,
@@ -7165,25 +6833,25 @@ async def test_options_assignment_edit_preserves_existing_circuit_id() -> None:
         data={},
         options={
             CONF_SOURCE_ENTITIES: [
-                "sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
-                "sensor.cs_energy_analyzer_demo_hvac_l2_active_power",
+                "sensor.hvac_l1_active_power",
+                "sensor.hvac_l2_active_power",
             ],
             CONF_CIRCUITS: [
                 {
-                    "circuit_id": "cs_energy_analyzer_demo_hvac",
+                    "circuit_id": "hvac",
                     "name": "HVAC",
                     "appliance_profile": "hvac",
                     "mode": "dual_phase",
                     "sensors": [
                         {
                             "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_hvac_l1_active_power"
+                                "sensor.hvac_l1_active_power"
                             ),
                             "role": "real_power",
                         },
                         {
                             "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_hvac_l2_active_power"
+                                "sensor.hvac_l2_active_power"
                             ),
                             "role": "real_power",
                         },
@@ -7200,7 +6868,7 @@ async def test_options_assignment_edit_preserves_existing_circuit_id() -> None:
     assert result["step_id"] == "select_assignment"
 
     result = await flow.async_step_select_assignment(
-        {"selected_assignment": "cs_energy_analyzer_demo_hvac"}
+        {"selected_assignment": "hvac"}
     )
 
     assert result["type"] == "form"
@@ -7212,15 +6880,15 @@ async def test_options_assignment_edit_preserves_existing_circuit_id() -> None:
             "circuit_name": "Upstairs HVAC",
             "appliance_profile": "hvac",
             "included_sensors": [
-                "sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
-                "sensor.cs_energy_analyzer_demo_hvac_l2_active_power",
+                "sensor.hvac_l1_active_power",
+                "sensor.hvac_l2_active_power",
             ],
         }
     )
 
     assert result["type"] == "create_entry"
     assert result["data"][CONF_CIRCUITS][0]["circuit_id"] == (
-        "cs_energy_analyzer_demo_hvac"
+        "hvac"
     )
     assert result["data"][CONF_CIRCUITS][0]["name"] == "Upstairs HVAC"
 
@@ -7523,78 +7191,6 @@ def test_setup_schema_filters_energy_sources_and_removes_manual_fields() -> None
     )
 
 
-def test_options_schema_allows_demo_dual_phase_entities_before_they_exist() -> None:
-    from custom_components.circuitsetup_energy_analyzer.config_flow import (
-        _energy_entity_selector_config,
-        _selectable_source_entity_ids,
-    )
-
-    include_entities = _energy_entity_selector_config(
-        _selectable_source_entity_ids(None)
-    )["entity"]["include_entities"]
-
-    assert "sensor.cs_energy_analyzer_demo_hvac_l1_active_power" in include_entities
-    assert "sensor.cs_energy_analyzer_demo_hvac_l2_active_power" in include_entities
-    assert (
-        "sensor.cs_energy_analyzer_demo_water_heater_l1_active_power"
-        in include_entities
-    )
-    assert "sensor.cs_energy_analyzer_demo_hvac_voltage" not in include_entities
-    assert "sensor.cs_energy_analyzer_demo_mains_l1_voltage" in include_entities
-    assert "sensor.cs_energy_analyzer_demo_mains_l2_voltage" in include_entities
-    assert (
-        "sensor.cs_energy_analyzer_demo_car_charger_l1_active_power" in include_entities
-    )
-    assert (
-        "sensor.cs_energy_analyzer_demo_car_charger_l2_active_power" in include_entities
-    )
-    assert "sensor.cs_energy_analyzer_demo_hvac_l1_apparent_power" in include_entities
-    assert "sensor.cs_energy_analyzer_demo_washer_active_power" in include_entities
-    assert "sensor.cs_energy_analyzer_demo_dryer_l1_active_power" in include_entities
-    assert "sensor.cs_energy_analyzer_demo_dryer_l2_active_power" in include_entities
-    assert "sensor.cs_energy_analyzer_demo_car_charger_voltage" not in include_entities
-
-
-def test_options_schema_uses_discovered_suffixed_demo_entity_ids(
-    monkeypatch,
-) -> None:
-    import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
-
-    monkeypatch.setattr(config_flow, "ha_selector", lambda config: config)
-
-    entry = SimpleNamespace(
-        data={},
-        options={
-            CONF_SOURCE_ENTITIES: [
-                "sensor.cs_energy_analyzer_demo_refrigerator_energy",
-            ],
-            CONF_EXTRA_SOURCE_ENTITIES: [
-                "sensor.cs_energy_analyzer_demo_refrigerator_energy",
-                "sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
-            ],
-            CONF_MAINS_SOURCE_ENTITIES: [
-                "sensor.cs_energy_analyzer_demo_mains_l1_energy",
-            ],
-        },
-    )
-    discovered_entities = [
-        "sensor.cs_energy_analyzer_demo_refrigerator_energy_2",
-        "sensor.cs_energy_analyzer_demo_hvac_l1_active_power_2",
-        "sensor.cs_energy_analyzer_demo_mains_l1_energy",
-    ]
-
-    source_schema = config_flow._options_schema(entry, discovered_entities)
-    mains_schema = config_flow._mains_schema(entry, discovered_entities)
-
-    assert _schema_default(source_schema, CONF_EXTRA_SOURCE_ENTITIES) == [
-        "sensor.cs_energy_analyzer_demo_refrigerator_energy_2",
-        "sensor.cs_energy_analyzer_demo_hvac_l1_active_power_2",
-    ]
-    assert _schema_default(mains_schema, CONF_MAINS_SOURCE_ENTITIES) == [
-        "sensor.cs_energy_analyzer_demo_mains_l1_energy"
-    ]
-
-
 def test_options_source_entities_override_setup_source_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         _source_entities_for_entry,
@@ -7681,114 +7277,7 @@ def test_source_entities_for_entry_includes_thermostat_sources_once() -> None:
     )
 
 
-def test_source_entities_for_entry_uses_registered_demo_entity_ids() -> None:
-    from custom_components.circuitsetup_energy_analyzer import (
-        _source_entities_for_entry,
-    )
-
-    entry = SimpleNamespace(
-        entry_id="entry-1",
-        data={},
-        options={
-            CONF_SOURCE_ENTITIES: [
-                "sensor.cs_energy_analyzer_demo_refrigerator_energy",
-                "sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
-            ],
-        },
-    )
-    registry = SimpleNamespace(
-        entities={
-            "sensor.cs_energy_analyzer_demo_refrigerator_energy_2": SimpleNamespace(
-                entity_id="sensor.cs_energy_analyzer_demo_refrigerator_energy_2",
-                unique_id=(
-                    "entry-1_demo_source_exact_"
-                    "cs_energy_analyzer_demo_refrigerator_energy"
-                ),
-                config_entry_id="entry-1",
-                platform=DOMAIN,
-            ),
-            "sensor.cs_energy_analyzer_demo_hvac_l1_active_power": SimpleNamespace(
-                entity_id="sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
-                unique_id=(
-                    "entry-1_demo_source_exact_"
-                    "cs_energy_analyzer_demo_hvac_l1_active_power"
-                ),
-                config_entry_id="entry-1",
-                platform=DOMAIN,
-            ),
-        }
-    )
-    coordinator = SimpleNamespace(
-        circuit_configs=(),
-        hass=SimpleNamespace(entity_registry=registry),
-    )
-
-    assert _source_entities_for_entry(entry, coordinator) == (
-        "sensor.cs_energy_analyzer_demo_refrigerator_energy_2",
-        "sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
-    )
-
-
-def test_source_entities_for_entry_falls_back_when_ha_registry_get_fails(
-    monkeypatch,
-) -> None:
-    import sys
-    from types import ModuleType
-
-    from custom_components.circuitsetup_energy_analyzer import (
-        _source_entities_for_entry,
-    )
-
-    homeassistant_module = ModuleType("homeassistant")
-    helpers_module = ModuleType("homeassistant.helpers")
-    entity_registry_module = ModuleType("homeassistant.helpers.entity_registry")
-
-    def async_get(_hass):
-        raise TypeError("unhashable type")
-
-    entity_registry_module.async_get = async_get
-    helpers_module.entity_registry = entity_registry_module
-    monkeypatch.setitem(sys.modules, "homeassistant", homeassistant_module)
-    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers_module)
-    monkeypatch.setitem(
-        sys.modules,
-        "homeassistant.helpers.entity_registry",
-        entity_registry_module,
-    )
-
-    entry = SimpleNamespace(
-        entry_id="entry-1",
-        data={},
-        options={
-            CONF_SOURCE_ENTITIES: [
-                "sensor.cs_energy_analyzer_demo_refrigerator_energy",
-            ],
-        },
-    )
-    registry = SimpleNamespace(
-        entities={
-            "sensor.cs_energy_analyzer_demo_refrigerator_energy_2": SimpleNamespace(
-                entity_id="sensor.cs_energy_analyzer_demo_refrigerator_energy_2",
-                unique_id=(
-                    "entry-1_demo_source_exact_"
-                    "cs_energy_analyzer_demo_refrigerator_energy"
-                ),
-                config_entry_id="entry-1",
-                platform=DOMAIN,
-            ),
-        }
-    )
-    coordinator = SimpleNamespace(
-        circuit_configs=(),
-        hass=SimpleNamespace(entity_registry=registry),
-    )
-
-    assert _source_entities_for_entry(entry, coordinator) == (
-        "sensor.cs_energy_analyzer_demo_refrigerator_energy_2",
-    )
-
-
-def test_config_flow_imports_and_strings_load_without_home_assistant() -> None:
+def test_config_flow_manifest_and_strings() -> None:
     import custom_components.circuitsetup_energy_analyzer.config_flow as config_flow
 
     manifest_path = (

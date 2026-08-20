@@ -5,6 +5,13 @@ from collections.abc import Iterable
 from datetime import datetime, timedelta
 from typing import Any
 
+from homeassistant.components.recorder import (
+    get_instance as _ha_recorder_get_instance,
+)
+from homeassistant.components.recorder.statistics import (
+    statistics_during_period as _ha_statistics_during_period,
+)
+
 from ..models import (
     ApplianceProfile,
     CircuitMode,
@@ -20,17 +27,6 @@ from ..utility_comparison import (
 _LOGGER = logging.getLogger(__name__)
 _UNSET = object()
 UTILITY_STATISTICS_CACHE_INTERVAL = timedelta(minutes=15)
-
-try:
-    from homeassistant.components.recorder import (
-        get_instance as _ha_recorder_get_instance,
-    )
-    from homeassistant.components.recorder.statistics import (
-        statistics_during_period as _ha_statistics_during_period,
-    )
-except ModuleNotFoundError:
-    _ha_recorder_get_instance = None
-    _ha_statistics_during_period = None
 
 
 class UtilityEnergySourceManager:
@@ -130,8 +126,7 @@ class UtilityEnergySourceManager:
             return cached
         statistics = await self.recorder_statistics_during_period(
             statistic_ids={statistic_id},
-            start_time=start_time
-            or _statistics_lookback_start(now, normalized_period),
+            start_time=start_time or _statistics_lookback_start(now, normalized_period),
             end_time=end_time or now,
             period=normalized_period,
         )
@@ -253,10 +248,7 @@ class UtilityEnergySourceManager:
         if cached is None:
             return _UNSET
         cached_at, value = cached
-        if (
-            cached_at <= now
-            and now - cached_at < UTILITY_STATISTICS_CACHE_INTERVAL
-        ):
+        if cached_at <= now and now - cached_at < UTILITY_STATISTICS_CACHE_INTERVAL:
             return value
         self._statistics_cache.pop(key, None)
         return _UNSET

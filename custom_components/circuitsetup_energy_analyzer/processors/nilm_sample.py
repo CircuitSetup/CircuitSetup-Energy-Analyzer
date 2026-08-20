@@ -83,7 +83,6 @@ from ..unknown_loads import (
 from .base import FeatureResult, ProcessingContext, StateUpdate
 
 type NilmEnabledPredicate = Callable[[CircuitConfig], bool]
-type DemoNilmSeeder = Callable[[CircuitConfig, Any], None]
 type MinDeltaProvider = Callable[[str], float]
 type KnownLoadEventsProvider = Callable[
     [str, Iterable[CircuitEvent]],
@@ -624,7 +623,6 @@ class NilmSampleProcessor:
         self,
         *,
         nilm_enabled: NilmEnabledPredicate,
-        seed_demo_nilm_state: DemoNilmSeeder,
         min_delta_w_for_circuit: MinDeltaProvider,
         detectors: MutableMapping[str, NilmEdgeDetector],
         total_events_by_circuit: defaultdict[str, int],
@@ -640,7 +638,6 @@ class NilmSampleProcessor:
         residual_power_trace_max_items: int | None = None,
     ) -> None:
         self._nilm_enabled = nilm_enabled
-        self._seed_demo_nilm_state = seed_demo_nilm_state
         self._min_delta_w_for_circuit = min_delta_w_for_circuit
         self.detectors = detectors
         self.total_events_by_circuit = total_events_by_circuit
@@ -915,8 +912,6 @@ class NilmSampleProcessor:
             self._revisions(circuit_id).session_history != session_history_revision
         )
         self._sync_input_revisions(circuit_id, context.store_data)
-
-        self._seed_demo_nilm_state(circuit_config, sample.timestamp)
 
         source_kind = nilm_source_kind(circuit_config)
         trace_timestamp = _nilm_residual_real_power_source_timestamp(sample)

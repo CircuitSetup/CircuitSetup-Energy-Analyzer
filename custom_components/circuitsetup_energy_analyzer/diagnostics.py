@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from typing import Any
 
+from homeassistant.helpers import device_registry as dr
+
 from .appliance_detail import (
     appliance_detail_for_assignment,
     appliance_detail_for_circuit,
@@ -13,13 +15,6 @@ from .const import (
     DOMAIN,
 )
 from .entity_catalog import selected_entity_groups_for_coordinator
-
-try:
-    from homeassistant.helpers import device_registry as dr
-except ModuleNotFoundError as err:
-    if err.name != "homeassistant":
-        raise
-    dr = None
 
 
 async def async_get_config_entry_diagnostics(hass: Any, entry: Any) -> dict[str, Any]:
@@ -163,9 +158,8 @@ def _entity_model_summary(hass: Any, entry: Any) -> dict[str, Any]:
             DEFAULT_ENTITY_DETAIL_LEVEL,
         ),
         "selected_groups": sorted(
-            group.value for group in selected_entity_groups_for_coordinator(
-                metadata_source
-            )
+            group.value
+            for group in selected_entity_groups_for_coordinator(metadata_source)
         ),
     }
 

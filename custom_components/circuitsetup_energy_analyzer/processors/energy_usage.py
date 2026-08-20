@@ -35,10 +35,6 @@ type EnergyUsageSettingsProvider = Callable[
 ]
 type RetentionDaysProvider = Callable[[str], int]
 type UsageAlertPolicyProvider = Callable[[str], AlertPolicy]
-type DemoEnergyUsageSeeder = Callable[
-    [CircuitConfig, NormalizedCircuitSample, Any, EnergyUsageSettings],
-    None,
-]
 
 
 class EnergyUsageProcessor:
@@ -52,12 +48,10 @@ class EnergyUsageProcessor:
         settings_for_config: EnergyUsageSettingsProvider,
         retention_days_for_circuit: RetentionDaysProvider,
         alert_policy_for_circuit: UsageAlertPolicyProvider,
-        seed_demo_history: DemoEnergyUsageSeeder | None = None,
     ) -> None:
         self._settings_for_config = settings_for_config
         self._retention_days_for_circuit = retention_days_for_circuit
         self._alert_policy_for_circuit = alert_policy_for_circuit
-        self._seed_demo_history = seed_demo_history
 
     def process(
         self,
@@ -68,9 +62,6 @@ class EnergyUsageProcessor:
         """Record daily usage, update analyzer state, and return spike alerts."""
         circuit_id = circuit_config.circuit_id
         settings = self._settings_for_config(circuit_config, circuit_id)
-        if self._seed_demo_history is not None:
-            self._seed_demo_history(circuit_config, sample, context.now, settings)
-
         context_key = build_context_for_sample(
             circuit_config=circuit_config,
             sample=sample,
@@ -145,10 +136,7 @@ class EnergyUsageProcessor:
         )
         for day in history.get("days", ()):
             if isinstance(day, dict) and day.get("date") == result.date:
-                if (
-                    contextual_comparison.get("status_override")
-                    == "context_explained"
-                ):
+                if contextual_comparison.get("status_override") == "context_explained":
                     day["expected_context"] = True
                 else:
                     day.pop("expected_context", None)
@@ -401,9 +389,7 @@ def _energy_interval_allows_baseline_learning(
         sample_end = sample_end.replace(tzinfo=None)
         maintenance_start = maintenance_start.replace(tzinfo=None)
         maintenance_end = maintenance_end.replace(tzinfo=None)
-    return not (
-        sample_start < maintenance_end and sample_end > maintenance_start
-    )
+    return not (sample_start < maintenance_end and sample_end > maintenance_start)
 
 
 def _maintenance_ineligible_dates(
@@ -434,9 +420,7 @@ def _maintenance_ineligible_dates(
     last = min(local_date(ended_at, time_zone), today)
     if last < first:
         return set()
-    return {
-        first + timedelta(days=offset) for offset in range((last - first).days + 1)
-    }
+    return {first + timedelta(days=offset) for offset in range((last - first).days + 1)}
 
 
 def _energy_ineligible_dates(

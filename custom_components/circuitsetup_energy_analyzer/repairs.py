@@ -75,10 +75,7 @@ def existing_circuit_problem_issues(
     problems: Iterable[str],
 ) -> set[tuple[str, str]]:
     """Return known circuit problem issues currently present in HA Repairs."""
-    try:
-        from homeassistant.helpers import issue_registry as ir
-    except ModuleNotFoundError:
-        return set()
+    from homeassistant.helpers import issue_registry as ir
 
     get_registry = getattr(ir, "async_get", None)
     if get_registry is None:
@@ -130,10 +127,7 @@ async def async_create_circuit_issue(
     data: Mapping[str, Any] | None = None,
 ) -> None:
     """Create a Home Assistant Repairs issue for one circuit problem."""
-    try:
-        from homeassistant.helpers import issue_registry as ir
-    except ModuleNotFoundError:
-        return
+    from homeassistant.helpers import issue_registry as ir
 
     create_issue = getattr(ir, "async_create_issue", None)
     if create_issue is None:
@@ -182,10 +176,7 @@ async def async_delete_circuit_issue(
     problem: str,
 ) -> None:
     """Delete a Home Assistant Repairs issue for a resolved circuit problem."""
-    try:
-        from homeassistant.helpers import issue_registry as ir
-    except ModuleNotFoundError:
-        return
+    from homeassistant.helpers import issue_registry as ir
 
     delete_issue = getattr(ir, "async_delete_issue", None)
     if delete_issue is None:

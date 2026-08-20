@@ -122,11 +122,6 @@ class EnvironmentalContextManager:
             circuit_id,
             0.0,
         )
-        coordinator.demo_data.seed_weather_context_history(
-            config,
-            now,
-            outdoor_temperature=outdoor_temperature,
-        )
         weather_mode = _weather_context_mode(config, outdoor_temperature)
         history = self.weather_context_history_samples(
             circuit_id,

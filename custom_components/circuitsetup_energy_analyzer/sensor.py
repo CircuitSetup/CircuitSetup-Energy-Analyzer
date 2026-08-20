@@ -2,10 +2,19 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass, replace
-from datetime import timedelta
-from time import monotonic
 from typing import Any
 from urllib.parse import urlencode
+
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
+from homeassistant.const import (
+    PERCENTAGE,
+    UnitOfEnergy,
+    UnitOfPower,
+)
 
 from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH
 from .appliance_metadata import appliance_icon_for_profile
@@ -19,24 +28,6 @@ from .const import (
     CONF_UTILITY_COMPARISON_SETTINGS,
     CONF_WATER_FLOW_SENSOR_ENTITIES,
     DOMAIN,
-)
-from .demo import (
-    DEMO_SIMULATION_INTERVAL_SECONDS as _DEMO_SIMULATION_INTERVAL_SECONDS,
-)
-from .demo import (
-    DEMO_SOURCE_ROLE_METADATA as _DEMO_SOURCE_ROLE_METADATA,
-)
-from .demo import (
-    demo_circuit_id_from_entity_id as _demo_circuit_id_from_entity_id,
-)
-from .demo import (
-    demo_simulated_source_value as _demo_simulated_source_value,
-)
-from .demo import (
-    demo_source_value as _demo_source_value,
-)
-from .demo import (
-    is_demo_source_entity_id as _is_demo_source_entity_id,
 )
 from .entities.energy import (
     daily_energy_usage_value,
@@ -72,7 +63,6 @@ from .entity import (
     device_identifiers_for_entities,
     entity_detail_level_for_coordinator,
     entity_enabled_default_for_tier,
-    hide_entity_registry_entries,
     prune_stale_device_registry_entries,
     prune_stale_entity_registry_entries,
     sync_entity_registry_categories,
@@ -80,7 +70,7 @@ from .entity import (
 from .entity_catalog import (
     compact_descriptions_for_setup,
 )
-from .models import ApplianceProfile, CircuitMode, PowerFlowMode, SensorRef, SensorRole
+from .models import ApplianceProfile, CircuitMode, PowerFlowMode, SensorRole
 from .nilm_virtual import (
     NilmVirtualApplianceState,
     nilm_virtual_attributes,
@@ -99,56 +89,6 @@ from .state import circuit_is_learning
 from .tariff import configured_electricity_rate, global_cost_settings
 from .utility_comparison import effective_electricity_rate
 from .ux import friendly_feature_name, friendly_sensitivity_label
-
-try:
-    from homeassistant.components.sensor import (
-        SensorDeviceClass,
-        SensorEntity,
-        SensorStateClass,
-    )
-    from homeassistant.const import (
-        PERCENTAGE,
-        UnitOfEnergy,
-        UnitOfPower,
-    )
-except ModuleNotFoundError:
-    PERCENTAGE = "%"
-
-    class UnitOfEnergy:
-        """Fallback energy unit constants."""
-
-        KILO_WATT_HOUR = "kWh"
-
-    class UnitOfPower:
-        """Fallback power unit constants."""
-
-        WATT = "W"
-
-    class SensorEntity:
-        """Fallback sensor base for tests without Home Assistant."""
-
-        @property
-        def state(self) -> Any:
-            return getattr(self, "native_value", None)
-
-    class SensorStateClass:
-        """Fallback sensor state class constants."""
-
-        MEASUREMENT = "measurement"
-        TOTAL = "total"
-        TOTAL_INCREASING = "total_increasing"
-
-    class SensorDeviceClass:
-        """Fallback sensor device class constants."""
-
-        ENERGY = "energy"
-        MONETARY = "monetary"
-
-try:
-    from homeassistant.helpers.event import async_track_time_interval
-except ModuleNotFoundError:
-    async_track_time_interval = None
-
 
 SETUP_HEALTH_ENTITY_NAME = "CircuitSetup Energy Analyzer Setup Health"
 SETUP_HEALTH_ENTITY_KEY = "setup_health"
@@ -204,9 +144,7 @@ def health_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         {},
     ).get(circuit_id, {})
     appliance_health_evidence = (
-        dict(raw_appliance_health)
-        if isinstance(raw_appliance_health, Mapping)
-        else {}
+        dict(raw_appliance_health) if isinstance(raw_appliance_health, Mapping) else {}
     )
     return {
         "raw_status": _health_summary_raw_status(summary, readiness),
@@ -241,9 +179,7 @@ def health_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         "leg_imbalance_percent": electrical["leg_imbalance_percent"],
         "power_quality_score": electrical["power_quality_score"],
         "power_quality_evidence": electrical["power_quality_evidence"],
-        "power_quality_alert_confirmed": electrical[
-            "power_quality_alert_confirmed"
-        ],
+        "power_quality_alert_confirmed": electrical["power_quality_alert_confirmed"],
         "electrical_status_explanation": electrical["status_explanation"],
         "metric_status_explanation": electrical["metric_status_explanation"],
         "leg_status_explanation": electrical["leg_status_explanation"],
@@ -340,16 +276,12 @@ def sensitivity_value(state: Any, circuit_id: str) -> str:
 
 def circuit_mode_value(state: Any, circuit_id: str) -> str:
     """Return the configured circuit mode label for a circuit."""
-    return str(
-        getattr(state, "circuit_mode_by_circuit", {}).get(circuit_id, "Unknown")
-    )
+    return str(getattr(state, "circuit_mode_by_circuit", {}).get(circuit_id, "Unknown"))
 
 
 def power_flow_value(state: Any, circuit_id: str) -> str:
     """Return the configured power-flow label for a circuit."""
-    return str(
-        getattr(state, "power_flow_by_circuit", {}).get(circuit_id, "Unknown")
-    )
+    return str(getattr(state, "power_flow_by_circuit", {}).get(circuit_id, "Unknown"))
 
 
 def power_quality_score_value(state: Any, circuit_id: str) -> float:
@@ -374,9 +306,7 @@ def _power_quality_alert_confirmed(state: Any, circuit_id: str) -> bool:
 
 
 def _alert_confirmed(state: Any, circuit_id: str) -> bool:
-    return bool(
-        getattr(state, "active_alerts_by_circuit", {}).get(circuit_id, ())
-    )
+    return bool(getattr(state, "active_alerts_by_circuit", {}).get(circuit_id, ()))
 
 
 def reactive_power_drift_value(state: Any, circuit_id: str) -> float:
@@ -532,9 +462,7 @@ def run_cycle_status_value(state: Any, circuit_id: str) -> str:
 
 def current_demand_value(state: Any, circuit_id: str) -> float:
     """Return the current rolling demand average in watts."""
-    return float(
-        getattr(state, "current_demand_w_by_circuit", {}).get(circuit_id, 0.0)
-    )
+    return float(getattr(state, "current_demand_w_by_circuit", {}).get(circuit_id, 0.0))
 
 
 def peak_demand_value(state: Any, circuit_id: str) -> float:
@@ -626,9 +554,7 @@ def metric_consistency_status_value(state: Any, circuit_id: str) -> str:
 
 def balance_power_value(state: Any, circuit_id: str) -> float:
     """Return unmonitored mains balance power in watts."""
-    return float(
-        getattr(state, "balance_power_w_by_circuit", {}).get(circuit_id, 0.0)
-    )
+    return float(getattr(state, "balance_power_w_by_circuit", {}).get(circuit_id, 0.0))
 
 
 def monitored_power_value(state: Any, circuit_id: str) -> float:
@@ -673,9 +599,7 @@ def solar_flow_status_value(state: Any, circuit_id: str) -> str:
 
 def solar_surplus_power_value(state: Any, circuit_id: str) -> float:
     """Return instantaneous solar export available as surplus power."""
-    return float(
-        getattr(state, "solar_surplus_w_by_circuit", {}).get(circuit_id, 0.0)
-    )
+    return float(getattr(state, "solar_surplus_w_by_circuit", {}).get(circuit_id, 0.0))
 
 
 def solar_surplus_status_value(state: Any, circuit_id: str) -> str:
@@ -742,10 +666,7 @@ def cost_cycle_forecast_value(state: Any, circuit_id: str) -> float:
 
 def estimated_cost_today_value(state: Any, circuit_id: str) -> float | None:
     """Return today's actual or estimated electricity cost when available."""
-    if (
-        getattr(state, "cost_today_status_by_circuit", {}).get(circuit_id)
-        == "actual"
-    ):
+    if getattr(state, "cost_today_status_by_circuit", {}).get(circuit_id) == "actual":
         actual = getattr(state, "cost_today_by_circuit", {}).get(circuit_id)
         if actual is not None:
             return actual
@@ -1002,13 +923,11 @@ def _electrical_health_first_check(
         return "Verify watts, amps, voltage, apparent power, and power factor sources."
     if power_quality_evidence:
         return (
-            "Compare recent VAR, VA, watts, and power factor to the learned "
-            "baseline."
+            "Compare recent VAR, VA, watts, and power factor to the learned baseline."
         )
     if summary == "Needs Metrics":
         return (
-            "Add matching electrical metrics such as watts, amps, voltage, VA, "
-            "or PF."
+            "Add matching electrical metrics such as watts, amps, voltage, VA, or PF."
         )
     return "No electrical check is needed right now."
 
@@ -1301,9 +1220,7 @@ def _bounded_attribute_string(value: str, max_length: int) -> str:
 
 
 def _solar_load_shift_attributes(value: Mapping[str, Any]) -> dict[str, Any]:
-    attributes = {
-        key: item for key, item in value.items() if key != "candidate_loads"
-    }
+    attributes = {key: item for key, item in value.items() if key != "candidate_loads"}
     raw_loads = value.get("candidate_loads", ())
     if not isinstance(raw_loads, Iterable) or isinstance(
         raw_loads, str | bytes | Mapping
@@ -1315,9 +1232,7 @@ def _solar_load_shift_attributes(value: Mapping[str, Any]) -> dict[str, Any]:
     preview_loads = candidate_loads[:SOLAR_LOAD_SHIFT_CANDIDATE_MAX_ITEMS]
     attributes["candidate_load_count"] = len(candidate_loads)
     attributes["candidate_loads_shown_count"] = len(preview_loads)
-    attributes["candidate_loads_has_more"] = len(candidate_loads) > len(
-        preview_loads
-    )
+    attributes["candidate_loads_has_more"] = len(candidate_loads) > len(preview_loads)
     attributes["candidate_loads"] = [
         _solar_load_shift_candidate_preview(load) for load in preview_loads
     ]
@@ -2239,6 +2154,8 @@ _POWER_QUALITY_ROLES = {
     SensorRole.CURRENT,
     SensorRole.VOLTAGE,
 }
+
+
 def sensor_description_applies(
     description: DiagnosticSensorDescription,
     circuit: Any,
@@ -2297,9 +2214,8 @@ def sensor_description_applies(
             or profile in _HIGH_POWER_PROFILES
         )
     if key in _CAPACITY_SENSOR_KEYS:
-        return (
-            (has_current or (has_real_power and has_voltage))
-            and _stored_settings(coordinator, "capacity_settings_by_circuit", circuit)
+        return (has_current or (has_real_power and has_voltage)) and _stored_settings(
+            coordinator, "capacity_settings_by_circuit", circuit
         )
     if key in _SPLIT_PHASE_SENSOR_KEYS:
         return mode is CircuitMode.DUAL_PHASE and (has_real_power or has_current)
@@ -2380,17 +2296,25 @@ def _applicable_sensor_descriptions(
 
 
 def _sensor_roles(circuit: Any) -> set[SensorRole]:
-    sensors = circuit.get("sensors", ()) if isinstance(circuit, Mapping) else getattr(
-        circuit,
-        "sensors",
-        (),
+    sensors = (
+        circuit.get("sensors", ())
+        if isinstance(circuit, Mapping)
+        else getattr(
+            circuit,
+            "sensors",
+            (),
+        )
     )
     roles: set[SensorRole] = set()
     for sensor in sensors or ():
-        role = sensor.get("role") if isinstance(sensor, Mapping) else getattr(
-            sensor,
-            "role",
-            None,
+        role = (
+            sensor.get("role")
+            if isinstance(sensor, Mapping)
+            else getattr(
+                sensor,
+                "role",
+                None,
+            )
         )
         try:
             roles.add(SensorRole(role))
@@ -2412,13 +2336,15 @@ def _appliance_profile(circuit: Any) -> ApplianceProfile | None:
         return None
 
 
-
-
 def _circuit_mode(circuit: Any) -> CircuitMode | None:
-    raw_mode = circuit.get("mode") if isinstance(circuit, Mapping) else getattr(
-        circuit,
-        "mode",
-        None,
+    raw_mode = (
+        circuit.get("mode")
+        if isinstance(circuit, Mapping)
+        else getattr(
+            circuit,
+            "mode",
+            None,
+        )
     )
     try:
         return CircuitMode(raw_mode)
@@ -2433,10 +2359,14 @@ def _circuit_id(circuit: Any) -> str:
 
 
 def _configured_positive(circuit: Any, field_name: str) -> bool:
-    value = circuit.get(field_name) if isinstance(circuit, Mapping) else getattr(
-        circuit,
-        field_name,
-        None,
+    value = (
+        circuit.get(field_name)
+        if isinstance(circuit, Mapping)
+        else getattr(
+            circuit,
+            field_name,
+            None,
+        )
     )
     try:
         return float(value) > 0.0
@@ -2653,9 +2583,7 @@ class EffectiveElectricityRateSensor(CoordinatorEntity, SensorEntity):
         self._entry_id = entry_id
         self._attr_name = "CircuitSetup Energy Analyzer Electricity Rate"
         self._attr_unique_id = f"{entry_id}_electricity_rate"
-        self._attr_suggested_object_id = (
-            "circuitsetup_energy_analyzer_electricity_rate"
-        )
+        self._attr_suggested_object_id = "circuitsetup_energy_analyzer_electricity_rate"
 
     @property
     def unique_id(self) -> str:
@@ -2720,20 +2648,22 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
         )
         self.entity_description = description
         self._attr_entity_category = description.entity_category
-        self._attr_entity_registry_enabled_default = (
-            entity_enabled_default_for_tier(
-                description.entity_tier,
-                entity_detail_level_for_coordinator(coordinator),
-            )
+        self._attr_entity_registry_enabled_default = entity_enabled_default_for_tier(
+            description.entity_tier,
+            entity_detail_level_for_coordinator(coordinator),
         )
         self._attr_entity_registry_visible_default = (
             description.entity_registry_visible_default
         )
         self._attr_icon = (
-            appliance_icon_for_profile(circuit.appliance_profile)
-            if description.key == "activity_summary"
-            else None
-        ) or description.icon or SENSOR_ICONS.get(description.key)
+            (
+                appliance_icon_for_profile(circuit.appliance_profile)
+                if description.key == "activity_summary"
+                else None
+            )
+            or description.icon
+            or SENSOR_ICONS.get(description.key)
+        )
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
         self._attr_state_class = description.state_class
 
@@ -2852,17 +2782,18 @@ NILM_VIRTUAL_SENSOR_DESCRIPTIONS: tuple[NilmVirtualSensorDescription, ...] = (
         key="activity_summary",
         name_suffix="Activity Summary",
         value_fn=lambda state: (
-            None if state.is_running is None
-            else "Running" if state.is_running else "Idle"
+            None
+            if state.is_running is None
+            else "Running"
+            if state.is_running
+            else "Idle"
         ),
         icon="mdi:run-fast",
     ),
     NilmVirtualSensorDescription(
         key="energy_summary",
         name_suffix="Energy Summary",
-        value_fn=lambda state: (
-            f"{state.estimated_energy_kwh_today:.3f} kWh today"
-        ),
+        value_fn=lambda state: f"{state.estimated_energy_kwh_today:.3f} kWh today",
         icon="mdi:home-lightning-bolt-outline",
     ),
     NilmVirtualSensorDescription(
@@ -2917,9 +2848,7 @@ class NilmVirtualApplianceSensor(CoordinatorEntity, SensorEntity):
             description.key,
         )
         self._attr_icon = description.icon
-        self._attr_native_unit_of_measurement = (
-            description.native_unit_of_measurement
-        )
+        self._attr_native_unit_of_measurement = description.native_unit_of_measurement
         self._attr_state_class = description.state_class
 
     @property
@@ -2971,158 +2900,6 @@ class NilmVirtualApplianceSensor(CoordinatorEntity, SensorEntity):
         return self._nilm_state
 
 
-class DemoSourceSensor(SensorEntity):
-    """Synthetic source sensor used by the installed demo dashboard."""
-
-    _attr_has_entity_name = False
-    _attr_entity_registry_visible_default = False
-
-    def __init__(self, *, entry_id: str, sensor: SensorRef) -> None:
-        object_id = sensor.entity_id.removeprefix("sensor.")
-        circuit_id = _demo_circuit_id_from_entity_id(sensor.entity_id)
-        role = _coerce_sensor_role(sensor.role)
-        metadata = _DEMO_SOURCE_ROLE_METADATA.get(role, {})
-
-        self.entity_id = sensor.entity_id
-        self._attr_name = _title_from_object_id(object_id)
-        self._attr_unique_id = f"{entry_id}_demo_source_exact_{object_id}"
-        self._attr_suggested_object_id = object_id
-        self._attr_native_value = _demo_source_value(circuit_id, role)
-        self._attr_device_class = metadata.get("device_class")
-        self._attr_native_unit_of_measurement = metadata.get("unit") or None
-        self._attr_state_class = metadata.get("state_class")
-        self._attr_icon = metadata.get("icon")
-        self._entry_id = entry_id
-        self._demo_circuit_id = circuit_id
-        self._demo_role = role
-        self._demo_started_at = monotonic()
-
-    async def async_added_to_hass(self) -> None:
-        """Start automatic 10-second demo source refreshes."""
-        if async_track_time_interval is None:
-            return
-        async_on_remove = getattr(self, "async_on_remove", None)
-        hass = getattr(self, "hass", None)
-        if async_on_remove is None or hass is None:
-            return
-        async_on_remove(
-            async_track_time_interval(
-                hass,
-                self._handle_demo_tick,
-                timedelta(seconds=_DEMO_SIMULATION_INTERVAL_SECONDS),
-            )
-        )
-
-    async def _handle_demo_tick(self, _now: Any) -> None:
-        write_state = getattr(self, "async_write_ha_state", None)
-        if write_state is not None:
-            write_state()
-
-    @property
-    def unique_id(self) -> str:
-        """Unique ID for fallback tests."""
-        return self._attr_unique_id
-
-    @property
-    def suggested_object_id(self) -> str:
-        """Suggested Home Assistant object ID for fallback tests."""
-        return self._attr_suggested_object_id
-
-    @property
-    def name(self) -> str:
-        """Entity display name for fallback tests."""
-        return self._attr_name
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the demo measurement value."""
-        tick = int(
-            (monotonic() - self._demo_started_at)
-            // _DEMO_SIMULATION_INTERVAL_SECONDS
-        )
-        return _demo_simulated_source_value(
-            self._demo_circuit_id,
-            self._demo_role,
-            tick,
-        )
-
-    @property
-    def device_class(self) -> str | None:
-        """Return the measurement device class."""
-        return self._attr_device_class
-
-    @property
-    def native_unit_of_measurement(self) -> str | None:
-        """Return the measurement unit."""
-        return self._attr_native_unit_of_measurement
-
-    @property
-    def state_class(self) -> str | None:
-        """Return the recorder state class."""
-        return self._attr_state_class
-
-    @property
-    def icon(self) -> str | None:
-        """Return the demo source icon."""
-        return self._attr_icon
-
-
-def _demo_source_entities_for_circuits(
-    entry_id: str,
-    circuits: tuple[Any, ...],
-) -> list[DemoSourceSensor]:
-    entities: list[DemoSourceSensor] = []
-    seen: set[str] = set()
-    for circuit in circuits:
-        sensors = (
-            circuit.get("sensors", ())
-            if isinstance(circuit, Mapping)
-            else getattr(circuit, "sensors", ())
-        )
-        for sensor in sensors or ():
-            sensor_ref = _sensor_ref_or_none(sensor)
-            if sensor_ref is None:
-                continue
-            if sensor_ref.entity_id in seen:
-                continue
-            if not _is_demo_source_entity_id(sensor_ref.entity_id):
-                continue
-            entities.append(DemoSourceSensor(entry_id=entry_id, sensor=sensor_ref))
-            seen.add(sensor_ref.entity_id)
-    return entities
-
-
-def _sensor_ref_or_none(sensor: Any) -> SensorRef | None:
-    if isinstance(sensor, SensorRef):
-        return sensor
-    if isinstance(sensor, Mapping):
-        entity_id = sensor.get("entity_id")
-        role = sensor.get("role")
-        leg = sensor.get("leg")
-        unit = sensor.get("unit")
-    else:
-        entity_id = getattr(sensor, "entity_id", None)
-        role = getattr(sensor, "role", None)
-        leg = getattr(sensor, "leg", None)
-        unit = getattr(sensor, "unit", None)
-    if not isinstance(entity_id, str) or not entity_id:
-        return None
-    try:
-        sensor_role = SensorRole(role)
-    except (TypeError, ValueError):
-        return None
-    return SensorRef(entity_id, sensor_role, leg=leg, unit=unit)
-
-
-def _coerce_sensor_role(role: Any) -> SensorRole:
-    return role if isinstance(role, SensorRole) else SensorRole(role)
-
-
-def _title_from_object_id(object_id: str) -> str:
-    text = object_id.removeprefix("cs_energy_analyzer_demo_")
-    return text.replace("_", " ").title()
-
-
 async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> None:
     """Set up diagnostic sensor entities for configured circuits."""
     entry_id = getattr(entry, "entry_id", "default")
@@ -3168,39 +2945,18 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         for state in published_nilm_virtual_appliance_states(coordinator)
         for description in NILM_VIRTUAL_SENSOR_DESCRIPTIONS
     )
-    entities.extend(
-        _demo_source_entities_for_circuits(
-            entry_id,
-            configured_circuits,
-        )
-    )
     prune_stale_entity_registry_entries(
         hass,
         entry_id=entry_id,
         entity_domain="sensor",
         desired_unique_ids={entity.unique_id for entity in entities},
     )
-    hidden_demo_source_suffixes = {
-        unique_id.removeprefix(f"{entry_id}_")
-        for unique_id in {
-            str(getattr(entity, "unique_id", ""))
-            for entity in entities
-            if isinstance(entity, DemoSourceSensor)
-        }
-        if unique_id.startswith(f"{entry_id}_demo_source_")
-    }
     prune_stale_device_registry_entries(
         hass,
         entry_id=entry_id,
         desired_identifiers=device_identifiers_for_entities(entities),
     )
     async_add_entities(entities)
-    hide_entity_registry_entries(
-        hass,
-        entry_id=entry_id,
-        entity_domain="sensor",
-        hidden_unique_id_suffixes=hidden_demo_source_suffixes,
-    )
     sync_entity_registry_categories(
         hass,
         entry_id=entry_id,

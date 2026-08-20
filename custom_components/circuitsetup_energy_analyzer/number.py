@@ -4,6 +4,9 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from homeassistant.components.number import NumberEntity
+from homeassistant.const import UnitOfEnergy
+
 from .const import CONF_ADVANCED_SETTINGS, DOMAIN
 from .entity import (
     CircuitAnalyzerEntity,
@@ -17,19 +20,6 @@ from .entity import (
 from .entity_catalog import compact_descriptions_for_setup
 from .models import SensorRole
 from .tariff import configured_electricity_rate, global_cost_settings
-
-try:
-    from homeassistant.components.number import NumberEntity
-    from homeassistant.const import UnitOfEnergy
-except ModuleNotFoundError:
-
-    class NumberEntity:
-        """Fallback number base for tests without Home Assistant."""
-
-    class UnitOfEnergy:
-        """Fallback energy unit constants."""
-
-        KILO_WATT_HOUR = "kWh"
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,9 +84,7 @@ class CircuitDailyEnergyGoalNumber(CircuitAnalyzerEntity, NumberEntity):
         self._attr_native_min_value = description.native_min_value
         self._attr_native_max_value = description.native_max_value
         self._attr_native_step = description.native_step
-        self._attr_native_unit_of_measurement = (
-            description.native_unit_of_measurement
-        )
+        self._attr_native_unit_of_measurement = description.native_unit_of_measurement
         self._attr_suggested_object_id = f"{self.circuit_id}_{description.key}"
 
     @property
@@ -162,9 +150,7 @@ class GlobalElectricityRateNumber(NumberEntity):
         self._entry_id = entry_id
         self._attr_name = "CircuitSetup Energy Analyzer Fallback Electricity Rate"
         self._attr_unique_id = f"{entry_id}_electricity_rate"
-        self._attr_suggested_object_id = (
-            "circuitsetup_energy_analyzer_electricity_rate"
-        )
+        self._attr_suggested_object_id = "circuitsetup_energy_analyzer_electricity_rate"
 
     @property
     def name(self) -> str:

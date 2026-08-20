@@ -254,7 +254,6 @@ def _iter_translation_strings(value, path: tuple[str, ...] = ()):
 EXPECTED_FLOW_LABELS = {
     "source_devices": "Source Devices",
     "extra_source_entities": "Extra Source Entities",
-    "demo_source_bundle_enabled": "Load Bundled Demo Sources",
     "mains_source_entities": "Mains Source Entities",
     "outdoor_temperature_entity": "Outdoor Temperature or Weather Entity",
     "rain_sensor_entity": "Rain or Weather Entity",
@@ -269,7 +268,6 @@ EXPECTED_FLOW_LABELS = {
 EXPECTED_OPTIONS_LABELS = {
     "source_devices": "Source Devices",
     "extra_source_entities": "Extra Source Entities",
-    "demo_source_bundle_enabled": "Load Bundled Demo Sources",
     "outdoor_temperature_entity": "Outdoor Temperature or Weather Entity",
     "rain_sensor_entity": "Rain or Weather Entity",
     "rain_intensity_entity": "Rain Intensity Sensor",
@@ -646,9 +644,9 @@ def test_mains_and_utility_flow_labels_are_human_readable_and_described() -> Non
     assert "optional" in mains_descriptions["mains_source_entities"].lower()
     assert "whole-home" in mains_descriptions["mains_source_entities"].lower()
     assert "edge detection" in mains_descriptions["nilm_detection_enabled"].lower()
-    assert "power transition" in mains_descriptions[
-        "nilm_detection_sensitivity"
-    ].lower()
+    assert (
+        "power transition" in mains_descriptions["nilm_detection_sensitivity"].lower()
+    )
     assert "known loads" in mains_descriptions["known_load_circuits"].lower()
 
 
@@ -742,10 +740,7 @@ def test_assignment_flow_labels_are_human_readable_and_described() -> None:
             in descriptions["circuit_composition"].lower()
         )
         assert "edge detection" in descriptions["nilm_detection_enabled"].lower()
-        assert (
-            "power transition"
-            in descriptions["nilm_detection_sensitivity"].lower()
-        )
+        assert "power transition" in descriptions["nilm_detection_sensitivity"].lower()
         assert "diagnostic history" in descriptions["circuit_retention_mode"].lower()
         for days in ("18 days", "45 days", "180 days"):
             assert days in descriptions["circuit_retention_mode"]
@@ -4139,7 +4134,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
 
 def test_nilm_workspace_collection_formatting_and_publication_disclosures() -> None:
     _run_panel_node_script(
-        r'''
+        r"""
 const edge = {
   timestamp: "2026-08-12T12:00:00Z",
   direction: "on",
@@ -4242,13 +4237,13 @@ assert.match(secondary, /<details[^>]*data-nilm-ambiguity-details(?![^>]*open)/)
 assert.ok(secondary.includes("Evidence quality and attribution"));
 assert.ok(secondary.indexOf("data-nilm-ambiguity-audit") > secondary.indexOf("data-nilm-secondary-collections"));
 assert.ok(secondary.indexOf("data-nilm-evidence-section") > secondary.indexOf("data-nilm-secondary-collections"));
-''',
+""",
     )
 
 
 def test_nilm_helper_prompt_distinguishes_unassigned_and_assigned_helpers() -> None:
     _run_panel_node_script(
-        r'''
+        r"""
 const workspace = makeWorkspace();
 const panel = makePanel({ _nilmWorkspace: workspace });
 const helperOptions = [{ helper_circuit_id: "washer", helper_name: "Washer" }];
@@ -4268,13 +4263,13 @@ const assigned = panel._renderNilmHelperEvidence({
 assert.ok(unassigned.includes("Choose a helper circuit"));
 assert.ok(!unassigned.includes("Choose another helper circuit"));
 assert.ok(assigned.includes("Choose another helper circuit"));
-''',
+""",
     )
 
 
 def test_open_nilm_session_matches_validation_confidence_format() -> None:
     _run_panel_node_script(
-        r'''
+        r"""
 const workspace = makeWorkspace({
   sessions: [{
     session_id: "open-session",
@@ -4294,13 +4289,13 @@ const sessions = html.slice(sessionsStart, edgesStart);
 
 assert.ok(sessions.includes("In progress. Pairing confidence 40%"));
 assert.ok(!sessions.includes("Low pairing confidence"));
-''',
+""",
     )
 
 
 def test_nilm_secondary_sessions_exclude_needs_review_duplicates() -> None:
     _run_panel_node_script(
-        r'''
+        r"""
 const workspace = makeWorkspace({
   sessions: [
     {
@@ -4335,13 +4330,13 @@ const html = panel._renderNilmSecondaryCollections(workspace);
 
 assert.ok(!html.includes("Duplicate review session"));
 assert.ok(html.includes("Independent open session"));
-''',
+""",
     )
 
 
 def test_nilm_evidence_quality_pagination_and_deep_links_are_bounded() -> None:
     _run_panel_node_script(
-        r'''
+        r"""
 (async () => {
   const quality = [{
     window: "today",
@@ -4535,7 +4530,7 @@ def test_nilm_evidence_quality_pagination_and_deep_links_are_bounded() -> None:
   assert.ok(auditHtml.includes("data-nilm-ambiguity-open-graph"));
   assert.ok(!auditHtml.includes("data-nilm-ambiguity-create-interval"));
 })();
-'''
+"""
     )
 
 
@@ -5303,22 +5298,16 @@ def test_dynamic_alert_evidence_panel_separates_applied_recommendations() -> Non
     assert "originalIndex" in asset
 
 
-def test_dynamic_alert_evidence_panel_uses_internal_component_renderers() -> None:
+def test_dynamic_alert_evidence_panel_calls_internal_renderers_directly() -> None:
     asset = _frontend_source()
 
     for expected in (
-        "class CircuitSetupPanelComponent",
-        "class CircuitSetupEvidenceSummary",
-        "class CircuitSetupNilmWorkspace",
-        "class CircuitSetupRecommendationCards",
-        "this._evidenceSummary = new CircuitSetupEvidenceSummary(this);",
-        "this._nilmWorkspaceComponent = new CircuitSetupNilmWorkspace(this);",
-        "this._recommendationCards = new CircuitSetupRecommendationCards(this);",
-        "return this._evidenceSummary.renderAlert(alert, circuit);",
-        "return this._nilmWorkspaceComponent.render();",
-        "return this._recommendationCards.renderSection(",
+        "return this._renderAlertContent(alert, circuit);",
+        "return this._renderNilmWorkspaceContent();",
+        "return this._renderRecommendationSectionContent(title, recommendationItems);",
     ):
         assert expected in asset
+    assert "class CircuitSetupPanelComponent" not in asset
 
 
 def test_dynamic_alert_evidence_panel_formats_setting_recommendation_rows() -> None:
@@ -7332,7 +7321,9 @@ assert.equal(JSON.stringify(panel._nilmRemovedIntervalIds), '["saved-interval"]'
     )
 
 
-def test_nilm_interval_evidence_preview_uses_explicit_target_and_ignores_stale_results() -> None:
+def test_nilm_interval_evidence_preview_uses_explicit_target_and_ignores_stale_results() -> (
+    None
+):
     _run_panel_node_script(
         """
 const workspace = makeWorkspace({

@@ -8,7 +8,6 @@
         "data": {
           "source_devices": "Source Devices",
           "extra_source_entities": "Extra Source Entities",
-          "demo_source_bundle_enabled": "Load Bundled Demo Sources",
           "mains_source_entities": "Mains Source Entities",
           "outdoor_temperature_entity": "Outdoor Temperature or Weather Entity",
           "rain_sensor_entity": "Rain or Weather Entity",
@@ -22,7 +21,6 @@
         "data_description": {
           "source_devices": "Select ESPHome meter devices to include their matching energy sensors.",
           "extra_source_entities": "Optional individual sensors for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
-          "demo_source_bundle_enabled": "Adds every bundled demo source sensor for testing. Turn this off to remove demo sources and demo appliance assignments.",
           "mains_source_entities": "Optional aggregate mains sensors for whole-home analysis. For split-phase topology evidence, use L1/L2 or leg A/B-style power entity names.",
           "outdoor_temperature_entity": "Optional outdoor temperature sensor or weather entity used for HVAC context. Its humidity attribute also helps explain air-conditioner condensate reaching a sump pump.",
           "rain_sensor_entity": "Optional binary rain sensor or weather entity. Rain conditions and available precipitation attributes explain expected sump, well pump, or water pump activity.",
@@ -134,7 +132,6 @@
         "data": {
           "source_devices": "Source Devices",
           "extra_source_entities": "Extra Source Entities",
-          "demo_source_bundle_enabled": "Load Bundled Demo Sources",
           "outdoor_temperature_entity": "Outdoor Temperature or Weather Entity",
           "rain_sensor_entity": "Rain or Weather Entity",
           "rain_intensity_entity": "Rain Intensity Sensor",
@@ -147,7 +144,6 @@
         "data_description": {
           "source_devices": "Select ESPHome meter devices to include their matching energy sensors.",
           "extra_source_entities": "Optional individual sensors for power, voltage, current, energy, frequency, reactive power, apparent power, or power factor.",
-          "demo_source_bundle_enabled": "Adds every bundled demo source sensor for testing. Turn this off to remove demo sources and demo appliance assignments.",
           "outdoor_temperature_entity": "Optional outdoor temperature sensor or weather entity used for HVAC context. Its humidity attribute also helps explain air-conditioner condensate reaching a sump pump.",
           "rain_sensor_entity": "Optional binary rain sensor or weather entity. Rain conditions and available precipitation attributes explain expected sump, well pump, or water pump activity.",
           "rain_intensity_entity": "Optional precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain.",

@@ -270,62 +270,10 @@ function installRouteChangeDispatcher() {
   window.addEventListener("popstate", dispatchRouteChange);
 }
 
-class CircuitSetupPanelComponent {
-  constructor(host) {
-    this.host = host;
-  }
-}
-
-class CircuitSetupEvidenceSummary extends CircuitSetupPanelComponent {
-  renderAlert(alert, circuit) {
-    return this.host._renderAlertContent(alert, circuit);
-  }
-
-  renderFallbackActions() {
-    return this.host._renderFallbackActionsContent();
-  }
-}
-
-class CircuitSetupNilmWorkspace extends CircuitSetupPanelComponent {
-  render() {
-    return this.host._renderNilmWorkspaceContent();
-  }
-}
-
-class CircuitSetupApplianceDetail extends CircuitSetupPanelComponent {
-  render() {
-    return this.host._renderApplianceDetailContent();
-  }
-}
-
-class CircuitSetupApplianceInsights extends CircuitSetupPanelComponent {
-  render() {
-    return this.host._renderApplianceInsightsContent();
-  }
-}
-
-class CircuitSetupSetupHealth extends CircuitSetupPanelComponent {
-  render() {
-    return this.host._renderSetupHealthContent();
-  }
-}
-
-class CircuitSetupRecommendationCards extends CircuitSetupPanelComponent {
-  renderSection(title, recommendationItems) {
-    return this.host._renderRecommendationSectionContent(title, recommendationItems);
-  }
-}
-
 class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
-    this._evidenceSummary = new CircuitSetupEvidenceSummary(this);
-    this._nilmWorkspaceComponent = new CircuitSetupNilmWorkspace(this);
-    this._applianceDetailComponent = new CircuitSetupApplianceDetail(this);
-    this._applianceInsightsComponent = new CircuitSetupApplianceInsights(this);
-    this._setupHealthComponent = new CircuitSetupSetupHealth(this);
-    this._recommendationCards = new CircuitSetupRecommendationCards(this);
     this._hass = null;
     this._payload = null;
     this._historySeries = [];
@@ -347,7 +295,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmAmbiguityAuditRequestToken = 0;
     this._nilmFocusedAmbiguitySession = null;
     this._applianceDetail = null;
-    this._applianceInsights = null;
     this._applianceInsights = null;
     this._applianceInsightsFilters = {
       running: false,
@@ -385,8 +332,6 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmWorkspaceHistoryError = "";
     this._nilmWorkspaceHistoryFailedRequest = null;
     this._applianceDetailError = "";
-    this._applianceInsightsError = "";
-    this._applianceInsightsLoading = false;
     this._applianceInsightsError = "";
     this._applianceDetailHistoryError = "";
     this._setupHealthError = "";

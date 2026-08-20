@@ -6,6 +6,10 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.entity import EntityCategory
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
 from .appliance_metadata import existing_area_names_for_hass, suggested_area_for_profile
 from .const import (
     CONF_CIRCUITS,
@@ -17,26 +21,6 @@ from .const import (
     ENTITY_DETAIL_STANDARD,
 )
 from .models import ApplianceProfile, SensorRole
-
-try:
-    from homeassistant.exceptions import HomeAssistantError
-    from homeassistant.helpers.entity import EntityCategory
-    from homeassistant.helpers.update_coordinator import CoordinatorEntity
-except ModuleNotFoundError:
-
-    class HomeAssistantError(Exception):
-        """Fallback Home Assistant error for tests without Home Assistant."""
-
-    class EntityCategory:
-        """Fallback entity category constants for tests without Home Assistant."""
-
-        DIAGNOSTIC = "diagnostic"
-
-    class CoordinatorEntity:
-        """Small CoordinatorEntity fallback for helper tests."""
-
-        def __init__(self, coordinator: Any) -> None:
-            self.coordinator = coordinator
 
 
 class EntityTier(StrEnum):
@@ -276,8 +260,7 @@ def hide_entity_registry_entries(
             or not entity_id.startswith(prefix)
             or getattr(entry, "hidden_by", None) is not None
             or not any(
-                unique_id.endswith(f"_{suffix}")
-                for suffix in hidden_unique_id_suffixes
+                unique_id.endswith(f"_{suffix}") for suffix in hidden_unique_id_suffixes
             )
         ):
             continue
