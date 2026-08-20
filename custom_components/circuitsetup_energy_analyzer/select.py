@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from homeassistant.components.select import SelectEntity
+
 from .const import (
     CONF_DASHBOARD_LAYOUT,
     DASHBOARD_LAYOUT_EXPERT,
@@ -30,14 +32,6 @@ from .entity_catalog import compact_descriptions_for_setup
 from .sensor import sensitivity_value
 from .ux import friendly_sensitivity_label
 
-try:
-    from homeassistant.components.select import SelectEntity
-except ModuleNotFoundError:
-
-    class SelectEntity:
-        """Fallback select base for tests without Home Assistant."""
-
-
 SENSITIVITY_OPTIONS = ["Quiet", "Balanced", "Sensitive"]
 DASHBOARD_LAYOUT_OPTIONS = ["Simple", "Standard", "Expert"]
 DASHBOARD_LAYOUT_LABELS = {
@@ -45,6 +39,8 @@ DASHBOARD_LAYOUT_LABELS = {
     DASHBOARD_LAYOUT_STANDARD: "Standard",
     DASHBOARD_LAYOUT_EXPERT: "Expert",
 }
+
+
 @dataclass(frozen=True, slots=True)
 class CircuitSelectDescription:
     key: str

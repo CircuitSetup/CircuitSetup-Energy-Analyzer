@@ -5,8 +5,6 @@ from datetime import datetime
 from typing import Any
 
 from ..aggregation import aggregate_dual_phase
-from ..const import DOMAIN
-from ..demo import is_demo_source_entity_id
 from ..models import CircuitConfig, CircuitMode, PowerFlowMode, SensorRef, SensorRole
 from ..normalize import (
     NormalizedCircuitSample,
@@ -15,15 +13,12 @@ from ..normalize import (
     suppress_inactive_stale_current_issues,
 )
 
-_DEMO_SOURCE_UNIQUE_ID_PREFIX = "demo_source_exact_"
-
 
 class SourceSampleBuilder:
     """Read HA source states and build normalized circuit samples."""
 
-    def __init__(self, hass: Any, *, entry_id: str) -> None:
+    def __init__(self, hass: Any) -> None:
         self._hass = hass
-        self._entry_id = entry_id
 
     def sample_for_config(
         self,
@@ -133,29 +128,12 @@ class SourceSampleBuilder:
         if get_state is None:
             return states
 
-        has_demo_source = any(
-            is_demo_source_entity_id(sensor.entity_id) for sensor in config.sensors
-        )
-        registered_demo_entity_ids = (
-            self.registered_demo_source_entity_ids() if has_demo_source else {}
-        )
         for sensor in config.sensors:
             raw_state = get_state(sensor.entity_id)
-            if raw_state is None and is_demo_source_entity_id(sensor.entity_id):
-                registered_entity_id = registered_demo_entity_ids.get(
-                    sensor.entity_id
-                )
-                if (
-                    registered_entity_id is not None
-                    and registered_entity_id != sensor.entity_id
-                ):
-                    raw_state = get_state(registered_entity_id)
             if raw_state is None:
                 continue
             attributes = getattr(raw_state, "attributes", {}) or {}
             last_updated = getattr(raw_state, "last_updated", now) or now
-            if is_demo_source_entity_id(sensor.entity_id):
-                last_updated = now
             states[sensor.entity_id] = SourceState(
                 entity_id=sensor.entity_id,
                 state=str(getattr(raw_state, "state", "")),
@@ -165,39 +143,6 @@ class SourceSampleBuilder:
                 state_class=attributes.get("state_class"),
             )
         return states
-
-    def registered_demo_source_entity_ids(self) -> dict[str, str]:
-        if self._hass is None:
-            return {}
-        registry = None
-        try:
-            from homeassistant.helpers import entity_registry as er
-
-            registry = er.async_get(self._hass)
-        except (ImportError, AttributeError, TypeError):
-            registry = getattr(self._hass, "entity_registry", None)
-        if registry is None:
-            return {}
-        entries = getattr(registry, "entities", {})
-        values = entries.values() if hasattr(entries, "values") else entries
-        registered: dict[str, str] = {}
-        unique_id_prefix = f"{self._entry_id}_{_DEMO_SOURCE_UNIQUE_ID_PREFIX}"
-        for registry_entry in values:
-            unique_id = str(getattr(registry_entry, "unique_id", ""))
-            if not unique_id.startswith(unique_id_prefix):
-                continue
-            if (
-                getattr(registry_entry, "config_entry_id", self._entry_id)
-                != self._entry_id
-            ):
-                continue
-            if getattr(registry_entry, "platform", DOMAIN) != DOMAIN:
-                continue
-            canonical_entity_id = f"sensor.{unique_id.removeprefix(unique_id_prefix)}"
-            registered[canonical_entity_id] = str(
-                getattr(registry_entry, "entity_id", canonical_entity_id)
-            )
-        return registered
 
     def _aggregate_parallel_sample(
         self,
@@ -396,8 +341,7 @@ def _sample_value_or_none(
 
 
 def _merge_source_update_times(
-    samples: list[NormalizedCircuitSample]
-    | tuple[NormalizedCircuitSample, ...],
+    samples: list[NormalizedCircuitSample] | tuple[NormalizedCircuitSample, ...],
 ) -> tuple[tuple[SensorRole, datetime], ...]:
     latest: dict[SensorRole, datetime] = {}
     for sample in samples:

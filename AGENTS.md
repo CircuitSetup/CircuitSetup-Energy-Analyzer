@@ -21,9 +21,9 @@
 ## Codegraph
 
 - Read `docs/codegraph/CODEGRAPH.md` before cross-cutting changes or unfamiliar module work.
-- Before editing a module, use the curated codegraph for semantic ownership, and run the local generator when exact AST-derived imports, definitions, entrypoints, or import cycles matter.
-- Regenerate the checked-out graph after adding, removing, or moving modules; changing imports, entrypoints, processor registration, platform surfaces, panel API endpoints, storage ownership, or coordinator pipeline structure.
-- Regenerate with `.codex/scripts/update-codegraph.ps1`; generated output is local-only and should not be committed.
+- Before editing a module, use the curated map for semantic ownership and `codegraph explore` for live source, callers, imports, entrypoints, and impact paths.
+- Rebuild the local index with `codegraph init` after adding, removing, or moving modules or changing imports, entrypoints, processor registration, platform surfaces, panel API endpoints, storage ownership, or coordinator pipeline structure.
+- The `.codegraph/` index is local-only and must not be committed.
 
 ## Structural Search
 

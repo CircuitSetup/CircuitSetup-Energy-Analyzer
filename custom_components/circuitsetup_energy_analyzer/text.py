@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from homeassistant.components.text import TextEntity
+
 from .const import DOMAIN
 from .entity import (
     async_call_or_raise,
@@ -12,13 +14,6 @@ from .entity import (
     prune_stale_entity_registry_entries,
 )
 from .tariff import global_cost_settings
-
-try:
-    from homeassistant.components.text import TextEntity
-except ModuleNotFoundError:
-
-    class TextEntity:
-        """Fallback text base for tests without Home Assistant."""
 
 
 class GlobalTimeOfUseNameText(TextEntity):

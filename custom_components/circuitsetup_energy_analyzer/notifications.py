@@ -148,11 +148,7 @@ def alert_notification_message(
     lines.extend(
         [
             "",
-            f"- {
-                _notification_value_label(
-                    alert, observed_label
-                )
-            }: "
+            f"- {_notification_value_label(alert, observed_label)}: "
             f"{_format_notification_value(alert, alert.observed_value)}",
             f"- {_notification_value_label(alert, _comparison_value_label(alert))}: "
             f"{_format_notification_value(alert, alert.baseline_value)}",
@@ -309,10 +305,7 @@ async def async_create_alert_notification(
     dashboard_path: str = DEFAULT_ALERT_EVIDENCE_PATH,
 ) -> None:
     """Create a persistent notification for important alert evidence if HA exists."""
-    try:
-        from homeassistant.components import persistent_notification
-    except ModuleNotFoundError:
-        return
+    from homeassistant.components import persistent_notification
 
     create = getattr(persistent_notification, "async_create", None)
     if create is None:
@@ -338,10 +331,7 @@ async def async_dismiss_persistent_notification(
     notification_id: str,
 ) -> None:
     """Dismiss a persistent notification if Home Assistant is available."""
-    try:
-        from homeassistant.components import persistent_notification
-    except ModuleNotFoundError:
-        return
+    from homeassistant.components import persistent_notification
 
     dismiss = getattr(persistent_notification, "async_dismiss", None)
     if dismiss is None:
@@ -362,10 +352,7 @@ async def async_create_settings_recommendation_notification(
     """Create one persistent notification for pending suggested settings."""
     if total_pending <= 0:
         return
-    try:
-        from homeassistant.components import persistent_notification
-    except ModuleNotFoundError:
-        return
+    from homeassistant.components import persistent_notification
 
     create = getattr(persistent_notification, "async_create", None)
     if create is None:
@@ -387,10 +374,8 @@ async def async_create_weekly_digest_notification(
     digest: Any,
 ) -> None:
     """Create one idempotent persistent notification for a weekly digest."""
-    try:
-        from homeassistant.components import persistent_notification
-    except ModuleNotFoundError:
-        return
+    from homeassistant.components import persistent_notification
+
     create = getattr(persistent_notification, "async_create", None)
     if create is None:
         return
@@ -495,10 +480,8 @@ async def async_create_daily_summary_notification(
     """Create one bounded daily appliance-notification summary."""
     if not alerts:
         return
-    try:
-        from homeassistant.components import persistent_notification
-    except ModuleNotFoundError:
-        return
+    from homeassistant.components import persistent_notification
+
     create = getattr(persistent_notification, "async_create", None)
     if create is None:
         return

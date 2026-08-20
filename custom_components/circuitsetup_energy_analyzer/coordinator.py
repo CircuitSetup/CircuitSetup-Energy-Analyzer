@@ -9,6 +9,13 @@ from datetime import datetime, timedelta
 from time import monotonic
 from typing import Any, Self
 
+from homeassistant.helpers.event import (
+    async_track_point_in_time,
+    async_track_state_change_event,
+    async_track_time_interval,
+)
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+
 from .activity_timeline import (
     DEFAULT_TIMELINE_WINDOW_HOURS,
 )
@@ -75,36 +82,6 @@ _EXPECTED_SCHEDULE_ALERT_FEATURES = frozenset(
     {"expected_schedule_missed", "running_outside_expected_schedule"}
 )
 _UTILITY_COMPARISON_ALERT_FEATURES = frozenset({"utility_energy_mismatch"})
-try:
-    from homeassistant.helpers.event import (
-        async_track_point_in_time,
-        async_track_state_change_event,
-        async_track_time_interval,
-    )
-    from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-except ModuleNotFoundError:
-    async_track_state_change_event = None
-    async_track_point_in_time = None
-    async_track_time_interval = None
-
-    class DataUpdateCoordinator:
-        """Small fallback so helper tests can import without Home Assistant."""
-
-        def __init__(
-            self,
-            hass: Any,
-            logger: logging.Logger | None = None,
-            *,
-            name: str | None = None,
-            **_: Any,
-        ) -> None:
-            self.hass = hass
-            self.logger = logger
-            self.name = name
-            self.data: Any = None
-
-        def async_set_updated_data(self, data: Any) -> None:
-            self.data = data
 
 
 def _normalized_entity_ids(entity_ids: Iterable[str] | None) -> set[str]:
@@ -846,8 +823,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         await self._async_save_store(now, force=False)
         if recommendation_refresh_due:
             notify = (
-                self.notification_controller
-                .async_notify_settings_recommendations_if_needed
+                self.notification_controller.async_notify_settings_recommendations_if_needed
             )
             await notify()
         return self.state
@@ -2017,9 +1993,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         now: datetime,
     ) -> dict[str, SourceState]:
         return self.source_samples.source_states_for(config, now)
-
-    def _registered_demo_source_entity_ids(self: Self) -> dict[str, str]:
-        return self.source_samples.registered_demo_source_entity_ids()
 
     def _clear_nilm_topology_state(self: Self, circuit_id: str) -> None:
         self.processor_runtime.clear_nilm_topology_state(circuit_id)

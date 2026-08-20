@@ -131,8 +131,7 @@ def circuit_configs_from_entry_data(
     )
 
     if not any(
-        config.mode is CircuitMode.MAINS_NILM
-        or config.circuit_id == "mains"
+        config.mode is CircuitMode.MAINS_NILM or config.circuit_id == "mains"
         for config in configs
     ):
         mains_config = mains_context_config_from_sources(
@@ -336,8 +335,7 @@ def _configs_with_merged_source_entity_refs(
         config
         for config in configs
         if config.sensors
-        or _canonical_source_circuit_id(config.circuit_id)
-        not in reusable_variant_ids
+        or _canonical_source_circuit_id(config.circuit_id) not in reusable_variant_ids
     ]
 
 
@@ -979,7 +977,6 @@ _ANALYZER_SOURCE_ENTITY_PREFIXES = (
     "circuitsetup_energy_analyzer_",
     "cs_energy_analyzer_",
 )
-_PRESERVED_ANALYZER_SOURCE_ENTITY_PREFIXES = ("cs_energy_analyzer_demo_",)
 
 
 def sensor_role_from_entity_id(entity_id: str) -> SensorRole:
@@ -1041,9 +1038,7 @@ def source_entity_leg_hint(entity_id: str) -> str | None:
 
 def _source_circuit_id_from_entity_id(entity_id: str) -> str:
     object_id = _entity_object_id(entity_id)
-    return _canonical_source_circuit_id(
-        strip_trailing_source_detail_tokens(object_id)
-    )
+    return _canonical_source_circuit_id(strip_trailing_source_detail_tokens(object_id))
 
 
 def source_entity_matches_variant_circuit_id(
@@ -1173,8 +1168,7 @@ def source_circuit_ids_from_entity_ids(
                     )
 
     reserved_ids = set(circuit_ids.values()) | {
-        _canonical_source_circuit_id(circuit_id)
-        for circuit_id in reserved_circuit_ids
+        _canonical_source_circuit_id(circuit_id) for circuit_id in reserved_circuit_ids
     }
     variant_ids: dict[tuple[str, str, int], str] = {}
     for variant_key in sorted(set(variant_by_entity.values())):
@@ -1194,9 +1188,6 @@ def source_circuit_ids_from_entity_ids(
 
 def _canonical_source_circuit_id(value: Any) -> str:
     circuit_id = re.sub(r"[^a-z0-9]+", "_", str(value or "").lower()).strip("_")
-    for preserved_prefix in _PRESERVED_ANALYZER_SOURCE_ENTITY_PREFIXES:
-        if circuit_id.startswith(preserved_prefix):
-            return circuit_id
     for prefix in _ANALYZER_SOURCE_ENTITY_PREFIXES:
         if circuit_id.startswith(prefix):
             return circuit_id.removeprefix(prefix) or circuit_id
@@ -1310,11 +1301,7 @@ def _source_metric_suffix_exposed(object_id: str) -> bool:
 
 def _strip_terminal_phase_letter(object_id: str) -> str:
     without_phase = re.sub(r"_[ab]$", "", object_id)
-    return (
-        without_phase
-        if _source_metric_suffix_exposed(without_phase)
-        else object_id
-    )
+    return without_phase if _source_metric_suffix_exposed(without_phase) else object_id
 
 
 def _entity_object_id(entity_id: str) -> str:
@@ -1330,9 +1317,7 @@ def _has_metric_suffix(object_id: str, metric_suffixes: Iterable[str]) -> bool:
 
 
 def _friendly_name_from_circuit_id(circuit_id: str) -> str:
-    return friendly_source_name(
-        str(circuit_id).removeprefix("cs_energy_analyzer_demo_")
-    )
+    return friendly_source_name(str(circuit_id))
 
 
 def _appliance_profile_mode_from_circuit_id(

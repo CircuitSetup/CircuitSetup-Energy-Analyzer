@@ -121,7 +121,6 @@ def _point(index: int) -> NilmResidualPowerPoint:
 def _processor() -> NilmSampleProcessor:
     return NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda *_args: None,
         min_delta_w_for_circuit=lambda _circuit_id: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),

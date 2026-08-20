@@ -128,7 +128,7 @@ export function createEvidenceViewMethods({
   }
 
   _renderAlert(alert, circuit) {
-    return this._evidenceSummary.renderAlert(alert, circuit);
+    return this._renderAlertContent(alert, circuit);
   }
 
   _renderAlertContent(alert, circuit) {
@@ -340,7 +340,7 @@ export function createEvidenceViewMethods({
   }
 
   _renderRecommendationSection(title, recommendationItems) {
-    return this._recommendationCards.renderSection(title, recommendationItems);
+    return this._renderRecommendationSectionContent(title, recommendationItems);
   }
 
   _renderRecommendationSectionContent(title, recommendationItems) {
@@ -1077,7 +1077,7 @@ export function createEvidenceViewMethods({
   }
 
   _renderFallbackActions() {
-    return this._evidenceSummary.renderFallbackActions();
+    return this._renderFallbackActionsContent();
   }
 
   _renderFallbackActionsContent() {

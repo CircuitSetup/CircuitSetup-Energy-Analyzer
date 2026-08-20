@@ -4,6 +4,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from homeassistant.components.switch import SwitchEntity
+
 from .const import DOMAIN
 from .entity import (
     CircuitAnalyzerEntity,
@@ -17,13 +19,6 @@ from .entity import (
 )
 from .entity_catalog import compact_descriptions_for_setup
 from .tariff import global_cost_settings
-
-try:
-    from homeassistant.components.switch import SwitchEntity
-except ModuleNotFoundError:
-
-    class SwitchEntity:
-        """Fallback switch base for tests without Home Assistant."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,6 +222,7 @@ class GlobalTimeOfUseWeekdaySwitch(SwitchEntity):
                 self._weekday,
                 False,
             )
+
 
 async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> None:
     """Set up switch entities for daily circuit controls."""

@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import time as time_of_day
 from typing import Any
 
+from homeassistant.components.time import TimeEntity
+
 from .const import DOMAIN
 from .entity import (
     async_call_or_raise,
@@ -13,14 +15,6 @@ from .entity import (
     prune_stale_entity_registry_entries,
 )
 from .tariff import global_cost_settings
-
-try:
-    from homeassistant.components.time import TimeEntity
-except ModuleNotFoundError:
-
-    class TimeEntity:
-        """Fallback time base for tests without Home Assistant."""
-
 
 _TOU_TIME_DETAILS = {
     "tou_start": ("Time-Of-Use Start", "mdi:clock-start"),

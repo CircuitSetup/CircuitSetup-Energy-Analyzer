@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from aiohttp import web
+from homeassistant.components.http import KEY_HASS, HomeAssistantView, require_admin
+
 from .const import DOMAIN
 from .panel_contracts import (
     APPLIANCE_DETAIL_API_PATH,
@@ -19,17 +22,6 @@ from .panel_contracts import (
     SETUP_HEALTH_API_PATH,
 )
 
-try:
-    from homeassistant.components.http import HomeAssistantView, require_admin
-except ModuleNotFoundError:
-
-    class HomeAssistantView:  # type: ignore[no-redef]
-        """Fallback base class for unit tests without Home Assistant installed."""
-
-    def require_admin(method: Any) -> Any:
-        """Preserve imports when Home Assistant is unavailable."""
-        return method
-
 
 class AlertEvidenceView(HomeAssistantView):
     """Authenticated API endpoint used by the dynamic alert evidence panel."""
@@ -42,7 +34,7 @@ class AlertEvidenceView(HomeAssistantView):
         """Return alert evidence selected by query parameters."""
         from . import panel
 
-        hass = request.app[panel.KEY_HASS]
+        hass = request.app[KEY_HASS]
         payload = panel.alert_evidence_payload(
             panel._loaded_coordinators(hass),
             alert_id=request.query.get("alert_id"),
@@ -53,11 +45,9 @@ class AlertEvidenceView(HomeAssistantView):
             review_suggested_settings=panel._truthy_query(
                 request.query.get("review_suggested_settings")
             ),
-            include_all_nilm=panel._truthy_query(
-                request.query.get("include_all_nilm")
-            ),
+            include_all_nilm=panel._truthy_query(request.query.get("include_all_nilm")),
         )
-        return panel.web.json_response(payload)
+        return web.json_response(payload)
 
 
 class HvacAssociationsView(HomeAssistantView):
@@ -70,8 +60,8 @@ class HvacAssociationsView(HomeAssistantView):
     async def get(self, request: Any) -> Any:
         from . import panel
 
-        hass = request.app[panel.KEY_HASS]
-        return panel.web.json_response(
+        hass = request.app[KEY_HASS]
+        return web.json_response(
             panel.hvac_associations_payload(
                 panel._loaded_coordinators(hass),
                 entry_id=request.query.get(panel.ATTR_ENTRY_ID),
@@ -90,21 +80,21 @@ class ApplianceDetailView(HomeAssistantView):
         """Return appliance detail selected by circuit or NILM assignment."""
         from . import panel
 
-        hass = request.app[panel.KEY_HASS]
+        hass = request.app[KEY_HASS]
         payload = panel.appliance_detail_payload(
             panel._loaded_coordinators(hass),
             circuit_id=request.query.get("circuit_id"),
             assignment_id=request.query.get(panel.ATTR_ASSIGNMENT_ID),
             entry_id=request.query.get(panel.ATTR_ENTRY_ID),
         )
-        return panel.web.json_response(payload)
+        return web.json_response(payload)
 
     @require_admin
     async def post(self, request: Any) -> Any:
         """Persist appliance notification or expected-schedule settings."""
         from . import panel
 
-        hass = request.app[panel.KEY_HASS]
+        hass = request.app[KEY_HASS]
         payload = await request.json()
         if isinstance(payload, Mapping) and "expected_schedule" in payload:
             result = await panel.async_set_appliance_expected_schedule(
@@ -122,7 +112,7 @@ class ApplianceDetailView(HomeAssistantView):
                 values=payload,
                 entry_id=request.query.get(panel.ATTR_ENTRY_ID),
             )
-        return panel.web.json_response(result)
+        return web.json_response(result)
 
 
 class ApplianceInsightsView(HomeAssistantView):
@@ -136,8 +126,8 @@ class ApplianceInsightsView(HomeAssistantView):
         """Return bounded direct and NILM appliance insights."""
         from . import panel
 
-        hass = request.app[panel.KEY_HASS]
-        return panel.web.json_response(
+        hass = request.app[KEY_HASS]
+        return web.json_response(
             panel.appliance_insights_payload(panel._loaded_coordinators(hass))
         )
 
@@ -153,25 +143,25 @@ class SetupHealthView(HomeAssistantView):
         """Return the current integration setup checklist."""
         from . import panel
 
-        hass = request.app[panel.KEY_HASS]
+        hass = request.app[KEY_HASS]
         payload = panel.setup_health_payload(
             panel._loaded_coordinators(hass),
             entry_id=request.query.get(panel.ATTR_ENTRY_ID),
         )
-        return panel.web.json_response(payload)
+        return web.json_response(payload)
 
     @require_admin
     async def post(self, request: Any) -> Any:
         """Persist weekly digest opt-in and delivery settings."""
         from . import panel
 
-        hass = request.app[panel.KEY_HASS]
+        hass = request.app[KEY_HASS]
         result = await panel.async_set_weekly_digest_settings(
             panel._loaded_coordinators(hass),
             entry_id=request.query.get(panel.ATTR_ENTRY_ID),
             values=await request.json(),
         )
-        return panel.web.json_response(result)
+        return web.json_response(result)
 
 
 class NilmWorkspaceView(HomeAssistantView):
@@ -186,14 +176,14 @@ class NilmWorkspaceView(HomeAssistantView):
         from . import panel
         from .panel_nilm import nilm_workspace_payload
 
-        hass = request.app[panel.KEY_HASS]
+        hass = request.app[KEY_HASS]
         payload = nilm_workspace_payload(
             panel._loaded_coordinators(hass),
             circuit_id=request.query.get("circuit_id"),
             hours=request.query.get("hours"),
             entry_id=request.query.get(panel.ATTR_ENTRY_ID),
         )
-        return panel.web.json_response(payload)
+        return web.json_response(payload)
 
 
 class NilmWorkspaceCollectionView(HomeAssistantView):
@@ -208,7 +198,7 @@ class NilmWorkspaceCollectionView(HomeAssistantView):
         from . import panel
         from .panel_nilm import async_nilm_workspace_collection_payload
 
-        hass = request.app[panel.KEY_HASS]
+        hass = request.app[KEY_HASS]
         payload = await async_nilm_workspace_collection_payload(
             hass,
             panel._loaded_coordinators(hass),
@@ -220,7 +210,7 @@ class NilmWorkspaceCollectionView(HomeAssistantView):
             limit=request.query.get("limit"),
             view=request.query.get("view"),
         )
-        return panel.web.json_response(payload)
+        return web.json_response(payload)
 
 
 class NilmWorkspaceItemView(HomeAssistantView):
@@ -235,7 +225,7 @@ class NilmWorkspaceItemView(HomeAssistantView):
         from . import panel
         from .panel_nilm import async_nilm_workspace_item_payload
 
-        hass = request.app[panel.KEY_HASS]
+        hass = request.app[KEY_HASS]
         payload = await async_nilm_workspace_item_payload(
             hass,
             panel._loaded_coordinators(hass),
@@ -244,7 +234,7 @@ class NilmWorkspaceItemView(HomeAssistantView):
             circuit_id=request.query.get("circuit_id"),
             entry_id=request.query.get(panel.ATTR_ENTRY_ID),
         )
-        return panel.web.json_response(payload)
+        return web.json_response(payload)
 
 
 class NilmWorkspaceHistoryView(HomeAssistantView):
@@ -258,7 +248,7 @@ class NilmWorkspaceHistoryView(HomeAssistantView):
         """Return capped recorder history for NILM workspace charting."""
         from . import panel
 
-        hass = request.app[panel.KEY_HASS]
+        hass = request.app[KEY_HASS]
         payload = await panel.nilm_workspace_history_payload(
             hass,
             panel._loaded_coordinators(hass),
@@ -273,7 +263,7 @@ class NilmWorkspaceHistoryView(HomeAssistantView):
                 else []
             ),
         )
-        return panel.web.json_response(payload)
+        return web.json_response(payload)
 
 
 class NilmIntervalEvidenceView(HomeAssistantView):
@@ -287,7 +277,7 @@ class NilmIntervalEvidenceView(HomeAssistantView):
         """Return backend-derived manual evidence for one selected interval."""
         from . import panel
 
-        hass = request.app[panel.KEY_HASS]
+        hass = request.app[KEY_HASS]
         payload = await panel.nilm_interval_evidence_payload(
             hass,
             panel._loaded_coordinators(hass),
@@ -296,4 +286,4 @@ class NilmIntervalEvidenceView(HomeAssistantView):
             end=request.query.get("end"),
             entry_id=request.query.get(panel.ATTR_ENTRY_ID),
         )
-        return panel.web.json_response(payload)
+        return web.json_response(payload)

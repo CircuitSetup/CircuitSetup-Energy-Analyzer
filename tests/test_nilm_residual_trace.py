@@ -69,7 +69,6 @@ def _mixed_config() -> CircuitConfig:
 def _processor(**kwargs: object) -> NilmSampleProcessor:
     return NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _circuit_id: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -219,8 +218,7 @@ def test_nilm_processor_never_subtracts_unavailable_legacy_power() -> None:
     assert point.subtraction_complete is False
 
 
-def test_monotonic_residual_trace_append_never_uses_slow_rebuild(
-) -> None:
+def test_monotonic_residual_trace_append_never_uses_slow_rebuild() -> None:
     """Appending a newer point must not iterate the complete retained trace."""
     processor = _processor()
 
@@ -667,15 +665,11 @@ def test_residual_trace_freshness_replay_fixture_exercises_quality_metrics() -> 
     long_session = results["long_session_beyond_retained_context"]
     long_trace = long_session.residual_trace_points_by_circuit["mains"]
     assert len(long_trace) == 2
-    assert (long_trace[1].timestamp - long_trace[0].timestamp) == timedelta(
-        seconds=10
-    )
+    assert (long_trace[1].timestamp - long_trace[0].timestamp) == timedelta(seconds=10)
 
     restart = results["restart_mid_session"]
     restart_trace = restart.residual_trace_points_by_circuit["mains"]
-    latest_mains = restart.final_state.latest_real_power_observation_by_circuit[
-        "mains"
-    ]
+    latest_mains = restart.final_state.latest_real_power_observation_by_circuit["mains"]
     assert restart_trace[0].timestamp == latest_mains.observed_at - timedelta(
         seconds=10
     )

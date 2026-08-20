@@ -3059,7 +3059,7 @@ export function createNilmWorkspaceMethods({
   }
 
   _renderNilmWorkspace() {
-    return this._nilmWorkspaceComponent.render();
+    return this._renderNilmWorkspaceContent();
   }
 
   _renderNilmWorkspaceContent() {

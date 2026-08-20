@@ -9323,7 +9323,6 @@ def test_nilm_processor_refresh_preserves_persisted_measured_trace_after_restart
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda *_args: None,
         min_delta_w_for_circuit=lambda _circuit_id: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -9358,7 +9357,6 @@ def test_unchanged_session_history_does_not_resanitize_ingress(
 
     processor = nilm_sample.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda *_args: None,
         min_delta_w_for_circuit=lambda _circuit_id: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -9454,7 +9452,6 @@ def test_unchanged_session_history_does_not_resanitize_ingress(
     cached_inventory = deepcopy(store.nilm_unknown_loads_by_circuit["mains"])
     forced = nilm_sample.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda *_args: None,
         min_delta_w_for_circuit=lambda _circuit_id: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -9492,7 +9489,6 @@ def test_nilm_input_row_mutations_invalidate_session_rebuild(
     )
     processor = nilm_sample.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda *_args: None,
         min_delta_w_for_circuit=lambda _circuit_id: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -9582,7 +9578,6 @@ def test_nilm_sample_processor_updates_signatures_and_unknown_inventory() -> Non
     topology_alerts: list[AlertEvidence] = []
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _circuit_id: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -9721,7 +9716,6 @@ def test_nilm_processor_builds_inventory_after_refreshing_current_sessions(
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _circuit_id: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -9827,7 +9821,6 @@ def test_nilm_processor_does_not_recluster_an_empty_signature_revision(
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _circuit_id: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -9886,7 +9879,6 @@ def test_nilm_inventory_cache_tracks_open_sessions_and_window_boundaries() -> No
     ]
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _: True,
-        seed_demo_nilm_state=lambda *_: None,
         min_delta_w_for_circuit=lambda _: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -9963,7 +9955,6 @@ def test_nilm_processor_records_actual_session_retention_coverage() -> None:
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _circuit_id: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -10044,7 +10035,7 @@ def test_nilm_processor_coverage_is_component_and_window_specific() -> None:
             mode=CircuitMode.MAINS_NILM,
         )
         processor = processors.NilmSampleProcessor(
-            nilm_enabled=lambda _: True, seed_demo_nilm_state=lambda *_: None,
+            nilm_enabled=lambda _: True,
             min_delta_w_for_circuit=lambda _: 100.0, detectors={},
             total_events_by_circuit=defaultdict(int),
             unmatched_edges_by_circuit=defaultdict(list), ignored_signatures=set(),
@@ -10258,7 +10249,6 @@ def test_nilm_processor_dropped_open_session_is_not_complete_or_off() -> None:
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _: True,
-        seed_demo_nilm_state=lambda *_: None,
         min_delta_w_for_circuit=lambda _: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -10337,7 +10327,6 @@ def test_nilm_processor_coverage_counts_unique_sessions_before_retention() -> No
         )
         processor = processors.NilmSampleProcessor(
             nilm_enabled=lambda _: True,
-            seed_demo_nilm_state=lambda *_: None,
             min_delta_w_for_circuit=lambda _: 100.0,
             detectors={},
             total_events_by_circuit=defaultdict(int),
@@ -10476,7 +10465,6 @@ def test_nilm_processor_process_ignores_expired_component_exclusions() -> None:
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _: True,
-        seed_demo_nilm_state=lambda *_: None,
         min_delta_w_for_circuit=lambda _: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -10566,7 +10554,7 @@ def test_nilm_processor_retains_persisted_truncation_coverage_after_restart(
             }
         )
     restarted = processors.NilmSampleProcessor(
-        nilm_enabled=lambda _: True, seed_demo_nilm_state=lambda *_: None,
+        nilm_enabled=lambda _: True,
         min_delta_w_for_circuit=lambda _: 100.0, detectors={},
         total_events_by_circuit=defaultdict(int),
         unmatched_edges_by_circuit=defaultdict(list), ignored_signatures=set(),
@@ -10768,7 +10756,6 @@ def test_nilm_processor_restart_merges_persisted_truncation_coverage(
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _: True,
-        seed_demo_nilm_state=lambda *_: None,
         min_delta_w_for_circuit=lambda _: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -10905,7 +10892,6 @@ def test_nilm_processor_dropped_stable_session_is_conservative_after_restart(
     def process_after_restart() -> object:
         processor = processors.NilmSampleProcessor(
             nilm_enabled=lambda _: True,
-            seed_demo_nilm_state=lambda *_: None,
             min_delta_w_for_circuit=lambda _: 100.0,
             detectors={},
             total_events_by_circuit=defaultdict(int),
@@ -11046,7 +11032,6 @@ def test_nilm_processor_incomplete_coverage_survives_capacity_changes(
     def process_after_restart() -> object:
         processor = processors.NilmSampleProcessor(
             nilm_enabled=lambda _: True,
-            seed_demo_nilm_state=lambda *_: None,
             min_delta_w_for_circuit=lambda _: 100.0,
             detectors={},
             total_events_by_circuit=defaultdict(int),
@@ -11119,7 +11104,6 @@ def test_nilm_processor_invalid_dropped_identities_do_not_become_aliases() -> No
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _: True,
-        seed_demo_nilm_state=lambda *_: None,
         min_delta_w_for_circuit=lambda _: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -11251,7 +11235,6 @@ def test_nilm_processor_bounds_direct_history_before_all_consumers(
     def process_after_restart() -> object:
         processor = processors.NilmSampleProcessor(
             nilm_enabled=lambda _: True,
-            seed_demo_nilm_state=lambda *_: None,
             min_delta_w_for_circuit=lambda _: 100.0,
             detectors={},
             total_events_by_circuit=defaultdict(int),
@@ -11348,7 +11331,6 @@ def test_nilm_processor_projects_direct_history_before_snapshot() -> None:
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _: True,
-        seed_demo_nilm_state=lambda *_: None,
         min_delta_w_for_circuit=lambda _: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -11420,7 +11402,6 @@ def test_nilm_processor_rejects_out_of_range_timestamp_before_inventory_math() -
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _: True,
-        seed_demo_nilm_state=lambda *_: None,
         min_delta_w_for_circuit=lambda _: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -11463,7 +11444,6 @@ def test_nilm_processor_enforces_the_global_2000_row_history_cap() -> None:
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _: True,
-        seed_demo_nilm_state=lambda *_: None,
         min_delta_w_for_circuit=lambda _: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -11503,7 +11483,6 @@ def test_nilm_processor_rejects_unproven_ingress_counts_before_coverage() -> Non
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _: True,
-        seed_demo_nilm_state=lambda *_: None,
         min_delta_w_for_circuit=lambda _: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -11690,7 +11669,6 @@ def test_nilm_processor_component_bridges_and_disjoint_novelty_are_stable(
         )
         processor = processors.NilmSampleProcessor(
             nilm_enabled=lambda _: True,
-            seed_demo_nilm_state=lambda *_: None,
             min_delta_w_for_circuit=lambda _: 100.0,
             detectors={},
             total_events_by_circuit=defaultdict(int),
@@ -11808,7 +11786,6 @@ def test_nilm_processor_transitive_session_edge_conflicts_are_order_stable() -> 
         )
         processor = processors.NilmSampleProcessor(
             nilm_enabled=lambda _: True,
-            seed_demo_nilm_state=lambda *_: None,
             min_delta_w_for_circuit=lambda _: 100.0,
             detectors={},
             total_events_by_circuit=defaultdict(int),
@@ -11879,7 +11856,6 @@ def test_nilm_sample_processor_caps_runtime_unmatched_edges() -> None:
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _circuit_id: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -11982,7 +11958,6 @@ def test_nilm_processor_restores_raw_edges_before_legacy_sessions() -> (
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _circuit_id: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -12314,7 +12289,6 @@ def test_nilm_pending_edge_defers_when_previous_truth_is_invalid(
     }
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _id: 20.0,
         detectors={"mixed": PendingDetector()},
         total_events_by_circuit=defaultdict(int),
@@ -12429,7 +12403,6 @@ def test_nilm_future_pending_truth_defers_then_confirms_without_double_energy() 
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _id: 20.0,
         detectors={"mixed": ConfirmingDetector()},
         total_events_by_circuit=defaultdict(int),
@@ -12591,7 +12564,6 @@ def test_nilm_sample_processor_preserves_delayed_overallocation_conflict() -> No
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _id: 20.0,
         detectors={"mixed": DelayedDetector()},
         total_events_by_circuit=defaultdict(int),
@@ -14376,7 +14348,6 @@ def test_signature_payload_rebinds_confirmed_placeholder_owner() -> None:
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _id: 20.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -14458,7 +14429,6 @@ def test_nilm_signature_payload_migrates_unique_v1_metadata() -> None:
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _id: 20.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -14529,7 +14499,6 @@ def test_nilm_signature_payload_retains_ambiguous_legacy_split_for_review() -> N
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _id: 20.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -14600,7 +14569,6 @@ def test_nilm_signature_payload_enriches_confidence_from_validation_precision() 
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _id: 20.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -14680,7 +14648,6 @@ def test_assigned_signature_drives_w_var_component_runtime() -> None:
     }
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _id: 20.0,
         detectors={"mixed": Detector()},
         total_events_by_circuit=defaultdict(int),
@@ -15284,7 +15251,6 @@ def test_processor_keeps_only_rejected_reconciliation_edges_unknown() -> None:
         )
         processor = processors.NilmSampleProcessor(
             nilm_enabled=lambda _config: True,
-            seed_demo_nilm_state=lambda _config, _now: None,
             min_delta_w_for_circuit=lambda _id: 20.0,
             detectors={"mixed": Detector()},
             total_events_by_circuit=defaultdict(int),
@@ -15362,7 +15328,6 @@ def test_nilm_sample_processor_matches_confirmed_edge_to_known_event(
     observed_matches = []
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _circuit_id: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -15464,7 +15429,6 @@ def test_nilm_sample_processor_persists_known_load_attribution_without_write_chu
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _circuit_id: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -15572,7 +15536,6 @@ def test_nilm_sample_processor_reconciles_only_known_load_residual(
     monkeypatch.setattr(nilm_sample, "reconcile_component_runtime", reconcile)
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _circuit_id: min_delta_w,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -15674,7 +15637,6 @@ def test_nilm_sample_processor_keeps_equal_fresh_edge_when_persisted_edge_matche
     unmatched = defaultdict(list, {"mains": [persisted]})
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda *_args: None,
         min_delta_w_for_circuit=lambda _id: 100.0,
         detectors={"mains": Detector()},
         total_events_by_circuit=defaultdict(int),
@@ -15766,7 +15728,6 @@ def test_nilm_sample_processor_keeps_mixed_known_load_edges_unmatched() -> None:
     observed_matches = []
     processor = processors.NilmSampleProcessor(
         nilm_enabled=controller.enabled_for_config,
-        seed_demo_nilm_state=controller.seed_demo_state,
         min_delta_w_for_circuit=lambda _circuit_id: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -15856,7 +15817,6 @@ def test_nilm_sample_processor_collects_helper_candidate_statistics() -> None:
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _id: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -15979,7 +15939,6 @@ def test_nilm_helper_candidates_ignore_edges_before_observation_window() -> None
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=lambda _config: True,
-        seed_demo_nilm_state=lambda _config, _now: None,
         min_delta_w_for_circuit=lambda _id: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -16152,7 +16111,6 @@ def test_nilm_sample_processor_processes_only_configured_source_kinds(
     )
     processor = processors.NilmSampleProcessor(
         nilm_enabled=controller.enabled_for_config,
-        seed_demo_nilm_state=controller.seed_demo_state,
         min_delta_w_for_circuit=lambda _circuit_id: 100.0,
         detectors={},
         total_events_by_circuit=defaultdict(int),
@@ -16410,7 +16368,6 @@ def test_standby_processor_updates_state_and_returns_always_on_alert() -> None:
             min_samples=6,
         ),
         alert_policy_for_circuit=lambda _circuit_id: policy,
-        seed_demo_history=lambda _config, _sample, _context, _settings: None,
     )
 
     result = processor.process(_sample(0, 46.0), config, context)
@@ -16516,7 +16473,6 @@ def test_standby_processor_alert_features_include_contextual_baseline_details() 
             min_samples=6,
         ),
         alert_policy_for_circuit=lambda _circuit_id: policy,
-        seed_demo_history=lambda _config, _sample, _context, _settings: None,
     )
 
     result = processor.process(_sample(0, 46.0), config, context)
@@ -16541,102 +16497,6 @@ def test_standby_processor_alert_features_include_contextual_baseline_details() 
         ]
         == "standby_power_w"
     )
-
-
-def test_standby_processor_learning_path_uses_demo_seeder_without_alert() -> None:
-    from custom_components.circuitsetup_energy_analyzer import processors
-    from custom_components.circuitsetup_energy_analyzer.coordinator import (
-        AnalyzerState,
-    )
-    from custom_components.circuitsetup_energy_analyzer.processors.base import (
-        ProcessingContext,
-    )
-
-    now = datetime(2026, 6, 11, 12, 0, tzinfo=UTC)
-    context = ProcessingContext(
-        now=now,
-        hass=SimpleNamespace(data={DOMAIN: {}}),
-        state=AnalyzerState(),
-        store_data=FeatureStoreData(
-            standby_by_circuit={
-                "office": {
-                    "standby_sample_format": "1m-min-v1",
-                    "samples": [
-                        {
-                            "timestamp": (now - timedelta(seconds=30)).isoformat(),
-                            "real_power_w": 5.0,
-                        },
-                        {
-                            "timestamp": (now - timedelta(seconds=10)).isoformat(),
-                            "real_power_w": 3.0,
-                        },
-                    ]
-                }
-            }
-        ),
-        options={},
-        entry_data={},
-        known_load_circuit_ids=frozenset(),
-        sensitivity="standard",
-    )
-    config = CircuitConfig(
-        circuit_id="office",
-        name="Office",
-        appliance_profile=ApplianceProfile.MOTOR_LOAD,
-        mode=CircuitMode.SINGLE_PHASE,
-    )
-    seeded: list[str] = []
-
-    def seed_demo_history(
-        seeded_config: CircuitConfig,
-        _sample: CircuitSample,
-        seeded_context: ProcessingContext,
-        settings: StandbySettings,
-    ) -> None:
-        seeded.append(seeded_config.circuit_id)
-        assert seeded_context is context
-        assert settings.min_samples == 4
-
-    processor = processors.StandbyProcessor(
-        settings_for_config=lambda _config, _circuit_id: StandbySettings(
-            min_samples=4,
-        ),
-        alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
-        seed_demo_history=seed_demo_history,
-    )
-
-    result = processor.process(_sample(0, 4.0), config, context)
-
-    assert seeded == ["office"]
-    assert result.store_dirty is True
-    assert result.alerts == []
-    assert context.store_data.standby_by_circuit["office"] == {
-            "standby_sample_format": "1m-min-v1",
-            "samples": [
-                {
-                    "timestamp": (now - timedelta(seconds=30)).isoformat(),
-                    "real_power_w": 5.0,
-                },
-                {
-                    "timestamp": (now - timedelta(seconds=10)).isoformat(),
-                    "real_power_w": 3.0,
-                },
-            {"timestamp": now.isoformat(), "real_power_w": 4.0},
-        ],
-    }
-    updates = {update.path: update.value for update in result.state_updates}
-    assert updates[("always_on_power_w_by_circuit", "office")] == 0.0
-    assert updates[("standby_status_by_circuit", "office")] == "learning"
-    assert updates[("standby_evidence_by_circuit", "office")] == {
-        "always_on_power_w": 0.0,
-        "current_power_w": 4.0,
-        "standby_threshold_w": 8.0,
-        "sample_count": 3,
-        "window_hours": 48,
-        "always_on_alert_w": None,
-        "always_on_limit_usage_percent": 0.0,
-        "status": "learning",
-    }
 
 
 def test_power_quality_processor_updates_generation_state_and_returns_alert() -> None:
@@ -16758,8 +16618,6 @@ def test_power_quality_processor_updates_generation_state_and_returns_alert() ->
     processor = processors.PowerQualityProcessor(
         alert_policy_for_circuit=lambda _circuit_id: policy,
         learning_mature=lambda _config, _now: True,
-        seed_demo_event_history=lambda _config, _now: None,
-        seed_demo_power_quality_baselines=lambda _config, _features: None,
     )
 
     result = processor.process(sample, config, context)
@@ -16814,8 +16672,6 @@ def test_power_quality_processor_marks_mixed_circuit_aggregate_ready(
     processor = processors.PowerQualityProcessor(
         alert_policy_for_circuit=lambda _circuit_id: policy,
         learning_mature=lambda _config, _now: True,
-        seed_demo_event_history=lambda _config, _now: None,
-        seed_demo_power_quality_baselines=lambda _config, _features: None,
     )
 
     result = processor.process(
@@ -16879,8 +16735,6 @@ def test_power_quality_processor_requests_clear_when_features_missing() -> None:
     processor = processors.PowerQualityProcessor(
         alert_policy_for_circuit=lambda _circuit_id: _CaptureAlertPolicy(),
         learning_mature=lambda _config, _now: True,
-        seed_demo_event_history=lambda _config, _now: None,
-        seed_demo_power_quality_baselines=lambda _config, _features: None,
     )
 
     result = processor.process(sample, config, context)
@@ -16940,12 +16794,6 @@ def test_power_quality_processor_does_not_learn_during_maintenance() -> None:
     processor = processors.PowerQualityProcessor(
         alert_policy_for_circuit=lambda _circuit_id: policy,
         learning_mature=lambda _config, _now: True,
-        seed_demo_event_history=lambda config, _now: seeded_events.append(
-            config.circuit_id
-        ),
-        seed_demo_power_quality_baselines=lambda _config, features: seeded.append(
-            dict(features)
-        ),
         baseline_values=baseline_values,
     )
 

@@ -10,7 +10,6 @@ from statistics import median
 from typing import Any
 
 from ..const import DOMAIN
-from ..demo import demo_nilm_workspace_seed, is_demo_config
 from ..discovery import sensor_metadata_role_conflict, sensor_role_from_metadata
 from ..models import (
     AlertEvidence,
@@ -22,7 +21,6 @@ from ..models import (
 )
 from ..nilm import (
     KnownLoadTopology,
-    NilmEdge,
     build_nilm_assignment_model,
     build_nilm_validation_profile,
     evaluate_nilm_validation_readiness,
@@ -380,60 +378,6 @@ class NilmController:
             coordinator.state,
             result.state_updates,
         )
-
-    def seed_demo_state(self, config: Any, now: datetime) -> None:
-        """Seed bundled NILM workspace demo data when the demo source is active."""
-        if not is_demo_config(config):
-            return
-
-        coordinator = self._coordinator
-        circuit_id = config.circuit_id
-        seed = demo_nilm_workspace_seed(now, circuit_id=circuit_id)
-
-        if not coordinator.store_data.nilm_signatures.get(circuit_id):
-            coordinator.store_data.nilm_signatures[circuit_id] = _demo_seed_list(
-                seed.get("signatures"),
-            )
-            coordinator.store_persistence.mark_dirty()
-
-        if not coordinator.store_data.nilm_unknown_loads_by_circuit.get(circuit_id):
-            unknown_loads = seed.get("unknown_loads")
-            if isinstance(unknown_loads, Mapping):
-                coordinator.store_data.nilm_unknown_loads_by_circuit[circuit_id] = dict(
-                    unknown_loads
-                )
-            coordinator.store_persistence.mark_dirty()
-
-        if not coordinator.store_data.nilm_session_history_by_circuit.get(circuit_id):
-            coordinator.store_data.nilm_session_history_by_circuit[circuit_id] = (
-                _demo_seed_list(seed.get("sessions"))
-            )
-            coordinator.store_persistence.mark_dirty()
-
-        if not coordinator.store_data.nilm_label_intervals_by_circuit.get(circuit_id):
-            coordinator.store_data.nilm_label_intervals_by_circuit[circuit_id] = (
-                _demo_seed_list(seed.get("label_intervals"))
-            )
-            coordinator.store_persistence.mark_dirty()
-
-        if not coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
-            circuit_id,
-        ):
-            coordinator.store_data.nilm_appliance_assignments_by_circuit[circuit_id] = (
-                _demo_seed_list(seed.get("assignments"))
-            )
-            coordinator.store_persistence.mark_dirty()
-
-        total_events_by_circuit = self._total_events_by_circuit
-        unmatched_edges_by_circuit = self._unmatched_edges_by_circuit
-        total_events_by_circuit[circuit_id] = max(
-            total_events_by_circuit[circuit_id],
-            int(seed.get("total_events") or 0),
-        )
-        if not unmatched_edges_by_circuit[circuit_id]:
-            unmatched_edges_by_circuit[circuit_id] = _demo_nilm_edges(seed.get("edges"))
-        unmatched_edges = unmatched_edges_by_circuit[circuit_id]
-        unmatched_edges_by_circuit[circuit_id] = unmatched_edges[:8]
 
     def hydrate_state_from_store(self) -> None:
         """Hydrate NILM runtime state from retained store data."""
@@ -4450,25 +4394,6 @@ def _alert_feature(alert: AlertEvidence) -> str:
     if alert.event_type is not None:
         return alert.event_type.value
     return "alert"
-
-
-def _demo_seed_list(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    return [dict(item) for item in value if isinstance(item, Mapping)]
-
-
-def _demo_nilm_edges(value: Any) -> list[NilmEdge]:
-    edges: list[NilmEdge] = []
-    for raw_edge in _demo_seed_list(value):
-        timestamp = _datetime_or_none(raw_edge.pop("timestamp", None))
-        if timestamp is None:
-            continue
-        try:
-            edges.append(NilmEdge(timestamp=timestamp, **raw_edge))
-        except TypeError:
-            continue
-    return edges
 
 
 def _datetime_or_none(value: Any) -> datetime | None:

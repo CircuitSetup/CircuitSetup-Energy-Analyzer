@@ -381,12 +381,7 @@ async def _async_recorder_statistic_ids(hass: Any) -> list[str]:
     if fake_statistic_ids is not None:
         return [str(statistic_id) for statistic_id in fake_statistic_ids]
 
-    try:
-        from homeassistant.components.recorder.statistics import (
-            async_list_statistic_ids,
-        )
-    except (ImportError, ModuleNotFoundError):
-        return []
+    from homeassistant.components.recorder.statistics import async_list_statistic_ids
 
     try:
         statistics = await async_list_statistic_ids(hass)

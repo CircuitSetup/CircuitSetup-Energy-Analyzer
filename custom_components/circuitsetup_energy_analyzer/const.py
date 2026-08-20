@@ -1,23 +1,6 @@
 from __future__ import annotations
 
-from enum import StrEnum
-
-try:
-    from homeassistant.const import Platform
-except ModuleNotFoundError:
-
-    class Platform(StrEnum):
-        """Fallback platform enum for unit tests without Home Assistant installed."""
-
-        SENSOR = "sensor"
-        BINARY_SENSOR = "binary_sensor"
-        BUTTON = "button"
-        SELECT = "select"
-        NUMBER = "number"
-        SWITCH = "switch"
-        TEXT = "text"
-        TIME = "time"
-
+from homeassistant.const import Platform
 
 DOMAIN = "circuitsetup_energy_analyzer"
 DATA_RELOAD_COUNT = "_reload_count"
@@ -38,7 +21,6 @@ CONF_CIRCUITS = "circuits"
 CONF_CIRCUIT_ASSIGNMENTS = "circuit_assignments"
 CONF_ADVANCED_SETTINGS = "advanced_settings"
 CONF_DASHBOARD_LAYOUT = "dashboard_layout"
-CONF_DEMO_SOURCE_BUNDLE_ENABLED = "demo_source_bundle_enabled"
 CONF_ENABLE_EXPERIMENTAL_NILM = "enable_experimental_nilm"
 CONF_ENTITY_DETAIL_LEVEL = "entity_detail_level"
 CONF_EXTRA_SOURCE_ENTITIES = "extra_source_entities"
@@ -64,14 +46,10 @@ CONF_FLOW_MISMATCH_THRESHOLD_MINUTES = "flow_mismatch_threshold_minutes"
 CONF_LINKED_FLOW_SENSOR_ENTITIES = "linked_flow_sensor_entities"
 CONF_EXPECTS_WATER_FLOW = "expects_water_flow"
 CONF_THERMOSTAT_ENTITIES = "thermostat_entities"
-CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES = (
-    "thermostat_temperature_sensor_entities"
-)
+CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES = "thermostat_temperature_sensor_entities"
 CONF_LINKED_THERMOSTAT_ENTITIES = "linked_thermostat_entities"
 CONF_THERMOSTAT_TEMPERATURE_SENSOR_MAP = "thermostat_temperature_sensor_map"
-CONF_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT = (
-    "hvac_efficiency_change_threshold_pct"
-)
+CONF_HVAC_EFFICIENCY_CHANGE_THRESHOLD_PCT = "hvac_efficiency_change_threshold_pct"
 CONF_BLOWER_REPRESENTS_GAS_HEAT = "blower_represents_gas_heat"
 
 DEFAULT_ENABLE_EXPERIMENTAL_NILM = False

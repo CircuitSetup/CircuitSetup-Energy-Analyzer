@@ -8,6 +8,9 @@ from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import Any
 
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
+
 from . import notifications
 from .const import DOMAIN, NILM_INTERVAL_CHANGES_MAX_ITEMS
 from .discovery import sensor_metadata_role_conflict, sensor_role_from_metadata
@@ -22,19 +25,6 @@ from .nilm_interval_evidence import (
     normalize_power_samples,
 )
 from .ux import SENSITIVITY_VALUES
-
-try:
-    from homeassistant.exceptions import HomeAssistantError
-except ModuleNotFoundError:
-
-    class HomeAssistantError(Exception):
-        """Fallback Home Assistant service error for tests without HA installed."""
-
-
-try:
-    from homeassistant.helpers import entity_registry as er
-except ModuleNotFoundError:
-    er = None
 
 SERVICE_RELEARN_BASELINE = "relearn_baseline"
 SERVICE_MARK_CIRCUIT_MIXED = "mark_circuit_mixed"
@@ -205,10 +195,7 @@ class _FallbackSchema:
 
 
 def _schema(required: tuple[str, ...] = (), optional: tuple[str, ...] = ()) -> Callable:
-    try:
-        import voluptuous as vol
-    except ModuleNotFoundError:
-        return _FallbackSchema(required, optional)
+    import voluptuous as vol
 
     fields: dict[Any, Any] = {}
     for field in required:
@@ -680,12 +667,8 @@ def _recommendation_action_schema() -> Callable:
         values = base_schema(data)
         if values.get(ATTR_RECOMMENDATION_ID) or values.get(ATTR_ENTITY_ID):
             return values
-        try:
-            import voluptuous as vol
-        except ModuleNotFoundError as err:
-            raise ValueError(
-                "Missing recommendation_id or entity_id.",
-            ) from err
+        import voluptuous as vol
+
         raise vol.Invalid("Missing recommendation_id or entity_id.")
 
     return validate
@@ -736,9 +719,7 @@ _SERVICE_SCHEMAS: dict[str, Callable | None] = {
     SERVICE_SET_NILM_REFERENCE_LINK: NILM_SET_REFERENCE_LINK_SERVICE_SCHEMA,
     SERVICE_REMOVE_NILM_REFERENCE_LINK: NILM_REMOVE_REFERENCE_LINK_SERVICE_SCHEMA,
     SERVICE_SET_CIRCUIT_SENSITIVITY: SENSITIVITY_SERVICE_SCHEMA,
-    SERVICE_SET_NILM_DETECTION_SENSITIVITY: (
-        NILM_DETECTION_SENSITIVITY_SERVICE_SCHEMA
-    ),
+    SERVICE_SET_NILM_DETECTION_SENSITIVITY: (NILM_DETECTION_SENSITIVITY_SERVICE_SCHEMA),
     SERVICE_SET_ENERGY_USAGE_SETTINGS: ENERGY_USAGE_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_ENERGY_GOAL_SETTINGS: ENERGY_GOAL_SETTINGS_SERVICE_SCHEMA,
     SERVICE_SET_ACTIVITY_ALERT_SETTINGS: ACTIVITY_ALERT_SETTINGS_SERVICE_SCHEMA,
@@ -1094,9 +1075,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 )
             ]
             if assignment_id
-            else _target_nilm_coordinators(
-                hass, circuit_id, data.get(ATTR_ENTRY_ID)
-            )
+            else _target_nilm_coordinators(hass, circuit_id, data.get(ATTR_ENTRY_ID))
         )
         history_cache: dict[str, Any] = {}
         for coordinator in targets:
@@ -1106,18 +1085,23 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             requested_power_entity_id = str(
                 data.get(ATTR_REFERENCE_POWER_ENTITY_ID) or ""
             ).strip()
-            power_entity_id = requested_power_entity_id or str(
-                (assignment.get(ATTR_REFERENCE_POWER_ENTITY_ID) if assignment else "")
-                or ""
-            ).strip()
+            power_entity_id = (
+                requested_power_entity_id
+                or str(
+                    (
+                        assignment.get(ATTR_REFERENCE_POWER_ENTITY_ID)
+                        if assignment
+                        else ""
+                    )
+                    or ""
+                ).strip()
+            )
             stored_state_entity_id = str(
                 (assignment.get(ATTR_REFERENCE_STATE_ENTITY_ID) if assignment else "")
                 or ""
             ).strip()
             state_entity_id = (
-                ground_truth_entity_id
-                or stored_state_entity_id
-                or power_entity_id
+                ground_truth_entity_id or stored_state_entity_id or power_entity_id
             )
             if not state_entity_id:
                 raise HomeAssistantError(
@@ -2766,9 +2750,7 @@ def _nilm_reference_evidence(
         "start_boundary_uncertainty_seconds": (
             interval.start_boundary_uncertainty_seconds
         ),
-        "end_boundary_uncertainty_seconds": (
-            interval.end_boundary_uncertainty_seconds
-        ),
+        "end_boundary_uncertainty_seconds": (interval.end_boundary_uncertainty_seconds),
         "quality_flags": sorted(flags)[:32],
         "ground_truth_entity_id": state_entity_id,
         "reference_power_entity_id": power_entity_id,
@@ -3092,18 +3074,14 @@ async def _async_nilm_sensor_history_rows(
 
 
 def _history_get_significant_states() -> Any:
-    try:
-        from homeassistant.components.recorder.history import get_significant_states
-    except ModuleNotFoundError:
-        return None
+    from homeassistant.components.recorder.history import get_significant_states
+
     return get_significant_states
 
 
 def _recorder_get_instance(hass: Any) -> Any:
-    try:
-        from homeassistant.components.recorder import get_instance
-    except ModuleNotFoundError:
-        return None
+    from homeassistant.components.recorder import get_instance
+
     try:
         return get_instance(hass)
     except Exception:

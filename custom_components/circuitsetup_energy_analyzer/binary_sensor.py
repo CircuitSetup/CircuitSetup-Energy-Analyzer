@@ -4,6 +4,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
+from homeassistant.components.binary_sensor import BinarySensorEntity
+
 from .const import (
     CONF_ADVANCED_SETTINGS,
     CONF_LINKED_FLOW_SENSOR_ENTITIES,
@@ -37,13 +39,6 @@ from .nilm_virtual import (
 )
 from .profiles import supports_direct_appliance_analysis
 from .state import circuit_is_learning
-
-try:
-    from homeassistant.components.binary_sensor import BinarySensorEntity
-except ModuleNotFoundError:
-
-    class BinarySensorEntity:
-        """Fallback binary sensor base for tests without Home Assistant."""
 
 
 def is_learning(
@@ -203,11 +198,9 @@ class CircuitAnalyzerBinarySensor(CircuitAnalyzerEntity, BinarySensorEntity):
         )
         self._attr_device_class = description.device_class
         self._attr_entity_category = description.entity_category
-        self._attr_entity_registry_enabled_default = (
-            entity_enabled_default_for_tier(
-                description.entity_tier,
-                entity_detail_level_for_coordinator(coordinator),
-            )
+        self._attr_entity_registry_enabled_default = entity_enabled_default_for_tier(
+            description.entity_tier,
+            entity_detail_level_for_coordinator(coordinator),
         )
         self._attr_entity_registry_visible_default = (
             description.entity_registry_visible_default
@@ -322,9 +315,7 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         descriptions = tuple(
             description
             for description in BINARY_SENSOR_DESCRIPTIONS
-            if binary_sensor_description_applies(
-                description, raw_circuit, coordinator
-            )
+            if binary_sensor_description_applies(description, raw_circuit, coordinator)
         )
         descriptions = compact_descriptions_for_setup(
             "binary_sensor",
@@ -421,10 +412,14 @@ def _has_water_flow_source(coordinator: Any | None, circuit: Any | None = None) 
         return False
     for field_name in ("options", "entry_data"):
         container = getattr(coordinator, field_name, {})
-        value = container.get(CONF_WATER_FLOW_SENSOR_ENTITIES) if isinstance(
-            container,
-            dict,
-        ) else None
+        value = (
+            container.get(CONF_WATER_FLOW_SENSOR_ENTITIES)
+            if isinstance(
+                container,
+                dict,
+            )
+            else None
+        )
         if isinstance(value, str) and value.strip():
             return True
         if isinstance(value, (list, tuple, set)) and any(

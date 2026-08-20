@@ -3531,42 +3531,6 @@ def test_nilm_controller_observes_known_load_topology() -> None:
     )
 
 
-def test_nilm_controller_seeds_demo_workspace_state() -> None:
-    from custom_components.circuitsetup_energy_analyzer import (
-        coordinator as coordinator_module,
-    )
-
-    now = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
-    coordinator = coordinator_module.EnergyAnalyzerCoordinator(
-        SimpleNamespace(data={}),
-        now_fn=lambda: now,
-    )
-    config = CircuitConfig(
-        circuit_id="cs_energy_analyzer_demo_mains_nilm",
-        name="Demo Mains NILM",
-        appliance_profile=ApplianceProfile.MAINS_NILM,
-        mode=CircuitMode.MAINS_NILM,
-        sensors=(
-            SensorRef(
-                entity_id=("sensor.cs_energy_analyzer_demo_mains_nilm_active_power"),
-                role=SensorRole.REAL_POWER,
-            ),
-        ),
-    )
-
-    coordinator.nilm_controller.seed_demo_state(config, now)
-
-    circuit_id = config.circuit_id
-    assert coordinator.store_data.nilm_signatures[circuit_id]
-    assert coordinator.store_data.nilm_unknown_loads_by_circuit[circuit_id]
-    assert coordinator.store_data.nilm_session_history_by_circuit[circuit_id]
-    assert coordinator.store_data.nilm_label_intervals_by_circuit[circuit_id]
-    assert coordinator.store_data.nilm_appliance_assignments_by_circuit[circuit_id]
-    assert coordinator._nilm_total_events_by_circuit[circuit_id] > 0
-    assert coordinator._nilm_unmatched_edges[circuit_id]
-    assert coordinator._store_dirty is True
-
-
 def test_nilm_controller_hydrates_ignored_signatures_from_store() -> None:
     from custom_components.circuitsetup_energy_analyzer import (
         coordinator as coordinator_module,
@@ -8120,95 +8084,6 @@ def test_append_weather_context_history_replaces_same_ha_local_day() -> None:
             "duty_cycle_percent": 30.0,
             "start_count": 2,
         }
-    ]
-
-
-def test_demo_energy_usage_history_uses_ha_local_seed_dates() -> None:
-    from custom_components.circuitsetup_energy_analyzer.coordinator import (
-        EnergyAnalyzerCoordinator,
-    )
-    from custom_components.circuitsetup_energy_analyzer.usage import (
-        EnergyUsageSettings,
-    )
-
-    now = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
-    coordinator = EnergyAnalyzerCoordinator(
-        SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
-        store_data=FeatureStoreData(),
-        now_fn=lambda: now,
-    )
-    config = CircuitConfig(
-        circuit_id="cs_energy_analyzer_demo_refrigerator",
-        name="Demo Refrigerator",
-        appliance_profile=ApplianceProfile.REFRIGERATOR,
-        mode=CircuitMode.SINGLE_PHASE,
-        sensors=(
-            SensorRef(
-                entity_id="sensor.cs_energy_analyzer_demo_refrigerator_energy",
-                role=SensorRole.ENERGY,
-            ),
-        ),
-    )
-
-    coordinator.demo_data.seed_energy_usage_history(
-        config,
-        SimpleNamespace(energy=52.6),
-        now,
-        EnergyUsageSettings(window_days=7),
-    )
-
-    history = coordinator.store_data.energy_usage_by_circuit[config.circuit_id]
-    assert history["_demo_seed_date"] == "2026-05-31"
-    assert [day["date"] for day in history["days"]] == [
-        "2026-05-24",
-        "2026-05-25",
-        "2026-05-26",
-        "2026-05-27",
-        "2026-05-28",
-        "2026-05-29",
-        "2026-05-30",
-    ]
-
-
-def test_demo_weather_context_history_uses_ha_local_prior_days() -> None:
-    from custom_components.circuitsetup_energy_analyzer.coordinator import (
-        EnergyAnalyzerCoordinator,
-    )
-
-    now = datetime(2026, 6, 1, 3, 30, tzinfo=UTC)
-    coordinator = EnergyAnalyzerCoordinator(
-        SimpleNamespace(config=SimpleNamespace(time_zone="America/New_York")),
-        store_data=FeatureStoreData(),
-        now_fn=lambda: now,
-    )
-    config = CircuitConfig(
-        circuit_id="cs_energy_analyzer_demo_hvac",
-        name="Demo HVAC",
-        appliance_profile=ApplianceProfile.HVAC,
-        mode=CircuitMode.DUAL_PHASE,
-        sensors=(
-            SensorRef(
-                entity_id="sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
-                role=SensorRole.REAL_POWER,
-            ),
-        ),
-    )
-
-    coordinator.demo_data.seed_weather_context_history(
-        config,
-        now,
-        outdoor_temperature=86.0,
-    )
-
-    history = coordinator.store_data.weather_context_history_by_circuit[
-        config.circuit_id
-    ]
-    assert [item["timestamp"] for item in history] == [
-        "2026-05-24T16:00:00+00:00",
-        "2026-05-25T16:00:00+00:00",
-        "2026-05-26T16:00:00+00:00",
-        "2026-05-27T16:00:00+00:00",
-        "2026-05-28T16:00:00+00:00",
     ]
 
 
@@ -13224,480 +13099,6 @@ def test_runtime_keeps_saved_mains_role_when_metadata_is_inconclusive() -> None:
     )
 
 
-@pytest.mark.asyncio
-async def test_demo_source_entities_are_treated_as_current_for_data_quality() -> None:
-    from custom_components.circuitsetup_energy_analyzer.coordinator import (
-        EnergyAnalyzerCoordinator,
-    )
-
-    now = datetime(2026, 6, 7, 12, 0, tzinfo=UTC)
-    old_timestamp = now - timedelta(hours=2)
-    circuit_id = "cs_energy_analyzer_demo_refrigerator"
-
-    class FakeStates:
-        def get(self, entity_id: str):
-            assert entity_id == (
-                "sensor.cs_energy_analyzer_demo_refrigerator_active_power"
-            )
-            return SimpleNamespace(
-                state="285",
-                attributes={"unit_of_measurement": "W"},
-                last_updated=old_timestamp,
-            )
-
-    coordinator = EnergyAnalyzerCoordinator(
-        SimpleNamespace(states=FakeStates(), data={DOMAIN: {}}),
-        entry_data={
-            CONF_CIRCUITS: [
-                {
-                    "circuit_id": circuit_id,
-                    "name": "Refrigerator",
-                    "mode": "single_phase",
-                    "appliance_profile": "refrigerator",
-                    "sensors": [
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_refrigerator_active_power"
-                            ),
-                            "role": "real_power",
-                        },
-                    ],
-                }
-            ],
-        },
-        now_fn=lambda: now,
-    )
-
-    await coordinator.async_process_update()
-
-    assert circuit_id not in coordinator.state.data_quality_by_circuit
-    checklist = coordinator.state.data_quality_checklist_by_circuit[circuit_id]
-    assert checklist["source_data_fresh"] is True
-    assert not any("stale" in issue for issue in checklist["quality_issues"])
-
-
-def test_demo_source_states_use_registered_suffixed_entity_ids() -> None:
-    from custom_components.circuitsetup_energy_analyzer.coordinator import (
-        EnergyAnalyzerCoordinator,
-    )
-
-    now = datetime(2026, 6, 7, 12, 0, tzinfo=UTC)
-    canonical_entity_id = "sensor.cs_energy_analyzer_demo_refrigerator_energy"
-    registered_entity_id = "sensor.cs_energy_analyzer_demo_refrigerator_energy_2"
-    config = CircuitConfig(
-        circuit_id="cs_energy_analyzer_demo_refrigerator",
-        name="Refrigerator",
-        appliance_profile=ApplianceProfile.REFRIGERATOR,
-        mode=CircuitMode.SINGLE_PHASE,
-        sensors=(SensorRef(canonical_entity_id, SensorRole.ENERGY),),
-    )
-
-    class FakeStates:
-        def get(self, entity_id: str):
-            if entity_id == canonical_entity_id:
-                return None
-            assert entity_id == registered_entity_id
-            return SimpleNamespace(
-                state="52.6",
-                attributes={"unit_of_measurement": "kWh"},
-                last_updated=now,
-            )
-
-    registry = SimpleNamespace(
-        entities={
-            registered_entity_id: SimpleNamespace(
-                entity_id=registered_entity_id,
-                unique_id=(
-                    "entry-1_demo_source_exact_"
-                    "cs_energy_analyzer_demo_refrigerator_energy"
-                ),
-                config_entry_id="entry-1",
-                platform=DOMAIN,
-            )
-        }
-    )
-    hass = SimpleNamespace(
-        states=FakeStates(),
-        data={DOMAIN: {}},
-        entity_registry=registry,
-    )
-    coordinator = EnergyAnalyzerCoordinator(
-        hass,
-        entry_id="entry-1",
-        entry_data={},
-        now_fn=lambda: now,
-    )
-
-    states = coordinator._source_states_for(config, now)
-
-    assert states[canonical_entity_id].state == "52.6"
-    assert states[canonical_entity_id].entity_id == canonical_entity_id
-
-
-@pytest.mark.asyncio
-async def test_demo_appliance_history_is_seeded_after_learning() -> None:
-    from custom_components.circuitsetup_energy_analyzer.coordinator import (
-        EnergyAnalyzerCoordinator,
-    )
-
-    now = datetime(2026, 6, 7, 12, 0, tzinfo=UTC)
-    circuit_id = "cs_energy_analyzer_demo_hvac"
-    states = {
-        "sensor.cs_energy_analyzer_demo_hvac_l1_energy": ("188.4", "kWh"),
-        "sensor.cs_energy_analyzer_demo_hvac_l2_energy": ("171.9", "kWh"),
-        "sensor.cs_energy_analyzer_demo_hvac_l1_active_power": ("3300", "W"),
-        "sensor.cs_energy_analyzer_demo_hvac_l2_active_power": ("900", "W"),
-        "sensor.cs_energy_analyzer_demo_hvac_l1_current": ("28.0", "A"),
-        "sensor.cs_energy_analyzer_demo_hvac_l2_current": ("7.4", "A"),
-        "sensor.cs_energy_analyzer_demo_hvac_l1_power_factor": ("0.72", ""),
-        "sensor.cs_energy_analyzer_demo_hvac_l2_power_factor": ("0.95", ""),
-        "sensor.cs_energy_analyzer_demo_hvac_l1_reactive_power": ("3100", "var"),
-        "sensor.cs_energy_analyzer_demo_hvac_l2_reactive_power": ("300", "var"),
-        "sensor.cs_energy_analyzer_demo_hvac_l1_apparent_power": ("4580", "VA"),
-        "sensor.cs_energy_analyzer_demo_hvac_l2_apparent_power": ("947", "VA"),
-        "sensor.cs_energy_analyzer_demo_mains_l1_voltage": ("119.6", "V"),
-        "sensor.cs_energy_analyzer_demo_mains_l2_voltage": ("120.3", "V"),
-        "sensor.demo_outdoor_temperature": ("86", "°F"),
-    }
-
-    class FakeStates:
-        def get(self, entity_id: str):
-            value, unit = states[entity_id]
-            return SimpleNamespace(
-                state=value,
-                attributes={"unit_of_measurement": unit},
-                last_updated=now,
-            )
-
-    coordinator = EnergyAnalyzerCoordinator(
-        SimpleNamespace(states=FakeStates(), data={DOMAIN: {}}),
-        entry_data={
-            CONF_OUTDOOR_TEMPERATURE_ENTITY: "sensor.demo_outdoor_temperature",
-            CONF_CIRCUITS: [
-                {
-                    "circuit_id": circuit_id,
-                    "name": "HVAC",
-                    "mode": "dual_phase",
-                    "appliance_profile": "hvac",
-                    "sensors": [
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_hvac_l1_energy"
-                            ),
-                            "role": "energy",
-                            "leg": "a",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_hvac_l2_energy"
-                            ),
-                            "role": "energy",
-                            "leg": "b",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_hvac_l1_active_power"
-                            ),
-                            "role": "real_power",
-                            "leg": "a",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_hvac_l2_active_power"
-                            ),
-                            "role": "real_power",
-                            "leg": "b",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_hvac_l1_current"
-                            ),
-                            "role": "current",
-                            "leg": "a",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_hvac_l2_current"
-                            ),
-                            "role": "current",
-                            "leg": "b",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_hvac_l1_power_factor"
-                            ),
-                            "role": "power_factor",
-                            "leg": "a",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_hvac_l2_power_factor"
-                            ),
-                            "role": "power_factor",
-                            "leg": "b",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_hvac_l1_reactive_power"
-                            ),
-                            "role": "reactive_power",
-                            "leg": "a",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_hvac_l2_reactive_power"
-                            ),
-                            "role": "reactive_power",
-                            "leg": "b",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_hvac_l1_apparent_power"
-                            ),
-                            "role": "apparent_power",
-                            "leg": "a",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_hvac_l2_apparent_power"
-                            ),
-                            "role": "apparent_power",
-                            "leg": "b",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_mains_l1_voltage"
-                            ),
-                            "role": "voltage",
-                            "leg": "a",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_mains_l2_voltage"
-                            ),
-                            "role": "voltage",
-                            "leg": "b",
-                        },
-                    ],
-                },
-            ],
-        },
-        now_fn=lambda: now,
-    )
-
-    await coordinator.async_process_update()
-
-    usage = coordinator.state.energy_usage_evidence_by_circuit[circuit_id]
-    seeded_prior_days = [
-        day
-        for day in coordinator.store_data.energy_usage_by_circuit[circuit_id]["days"]
-        if str(day.get("date", "")) < now.date().isoformat()
-    ]
-    assert seeded_prior_days
-    assert all(day.get("complete") is True for day in seeded_prior_days)
-    assert usage["baseline_day_count"] >= 7
-    assert usage["status"] != "learning"
-    assert usage["status"] != "waiting_for_delta"
-    assert coordinator.state.learning_by_circuit[circuit_id] is False
-    assert (
-        coordinator.state.learning_progress_by_circuit[circuit_id]["learning"] is False
-    )
-    weather = coordinator.state.weather_context_by_circuit[circuit_id]
-    assert weather["status"] != "learning"
-    assert weather["status"] in {
-        "weather_correlated",
-        "above_weather_adjusted_range",
-    }
-    assert coordinator.state.standby_status_by_circuit[circuit_id] != "learning"
-
-
-@pytest.mark.asyncio
-async def test_demo_mains_nilm_history_is_seeded_after_learning() -> None:
-    from custom_components.circuitsetup_energy_analyzer.coordinator import (
-        EnergyAnalyzerCoordinator,
-    )
-    from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
-        nilm_workspace_payload,
-    )
-
-    now = datetime(2026, 6, 7, 12, 0, tzinfo=UTC)
-    circuit_id = "mains_nilm"
-    states = {
-        "sensor.cs_energy_analyzer_demo_mains_l1_energy": ("868.4", "kWh"),
-        "sensor.cs_energy_analyzer_demo_mains_l2_energy": ("852.7", "kWh"),
-        "sensor.cs_energy_analyzer_demo_mains_l1_active_power": ("1850", "W"),
-        "sensor.cs_energy_analyzer_demo_mains_l2_active_power": ("1680", "W"),
-        "sensor.cs_energy_analyzer_demo_mains_l1_current": ("15.4", "A"),
-        "sensor.cs_energy_analyzer_demo_mains_l2_current": ("14.1", "A"),
-        "sensor.cs_energy_analyzer_demo_mains_l1_power_factor": ("0.96", ""),
-        "sensor.cs_energy_analyzer_demo_mains_l2_power_factor": ("0.95", ""),
-        "sensor.cs_energy_analyzer_demo_mains_l1_reactive_power": ("520", "var"),
-        "sensor.cs_energy_analyzer_demo_mains_l2_reactive_power": ("470", "var"),
-        "sensor.cs_energy_analyzer_demo_mains_l1_apparent_power": ("1927", "VA"),
-        "sensor.cs_energy_analyzer_demo_mains_l2_apparent_power": ("1768", "VA"),
-        "sensor.cs_energy_analyzer_demo_mains_l1_voltage": ("119.6", "V"),
-        "sensor.cs_energy_analyzer_demo_mains_l2_voltage": ("120.3", "V"),
-    }
-
-    class FakeStates:
-        def get(self, entity_id: str):
-            value, unit = states[entity_id]
-            return SimpleNamespace(
-                state=value,
-                attributes={"unit_of_measurement": unit},
-                last_updated=now,
-            )
-
-    coordinator = EnergyAnalyzerCoordinator(
-        SimpleNamespace(states=FakeStates(), data={DOMAIN: {}}),
-        entry_data={
-            CONF_ENABLE_EXPERIMENTAL_NILM: True,
-            CONF_CIRCUITS: [
-                {
-                    "circuit_id": circuit_id,
-                    "name": "Mains NILM",
-                    "mode": "mains_nilm",
-                    "appliance_profile": "mains_nilm",
-                    "power_flow": "mains_net",
-                    "sensors": [
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_mains_l1_energy"
-                            ),
-                            "role": "energy",
-                            "leg": "a",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_mains_l2_energy"
-                            ),
-                            "role": "energy",
-                            "leg": "b",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_mains_l1_active_power"
-                            ),
-                            "role": "real_power",
-                            "leg": "a",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_mains_l2_active_power"
-                            ),
-                            "role": "real_power",
-                            "leg": "b",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_mains_l1_current"
-                            ),
-                            "role": "current",
-                            "leg": "a",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_mains_l2_current"
-                            ),
-                            "role": "current",
-                            "leg": "b",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_mains_l1_power_factor"
-                            ),
-                            "role": "power_factor",
-                            "leg": "a",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_mains_l2_power_factor"
-                            ),
-                            "role": "power_factor",
-                            "leg": "b",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_mains_l1_reactive_power"
-                            ),
-                            "role": "reactive_power",
-                            "leg": "a",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_mains_l2_reactive_power"
-                            ),
-                            "role": "reactive_power",
-                            "leg": "b",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_mains_l1_apparent_power"
-                            ),
-                            "role": "apparent_power",
-                            "leg": "a",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_mains_l2_apparent_power"
-                            ),
-                            "role": "apparent_power",
-                            "leg": "b",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_mains_l1_voltage"
-                            ),
-                            "role": "voltage",
-                            "leg": "a",
-                        },
-                        {
-                            "entity_id": (
-                                "sensor.cs_energy_analyzer_demo_mains_l2_voltage"
-                            ),
-                            "role": "voltage",
-                            "leg": "b",
-                        },
-                    ],
-                },
-            ],
-        },
-        now_fn=lambda: now,
-    )
-
-    await coordinator.async_process_update()
-
-    usage = coordinator.state.energy_usage_evidence_by_circuit[circuit_id]
-    assert usage["baseline_day_count"] >= 7
-    assert usage["status"] != "learning"
-    assert circuit_id not in coordinator.state.learning_by_circuit
-    assert coordinator.state.nilm_signature_count_by_circuit[circuit_id] > 0
-    unknown_loads = coordinator.state.nilm_unknown_loads_by_circuit[circuit_id]
-    assert unknown_loads["unknown_load_count"] > 0
-    assert unknown_loads["active_unknown_load_count"] > 0
-    sessions = coordinator.store_data.nilm_session_history_by_circuit[circuit_id]
-    assert any(session["end"] is not None for session in sessions)
-    assert all(session["median_power_w"] > 0 for session in sessions)
-    assert all(session["pairing_confidence"] > 0 for session in sessions)
-    workspace = nilm_workspace_payload([coordinator], circuit_id=circuit_id)
-    assert workspace["edge_count"] >= 4
-    assert {edge["direction"] for edge in workspace["edges"]} == {"on", "off"}
-    assert workspace["label_interval_count"] >= 1
-    assert workspace["assignment_count"] >= 1
-    assert workspace["virtual_appliance_count"] >= 1
-    assert workspace["validation"]["metrics"]["ground_truth_interval_count"] >= 1
-    assert workspace["validation"]["metrics"]["prediction_count"] >= 1
-    assert workspace["session_count"] >= 2
-    assert {session["session_id"] for session in workspace["sessions"]} >= {
-        "demo_motor_load_l1_open",
-        "demo_resistive_load_240v_session",
-    }
-    assert any(
-        session.get("display_label") == "Demo Pool Pump"
-        for session in workspace["sessions"]
-    )
-
-
 def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -13712,47 +13113,47 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
         SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
         entry_data={
             CONF_SOURCE_ENTITIES: [
-                "sensor.cs_energy_analyzer_demo_refrigerator_energy",
-                "sensor.cs_energy_analyzer_demo_hvac_l1_energy",
-                "sensor.cs_energy_analyzer_demo_hvac_l2_energy",
-                "sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
-                "sensor.cs_energy_analyzer_demo_hvac_l2_active_power",
-                "sensor.cs_energy_analyzer_demo_hvac_l1_current",
-                "sensor.cs_energy_analyzer_demo_hvac_l2_current",
-                "sensor.cs_energy_analyzer_demo_water_heater_l1_energy",
-                "sensor.cs_energy_analyzer_demo_water_heater_l2_energy",
-                "sensor.cs_energy_analyzer_demo_water_heater_l1_active_power",
-                "sensor.cs_energy_analyzer_demo_water_heater_l2_active_power",
-                "sensor.cs_energy_analyzer_demo_water_heater_l1_current",
-                "sensor.cs_energy_analyzer_demo_water_heater_l2_current",
-                "sensor.cs_energy_analyzer_demo_washer_energy",
-                "sensor.cs_energy_analyzer_demo_washer_active_power",
-                "sensor.cs_energy_analyzer_demo_washer_current",
-                "sensor.cs_energy_analyzer_demo_washer_power_factor",
-                "sensor.cs_energy_analyzer_demo_washer_reactive_power",
-                "sensor.cs_energy_analyzer_demo_washer_apparent_power",
-                "sensor.cs_energy_analyzer_demo_dryer_l1_energy",
-                "sensor.cs_energy_analyzer_demo_dryer_l2_energy",
-                "sensor.cs_energy_analyzer_demo_dryer_l1_active_power",
-                "sensor.cs_energy_analyzer_demo_dryer_l2_active_power",
-                "sensor.cs_energy_analyzer_demo_dryer_l1_current",
-                "sensor.cs_energy_analyzer_demo_dryer_l2_current",
-                "sensor.cs_energy_analyzer_demo_dryer_l1_power_factor",
-                "sensor.cs_energy_analyzer_demo_dryer_l2_power_factor",
-                "sensor.cs_energy_analyzer_demo_dryer_l1_reactive_power",
-                "sensor.cs_energy_analyzer_demo_dryer_l2_reactive_power",
-                "sensor.cs_energy_analyzer_demo_dryer_l1_apparent_power",
-                "sensor.cs_energy_analyzer_demo_dryer_l2_apparent_power",
-                "sensor.cs_energy_analyzer_demo_pool_pump_energy",
-                "sensor.cs_energy_analyzer_demo_basement_lights_energy",
-                "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
-                "sensor.cs_energy_analyzer_demo_mains_l2_voltage",
+                "sensor.refrigerator_energy",
+                "sensor.hvac_l1_energy",
+                "sensor.hvac_l2_energy",
+                "sensor.hvac_l1_active_power",
+                "sensor.hvac_l2_active_power",
+                "sensor.hvac_l1_current",
+                "sensor.hvac_l2_current",
+                "sensor.water_heater_l1_energy",
+                "sensor.water_heater_l2_energy",
+                "sensor.water_heater_l1_active_power",
+                "sensor.water_heater_l2_active_power",
+                "sensor.water_heater_l1_current",
+                "sensor.water_heater_l2_current",
+                "sensor.washer_energy",
+                "sensor.washer_active_power",
+                "sensor.washer_current",
+                "sensor.washer_power_factor",
+                "sensor.washer_reactive_power",
+                "sensor.washer_apparent_power",
+                "sensor.dryer_l1_energy",
+                "sensor.dryer_l2_energy",
+                "sensor.dryer_l1_active_power",
+                "sensor.dryer_l2_active_power",
+                "sensor.dryer_l1_current",
+                "sensor.dryer_l2_current",
+                "sensor.dryer_l1_power_factor",
+                "sensor.dryer_l2_power_factor",
+                "sensor.dryer_l1_reactive_power",
+                "sensor.dryer_l2_reactive_power",
+                "sensor.dryer_l1_apparent_power",
+                "sensor.dryer_l2_apparent_power",
+                "sensor.pool_pump_energy",
+                "sensor.basement_lights_energy",
+                "sensor.mains_l1_voltage",
+                "sensor.mains_l2_voltage",
             ],
             CONF_MAINS_SOURCE_ENTITIES: [
-                "sensor.cs_energy_analyzer_demo_mains_l1_energy",
-                "sensor.cs_energy_analyzer_demo_mains_l2_energy",
-                "sensor.cs_energy_analyzer_demo_mains_l1_voltage",
-                "sensor.cs_energy_analyzer_demo_mains_l2_voltage",
+                "sensor.mains_l1_energy",
+                "sensor.mains_l2_energy",
+                "sensor.mains_l1_voltage",
+                "sensor.mains_l2_voltage",
             ],
         },
     )
@@ -13761,63 +13162,63 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
 
     assert set(by_circuit) == {
         "mains",
-        "cs_energy_analyzer_demo_refrigerator",
-        "cs_energy_analyzer_demo_hvac",
-        "cs_energy_analyzer_demo_water_heater",
-        "cs_energy_analyzer_demo_washer",
-        "cs_energy_analyzer_demo_dryer",
-        "cs_energy_analyzer_demo_pool_pump",
-        "cs_energy_analyzer_demo_basement_lights",
+        "refrigerator",
+        "hvac",
+        "water_heater",
+        "washer",
+        "dryer",
+        "pool_pump",
+        "basement_lights",
     }
     assert {sensor.role for sensor in by_circuit["mains"].sensors} == {
         SensorRole.ENERGY,
         SensorRole.VOLTAGE,
     }
-    fridge = by_circuit["cs_energy_analyzer_demo_refrigerator"]
-    assert fridge.circuit_id == "cs_energy_analyzer_demo_refrigerator"
+    fridge = by_circuit["refrigerator"]
+    assert fridge.circuit_id == "refrigerator"
     assert fridge.name == "Refrigerator"
     assert fridge.appliance_profile is ApplianceProfile.REFRIGERATOR
     assert fridge.mode is CircuitMode.SINGLE_PHASE
     assert fridge.sensors[0].role is SensorRole.ENERGY
     assert not any(sensor.role is SensorRole.VOLTAGE for sensor in fridge.sensors)
 
-    hvac = by_circuit["cs_energy_analyzer_demo_hvac"]
+    hvac = by_circuit["hvac"]
     assert hvac.appliance_profile is ApplianceProfile.HVAC
     assert hvac.mode is CircuitMode.DUAL_PHASE
     assert {(sensor.entity_id, sensor.role, sensor.leg) for sensor in hvac.sensors} >= {
         (
-            "sensor.cs_energy_analyzer_demo_hvac_l1_active_power",
+            "sensor.hvac_l1_active_power",
             SensorRole.REAL_POWER,
             "a",
         ),
         (
-            "sensor.cs_energy_analyzer_demo_hvac_l2_active_power",
+            "sensor.hvac_l2_active_power",
             SensorRole.REAL_POWER,
             "b",
         ),
     }
     assert not any(sensor.role is SensorRole.VOLTAGE for sensor in hvac.sensors)
 
-    water_heater = by_circuit["cs_energy_analyzer_demo_water_heater"]
+    water_heater = by_circuit["water_heater"]
     assert water_heater.appliance_profile is ApplianceProfile.WATER_HEATER
     assert water_heater.mode is CircuitMode.DUAL_PHASE
     assert {
         (sensor.entity_id, sensor.role, sensor.leg) for sensor in water_heater.sensors
     } >= {
         (
-            "sensor.cs_energy_analyzer_demo_water_heater_l1_active_power",
+            "sensor.water_heater_l1_active_power",
             SensorRole.REAL_POWER,
             "a",
         ),
         (
-            "sensor.cs_energy_analyzer_demo_water_heater_l2_active_power",
+            "sensor.water_heater_l2_active_power",
             SensorRole.REAL_POWER,
             "b",
         ),
     }
     assert not any(sensor.role is SensorRole.VOLTAGE for sensor in water_heater.sensors)
 
-    washer = by_circuit["cs_energy_analyzer_demo_washer"]
+    washer = by_circuit["washer"]
     assert washer.name == "Washer"
     assert washer.appliance_profile is ApplianceProfile.WASHER
     assert washer.mode is CircuitMode.SINGLE_PHASE
@@ -13825,34 +13226,34 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
         (sensor.entity_id, sensor.role, sensor.leg) for sensor in washer.sensors
     } >= {
         (
-            "sensor.cs_energy_analyzer_demo_washer_active_power",
+            "sensor.washer_active_power",
             SensorRole.REAL_POWER,
             None,
         ),
         (
-            "sensor.cs_energy_analyzer_demo_washer_current",
+            "sensor.washer_current",
             SensorRole.CURRENT,
             None,
         ),
         (
-            "sensor.cs_energy_analyzer_demo_washer_power_factor",
+            "sensor.washer_power_factor",
             SensorRole.POWER_FACTOR,
             None,
         ),
         (
-            "sensor.cs_energy_analyzer_demo_washer_reactive_power",
+            "sensor.washer_reactive_power",
             SensorRole.REACTIVE_POWER,
             None,
         ),
         (
-            "sensor.cs_energy_analyzer_demo_washer_apparent_power",
+            "sensor.washer_apparent_power",
             SensorRole.APPARENT_POWER,
             None,
         ),
     }
     assert not any(sensor.role is SensorRole.VOLTAGE for sensor in washer.sensors)
 
-    dryer = by_circuit["cs_energy_analyzer_demo_dryer"]
+    dryer = by_circuit["dryer"]
     assert dryer.name == "Dryer"
     assert dryer.appliance_profile is ApplianceProfile.DRYER
     assert dryer.mode is CircuitMode.DUAL_PHASE
@@ -13860,43 +13261,43 @@ def test_runtime_infers_appliance_profiles_from_named_source_entities() -> None:
         (sensor.entity_id, sensor.role, sensor.leg) for sensor in dryer.sensors
     } >= {
         (
-            "sensor.cs_energy_analyzer_demo_dryer_l1_active_power",
+            "sensor.dryer_l1_active_power",
             SensorRole.REAL_POWER,
             "a",
         ),
         (
-            "sensor.cs_energy_analyzer_demo_dryer_l2_active_power",
+            "sensor.dryer_l2_active_power",
             SensorRole.REAL_POWER,
             "b",
         ),
         (
-            "sensor.cs_energy_analyzer_demo_dryer_l1_current",
+            "sensor.dryer_l1_current",
             SensorRole.CURRENT,
             "a",
         ),
         (
-            "sensor.cs_energy_analyzer_demo_dryer_l2_current",
+            "sensor.dryer_l2_current",
             SensorRole.CURRENT,
             "b",
         ),
         (
-            "sensor.cs_energy_analyzer_demo_dryer_l1_reactive_power",
+            "sensor.dryer_l1_reactive_power",
             SensorRole.REACTIVE_POWER,
             "a",
         ),
         (
-            "sensor.cs_energy_analyzer_demo_dryer_l2_apparent_power",
+            "sensor.dryer_l2_apparent_power",
             SensorRole.APPARENT_POWER,
             "b",
         ),
     }
     assert not any(sensor.role is SensorRole.VOLTAGE for sensor in dryer.sensors)
 
-    pool_pump = by_circuit["cs_energy_analyzer_demo_pool_pump"]
+    pool_pump = by_circuit["pool_pump"]
     assert pool_pump.appliance_profile is ApplianceProfile.POOL_PUMP
     assert pool_pump.mode is CircuitMode.SINGLE_PHASE
 
-    lights = by_circuit["cs_energy_analyzer_demo_basement_lights"]
+    lights = by_circuit["basement_lights"]
     assert lights.appliance_profile is ApplianceProfile.MIXED
     assert lights.mode is CircuitMode.MIXED
 
@@ -14302,8 +13703,8 @@ def test_runtime_infers_mains_source_entity_role_from_entity_id() -> None:
         options={
             CONF_ENABLE_EXPERIMENTAL_NILM: True,
             CONF_MAINS_SOURCE_ENTITIES: [
-                "sensor.cs_energy_analyzer_demo_mains_l1_energy",
-                "sensor.cs_energy_analyzer_demo_mains_l2_power",
+                "sensor.mains_l1_energy",
+                "sensor.mains_l2_power",
             ],
         },
     )

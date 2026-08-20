@@ -23,11 +23,6 @@ from .base import AlertPolicy, FeatureResult, ProcessingContext, StateUpdate
 
 type PowerQualityAlertPolicyProvider = Callable[[str], AlertPolicy]
 type LearningMaturePredicate = Callable[[CircuitConfig, Any], bool]
-type DemoEventSeeder = Callable[[CircuitConfig, Any], None]
-type DemoPowerQualityBaselineSeeder = Callable[
-    [CircuitConfig, Mapping[str, float]],
-    None,
-]
 
 
 @dataclass(slots=True)
@@ -47,14 +42,10 @@ class PowerQualityProcessor:
         *,
         alert_policy_for_circuit: PowerQualityAlertPolicyProvider,
         learning_mature: LearningMaturePredicate,
-        seed_demo_event_history: DemoEventSeeder,
-        seed_demo_power_quality_baselines: DemoPowerQualityBaselineSeeder,
         baseline_values: defaultdict[str, list[float]] | None = None,
     ) -> None:
         self._alert_policy_for_circuit = alert_policy_for_circuit
         self._learning_mature = learning_mature
-        self._seed_demo_event_history = seed_demo_event_history
-        self._seed_demo_power_quality_baselines = seed_demo_power_quality_baselines
         self._baseline_values = (
             baseline_values if baseline_values is not None else defaultdict(list)
         )
@@ -93,10 +84,6 @@ class PowerQualityProcessor:
         maintenance_active = (
             isinstance(maintenance, Mapping) and maintenance.get("active") is True
         )
-        if not maintenance_active:
-            self._seed_demo_event_history(circuit_config, context.now)
-            self._seed_demo_power_quality_baselines(circuit_config, features)
-
         baselines: dict[str, Any] = {}
         learning_new_features = False
         store_dirty = False
@@ -160,6 +147,7 @@ class PowerQualityProcessor:
             feature_result.alerts.append(alert)
             feature_result.notifications.append(alert)
         return feature_result
+
 
 def power_quality_state_updates(
     circuit_id: str,

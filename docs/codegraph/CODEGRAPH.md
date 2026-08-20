@@ -4,27 +4,21 @@
 > **Repository:** https://github.com/CircuitSetup/CircuitSetup-Energy-Analyzer
 > **Primary source:** `custom_components/circuitsetup_energy_analyzer`
 
-This document is a Codex-oriented semantic map of the project. It explains ownership, runtime flow, feature boundaries, persistence, Home Assistant surfaces, and likely change impact. Run the repository codegraph script inside a checkout when exact AST-derived import and symbol graphs are needed for that commit.
+This document is a Codex-oriented semantic map of the project. It explains ownership, runtime flow, feature boundaries, persistence, Home Assistant surfaces, and likely change impact. Use the installed CodeGraph index for exact live source, imports, callers, definitions, entrypoints, and impact paths.
 
 ## How Codex should use this
 
-1. Confirm the checkout commit:
-   ```bash
-   git rev-parse HEAD
-   ```
-2. Generate an exact graph:
-   ```powershell
-   .\.codex\scripts\update-codegraph.ps1
-   ```
-3. Read this file for semantic ownership and runtime flow.
-4. Inspect the generated local graph for exact imports, symbols, entrypoints and cycles when a change is cross-cutting.
-5. Generated graph output is local-only and should not be committed.
+1. Read this file for semantic ownership and runtime flow.
+2. Run `codegraph status` to confirm the local index is current.
+3. Run `codegraph init` when the index is missing or stale.
+4. Use `codegraph explore "<symbol or question>"` for exact live source and impact paths.
+5. Keep `.codegraph/` local-only.
 
 ## Graph trust model
 
 - **Inventory and entrypoint facts:** pinned to the current GitHub tree and key source files.
 - **Semantic runtime edges:** curated, intended to explain responsibility and data flow.
-- **Exact imports and definitions:** generated locally by `generate_codegraph.py`.
+- **Exact imports and definitions:** read from the installed CodeGraph index.
 - **Call graph:** best effort only; Python's dynamic dispatch and Home Assistant callbacks prevent a fully static call graph.
 
 ## System map
@@ -145,7 +139,6 @@ Evidence panel or HA control
 | `configuration` | `custom_components/circuitsetup_energy_analyzer/mapping.py` | Sensor-to-circuit role mapping and mapping validation. |
 | `configuration` | `custom_components/circuitsetup_energy_analyzer/profiles.py` | Appliance-profile capabilities, required/recommended roles and feature applicability. |
 | `configuration` | `custom_components/circuitsetup_energy_analyzer/appliance_metadata.py` | User-facing appliance labels and metadata. |
-| `configuration` | `custom_components/circuitsetup_energy_analyzer/demo.py` | Demo source bundle and sample setup support. |
 | `configuration` | `custom_components/circuitsetup_energy_analyzer/localized_text.py` | Runtime access to bundled translated panel and notification text. |
 | `configuration` | `custom_components/circuitsetup_energy_analyzer/ux.py` | User-facing status labels, sensitivity normalization and explanation helpers. |
 | `orchestration` | `custom_components/circuitsetup_energy_analyzer/coordinator.py` | Stable Home Assistant-facing facade that delegates source updates, processing, persistence, feedback and settings to runtime managers. |
@@ -261,7 +254,6 @@ Evidence panel or HA control
 | `config_entry_controller.py` | Config-entry option writes, reloads and entry-derived mutations. |
 | `context.py` | `ProcessingContext` construction and context-source values. |
 | `dashboard_controller.py` | Dashboard create/remove requests and persisted dashboard status. |
-| `demo_data.py` | Deterministic demo-state and retained-history seeding. |
 | `entity_profile_controller.py` | Entity-detail/profile changes and compact entity exposure. |
 | `environmental_context.py` | Weather, rain, pump and water-flow histories and context refresh. |
 | `evidence_actions.py` | Alert acknowledgement/feedback, maintenance and relearn actions. |
@@ -404,7 +396,7 @@ Only qualified alert evidence should reach notification policy. Routine notifica
 
 | Surface | Files |
 |---|---|
-| Config and options flows | `config_flow.py`, `config_parsing.py`, `context_sources.py`, `discovery.py`, `mapping.py`, `profiles.py`, `demo.py` |
+| Config and options flows | `config_flow.py`, `config_parsing.py`, `context_sources.py`, `discovery.py`, `mapping.py`, `profiles.py` |
 | Sensors | `sensor.py`, `entities/*`, `entity_catalog.py` |
 | Binary sensors | `binary_sensor.py` |
 | Buttons | `button.py` |
@@ -623,26 +615,17 @@ Changes to these features should inspect coordinator ordering, source selection 
 | `scripts/` | Project utilities |
 | `AGENTS.md` | Repository-specific agent instructions |
 
-## JSON queries
+## Live queries
 
-Find inbound dependencies after running the AST generator:
+Find inbound dependencies and current source with `codegraph explore`, for example:
 
 ```bash
-python - <<'PY'
-import json
-from pathlib import Path
-
-g = json.loads(Path("docs/codegraph/generated/codegraph.generated.json").read_text())
-target = "custom_components.circuitsetup_energy_analyzer.alerting"
-for e in g["edges"]:
-    if e["relation"] == "imports" and e["target"] == target:
-        print(e["source"])
-PY
+codegraph explore "Who imports alerting.py, and which callers reach its public functions?"
 ```
 
 ## Maintenance rule
 
-Regenerate this graph after:
+Rebuild the local CodeGraph index after:
 
 - adding, removing or moving a module;
 - adding a platform;
