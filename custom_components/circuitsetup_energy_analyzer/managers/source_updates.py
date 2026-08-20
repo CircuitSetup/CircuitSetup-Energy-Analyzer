@@ -16,6 +16,7 @@ class SourceUpdateManager:
         track_state_change_event: Callable[..., Any] | None,
         debounce_seconds: float,
         max_batch_seconds: float | None = None,
+        analysis_interval_seconds: float = 0.0,
     ) -> None:
         self._coordinator = coordinator
         self._track_state_change_event = track_state_change_event
@@ -24,11 +25,14 @@ class SourceUpdateManager:
             debounce_seconds if max_batch_seconds is None else max_batch_seconds,
             debounce_seconds,
         )
+        self._analysis_interval_seconds = max(float(analysis_interval_seconds), 0.0)
         self.source_entities: tuple[str, ...] = ()
         self.pending_source_update_entities: tuple[str, ...] = ()
         self.last_source_update_entities: tuple[str, ...] = ()
         self._pending_source_update_entities: set[str] = set()
         self._source_update_task: asyncio.Task[Any] | None = None
+        self._analysis_update_task: asyncio.Task[Any] | None = None
+        self._pending_analysis_entities: set[str] = set()
         self._batch_started_at: float | None = None
         self._latest_source_update_at: float | None = None
         self._unsub_state_change: Any = None
@@ -36,6 +40,14 @@ class SourceUpdateManager:
     @property
     def source_update_task(self) -> asyncio.Task[Any] | None:
         return self._source_update_task
+
+    @property
+    def analysis_update_task(self) -> asyncio.Task[Any] | None:
+        return self._analysis_update_task
+
+    @property
+    def pending_analysis_entities(self) -> tuple[str, ...]:
+        return tuple(sorted(self._pending_analysis_entities))
 
     async def async_start(self, source_entities: Iterable[str]) -> None:
         """Start listening to configured source entity state changes."""
@@ -65,15 +77,15 @@ class SourceUpdateManager:
             self._unsub_state_change()
             self._unsub_state_change = None
         self._coordinator.started = False
-        pending_task = self._source_update_task
-        if (
-            pending_task is not None
-            and pending_task is not asyncio.current_task()
-            and not pending_task.done()
-        ):
-            pending_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await pending_task
+        for pending_task in (self._source_update_task, self._analysis_update_task):
+            if (
+                pending_task is not None
+                and pending_task is not asyncio.current_task()
+                and not pending_task.done()
+            ):
+                pending_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await pending_task
         self.cancel_pending_source_update()
 
     async def async_handle_source_state_change(self, event: Any) -> None:
@@ -108,16 +120,26 @@ class SourceUpdateManager:
             self.last_source_update_entities = changed_entities
             if not self._coordinator.started:
                 return
-            loop = asyncio.get_running_loop()
-            started_at = loop.time()
-            try:
-                await self._coordinator.async_process_update(
-                    changed_entities=changed_entities
-                )
-            finally:
-                self._coordinator._record_runtime_performance(
-                    "source_update",
-                    loop.time() - started_at,
+            ingest = getattr(self._coordinator, "async_ingest_source_update", None)
+            if ingest is not None:
+                loop = asyncio.get_running_loop()
+                started_at = loop.time()
+                try:
+                    await ingest(changed_entities=changed_entities)
+                finally:
+                    self._coordinator._record_runtime_performance(
+                        "source_ingest",
+                        loop.time() - started_at,
+                    )
+            self._pending_analysis_entities.update(changed_entities)
+            if self._analysis_interval_seconds <= 0.0:
+                await self.async_process_pending_analysis()
+            elif (
+                self._analysis_update_task is None
+                or self._analysis_update_task.done()
+            ):
+                self._analysis_update_task = asyncio.create_task(
+                    self.async_process_pending_analysis()
                 )
         except asyncio.CancelledError:
             self._pending_source_update_entities.clear()
@@ -134,6 +156,37 @@ class SourceUpdateManager:
                     self._source_update_task = asyncio.create_task(
                         self.async_process_debounced_source_update()
                     )
+
+    async def async_process_pending_analysis(self) -> None:
+        """Run one latest-state analysis pass without building an event backlog."""
+        current_task = asyncio.current_task()
+        try:
+            if self._analysis_interval_seconds > 0.0:
+                await asyncio.sleep(self._analysis_interval_seconds)
+            changed_entities = tuple(sorted(self._pending_analysis_entities))
+            self._pending_analysis_entities.clear()
+            if not self._coordinator.started or not changed_entities:
+                return
+            loop = asyncio.get_running_loop()
+            started_at = loop.time()
+            try:
+                await self._coordinator.async_process_update(
+                    changed_entities=changed_entities
+                )
+            finally:
+                self._coordinator._record_runtime_performance(
+                    "source_update",
+                    loop.time() - started_at,
+                )
+        except asyncio.CancelledError:
+            raise
+        finally:
+            if self._analysis_update_task is current_task:
+                self._analysis_update_task = None
+            if self._coordinator.started and self._pending_analysis_entities:
+                self._analysis_update_task = asyncio.create_task(
+                    self.async_process_pending_analysis()
+                )
 
     async def _async_wait_for_source_update_batch(self) -> None:
         while True:
@@ -154,8 +207,15 @@ class SourceUpdateManager:
         """Cancel queued source-state processing during restart/unload."""
         if self._source_update_task is not None and not self._source_update_task.done():
             self._source_update_task.cancel()
+        if (
+            self._analysis_update_task is not None
+            and not self._analysis_update_task.done()
+        ):
+            self._analysis_update_task.cancel()
         self._source_update_task = None
+        self._analysis_update_task = None
         self._pending_source_update_entities.clear()
+        self._pending_analysis_entities.clear()
         self.pending_source_update_entities = ()
         self._batch_started_at = None
         self._latest_source_update_at = None

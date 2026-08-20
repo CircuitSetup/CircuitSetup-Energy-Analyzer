@@ -95,6 +95,7 @@ def initialize_runtime(
     track_state_change_event: Any,
     debounce_seconds: float,
     max_batch_seconds: float,
+    analysis_interval_seconds: float,
 ) -> None:
     """Attach the established manager and processor runtime to a coordinator."""
     self = coordinator
@@ -383,5 +384,6 @@ def initialize_runtime(
         track_state_change_event=track_state_change_event,
         debounce_seconds=debounce_seconds,
         max_batch_seconds=max_batch_seconds,
+        analysis_interval_seconds=analysis_interval_seconds,
     )
     self.ux_state = UxStateManager(self)

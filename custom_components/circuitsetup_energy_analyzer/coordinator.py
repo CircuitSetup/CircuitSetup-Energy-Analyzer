@@ -75,6 +75,7 @@ from .ux import (
 _LOGGER = logging.getLogger(__name__)
 SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS = 0.5
 SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS = 5.0
+SOURCE_ANALYSIS_INTERVAL_SECONDS = 5.0
 SETTINGS_RECOMMENDATION_SOURCE_REFRESH_INTERVAL = timedelta(minutes=5)
 SLOW_RUNTIME_OPERATION_SECONDS = 0.1
 SLOW_RUNTIME_WARNING_INTERVAL_SECONDS = 300.0
@@ -233,6 +234,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             track_state_change_event=async_track_state_change_event,
             debounce_seconds=SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS,
             max_batch_seconds=SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS,
+            analysis_interval_seconds=SOURCE_ANALYSIS_INTERVAL_SECONDS,
         )
         self._startup_store_dirty = False
         self._startup_alert_notification_ids: set[str] = set()
@@ -526,6 +528,12 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         """Return JSON-safe bounded runtime performance diagnostics."""
         return {
             "slow_operation_threshold_ms": SLOW_RUNTIME_OPERATION_SECONDS * 1000.0,
+            "source_ingest": dict(
+                self._runtime_performance_by_operation.get(
+                    "source_ingest",
+                    {"count": 0, "last_ms": 0.0, "max_ms": 0.0},
+                )
+            ),
             "source_update": dict(
                 self._runtime_performance_by_operation.get(
                     "source_update",
@@ -537,6 +545,22 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 for key, value in self._runtime_performance_by_operation.items()
                 if key.startswith("nilm:")
             },
+            "nilm_enabled_by_circuit": {
+                config.circuit_id: self.nilm_controller.enabled_for_config(config)
+                for config in self.circuit_configs
+            },
+            "processors": {
+                key.removeprefix("processor:"): dict(value)
+                for key, value in self._runtime_performance_by_operation.items()
+                if key.startswith("processor:")
+            },
+            "analysis_pending": bool(
+                self.source_updates.pending_analysis_entities
+                or (
+                    self.source_updates.analysis_update_task is not None
+                    and not self.source_updates.analysis_update_task.done()
+                )
+            ),
         }
 
     def _processing_configs_for_changed_entities(
@@ -611,6 +635,29 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
     ) -> FeatureResult:
         """Refresh daily energy-goal state through the configured processor."""
         return self._energy_goal_processor.refresh_state(circuit_id, config, context)
+
+    async def async_ingest_source_update(
+        self: Self,
+        *,
+        changed_entities: Iterable[str] | None = None,
+    ) -> AnalyzerState:
+        """Publish current source values without running derived analytics."""
+        now = self._now_fn()
+        mains_context_sample = self._mains_context_sample(now)
+        for config in self._processing_configs_for_changed_entities(changed_entities):
+            sample = self._sample_for_config(
+                config,
+                now,
+                mains_context_sample=mains_context_sample,
+            )
+            self.state_reducer.refresh_config_metadata_state(self.state, config)
+            self.state_reducer.refresh_latest_real_power_state(
+                self.state,
+                config,
+                sample,
+            )
+        self.async_set_updated_data(self.state)
+        return self.state
 
     async def async_process_update(
         self: Self,
@@ -687,7 +734,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             if config.circuit_id not in processing_circuit_ids:
                 continue
             nilm_enabled = self.nilm_controller.enabled_for_config(config)
-            nilm_started_at = monotonic() if nilm_enabled else None
+            if not nilm_enabled:
+                continue
+            nilm_started_at = monotonic()
             try:
                 nilm_alerts = self.nilm_controller.process_sample(
                     config,
@@ -696,12 +745,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                     context,
                 )
             finally:
-                if nilm_started_at is not None:
-                    self._record_runtime_performance(
-                        "nilm",
-                        monotonic() - nilm_started_at,
-                        circuit_id=config.circuit_id,
-                    )
+                self._record_runtime_performance(
+                    "nilm",
+                    monotonic() - nilm_started_at,
+                    circuit_id=config.circuit_id,
+                )
             for nilm_alert in nilm_alerts:
                 if not self.notification_controller.learning_allows_alert(nilm_alert):
                     continue

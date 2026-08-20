@@ -865,6 +865,7 @@ async def test_config_entry_runtime_source_changes_update_analyzer_state(
     from custom_components.circuitsetup_energy_analyzer import coordinator as coord
 
     monkeypatch.setattr(coord, "SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS", 0.0)
+    monkeypatch.setattr(coord, "SOURCE_ANALYSIS_INTERVAL_SECONDS", 0.0)
     _point_custom_components_at_worktree(monkeypatch)
     _set_source_state(hass, "sensor.fridge_power", "0", "W", "power")
     entry = MockConfigEntry(

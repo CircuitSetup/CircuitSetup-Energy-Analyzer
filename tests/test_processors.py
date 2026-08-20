@@ -2946,10 +2946,6 @@ async def test_processing_pipeline_uses_injected_processors() -> None:
         def process(self, *args: object, **kwargs: object) -> FeatureResult:
             del args, kwargs
             calls.append(self.name)
-            asyncio.get_running_loop().call_soon(
-                calls.append,
-                f"tick:{self.name}",
-            )
             return self.result
 
     class _Coordinator:
@@ -3021,13 +3017,38 @@ async def test_processing_pipeline_uses_injected_processors() -> None:
         "metric_consistency",
         "standby",
     ]
-    assert calls == [
-        entry
-        for name in processor_names
-        for entry in (name, f"tick:{name}")
-    ]
+    assert calls == processor_names
     assert cleared_power_quality == ["fridge"]
     assert cleared_standby == []
+
+
+@pytest.mark.asyncio
+async def test_processing_pipeline_keeps_event_loop_responsive() -> None:
+    import time
+
+    from custom_components.circuitsetup_energy_analyzer.managers import (
+        processing_pipeline,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+    )
+
+    class _SlowProcessor:
+        @staticmethod
+        def process() -> FeatureResult:
+            time.sleep(0.05)
+            return FeatureResult()
+
+    coordinator = SimpleNamespace(
+        _record_runtime_performance=lambda *_args, **_kwargs: None,
+    )
+    heartbeat = asyncio.create_task(asyncio.sleep(0.01))
+
+    await processing_pipeline.ProcessingPipeline(coordinator)._async_process(
+        "slow", _SlowProcessor()
+    )
+
+    assert heartbeat.done()
 
 
 @pytest.mark.asyncio
