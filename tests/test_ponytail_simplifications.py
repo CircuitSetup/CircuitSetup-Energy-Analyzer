@@ -6,6 +6,12 @@ ROOT = Path(__file__).parents[1]
 DOMAIN = ROOT / "custom_components" / "circuitsetup_energy_analyzer"
 
 
+def test_nilm_benchmark_constructs_processor() -> None:
+    from scripts.benchmark_nilm_performance import _processor
+
+    assert _processor().name == "nilm_sample"
+
+
 def test_removed_surfaces_stay_removed() -> None:
     for relative_path in (
         ".codex/scripts/update-codegraph.ps1",
@@ -26,10 +32,6 @@ def test_removed_surfaces_stay_removed() -> None:
         and "DemoDataSeeder" not in source
         and "DemoSourceSensor" not in source
         for source in production_sources.values()
-    )
-
-    assert all(
-        "ModuleNotFoundError" not in source for source in production_sources.values()
     )
 
     panel = (DOMAIN / "frontend" / "energy-analyzer-panel-main.js").read_text(

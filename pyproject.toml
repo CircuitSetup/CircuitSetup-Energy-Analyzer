@@ -18,6 +18,7 @@ test = [
   "pytest==8.3.4",
   "pytest-asyncio==0.24.0",
   "pytest-homeassistant-custom-component==0.13.205",
+  "ruff==0.16.3",
 ]
 
 [tool.pytest.ini_options]
