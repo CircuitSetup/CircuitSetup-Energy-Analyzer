@@ -1952,6 +1952,50 @@ async def test_options_mains_step_combines_mains_and_nilm_settings() -> None:
 
 
 @pytest.mark.asyncio
+async def test_options_mains_step_persists_disabled_legacy_nilm_override() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={},
+        options={
+            CONF_ENABLE_EXPERIMENTAL_NILM: True,
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.panel_mains_power"],
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "hvac_1",
+                    "name": "HVAC 1",
+                    "mode": "mixed",
+                    "appliance_profile": "hvac_blower",
+                    "nilm_detection_enabled": False,
+                }
+            ],
+        },
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+
+    result = await flow.async_step_mains(
+        {
+            CONF_MAINS_SOURCE_ENTITIES: ["sensor.panel_mains_power"],
+            "nilm_detection_enabled": False,
+            "nilm_detection_sensitivity": "balanced",
+        }
+    )
+
+    assert result["type"] == "create_entry"
+    mains = next(
+        circuit
+        for circuit in result["data"][CONF_CIRCUITS]
+        if circuit["circuit_id"] == "mains"
+    )
+    assert mains["nilm_detection_enabled"] is False
+    assert [sensor["entity_id"] for sensor in mains["sensors"]] == [
+        "sensor.panel_mains_power"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_options_mains_step_shows_mains_nilm_controls_without_source() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerOptionsFlow,
