@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from dataclasses import replace
 from time import monotonic
 from typing import Any
@@ -81,8 +82,16 @@ class ProcessingPipeline:
                 None,
             )
             if add_executor_job is not None:
-                return await add_executor_job(processor.process, *args)
-            return await asyncio.to_thread(processor.process, *args)
+                executor_job = add_executor_job(processor.process, *args)
+            else:
+                executor_job = asyncio.to_thread(processor.process, *args)
+            processor_task = asyncio.ensure_future(executor_job)
+            try:
+                return await asyncio.shield(processor_task)
+            except asyncio.CancelledError:
+                with suppress(asyncio.CancelledError, Exception):
+                    await processor_task
+                raise
         finally:
             record_performance = getattr(
                 self._coordinator, "_record_runtime_performance", None

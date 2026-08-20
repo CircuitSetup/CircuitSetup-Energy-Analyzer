@@ -2931,6 +2931,27 @@ def test_runtime_performance_does_not_warn_at_threshold(
     ]
 
 
+def test_background_runtime_performance_does_not_warn(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(SimpleNamespace())
+
+    with caplog.at_level("WARNING"):
+        coordinator._record_runtime_performance("source_update", 2.0)
+        coordinator._record_runtime_performance("processor:events", 1.0)
+
+    performance = coordinator.runtime_performance_snapshot()
+    assert performance["source_update"]["max_ms"] == 2000.0
+    assert performance["processors"]["events"]["max_ms"] == 1000.0
+    assert not [
+        record for record in caplog.records if record.levelname == "WARNING"
+    ]
+
+
 @pytest.mark.asyncio
 async def test_runtime_performance_identifies_each_processor() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
@@ -4288,15 +4309,14 @@ async def test_coordinator_max_source_update_batch_window(monkeypatch) -> None:
     await coordinator.async_start(["sensor.fridge_power"])
 
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_power"}))
-    await asyncio.sleep(0.03)
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_current"}))
-    await asyncio.sleep(0.03)
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_var"}))
+    coordinator.source_updates._batch_started_at = (
+        asyncio.get_running_loop().time() - 0.08
+    )
 
-    for _ in range(20):
-        if changed_entity_batches:
-            break
-        await asyncio.sleep(0.01)
+    assert coordinator.source_updates.source_update_task is not None
+    await asyncio.wait_for(coordinator.source_updates.source_update_task, timeout=1)
 
     assert changed_entity_batches == [
         ("sensor.fridge_current", "sensor.fridge_power", "sensor.fridge_var")

@@ -3052,6 +3052,47 @@ async def test_processing_pipeline_keeps_event_loop_responsive() -> None:
 
 
 @pytest.mark.asyncio
+async def test_processing_pipeline_cancellation_waits_for_executor_job() -> None:
+    import threading
+
+    from custom_components.circuitsetup_energy_analyzer.managers import (
+        processing_pipeline,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+    )
+
+    started = asyncio.Event()
+    release = threading.Event()
+    loop = asyncio.get_running_loop()
+
+    class _SlowProcessor:
+        @staticmethod
+        def process() -> FeatureResult:
+            loop.call_soon_threadsafe(started.set)
+            release.wait(timeout=1)
+            return FeatureResult()
+
+    coordinator = SimpleNamespace(
+        _record_runtime_performance=lambda *_args, **_kwargs: None,
+    )
+    task = asyncio.create_task(
+        processing_pipeline.ProcessingPipeline(coordinator)._async_process(
+            "slow", _SlowProcessor()
+        )
+    )
+    await started.wait()
+
+    task.cancel()
+    await asyncio.sleep(0)
+
+    assert not task.done()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
 async def test_processing_pipeline_applies_cross_circuit_feature_results() -> None:
     from custom_components.circuitsetup_energy_analyzer.managers import (
         processing_pipeline,
