@@ -865,6 +865,12 @@ async def test_config_entry_runtime_source_changes_update_analyzer_state(
     from custom_components.circuitsetup_energy_analyzer import coordinator as coord
 
     monkeypatch.setattr(coord, "SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS", 0.0)
+    monkeypatch.setattr(
+        coord,
+        "SOURCE_ANALYSIS_INTERVAL_SECONDS",
+        0.0,
+        raising=False,
+    )
     _point_custom_components_at_worktree(monkeypatch)
     _set_source_state(hass, "sensor.fridge_power", "0", "W", "power")
     entry = MockConfigEntry(
@@ -1052,9 +1058,10 @@ async def _wait_for_runtime_update(
     circuit_id: str = "fridge",
     expected_operating_state: str | None = None,
 ) -> None:
-    for _ in range(20):
+    deadline = asyncio.get_running_loop().time() + 5.0
+    while asyncio.get_running_loop().time() < deadline:
         await hass.async_block_till_done()
-        await asyncio.sleep(0)
+        await asyncio.sleep(0.01)
         await hass.async_block_till_done()
         if coordinator.last_source_update_entities == changed_entities:
             task = coordinator.source_updates.source_update_task

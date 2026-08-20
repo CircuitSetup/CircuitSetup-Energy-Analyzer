@@ -2890,10 +2890,14 @@ def test_coordinator_runtime_performance_is_bounded_and_rate_limits_warnings(
 
     assert coordinator.runtime_performance_snapshot() == {
         "slow_operation_threshold_ms": 100.0,
+        "source_ingest": {"count": 0, "last_ms": 0.0, "max_ms": 0.0},
         "source_update": {"count": 1, "last_ms": 25.0, "max_ms": 25.0},
         "nilm_by_circuit": {
             "hvac_1": {"count": 3, "last_ms": 175.0, "max_ms": 175.0}
         },
+        "nilm_enabled_by_circuit": {},
+        "processors": {},
+        "analysis_pending": False,
     }
     warning_messages = [
         record.message for record in caplog.records if record.levelname == "WARNING"
@@ -2925,6 +2929,56 @@ def test_runtime_performance_does_not_warn_at_threshold(
     assert not [
         record for record in caplog.records if record.levelname == "WARNING"
     ]
+
+
+def test_background_runtime_performance_does_not_warn(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(SimpleNamespace())
+
+    with caplog.at_level("WARNING"):
+        coordinator._record_runtime_performance("source_update", 2.0)
+        coordinator._record_runtime_performance("processor:events", 1.0)
+
+    performance = coordinator.runtime_performance_snapshot()
+    assert performance["source_update"]["max_ms"] == 2000.0
+    assert performance["processors"]["events"]["max_ms"] == 1000.0
+    assert not [
+        record for record in caplog.records if record.levelname == "WARNING"
+    ]
+
+
+@pytest.mark.asyncio
+async def test_runtime_performance_identifies_each_processor() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "office",
+                    "name": "Office",
+                    "mode": "mixed",
+                    "appliance_profile": "mixed",
+                    "sensors": [],
+                }
+            ]
+        },
+    )
+
+    await coordinator.async_process_update()
+
+    performance = coordinator.runtime_performance_snapshot()
+    assert performance["processors"]["events"]["count"] == 1
+    assert performance["processors"]["energy_usage"]["count"] == 1
+    assert performance["nilm_by_circuit"] == {}
 
 
 @pytest.mark.asyncio
@@ -2959,6 +3013,153 @@ async def test_source_update_manager_records_pipeline_duration() -> None:
 
 
 @pytest.mark.asyncio
+async def test_source_update_manager_defers_analysis_after_fast_ingest() -> None:
+    from custom_components.circuitsetup_energy_analyzer.managers.source_updates import (
+        SourceUpdateManager,
+    )
+
+    coordinator = SimpleNamespace(
+        started=True,
+        async_ingest_source_update=AsyncMock(),
+        async_process_update=AsyncMock(),
+        _record_runtime_performance=lambda *_args, **_kwargs: None,
+    )
+    manager = SourceUpdateManager(
+        coordinator,
+        track_state_change_event=None,
+        debounce_seconds=0.0,
+        analysis_interval_seconds=0.02,
+    )
+    manager._pending_source_update_entities.add("sensor.office_power")
+
+    await manager.async_process_debounced_source_update()
+
+    coordinator.async_ingest_source_update.assert_awaited_once_with(
+        changed_entities=("sensor.office_power",)
+    )
+    coordinator.async_process_update.assert_not_awaited()
+    assert manager.analysis_update_task is not None
+
+    await asyncio.wait_for(manager.analysis_update_task, timeout=1)
+
+    coordinator.async_process_update.assert_awaited_once_with(
+        changed_entities=("sensor.office_power",)
+    )
+
+
+@pytest.mark.asyncio
+async def test_source_update_manager_coalesces_pending_analysis() -> None:
+    from custom_components.circuitsetup_energy_analyzer.managers.source_updates import (
+        SourceUpdateManager,
+    )
+
+    coordinator = SimpleNamespace(
+        started=True,
+        async_ingest_source_update=AsyncMock(),
+        async_process_update=AsyncMock(),
+        _record_runtime_performance=lambda *_args, **_kwargs: None,
+    )
+    manager = SourceUpdateManager(
+        coordinator,
+        track_state_change_event=None,
+        debounce_seconds=0.0,
+        analysis_interval_seconds=0.02,
+    )
+    manager._pending_source_update_entities.add("sensor.office_power")
+    await manager.async_process_debounced_source_update()
+    analysis_task = manager.analysis_update_task
+
+    manager._pending_source_update_entities.add("sensor.kitchen_power")
+    await manager.async_process_debounced_source_update()
+
+    assert manager.analysis_update_task is analysis_task
+    assert analysis_task is not None
+    await asyncio.wait_for(analysis_task, timeout=1)
+    coordinator.async_process_update.assert_awaited_once_with(
+        changed_entities=("sensor.kitchen_power", "sensor.office_power")
+    )
+
+
+@pytest.mark.asyncio
+async def test_source_update_manager_stop_cancels_pending_analysis() -> None:
+    from custom_components.circuitsetup_energy_analyzer.managers.source_updates import (
+        SourceUpdateManager,
+    )
+
+    coordinator = SimpleNamespace(
+        started=True,
+        async_ingest_source_update=AsyncMock(),
+        async_process_update=AsyncMock(),
+        _record_runtime_performance=lambda *_args, **_kwargs: None,
+    )
+    manager = SourceUpdateManager(
+        coordinator,
+        track_state_change_event=None,
+        debounce_seconds=0.0,
+        analysis_interval_seconds=60.0,
+    )
+    manager._pending_source_update_entities.add("sensor.office_power")
+    await manager.async_process_debounced_source_update()
+    analysis_task = manager.analysis_update_task
+
+    await manager.async_stop()
+
+    assert analysis_task is not None
+    assert analysis_task.cancelled()
+    assert manager.analysis_update_task is None
+    assert manager.pending_analysis_entities == ()
+    coordinator.async_process_update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fast_source_ingest_publishes_power_without_running_processors() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    observed_at = datetime(2026, 8, 20, tzinfo=UTC)
+    source = SimpleNamespace(
+        state="125",
+        attributes={"unit_of_measurement": "W"},
+        last_updated=observed_at,
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(
+            states=SimpleNamespace(
+                get=lambda entity_id: source
+                if entity_id == "sensor.office_power"
+                else None
+            ),
+            data={},
+        ),
+        now_fn=lambda: observed_at,
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "office",
+                    "name": "Office",
+                    "mode": "mixed",
+                    "appliance_profile": "mixed",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.office_power",
+                            "role": "real_power",
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    await coordinator.async_ingest_source_update(
+        changed_entities=("sensor.office_power",)
+    )
+
+    assert coordinator.state.latest_real_power_w_by_circuit == {"office": 125.0}
+    assert coordinator.runtime_performance_snapshot()["processors"] == {}
+
+
+@pytest.mark.asyncio
 async def test_enabled_nilm_processing_records_circuit_duration() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -2988,9 +3189,44 @@ async def test_enabled_nilm_processing_records_circuit_duration() -> None:
 
     await coordinator.async_process_update()
 
-    assert len(recorded) == 1
-    assert recorded[0][0:2] == ("nilm", "hvac_1")
-    assert recorded[0][2] >= 0.0
+    nilm_records = [record for record in recorded if record[0] == "nilm"]
+    assert len(nilm_records) == 1
+    assert nilm_records[0][0:2] == ("nilm", "hvac_1")
+    assert nilm_records[0][2] >= 0.0
+
+
+@pytest.mark.asyncio
+async def test_disabled_nilm_processing_is_not_invoked() -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    CONF_NILM_DETECTION_ENABLED: False,
+                    "sensors": [],
+                }
+            ]
+        },
+    )
+
+    def fail_if_called(*_args, **_kwargs):
+        pytest.fail("disabled NILM processing must not be invoked")
+
+    coordinator.nilm_controller.process_sample = fail_if_called
+
+    await coordinator.async_process_update()
+
+    performance = coordinator.runtime_performance_snapshot()
+    assert performance["nilm_by_circuit"] == {}
+    assert performance["nilm_enabled_by_circuit"] == {"mains": False}
 
 
 def test_coordinator_exposes_notification_controller() -> None:
@@ -3944,6 +4180,7 @@ async def test_coordinator_coalesces_rapid_source_state_changes(monkeypatch) -> 
         "SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS",
         0.01,
     )
+    monkeypatch.setattr(coordinator_module, "SOURCE_ANALYSIS_INTERVAL_SECONDS", 0.0)
     monkeypatch.setattr(
         coordinator_module.EnergyAnalyzerCoordinator,
         "async_process_update",
@@ -4003,6 +4240,7 @@ async def test_coordinator_waits_for_quiet_source_state_changes(
         0.2,
         raising=False,
     )
+    monkeypatch.setattr(coordinator_module, "SOURCE_ANALYSIS_INTERVAL_SECONDS", 0.0)
     monkeypatch.setattr(
         coordinator_module.EnergyAnalyzerCoordinator,
         "async_process_update",
@@ -4060,6 +4298,7 @@ async def test_coordinator_max_source_update_batch_window(monkeypatch) -> None:
         0.08,
         raising=False,
     )
+    monkeypatch.setattr(coordinator_module, "SOURCE_ANALYSIS_INTERVAL_SECONDS", 0.0)
     monkeypatch.setattr(
         coordinator_module.EnergyAnalyzerCoordinator,
         "async_process_update",
@@ -4070,15 +4309,14 @@ async def test_coordinator_max_source_update_batch_window(monkeypatch) -> None:
     await coordinator.async_start(["sensor.fridge_power"])
 
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_power"}))
-    await asyncio.sleep(0.03)
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_current"}))
-    await asyncio.sleep(0.03)
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_var"}))
+    coordinator.source_updates._batch_started_at = (
+        asyncio.get_running_loop().time() - 0.08
+    )
 
-    for _ in range(20):
-        if changed_entity_batches:
-            break
-        await asyncio.sleep(0.01)
+    assert coordinator.source_updates.source_update_task is not None
+    await asyncio.wait_for(coordinator.source_updates.source_update_task, timeout=1)
 
     assert changed_entity_batches == [
         ("sensor.fridge_current", "sensor.fridge_power", "sensor.fridge_var")
@@ -4119,6 +4357,7 @@ async def test_coordinator_passes_changed_source_entities_to_process_update(
         "SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS",
         0.01,
     )
+    monkeypatch.setattr(coordinator_module, "SOURCE_ANALYSIS_INTERVAL_SECONDS", 0.0)
     monkeypatch.setattr(
         coordinator_module.EnergyAnalyzerCoordinator,
         "async_process_update",
@@ -4176,6 +4415,7 @@ async def test_coordinator_reschedules_source_update_added_during_processing(
         "SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS",
         0.01,
     )
+    monkeypatch.setattr(coordinator_module, "SOURCE_ANALYSIS_INTERVAL_SECONDS", 0.0)
     monkeypatch.setattr(
         coordinator_module.EnergyAnalyzerCoordinator,
         "async_process_update",
@@ -4470,7 +4710,7 @@ async def test_source_update_processes_only_changed_circuit_pipeline() -> None:
     )
 
     assert calls["pipeline"] == ["fridge"]
-    assert calls["nilm"] == ["fridge"]
+    assert calls["nilm"] == []
     assert calls["cross_samples"] == [["fridge", "hvac", "well_pump"]]
     assert coordinator.state.latest_real_power_w_by_circuit == {
         "fridge": 125.0,
@@ -4764,7 +5004,7 @@ async def test_source_update_unknown_entity_falls_back_to_full_processing() -> N
     )
 
     assert calls["pipeline"] == ["fridge", "hvac", "well_pump"]
-    assert calls["nilm"] == ["fridge", "hvac", "well_pump"]
+    assert calls["nilm"] == []
     assert calls["cross_samples"] == [["fridge", "hvac", "well_pump"]]
 
 
@@ -4787,7 +5027,7 @@ async def test_source_update_includes_mains_nilm_when_known_load_changes() -> No
     )
 
     assert calls["pipeline"] == ["mains", "fridge"]
-    assert calls["nilm"] == ["mains", "fridge"]
+    assert calls["nilm"] == ["mains"]
     assert calls["cross_samples"] == [["mains", "fridge", "hvac", "well_pump"]]
 
 

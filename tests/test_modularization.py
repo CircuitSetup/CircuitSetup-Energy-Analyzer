@@ -112,3 +112,7 @@ def test_runtime_factory_preserves_processor_and_listener_wiring() -> None:
         instance.source_updates._max_batch_seconds
         == coordinator.SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS
     )
+    assert (
+        instance.source_updates._analysis_interval_seconds
+        == coordinator.SOURCE_ANALYSIS_INTERVAL_SECONDS
+    )
