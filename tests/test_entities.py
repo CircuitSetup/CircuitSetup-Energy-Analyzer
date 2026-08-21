@@ -3773,6 +3773,23 @@ async def test_nilm_virtual_entities_are_opt_in_and_estimated() -> None:
                 "median_delta_va": 830.0,
                 "median_delta_pf": -0.05,
             }]},
+            nilm_session_history_by_circuit={
+                "mains": [
+                    {
+                        "session_id": "dishwasher-session",
+                        "assignment_id": "assignment-dishwasher",
+                        "mains_circuit_id": "mains",
+                        "signature_fingerprint": "signature_1",
+                        "start": "2026-06-06T08:00:00+00:00",
+                        "end": "2026-06-06T09:00:00+00:00",
+                        "duration_seconds": 3600.0,
+                        "median_power_w": 817.5,
+                        "estimated_energy_kwh": 0.8175,
+                        "pairing_confidence": 0.91,
+                        "ambiguous": False,
+                    }
+                ]
+            },
         ),
         _nilm_unmatched_edges={
             "mains": [
@@ -4050,6 +4067,50 @@ def test_nilm_virtual_states_filter_sessions_by_assignment_signature() -> None:
 
     assert states["assignment-dishwasher"].is_running is None
     assert states["assignment-washer"].is_running is None
+
+
+def test_nilm_virtual_states_use_persisted_sessions_without_pairing() -> None:
+    from custom_components.circuitsetup_energy_analyzer import nilm_virtual
+
+    original_pair = nilm_virtual.pair_nilm_sessions_for_signatures
+    nilm_virtual.pair_nilm_sessions_for_signatures = (
+        lambda *_args, **_kwargs: pytest.fail(
+            "virtual state must not rebuild sessions on the Home Assistant loop"
+        )
+    )
+    coordinator = SimpleNamespace(
+        circuit_configs=(),
+        store_data=FeatureStoreData(
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "washer",
+                        "lifecycle_state": "published",
+                        "publish_entities": True,
+                    }
+                ]
+            },
+            nilm_session_history_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "washer",
+                        "session_id": "washer-session",
+                        "start": "2026-08-02T12:00:00+00:00",
+                        "end": "2026-08-02T12:30:00+00:00",
+                        "median_power_w": 500.0,
+                    }
+                ]
+            },
+        ),
+    )
+
+    try:
+        states = nilm_virtual.published_nilm_virtual_appliance_states(coordinator)
+    finally:
+        nilm_virtual.pair_nilm_sessions_for_signatures = original_pair
+
+    assert len(states) == 1
+    assert states[0].assignment_id == "washer"
 
 
 def test_nilm_virtual_source_identity_prefers_metadata_real_power() -> None:

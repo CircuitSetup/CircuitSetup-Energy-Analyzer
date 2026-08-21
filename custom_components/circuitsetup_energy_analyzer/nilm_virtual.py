@@ -107,26 +107,11 @@ def nilm_virtual_appliance_states(
     for circuit_id, assignments in assignments_by_circuit.items():
         circuit_id_text = str(circuit_id or "").strip()
         edges = _nilm_edges_for_circuit(coordinator, circuit_id_text)
-        signatures_by_id = _nilm_signatures_by_id(coordinator, circuit_id_text)
         assignment_list = [
             assignment
             for assignment in _iter_items(assignments)
             if isinstance(assignment, Mapping)
         ]
-        derived_sessions = _nilm_assignment_sessions(
-            circuit_id_text,
-            [
-                assignment
-                for assignment in assignment_list
-                if (
-                    _published_assignment(assignment)
-                    if published_only
-                    else _matching_assignment(assignment)
-                )
-            ],
-            edges,
-            signatures_by_id,
-        )
         for assignment in assignment_list:
             if published_only and not _published_assignment(assignment):
                 continue
@@ -135,7 +120,7 @@ def nilm_virtual_appliance_states(
                 circuit_id_text,
                 assignment,
                 edges,
-                derived_sessions,
+                (),
             )
             if state is not None:
                 states.append(state)
@@ -1097,10 +1082,9 @@ def _nilm_assignment_sessions(
     signatures_by_id: Mapping[str, Mapping[str, Any]],
 ) -> list[NilmSession]:
     specs: list[dict[str, Any]] = []
-    unique_signatures = {
-        id(value): value for value in signatures_by_id.values()
-    }
-    signatures = list(unique_signatures.values())
+    signatures = list(
+        {id(value): value for value in signatures_by_id.values()}.values()
+    )
     for assignment in assignments:
         assignment_id = str(assignment.get("assignment_id") or "").strip() or None
         for value in _iter_items(assignment.get("signature_fingerprints")):
@@ -1123,25 +1107,6 @@ def _nilm_assignment_sessions(
         mains_circuit_id=circuit_id,
         signature_specs=specs,
     )
-
-
-def _nilm_signatures_by_id(
-    coordinator: Any,
-    circuit_id: str,
-) -> dict[str, Mapping[str, Any]]:
-    store_data = getattr(coordinator, "store_data", None)
-    signatures_by_circuit = getattr(store_data, "nilm_signatures", {})
-    if not isinstance(signatures_by_circuit, Mapping):
-        return {}
-    signatures: dict[str, Mapping[str, Any]] = {}
-    for signature in _iter_items(signatures_by_circuit.get(circuit_id, ())):
-        if not isinstance(signature, Mapping):
-            continue
-        for key in ("signature_id", "feedback_fingerprint"):
-            value = str(signature.get(key) or "").strip()
-            if value:
-                signatures[value] = signature
-    return signatures
 
 
 def _nilm_edges_for_circuit(coordinator: Any, circuit_id: str) -> list[NilmEdge]:

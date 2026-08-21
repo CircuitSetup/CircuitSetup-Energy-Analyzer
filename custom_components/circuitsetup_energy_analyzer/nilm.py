@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from bisect import bisect_left, bisect_right
+from bisect import bisect_left, bisect_right, insort
 from collections import defaultdict, deque
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
@@ -447,7 +447,7 @@ def _normalize_session_evidence(
     if (
         not evidence_id
         or (owner and owner != assignment_id)
-        or evidence_id not in confirmed | rejected
+        or (evidence_id not in confirmed and evidence_id not in rejected)
     ):
         return None
     on, off = _session_transition_values(session)
@@ -1713,6 +1713,8 @@ def _transition_prototype(
 
 
 def _model_number(value: Any) -> float | None:
+    if value is None:
+        return None
     try:
         number = float(value)
     except (OverflowError, TypeError, ValueError):
@@ -3783,6 +3785,8 @@ class _NilmEdgeCluster:
     split_phase_type: str
     dominant_leg: str
     feature_stats: dict[str, _NilmFeatureStats]
+    feature_values: tuple[list[float], ...]
+    first_edge_key: tuple[Any, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -6203,19 +6207,45 @@ def _cluster_recurring_edges(
     """Return deterministic, topology-partitioned clusters for recurring edges."""
     del day_key  # The core remains timezone-free; callers use it when emitting data.
     ordered_edges = tuple(sorted(edges, key=_nilm_cluster_edge_key))
-    clusters = _assign_recurring_edges(ordered_edges, policy=policy)
-    previous_membership = _cluster_membership_key(clusters)
+    edge_keys = {id(edge): _nilm_cluster_edge_key(edge) for edge in ordered_edges}
+    edge_values = {
+        id(edge): tuple(
+            _nilm_cluster_feature_value(edge, attribute)
+            for _name, attribute, _ratio_name, _floor_name in _CLUSTER_FEATURES
+        )
+        for edge in ordered_edges
+    }
+    edge_partitions = {
+        id(edge): _nilm_cluster_partition(edge) for edge in ordered_edges
+    }
+    clusters = _assign_recurring_edges(
+        ordered_edges,
+        policy=policy,
+        edge_values=edge_values,
+        edge_partitions=edge_partitions,
+        edge_keys=edge_keys,
+    )
+    previous_membership = _cluster_membership_key(clusters, edge_keys=edge_keys)
     for _ in range(policy.max_refinement_passes):
         refined = _refine_recurring_clusters(
             clusters,
             ordered_edges=ordered_edges,
             policy=policy,
+            edge_values=edge_values,
+            edge_partitions=edge_partitions,
+            edge_keys=edge_keys,
         )
-        membership = _cluster_membership_key(refined)
+        membership = _cluster_membership_key(refined, edge_keys=edge_keys)
         clusters = refined
         if membership == previous_membership:
             break
         previous_membership = membership
+    for cluster in clusters:
+        cluster.feature_stats = _cluster_feature_stats_from_values(
+            cluster.feature_values,
+            total=len(cluster.members),
+            include_mad=True,
+        )
     return tuple(sorted(clusters, key=_nilm_cluster_sort_key))
 
 
@@ -6223,28 +6253,40 @@ def _assign_recurring_edges(
     edges: Iterable[NilmEdge],
     *,
     policy: NilmClusteringPolicy,
+    edge_values: Mapping[int, tuple[float | None, ...]],
+    edge_partitions: Mapping[int, tuple[str, str, str]],
+    edge_keys: Mapping[int, tuple[Any, ...]],
 ) -> list[_NilmEdgeCluster]:
     by_partition: dict[tuple[str, str, str], list[_NilmEdgeCluster]] = {}
     for edge in edges:
-        partition = _nilm_cluster_partition(edge)
+        partition = edge_partitions[id(edge)]
         candidates = by_partition.setdefault(partition, [])
         fits = [
             (distance, cluster)
             for cluster in candidates
-            if (distance := _cluster_fit_distance(edge, cluster, policy=policy))
+            if (
+                distance := _cluster_fit_distance(
+                    edge_values[id(edge)], cluster, policy=policy
+                )
+            )
             is not None
         ]
         fits.sort(key=lambda item: (item[0], _nilm_cluster_sort_key(item[1])))
         if not fits or _missing_feature_best_fit_is_ambiguous(
-            edge,
+            edge_values[id(edge)],
             fits,
             policy=policy,
         ):
-            candidates.append(_new_nilm_edge_cluster(edge))
+            candidates.append(
+                _new_nilm_edge_cluster(
+                    edge, edge_values=edge_values, edge_keys=edge_keys
+                )
+            )
             continue
         selected = fits[0][1]
-        selected.members.append(edge)
-        selected.feature_stats = _cluster_feature_stats(selected.members)
+        _add_edge_to_cluster(
+            selected, edge, edge_values=edge_values, edge_keys=edge_keys
+        )
     return [cluster for clusters in by_partition.values() for cluster in clusters]
 
 
@@ -6253,6 +6295,9 @@ def _refine_recurring_clusters(
     *,
     ordered_edges: Iterable[NilmEdge],
     policy: NilmClusteringPolicy,
+    edge_values: Mapping[int, tuple[float | None, ...]],
+    edge_partitions: Mapping[int, tuple[str, str, str]],
+    edge_keys: Mapping[int, tuple[Any, ...]],
 ) -> list[_NilmEdgeCluster]:
     """Reassign each edge once against the current robust descriptors.
 
@@ -6262,19 +6307,34 @@ def _refine_recurring_clusters(
     other observations, then added back only when it is a unique admissible
     fit.  The caller bounds how often this pass runs.
     """
-    working = [
-        _NilmEdgeCluster(
-            members=list(cluster.members),
-            direction=cluster.direction,
-            split_phase_type=cluster.split_phase_type,
-            dominant_leg=cluster.dominant_leg,
-            feature_stats=_cluster_feature_stats(cluster.members),
+    working: list[_NilmEdgeCluster] = []
+    for cluster in clusters:
+        feature_values = _cluster_feature_values(
+            cluster.members, edge_values=edge_values
         )
-        for cluster in clusters
-    ]
+        working.append(
+            _NilmEdgeCluster(
+                members=list(cluster.members),
+                direction=cluster.direction,
+                split_phase_type=cluster.split_phase_type,
+                dominant_leg=cluster.dominant_leg,
+                feature_stats={},
+                feature_values=feature_values,
+                first_edge_key=cluster.first_edge_key,
+            )
+        )
+    cluster_by_edge = {
+        id(edge): cluster for cluster in working for edge in cluster.members
+    }
     for edge in ordered_edges:
-        _remove_edge_from_clusters(working, edge)
-        partition = _nilm_cluster_partition(edge)
+        _remove_edge_from_cluster(
+            working,
+            cluster_by_edge.pop(id(edge)),
+            edge,
+            edge_values=edge_values,
+            edge_keys=edge_keys,
+        )
+        partition = edge_partitions[id(edge)]
         candidates = [
             cluster
             for cluster in working
@@ -6288,49 +6348,100 @@ def _refine_recurring_clusters(
         fits = [
             (distance, cluster)
             for cluster in candidates
-            if (distance := _cluster_fit_distance(edge, cluster, policy=policy))
+            if (
+                distance := _cluster_fit_distance(
+                    edge_values[id(edge)], cluster, policy=policy
+                )
+            )
             is not None
         ]
         fits.sort(key=lambda item: (item[0], _nilm_cluster_sort_key(item[1])))
         if not fits or _missing_feature_best_fit_is_ambiguous(
-            edge,
+            edge_values[id(edge)],
             fits,
             policy=policy,
         ):
-            working.append(_new_nilm_edge_cluster(edge))
+            selected = _new_nilm_edge_cluster(
+                edge, edge_values=edge_values, edge_keys=edge_keys
+            )
+            working.append(selected)
+            cluster_by_edge[id(edge)] = selected
             continue
         selected = fits[0][1]
-        selected.members.append(edge)
-        selected.feature_stats = _cluster_feature_stats(selected.members)
+        _add_edge_to_cluster(
+            selected, edge, edge_values=edge_values, edge_keys=edge_keys
+        )
+        cluster_by_edge[id(edge)] = selected
     return working
 
 
-def _remove_edge_from_clusters(
+def _remove_edge_from_cluster(
     clusters: list[_NilmEdgeCluster],
+    cluster: _NilmEdgeCluster,
     edge: NilmEdge,
+    *,
+    edge_values: Mapping[int, tuple[float | None, ...]],
+    edge_keys: Mapping[int, tuple[Any, ...]],
 ) -> None:
     """Remove one exact working member and refresh only its cluster."""
-    for index, cluster in enumerate(clusters):
-        for member_index, member in enumerate(cluster.members):
-            if member is not edge:
-                continue
-            del cluster.members[member_index]
-            if cluster.members:
-                cluster.feature_stats = _cluster_feature_stats(cluster.members)
-            else:
-                del clusters[index]
-            return
+    for member_index, member in enumerate(cluster.members):
+        if member is not edge:
+            continue
+        del cluster.members[member_index]
+        if cluster.members:
+            for values, value in zip(
+                cluster.feature_values, edge_values[id(edge)], strict=True
+            ):
+                if value is not None:
+                    del values[bisect_left(values, value)]
+            edge_key = edge_keys[id(edge)]
+            if edge_key == cluster.first_edge_key:
+                cluster.first_edge_key = min(
+                    edge_keys[id(item)] for item in cluster.members
+                )
+        else:
+            for index, candidate in enumerate(clusters):
+                if candidate is cluster:
+                    del clusters[index]
+                    break
+        return
     raise ValueError("NILM clustering refinement lost an edge")
 
 
-def _new_nilm_edge_cluster(edge: NilmEdge) -> _NilmEdgeCluster:
+def _new_nilm_edge_cluster(
+    edge: NilmEdge,
+    *,
+    edge_values: Mapping[int, tuple[float | None, ...]],
+    edge_keys: Mapping[int, tuple[Any, ...]],
+) -> _NilmEdgeCluster:
+    feature_values = _cluster_feature_values(
+        (edge,), edge_values=edge_values
+    )
     return _NilmEdgeCluster(
         members=[edge],
         direction=edge.direction,
         split_phase_type=_nilm_cluster_split_phase_type(edge),
         dominant_leg=_nilm_cluster_dominant_leg(edge),
-        feature_stats=_cluster_feature_stats((edge,)),
+        feature_stats={},
+        feature_values=feature_values,
+        first_edge_key=edge_keys[id(edge)],
     )
+
+
+def _add_edge_to_cluster(
+    cluster: _NilmEdgeCluster,
+    edge: NilmEdge,
+    *,
+    edge_values: Mapping[int, tuple[float | None, ...]],
+    edge_keys: Mapping[int, tuple[Any, ...]],
+) -> None:
+    cluster.members.append(edge)
+    for values, value in zip(
+        cluster.feature_values, edge_values[id(edge)], strict=True
+    ):
+        if value is not None:
+            insort(values, value)
+    cluster.first_edge_key = min(cluster.first_edge_key, edge_keys[id(edge)])
 
 
 def _nilm_cluster_partition(edge: NilmEdge) -> tuple[str, str, str]:
@@ -6352,43 +6463,42 @@ def _nilm_cluster_dominant_leg(edge: NilmEdge) -> str:
 
 
 def _cluster_fit_distance(
-    edge: NilmEdge,
+    edge_values: tuple[float | None, ...],
     cluster: _NilmEdgeCluster,
     *,
     policy: NilmClusteringPolicy,
 ) -> float | None:
-    if _nilm_cluster_partition(edge) != (
-        cluster.direction,
-        cluster.split_phase_type,
-        cluster.dominant_leg,
-    ):
-        return None
     distances: list[float] = []
-    for name, attribute, ratio_name, floor_name in _CLUSTER_FEATURES:
-        value = _nilm_cluster_feature_value(edge, attribute)
-        stats = cluster.feature_stats[name]
+    for value, cluster_values, (
+        _name,
+        _attribute,
+        ratio_name,
+        floor_name,
+    ) in zip(
+        edge_values, cluster.feature_values, _CLUSTER_FEATURES, strict=True
+    ):
         if value is None:
-            if stats.median is not None:
+            if cluster_values:
                 distances.append(_MISSING_FEATURE_DISTANCE_PENALTY)
             continue
-        if stats.median is None:
+        if not cluster_values:
             distances.append(_MISSING_FEATURE_DISTANCE_PENALTY)
             continue
-        distance = _nilm_normalized_feature_distance(
-            value,
-            stats.median,
-            ratio=getattr(policy, ratio_name),
-            floor=getattr(policy, floor_name),
-        )
+        center = _median_of_sorted(cluster_values)
+        ratio = getattr(policy, ratio_name)
+        floor = getattr(policy, floor_name)
+        tolerance = max(floor, ratio * max(abs(value), abs(center)))
+        distance = abs(value - center) / tolerance
         if distance > policy.max_centroid_distance:
             return None
-        projected_minimum = min(stats.minimum, value)
-        projected_maximum = max(stats.maximum, value)
-        complete_link_distance = _nilm_normalized_feature_distance(
-            projected_minimum,
-            projected_maximum,
-            ratio=getattr(policy, ratio_name),
-            floor=getattr(policy, floor_name),
+        projected_minimum = min(cluster_values[0], value)
+        projected_maximum = max(cluster_values[-1], value)
+        complete_link_tolerance = max(
+            floor,
+            ratio * max(abs(projected_minimum), abs(projected_maximum)),
+        )
+        complete_link_distance = (
+            abs(projected_minimum - projected_maximum) / complete_link_tolerance
         )
         if complete_link_distance > policy.max_complete_link_distance:
             return None
@@ -6397,7 +6507,7 @@ def _cluster_fit_distance(
 
 
 def _missing_feature_best_fit_is_ambiguous(
-    edge: NilmEdge,
+    edge_values: tuple[float | None, ...],
     fits: list[tuple[float, _NilmEdgeCluster]],
     *,
     policy: NilmClusteringPolicy,
@@ -6406,51 +6516,83 @@ def _missing_feature_best_fit_is_ambiguous(
         return False
     first = fits[0][1]
     second = fits[1][1]
-    for name, attribute, ratio_name, floor_name in _CLUSTER_FEATURES[1:]:
-        if _nilm_cluster_feature_value(edge, attribute) is not None:
+    for value, first_values, second_values, (
+        _name,
+        _attribute,
+        ratio_name,
+        floor_name,
+    ) in zip(
+        edge_values[1:],
+        first.feature_values[1:],
+        second.feature_values[1:],
+        _CLUSTER_FEATURES[1:],
+        strict=True,
+    ):
+        if value is not None:
             continue
-        first_value = first.feature_stats[name].median
-        second_value = second.feature_stats[name].median
-        if first_value is None or second_value is None:
+        if not first_values or not second_values:
             continue
-        if (
-            _nilm_normalized_feature_distance(
-                first_value,
-                second_value,
-                ratio=getattr(policy, ratio_name),
-                floor=getattr(policy, floor_name),
-            )
-            > policy.max_centroid_distance
-        ):
+        first_value = _median_of_sorted(first_values)
+        second_value = _median_of_sorted(second_values)
+        tolerance = max(
+            getattr(policy, floor_name),
+            getattr(policy, ratio_name) * max(abs(first_value), abs(second_value)),
+        )
+        if abs(first_value - second_value) / tolerance > policy.max_centroid_distance:
             return True
     return False
 
 
-def _cluster_feature_stats(
+def _cluster_feature_values(
     edges: Iterable[NilmEdge],
-) -> dict[str, _NilmFeatureStats]:
+    *,
+    edge_values: Mapping[int, tuple[float | None, ...]],
+) -> tuple[list[float], ...]:
     members = tuple(edges)
-    total = len(members)
-    stats: dict[str, _NilmFeatureStats] = {}
-    for name, attribute, _ratio_name, _floor_name in _CLUSTER_FEATURES:
-        values = sorted(
+    return tuple(
+        sorted(
             value
             for edge in members
-            if (value := _nilm_cluster_feature_value(edge, attribute)) is not None
+            if (value := edge_values[id(edge)][index]) is not None
         )
+        for index in range(len(_CLUSTER_FEATURES))
+    )
+
+
+def _cluster_feature_stats_from_values(
+    values_by_feature: tuple[list[float], ...],
+    *,
+    total: int,
+    include_mad: bool = False,
+) -> dict[str, _NilmFeatureStats]:
+    stats: dict[str, _NilmFeatureStats] = {}
+    for values, (name, _attribute, _ratio_name, _floor_name) in zip(
+        values_by_feature, _CLUSTER_FEATURES, strict=True
+    ):
         if not values:
             stats[name] = _NilmFeatureStats(0, None, None, None, None, 0.0)
             continue
-        center = float(median(values))
+        center = _median_of_sorted(values)
         stats[name] = _NilmFeatureStats(
             count=len(values),
             median=center,
-            mad=float(median(abs(value - center) for value in values)),
+            mad=(
+                float(median(abs(value - center) for value in values))
+                if include_mad
+                else None
+            ),
             minimum=values[0],
             maximum=values[-1],
             coverage=len(values) / total if total else 0.0,
         )
     return stats
+
+
+def _median_of_sorted(values: list[float]) -> float:
+    middle = len(values) // 2
+    if len(values) % 2:
+        return float(values[middle])
+    return float((values[middle - 1] + values[middle]) / 2.0)
 
 
 def _nilm_cluster_feature_value(edge: NilmEdge, attribute: str) -> float | None:
@@ -6491,21 +6633,23 @@ def _nilm_cluster_sort_key(cluster: _NilmEdgeCluster) -> tuple[Any, ...]:
         cluster.direction,
         cluster.split_phase_type,
         cluster.dominant_leg,
-        _optional_sort_key(cluster.feature_stats["delta_w"].median),
-        _optional_sort_key(cluster.feature_stats["delta_var"].median),
-        _optional_sort_key(cluster.feature_stats["delta_va"].median),
-        _optional_sort_key(cluster.feature_stats["delta_pf"].median),
-        _nilm_cluster_edge_key(min(cluster.members, key=_nilm_cluster_edge_key)),
+        *(
+            _optional_sort_key(_median_of_sorted(values) if values else None)
+            for values in cluster.feature_values[:4]
+        ),
+        cluster.first_edge_key,
     )
 
 
 def _cluster_membership_key(
     clusters: Iterable[_NilmEdgeCluster],
+    *,
+    edge_keys: Mapping[int, tuple[Any, ...]],
 ) -> tuple[tuple[tuple[Any, ...], ...], ...]:
     return tuple(
         tuple(
-            _nilm_cluster_edge_key(edge)
-            for edge in sorted(cluster.members, key=_nilm_cluster_edge_key)
+            edge_keys[id(edge)]
+            for edge in sorted(cluster.members, key=lambda item: edge_keys[id(item)])
         )
         for cluster in sorted(clusters, key=_nilm_cluster_sort_key)
     )

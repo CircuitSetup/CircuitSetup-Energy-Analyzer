@@ -5083,6 +5083,37 @@ def test_cluster_recurring_signatures_groups_similar_edges_conservatively() -> N
     assert 0.0 <= signatures[0].confidence <= 0.75
 
 
+def test_cluster_recurring_signatures_reads_each_edge_feature_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = nilm_domain._nilm_cluster_feature_value
+    calls = 0
+
+    def counted_feature_value(item: NilmEdge, attribute: str) -> float | None:
+        nonlocal calls
+        calls += 1
+        return original(item, attribute)
+
+    monkeypatch.setattr(
+        nilm_domain,
+        "_nilm_cluster_feature_value",
+        counted_feature_value,
+    )
+    retained_edges = [
+        edge(
+            index * 30,
+            300.0,
+            delta_var=float(index * 100),
+            delta_va=300.0 + index * 100.0,
+        )
+        for index in range(128)
+    ]
+
+    cluster_recurring_signatures(retained_edges)
+
+    assert calls <= len(retained_edges) * len(nilm_domain._CLUSTER_FEATURES)
+
+
 def test_cluster_recurring_signatures_separates_same_w_by_apparent_power() -> None:
     signatures = cluster_recurring_signatures(
         [

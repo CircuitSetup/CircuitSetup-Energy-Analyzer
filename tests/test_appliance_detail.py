@@ -149,6 +149,22 @@ def _nilm_coordinator() -> SimpleNamespace:
                 "direction": "on",
                 "median_delta_w": 820.0,
             }]},
+            nilm_session_history_by_circuit={
+                "mains": [
+                    {
+                        "session_id": "current-session",
+                        "assignment_id": "assignment-dishwasher",
+                        "signature_fingerprint": "signature_1",
+                        "start": "2026-06-30T08:00:00+00:00",
+                        "end": "2026-06-30T09:00:00+00:00",
+                        "duration_seconds": 3600.0,
+                        "median_power_w": 817.5,
+                        "estimated_energy_kwh": 0.8175,
+                        "pairing_confidence": 0.91,
+                        "ambiguous": False,
+                    }
+                ]
+            },
         ),
         _nilm_unmatched_edges={
             "mains": [
@@ -174,13 +190,13 @@ def _nilm_coordinator() -> SimpleNamespace:
     )
 
 
-def test_nilm_assignment_without_signature_metadata_has_no_derived_usage() -> None:
+def test_nilm_assignment_without_persisted_sessions_has_no_derived_usage() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
         nilm_virtual_appliance_states,
     )
 
     coordinator = _nilm_coordinator()
-    coordinator.store_data.nilm_signatures = {}
+    coordinator.store_data.nilm_session_history_by_circuit = {}
 
     state = nilm_virtual_appliance_states(coordinator)[0]
 
@@ -188,24 +204,38 @@ def test_nilm_assignment_without_signature_metadata_has_no_derived_usage() -> No
     assert state.latest_session_id is None
 
 
-def test_nilm_assignment_combines_stored_and_newly_derived_sessions() -> None:
+def test_nilm_assignment_combines_persisted_sessions() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
         nilm_virtual_appliance_states,
     )
 
     coordinator = _nilm_coordinator()
     coordinator.store_data.nilm_session_history_by_circuit = {
-        "mains": [{
-            "session_id": "stored-session",
-            "assignment_id": "assignment-dishwasher",
-            "signature_fingerprint": "signature_1",
-            "start": "2026-06-29T08:00:00+00:00",
-            "end": "2026-06-29T08:30:00+00:00",
-            "duration_seconds": 1800.0,
-            "median_power_w": 820.0,
-            "estimated_energy_kwh": 0.41,
-            "confidence": 0.91,
-        }]
+        "mains": [
+            {
+                "session_id": "stored-session",
+                "assignment_id": "assignment-dishwasher",
+                "signature_fingerprint": "signature_1",
+                "start": "2026-06-29T08:00:00+00:00",
+                "end": "2026-06-29T08:30:00+00:00",
+                "duration_seconds": 1800.0,
+                "median_power_w": 820.0,
+                "estimated_energy_kwh": 0.41,
+                "confidence": 0.91,
+            },
+            {
+                "session_id": "current-session",
+                "assignment_id": "assignment-dishwasher",
+                "signature_fingerprint": "signature_1",
+                "start": "2026-06-30T08:00:00+00:00",
+                "end": "2026-06-30T09:00:00+00:00",
+                "duration_seconds": 3600.0,
+                "median_power_w": 817.5,
+                "estimated_energy_kwh": 0.8175,
+                "pairing_confidence": 0.91,
+                "ambiguous": False,
+            },
+        ]
     }
 
     sessions = nilm_virtual_appliance_states(coordinator)[0].sessions

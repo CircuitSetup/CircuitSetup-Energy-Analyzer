@@ -1512,6 +1512,7 @@ def _config_with_mains_nilm_settings(
     enabled: bool,
     sensitivity: Any,
 ) -> dict[str, Any]:
+    mains_source_entities = tuple(mains_source_entities)
     updated = dict(config)
     existing_mains = _mains_nilm_raw_circuit(config)
     circuits = [
@@ -1519,7 +1520,11 @@ def _config_with_mains_nilm_settings(
         for circuit in config.get(CONF_CIRCUITS, []) or []
         if isinstance(circuit, Mapping) and circuit is not existing_mains
     ]
-    if enabled or existing_mains is not None:
+    if (
+        enabled
+        or existing_mains is not None
+        or _mains_nilm_detection_enabled_from_config(config)
+    ):
         circuits.append(
             _mains_nilm_circuit_from_input(
                 config,
@@ -4269,7 +4274,11 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
                         _mains_nilm_detection_enabled_from_config(config),
                     )
                 )
-                if nilm_detection_enabled or existing_mains_nilm is not None:
+                if (
+                    nilm_detection_enabled
+                    or existing_mains_nilm is not None
+                    or _mains_nilm_detection_enabled_from_config(config)
+                ):
                     nilm_detection_sensitivity = user_input.get(
                         CONF_NILM_DETECTION_SENSITIVITY,
                         _mains_nilm_detection_sensitivity_from_config(config),

@@ -38,14 +38,15 @@ class UxStateManager:
     def __init__(self, coordinator: Any) -> None:
         self._coordinator = coordinator
 
-    def hydrate_state_from_store(self) -> None:
+    def hydrate_state_from_store(self, *, hydrate_nilm: bool = True) -> None:
         coordinator = self._coordinator
         now = coordinator.current_time()
         maintenance_by_circuit = coordinator.store_data.maintenance_by_circuit
         for circuit_id, maintenance in maintenance_by_circuit.items():
             if maintenance.get("active") is True:
                 coordinator.paused_circuits.add(circuit_id)
-        coordinator.nilm_controller.hydrate_state_from_store()
+        if hydrate_nilm:
+            coordinator.nilm_controller.hydrate_state_from_store()
         coordinator.state_reducer.hydrate_context_state_from_store(
             coordinator.state,
             coordinator.store_data,
@@ -59,12 +60,12 @@ class UxStateManager:
             coordinator.state.daily_energy_usage_by_circuit[config.circuit_id] = (
                 _usage_for_date(_coerce_days(history.get("days")), today)
             )
-        self.refresh_all(now)
+        self.refresh_all(now, refresh_nilm=hydrate_nilm)
         coordinator._refresh_settings_recommendation_state(now)
 
-    def refresh_all(self, now: datetime) -> None:
+    def refresh_all(self, now: datetime, *, refresh_nilm: bool = True) -> None:
         for config in self._coordinator.circuit_configs:
-            self.refresh_config(config, None, now)
+            self.refresh_config(config, None, now, refresh_nilm=refresh_nilm)
 
     def refresh_for_circuit(self, circuit_id: str, now: datetime) -> None:
         config = self._coordinator.circuit_registry.config_for_circuit(circuit_id)
@@ -80,6 +81,7 @@ class UxStateManager:
         *,
         circuit_events: Sequence[Any] | None = None,
         circuit_alerts: Sequence[AlertEvidence] | None = None,
+        refresh_nilm: bool = True,
     ) -> None:
         coordinator = self._coordinator
         circuit_id = config.circuit_id
@@ -200,7 +202,8 @@ class UxStateManager:
             events=events,
             alerts=alerts,
         )
-        coordinator.nilm_controller.refresh_state(circuit_id, context)
+        if refresh_nilm:
+            coordinator.nilm_controller.refresh_state(circuit_id, context)
 
         status, summary = health_summary(
             data_quality_problem=bool(

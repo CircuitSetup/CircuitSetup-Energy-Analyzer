@@ -3,6 +3,7 @@ import sys
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 from types import MappingProxyType, ModuleType, SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -2931,7 +2932,7 @@ def test_runtime_performance_does_not_warn_at_threshold(
     ]
 
 
-def test_background_runtime_performance_does_not_warn(
+def test_background_runtime_performance_remains_observable(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
@@ -2943,12 +2944,20 @@ def test_background_runtime_performance_does_not_warn(
     with caplog.at_level("WARNING"):
         coordinator._record_runtime_performance("source_update", 2.0)
         coordinator._record_runtime_performance("processor:events", 1.0)
+        coordinator._record_runtime_performance(
+            "nilm", 2.5, circuit_id="mains"
+        )
 
     performance = coordinator.runtime_performance_snapshot()
     assert performance["source_update"]["max_ms"] == 2000.0
     assert performance["processors"]["events"]["max_ms"] == 1000.0
-    assert not [
-        record for record in caplog.records if record.levelname == "WARNING"
+    assert performance["nilm_by_circuit"]["mains"]["max_ms"] == 2500.0
+    assert [
+        record.message for record in caplog.records if record.levelname == "WARNING"
+    ] == [
+        "Slow CSEA source_update operation: 2000.0 ms",
+        "Slow CSEA processor:events operation: 1000.0 ms",
+        "Slow CSEA nilm operation for mains: 2500.0 ms",
     ]
 
 
@@ -3193,6 +3202,264 @@ async def test_enabled_nilm_processing_records_circuit_duration() -> None:
     assert len(nilm_records) == 1
     assert nilm_records[0][0:2] == ("nilm", "hvac_1")
     assert nilm_records[0][2] >= 0.0
+
+
+@pytest.mark.asyncio
+async def test_enabled_nilm_processing_keeps_event_loop_responsive() -> None:
+    import threading
+    import time
+
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    CONF_NILM_DETECTION_ENABLED: True,
+                    "sensors": [],
+                }
+            ]
+        },
+    )
+    nilm_running = threading.Event()
+    event_loop_ran_during_nilm = asyncio.Event()
+
+    live_store = coordinator.store_data
+    live_state = coordinator.state
+
+    def slow_process_sample(
+        _sample: Any,
+        _config: Any,
+        context: Any,
+        **_kwargs: Any,
+    ) -> FeatureResult:
+        assert threading.current_thread() is not threading.main_thread()
+        assert context.store_data is not live_store
+        assert context.state is not live_state
+        assert context.hass is None
+        nilm_running.set()
+        time.sleep(0.05)
+        nilm_running.clear()
+        return FeatureResult()
+
+    async def heartbeat() -> None:
+        while not event_loop_ran_during_nilm.is_set():
+            await asyncio.sleep(0.005)
+            if nilm_running.is_set():
+                event_loop_ran_during_nilm.set()
+
+    coordinator.nilm_controller._sample_processor.process = slow_process_sample
+    heartbeat_task = asyncio.create_task(heartbeat())
+    try:
+        await coordinator.async_process_update()
+        assert event_loop_ran_during_nilm.is_set()
+    finally:
+        heartbeat_task.cancel()
+        await asyncio.gather(heartbeat_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_nilm_worker_does_not_apply_partial_state() -> None:
+    import threading
+
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    CONF_NILM_DETECTION_ENABLED: True,
+                    "sensors": [],
+                }
+            ]
+        },
+    )
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+
+    def mutate_detached_store(
+        _sample: Any,
+        _config: Any,
+        context: Any,
+        **_kwargs: Any,
+    ) -> FeatureResult:
+        context.store_data.nilm_signatures["mains"] = [{"signature_id": "partial"}]
+        worker_started.set()
+        release_worker.wait(timeout=1.0)
+        return FeatureResult(store_dirty=True)
+
+    coordinator.nilm_controller._sample_processor.process = mutate_detached_store
+    update = asyncio.create_task(coordinator.async_process_update())
+    assert await asyncio.to_thread(worker_started.wait, 1.0)
+    update.cancel()
+    release_worker.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await update
+
+    assert coordinator.store_data.nilm_signatures == {}
+
+
+@pytest.mark.asyncio
+async def test_max_retention_nilm_hydration_keeps_event_loop_responsive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.managers import (
+        nilm_controller as nilm_controller_module,
+    )
+
+    NilmController = nilm_controller_module.NilmController
+
+    now = datetime(2026, 8, 21, 12, 0, tzinfo=UTC)
+    sessions = [
+        {
+            "session_id": f"session-{index}",
+            "assignment_id": "washer",
+            "start": (now - timedelta(minutes=index + 1)).isoformat(),
+            "end": (now - timedelta(minutes=index)).isoformat(),
+            "median_power_w": 500.0,
+            "estimated_energy_kwh": 0.0083,
+        }
+        for index in range(2000)
+    ]
+    original_refresh_state = NilmController.refresh_state
+    synchronous_refreshes: list[str] = []
+    monkeypatch.setattr(
+        NilmController,
+        "refresh_state",
+        lambda _self, circuit_id, _context=None: synchronous_refreshes.append(
+            circuit_id
+        ),
+    )
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(data={}),
+        store_data=FeatureStoreData(
+            nilm_signatures={"mains": [{"signature_id": "washer-on"}]},
+            nilm_session_history_by_circuit={"mains": sessions},
+            nilm_appliance_assignments_by_circuit={
+                "mains": [
+                    {
+                        "assignment_id": "washer",
+                        "signature_fingerprints": ["washer-on"],
+                        "confirmed_session_ids": [
+                            session["session_id"] for session in sessions
+                        ],
+                    }
+                ]
+            },
+        ),
+        now_fn=lambda: now,
+    )
+    assert synchronous_refreshes == []
+    monkeypatch.setattr(NilmController, "refresh_state", original_refresh_state)
+    main_thread = threading.get_ident()
+    worker_threads: list[int] = []
+    original_rebuild = coordinator.nilm_controller._rebuilt_assignment_models
+
+    def observed_rebuild(*args: Any) -> Any:
+        worker_threads.append(threading.get_ident())
+        return original_rebuild(*args)
+
+    coordinator.nilm_controller._rebuilt_assignment_models = observed_rebuild
+    hydration = asyncio.create_task(
+        coordinator.nilm_controller.async_hydrate_state_from_store()
+    )
+    heartbeat_times: list[float] = []
+
+    async def heartbeat() -> None:
+        while not hydration.done():
+            heartbeat_times.append(asyncio.get_running_loop().time())
+            await asyncio.sleep(0.005)
+
+    heartbeat_task = asyncio.create_task(heartbeat())
+    await hydration
+    await heartbeat_task
+
+    assert len(heartbeat_times) > 1
+    assert worker_threads and all(
+        thread_id != main_thread for thread_id in worker_threads
+    )
+    assert max(
+        later - earlier
+        for earlier, later in pairwise(heartbeat_times)
+    ) < 0.1
+
+
+@pytest.mark.asyncio
+async def test_regular_energy_processing_keeps_event_loop_responsive() -> None:
+    import threading
+    import time
+
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "office",
+                    "name": "Office",
+                    "mode": "mixed",
+                    "appliance_profile": "mixed",
+                    "sensors": [],
+                }
+            ]
+        },
+    )
+    processor_running = threading.Event()
+    heartbeat_ran = asyncio.Event()
+
+    def slow_event_processor(*_args: Any, **_kwargs: Any) -> FeatureResult:
+        assert threading.current_thread() is not threading.main_thread()
+        processor_running.set()
+        time.sleep(0.05)
+        processor_running.clear()
+        return FeatureResult()
+
+    async def heartbeat() -> None:
+        while not heartbeat_ran.is_set():
+            await asyncio.sleep(0.005)
+            if processor_running.is_set():
+                heartbeat_ran.set()
+
+    coordinator.pipeline._event_processor.process = slow_event_processor
+    heartbeat_task = asyncio.create_task(heartbeat())
+    try:
+        await coordinator.async_process_update()
+        assert heartbeat_ran.is_set()
+    finally:
+        heartbeat_task.cancel()
+        await asyncio.gather(heartbeat_task, return_exceptions=True)
 
 
 @pytest.mark.asyncio
@@ -4658,7 +4925,7 @@ def _record_source_scoped_update_work(coordinator: Any) -> dict[str, list[Any]]:
         )
         return []
 
-    def fake_process_sample(config, sample, events, context=None):
+    async def fake_process_sample(config, sample, events, context=None):
         calls["nilm"].append(config.circuit_id)
         return []
 
@@ -4674,7 +4941,7 @@ def _record_source_scoped_update_work(coordinator: Any) -> dict[str, list[Any]]:
 
     coordinator.pipeline.async_process_circuit = fake_process_circuit
     coordinator.pipeline.async_process_cross_circuit = fake_cross_circuit
-    coordinator.nilm_controller.process_sample = fake_process_sample
+    coordinator.nilm_controller.async_process_sample = fake_process_sample
     coordinator._rebuild_setting_recommendations = fake_rebuild_settings
     notify_settings = "async_notify_settings_recommendations_if_needed"
     setattr(coordinator.notification_controller, notify_settings, fake_notify_settings)
@@ -8648,7 +8915,7 @@ async def test_session_assignment_updates_live_tracked_assignment() -> None:
     )
 
     store_data = FeatureStoreData(
-        nilm_appliance_assignments_by_circuit={
+                nilm_appliance_assignments_by_circuit={
             "mains": [
                 {
                     "assignment_id": "assignment-pump",
@@ -8920,9 +9187,9 @@ async def test_session_assignment_claims_only_selected_session() -> None:
                         "signature_fingerprints": ["pump-fingerprint"],
                         "session_ids": ["session-pump"],
                     },
-                ]
-            },
-        ),
+                    ]
+                },
+            ),
         now_fn=lambda: datetime(2026, 6, 2, 13, 0, tzinfo=UTC),
     )
 
@@ -11678,6 +11945,23 @@ async def test_opted_in_nilm_finished_notification_uses_existing_alert_flow(
                         "updated_at": "2026-06-02T12:00:00+00:00",
                         "created_device": True,
                         "publish_entities": True,
+                    }
+                ]
+            },
+            nilm_session_history_by_circuit={
+                "mains": [
+                    {
+                        "session_id": "dishwasher-finished",
+                        "assignment_id": "assignment-dishwasher",
+                        "mains_circuit_id": "mains",
+                        "signature_fingerprint": "signature_1",
+                        "start": (now - timedelta(minutes=45)).isoformat(),
+                        "end": (now - timedelta(minutes=5)).isoformat(),
+                        "duration_seconds": 2400.0,
+                        "median_power_w": 645.0,
+                        "estimated_energy_kwh": 0.43,
+                        "pairing_confidence": 0.91,
+                        "ambiguous": False,
                     }
                 ]
             },
