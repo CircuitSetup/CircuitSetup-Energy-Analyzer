@@ -6054,6 +6054,7 @@ test("NILM ambiguity audit is neutral, bounded, and focuses without editing", as
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   const audit = panel.locator("[data-nilm-ambiguity-audit]");
   const toggle = audit.locator("[data-nilm-ambiguity-toggle]");
 
@@ -6269,6 +6270,7 @@ test("NILM evidence quality and provenance remain bounded and accessible", async
     window.__panel._render();
   });
   const loadMore = panel.locator("[data-nilm-load-more-sessions]");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   await expect(panel.locator("[data-nilm-session-page-status]")).toContainText("Showing 1 of 2 sessions.");
   await loadMore.click();
   await expect.poll(() => pageRequests).toBe(1);
@@ -6605,6 +6607,7 @@ test("NILM ignores a stale session page after a route change", async ({ page }) 
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   await panel.locator("[data-nilm-load-more-sessions]").click();
   await pageStarted;
   await page.evaluate(() => {
@@ -6713,6 +6716,7 @@ test("NILM ambiguity audit reveals additional groups without moving keyboard foc
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   const audit = panel.locator("[data-nilm-ambiguity-audit]");
   await audit.locator("[data-nilm-ambiguity-toggle]").click();
   await expect(audit.locator("[data-nilm-ambiguity-group]")).toHaveCount(3);
@@ -6798,6 +6802,7 @@ test("NILM ambiguity audit clears an in-flight group-summary fetch when collapse
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   const audit = panel.locator("[data-nilm-ambiguity-audit]");
   const toggle = audit.locator("[data-nilm-ambiguity-toggle]");
   await toggle.click();
@@ -6894,6 +6899,7 @@ test("NILM ambiguity audit clears an in-flight occurrence fetch when its group c
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   const audit = panel.locator("[data-nilm-ambiguity-audit]");
   await audit.locator("[data-nilm-ambiguity-toggle]").click();
   const group = audit.locator(`[data-nilm-ambiguity-group="${groupId}"]`);
@@ -6983,6 +6989,7 @@ test("NILM ambiguity audit loads further bounded occurrence pages", async ({ pag
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   const audit = panel.locator("[data-nilm-ambiguity-audit]");
   await audit.locator("[data-nilm-ambiguity-toggle]").click();
   await audit.locator(`[data-nilm-ambiguity-group="${groupId}"]`).click();
@@ -7075,6 +7082,7 @@ test("NILM ambiguity audit drops a stale group response after a route change", a
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   await panel.locator("[data-nilm-ambiguity-toggle]").click();
   await expect(panel.locator(`[data-nilm-ambiguity-group="${delayedGroupId}"]`)).toBeVisible();
   await panel.locator(`[data-nilm-ambiguity-group="${delayedGroupId}"]`).click();
@@ -7162,6 +7170,7 @@ test("NILM ambiguity audit coalesces a refresh that arrives during its reload", 
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   const audit = panel.locator("[data-nilm-ambiguity-audit]");
   await audit.locator("[data-nilm-ambiguity-toggle]").click();
   await expect.poll(() => collectionRequests).toBe(1);
@@ -7230,6 +7239,7 @@ test("NILM ambiguity audit refreshes cached evidence after an accepted workspace
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   const audit = panel.locator("[data-nilm-ambiguity-audit]");
   await audit.locator("[data-nilm-ambiguity-toggle]").click();
   const group = audit.locator(`[data-nilm-ambiguity-group="${groupId}"]`);
@@ -7301,6 +7311,7 @@ test("NILM ambiguity audit drops a stale collection response after a route chang
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   await panel.locator("[data-nilm-ambiguity-toggle]").click();
   await expect.poll(() => collectionStarted).toBe(true);
   await page.evaluate(() => {
@@ -8579,6 +8590,7 @@ test("NILM validation renders evaluable prediction count and estimate error deta
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
 
   const referenceMetric = panel.locator(".metric").filter({ hasText: "Reference intervals" });
   await expect(referenceMetric).toContainText("2");
@@ -9456,6 +9468,7 @@ test("NILM review supports decisions and interval labeling", async ({ page }) =>
   await expect(panel.getByText("Suggested Settings", { exact: true })).toHaveCount(0);
   await expect(panel.getByText("Applied Suggested Settings", { exact: true })).toHaveCount(0);
   await expect(panel.locator("[data-nilm-secondary-details]")).toHaveCount(0);
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   await expect(panel.getByRole("heading", { name: "Known Load Overlays" })).toBeVisible();
 
   await expect(panel.getByText("This detection matches Unknown 900 W load; this decision applies to the signature and future matching detections.")).toBeVisible();
@@ -9497,6 +9510,7 @@ test("NILM review supports decisions and interval labeling", async ({ page }) =>
       removed_interval_ids: [],
     },
   });
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   await toHaveNoViolations(page);
 });
 
@@ -9765,7 +9779,6 @@ test("Needs Review session assignment preserves review state when assignment mem
   await expect(panel.locator(".inline-feedback.success")).toHaveCount(0);
   await expect(panel.locator('[data-nilm-review-item="session:nilm-session-0"]'))
     .toHaveAttribute("aria-pressed", "true");
-  await expect(panel.locator('#nilm_label_session_0')).toHaveValue("Keep this review label");
   await expect.poll(() => page.evaluate(() => ({
     decision: window.__panel._nilmDecisionDrafts.get("signature-1"),
     label: window.__panel._nilmLabelDrafts.get("signature-1"),

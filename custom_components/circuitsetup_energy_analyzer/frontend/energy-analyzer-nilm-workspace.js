@@ -832,7 +832,7 @@ export function createNilmWorkspaceMethods({
           data.on_edge_id,
         )) {
         this._setInlineFeedback(
-          feedbackScope,
+          "nilm-review",
           "error",
           this._panelText("errors.nilm_session_assignment_not_persisted"),
         );
@@ -4621,7 +4621,7 @@ export function createNilmWorkspaceMethods({
       ? workspace.label_intervals
       : [];
     return `<div class="metric" data-nilm-interval-editor>
-        <h3>${this._escape(this._panelText("nilm_workspace.interval_prompt"))}</h3>
+        <h2>${this._escape(this._panelText("nilm_workspace.interval_prompt"))}</h2>
         <p class="muted">${this._escape(this._panelText("nilm_workspace.interval_prompt_detail"))}</p>
         <ul class="muted nilm-interval-guidance" data-nilm-interval-guidance>
           <li>${this._escape(this._panelText("nilm_workspace.interval_guidance_start"))}</li>
