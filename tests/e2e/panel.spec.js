@@ -9173,7 +9173,76 @@ test("alert responses and setting preview actions call their services", async ({
   ]);
 });
 
-test("NILM review supports decisions, validation, and interval labeling", async ({ page }) => {
+test("NILM workspace reviews an assigned session once in the Needs Review lane", async ({ page }) => {
+  const sessionId = "nilm-session-1";
+  const validateData = {
+    circuit_id: "mains",
+    session_id: sessionId,
+    assignment_id: "dishwasher",
+  };
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: [] });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const validated = await page.evaluate(() => window.__serviceCalls?.some((call) => (
+      call.service === "validate_nilm_session"
+      && call.data?.session_id === "nilm-session-1"
+    )) || false);
+    const payload = structuredClone(apiPayload(url.pathname));
+    const session = payload.sessions.find((item) => item.session_id === sessionId);
+    session.assignment_id = "dishwasher";
+    session.ambiguous = false;
+    session.actions = {
+      validate: {
+        domain: "circuitsetup_energy_analyzer",
+        service: "validate_nilm_session",
+        data: validateData,
+      },
+      reject: {
+        domain: "circuitsetup_energy_analyzer",
+        service: "reject_nilm_session",
+        data: validateData,
+      },
+    };
+    payload.lanes.needs_review = {
+      ...payload.lanes.needs_review,
+      signature_ids: [],
+      session_ids: validated ? [] : [sessionId],
+    };
+    payload.lane_counts.needs_review = validated ? 0 : 1;
+    if (validated) {
+      payload.sessions = payload.sessions.filter((item) => item.session_id !== sessionId);
+    }
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  const reviewCard = panel.locator(`[data-nilm-review-item="session:${sessionId}"]`);
+
+  await expect(reviewCard).toHaveCount(1);
+  await expect(panel.locator("[data-nilm-session-validation-card]")).toHaveCount(0);
+  await reviewCard.click();
+
+  const inspector = panel.locator("[data-nilm-review-inspector]");
+  await expect(inspector).toBeVisible();
+  await expect(inspector.locator('[data-nilm-session-action="validate"]')).toHaveText("Correct");
+  await expect(inspector.locator('[data-nilm-session-action="reject"]')).toHaveText("Wrong appliance");
+  await expect(inspector.locator("[data-nilm-session-interval-index]")).toHaveText("Adjust Interval");
+  await inspector.locator('[data-nilm-session-action="validate"]').click();
+
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.find((call) => (
+    call.service === "validate_nilm_session"
+  )))).toMatchObject({
+    domain: "circuitsetup_energy_analyzer",
+    service: "validate_nilm_session",
+    data: validateData,
+  });
+  await expect(reviewCard).toHaveCount(0);
+});
+
+test("NILM review supports decisions and interval labeling", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (url.pathname.endsWith("/nilm_workspace_history")) {
       await route.fulfill({ json: [] });
@@ -9232,25 +9301,6 @@ test("NILM review supports decisions, validation, and interval labeling", async 
       fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
       max_hours: 24,
     };
-    const completed = payload.sessions.find((session) => session.assignment_id === "dishwasher");
-    completed.confidence = 0.7;
-    completed.pairing_confidence = 0.7;
-    completed.ambiguous = true;
-    payload.sessions.push(
-      { ...completed, session_id: "nilm-session-alternate", start: "2026-07-13T17:00:00Z", end: "2026-07-13T17:20:00Z", ambiguous: false, alternate_match_count: 2 },
-      { ...completed, session_id: "nilm-session-overlap", start: "2026-07-13T15:00:00Z", end: "2026-07-13T15:20:00Z", ambiguous: false, alternate_match_count: 0, overlap_count: 1 },
-      { ...completed, session_id: "nilm-session-known", start: "2026-07-13T14:00:00Z", end: "2026-07-13T14:20:00Z", ambiguous: false, alternate_match_count: 0, overlap_count: 0, known_load_masked: true },
-    );
-    payload.sessions.push({
-      session_id: "nilm-session-open",
-      assignment_id: "dishwasher",
-      display_label: "Dishwasher",
-      start: "2026-07-13T19:00:00Z",
-      end: null,
-      confidence: 0.82,
-      median_power_w: 900,
-      estimated_energy_kwh: null,
-    });
     await route.fulfill({ json: payload });
     return true;
   });
@@ -9263,34 +9313,13 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   await expect(panel.getByText("Suggested Settings", { exact: true })).toHaveCount(0);
   await expect(panel.getByText("Applied Suggested Settings", { exact: true })).toHaveCount(0);
   await expect(panel.locator("[data-nilm-secondary-details]")).toHaveCount(0);
-  await expect(panel.getByRole("heading", { name: "Session Validation" })).toBeVisible();
   await expect(panel.getByRole("heading", { name: "Known Load Overlays" })).toBeVisible();
-  await expect(panel.locator('[data-nilm-session-action="validate"]').first()).toBeVisible();
-  const card = panel.locator("[data-nilm-session-validation-card]").first();
-  await expect(card.locator("strong")).toContainText("Predicted");
-  await expect(card.locator("[data-nilm-session-range]")).toBeVisible();
-  const openCard = panel.locator('[data-nilm-session-validation-card][data-nilm-open="true"]');
-  await expect(openCard).toContainText("Pairing confidence");
-  await expect(openCard.locator("[data-nilm-session-action]")).toHaveCount(0);
-  await expect(openCard.locator("[data-nilm-session-interval-index]")).toHaveCount(0);
-  const closedCards = panel.locator('[data-nilm-session-validation-card][data-nilm-open="false"]');
-  await expect(closedCards).toHaveCount(4);
-  const closedCard = closedCards.first();
-  await closedCard.locator("[data-nilm-session-interval-index]").click();
-  await expect(panel.locator("[data-nilm-interval-editor]")).toBeVisible();
-  await panel.locator("[data-nilm-cancel-interval-editor]").click();
-  await expect(panel.getByText("Pairing confidence is lower because the session match is ambiguous.")).toBeVisible();
-  await expect(panel.getByText("Pairing confidence is lower because other edge matches were plausible.")).toBeVisible();
-  await expect(panel.getByText("Pairing confidence is lower because a competing session overlapped this run.")).toBeVisible();
-  await expect(panel.getByText("Pairing confidence is lower because known-load activity affected this run.")).toBeVisible();
 
   await expect(panel.getByText("This detection matches Unknown 900 W load; this decision applies to the signature and future matching detections.")).toBeVisible();
   await expect(panel.locator('[data-nilm-decision][value="mark_expected"]')).toHaveCount(0);
   await panel.locator('[data-nilm-decision][value="identify"]').check();
   await panel.locator('[data-nilm-existing-assignment="session_0"]').selectOption("mains-configured-primary");
   await panel.locator("[data-nilm-apply-decision]").click();
-
-  await panel.locator('[data-nilm-session-action="validate"]').first().click();
 
   await panel.locator('[data-nilm-lane="assigned"]').click();
   await panel.locator('[data-nilm-assignment-action="validate_history"]').click();
@@ -9315,7 +9344,6 @@ test("NILM review supports decisions, validation, and interval labeling", async 
 
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.map((call) => call.service))).toEqual([
     "assign_session_to_appliance",
-    "validate_nilm_session",
     "validate_nilm_assignment_history",
     "set_nilm_detection_sensitivity",
     "save_nilm_interval_changes",

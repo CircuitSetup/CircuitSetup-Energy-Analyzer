@@ -3944,7 +3944,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       assert.ok(!html.includes("Estimated Appliances"));
       assert.ok(!html.includes("Manual Labels"));
       assert.ok(!html.includes("data-nilm-decision"));
-      assert.ok(html.includes("OWNED_SESSION"));
+      assert.ok(!html.includes("OWNED_SESSION"));
       assert.ok(html.includes("RAW_SESSION"));
       assert.ok(html.includes('data-nilm-session-index="1" data-nilm-session-action="assign"'));
       assert.ok(!html.includes('data-nilm-session-index="0" data-nilm-session-action="assign"'));
@@ -4009,7 +4009,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
         assert.equal(html.split(input).length - 1, 0);
         for (const action of ["validate", "reject"]) {
           const marker = `data-nilm-session-index="${index}" data-nilm-session-action="${action}"`;
-          assert.equal(html.split(marker).length - 1, 1);
+          assert.equal(html.split(marker).length - 1, 0);
         }
         const assign = `data-nilm-session-index="${index}" data-nilm-session-action="assign"`;
         assert.equal(html.split(assign).length - 1, 0);
@@ -4042,53 +4042,51 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       estimated_energy_kwh: 0.61,
       actions: { validate: {}, reject: {} },
     };
-    name = "test_nilm_workspace_renders_session_validation_cards";
+    name = "test_nilm_workspace_renders_session_validation_in_review_inspector";
     {
-      const panel = makePanel({ _nilmWorkspace: makeWorkspace({
+      const workspace = makeWorkspace({
         signatures: [{ signature_id: "sig-dishwasher",
           feedback_fingerprint: "dishwasher-fingerprint", actions: { ignore: {} } }],
         sessions: [validationSession],
-      }) });
+      });
+      workspace.lanes.needs_review = {
+        ...workspace.lanes.needs_review,
+        signature_ids: [],
+        session_ids: ["session-dishwasher"],
+      };
+      const panel = makePanel({ _nilmWorkspace: workspace });
       const html = panel._renderNilmWorkspaceBody();
       for (const expected of [
-        "Session Validation", "Predicted Dishwasher", "2026-06-24", "51m",
+        "Predicted Dishwasher", "2026-06-24", "51m",
         "Estimated by NILM", "Pairing confidence: 82%", "Correct", "Wrong appliance",
         "Adjust Interval", 'data-nilm-session-action="validate"',
         'data-nilm-session-action="reject"', 'data-nilm-session-interval-index="0"',
       ]) assert.ok(html.includes(expected), expected);
-      for (const duplicate of ["Ignore Similar", 'data-nilm-action="ignore"']) {
+      for (const duplicate of [
+        "Session Validation",
+        "data-nilm-session-validation-card",
+        "Ignore Similar",
+        'data-nilm-action="ignore"',
+      ]) {
         assert.ok(!html.includes(duplicate), duplicate);
       }
     }
 
-    name = "test_nilm_workspace_hides_already_reviewed_session_validation_cards";
-    {
-      const workspace = makeWorkspace({
-        assignments: [{ assignment_id: "assignment-dishwasher",
-          confirmed_session_ids: ["session-confirmed"],
-          rejected_session_ids: ["session-rejected"] }],
-        sessions: [
-          { ...validationSession, session_id: "session-confirmed", display_label: "Already Confirmed" },
-          { ...validationSession, session_id: "session-rejected", display_label: "Already Rejected" },
-          { ...validationSession, session_id: "session-pending", display_label: "Pending Dishwasher" },
-        ],
-      });
-      const html = makePanel({ _nilmWorkspace: workspace })._renderNilmWorkspaceBody();
-      for (const hidden of ["Already Confirmed", "Already Rejected"]) {
-        assert.ok(!html.includes(hidden), hidden);
-      }
-      assert.ok(html.includes("Predicted Pending Dishwasher"));
-    }
-
     name = "test_nilm_workspace_marks_low_confidence_estimated_sessions";
     {
+      const workspace = makeWorkspace({
+        history: { start: "2026-06-24T18:00:00Z", end: "2026-06-24T19:10:00Z" },
+        sessions: [{ ...validationSession, pairing_confidence: 0.7 }],
+      });
+      workspace.lanes.needs_review = {
+        ...workspace.lanes.needs_review,
+        signature_ids: [],
+        session_ids: ["session-dishwasher"],
+      };
       const panel = makePanel({
         _nilmFocusedSignature: "dishwasher-fingerprint",
         _nilmFocusedOccurrenceIndex: 0,
-        _nilmWorkspace: makeWorkspace({
-          history: { start: "2026-06-24T18:00:00Z", end: "2026-06-24T19:10:00Z" },
-          sessions: [{ ...validationSession, pairing_confidence: 0.7 }],
-        }),
+        _nilmWorkspace: workspace,
       });
       panel._nilmWorkspaceHistorySeries = [[
         { entity_id: "sensor.mains_power", state: "200",
