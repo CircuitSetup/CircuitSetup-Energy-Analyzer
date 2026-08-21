@@ -2051,7 +2051,6 @@
         "hidden_description": "Removed loads stay out of active review and can be restored for review.",
         "lane_empty": "No review items from {lane} are available in the current workspace.",
         "item_count": "{count} {noun}",
-        "session_validation": "Session Validation",
         "predicted": "Predicted {label}",
         "in_progress": "In progress",
         "provisional_confidence": "In progress. Provisional confidence {confidence}; this session is still running.",

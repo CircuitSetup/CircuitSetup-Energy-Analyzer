@@ -3937,7 +3937,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       });
       const html = panel._renderNilmSecondaryCollections(workspace);
       assert.ok((html.match(/<details/g) || []).length >= 1);
-      assert.match(html, /<details[^>]*data-nilm-secondary-collections(?![^>]*\bopen\b)[^>]*>/);
+      assert.match(html, /<details[^>]*data-nilm-secondary-collections(?![^>]*\\bopen\\b)[^>]*>/);
       assert.ok(html.includes("<summary>Sessions, validation, and technical details</summary>"));
       assert.ok(html.includes("nilm-secondary-collections-content"));
       for (const expected of [
@@ -9166,8 +9166,8 @@ def test_readme_describes_current_nilm_workspace_flow() -> None:
         "highlights the active graph selection and matching time fields",
         "sends the saved evidence directly to Needs Review",
         "false-positive and false-negative rates",
-        "The workspace groups work into five lanes",
-        "Needs Review, Assigned, Published, Expected, and Removed",
+        "The workspace groups work into four lanes",
+        "Needs Review, Assigned, Published, and Removed",
         "dynamic dashboard NILM card can show the same lane counts "
         "when it is available",
         "Published NILM appliances are marked as estimated",
