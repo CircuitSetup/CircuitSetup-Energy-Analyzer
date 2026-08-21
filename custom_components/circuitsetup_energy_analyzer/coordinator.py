@@ -238,6 +238,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         self._startup_store_dirty = False
         self._startup_alert_notification_ids: set[str] = set()
+        self._startup_store_dirty |= (
+            self.nilm_controller._normalize_legacy_expected_records()
+        )
         explicitly_disabled_nilm_circuit_ids = _explicitly_disabled_nilm_circuit_ids(
             self.entry_data,
             self.options,
@@ -270,7 +273,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                         config.circuit_id, self._baseline_values
                     )
                 )
-        self._hydrate_state_from_store()
+        self.ux_state.hydrate_state_from_store(hydrate_nilm=False)
         self.async_set_updated_data(self.state)
 
     def async_set_updated_data(self: Self, data: Any) -> None:
@@ -289,6 +292,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def async_start(self: Self, source_entities: Iterable[str]) -> None:
         """Start listening to configured source entity state changes."""
+        await self.nilm_controller.async_hydrate_state_from_store()
         await self.evidence_actions.async_expire_maintenance_if_due(self.current_time())
         if self._startup_alert_notification_ids:
             await self.notification_controller.async_dismiss_alert_notification_ids(
@@ -499,10 +503,6 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         bucket["last_ms"] = elapsed_ms
         bucket["max_ms"] = max(float(bucket["max_ms"]), elapsed_ms)
 
-        if operation in {"nilm", "source_update"} or operation.startswith(
-            "processor:"
-        ):
-            return
         if elapsed_seconds <= SLOW_RUNTIME_OPERATION_SECONDS:
             return
         observed_at = monotonic()

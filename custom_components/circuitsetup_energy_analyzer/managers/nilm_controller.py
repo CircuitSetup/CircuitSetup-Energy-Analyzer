@@ -4,10 +4,11 @@ import asyncio
 import hashlib
 import math
 from collections.abc import Iterable, Mapping
-from copy import deepcopy
+from copy import copy, deepcopy
 from datetime import UTC, datetime
 from functools import partial
 from statistics import median
+from types import SimpleNamespace
 from typing import Any
 
 from ..const import DOMAIN
@@ -39,6 +40,52 @@ from ..profiles import nilm_source_kind, supports_direct_appliance_analysis
 
 _NILM_VALIDATION_OUTCOME_MAX_ITEMS = 64
 _NILM_VALIDATION_PROFILE_MAX_ITEMS = 12
+_NILM_WORKER_CALLBACK_FIELDS = frozenset(
+    {
+        "_nilm_enabled",
+        "_min_delta_w_for_circuit",
+        "_known_load_events",
+        "_known_load_topology",
+        "_helper_candidate_events",
+        "_observe_topology",
+    }
+)
+_NILM_WORKER_SHARED_FIELDS = frozenset(
+    {
+        "detectors",
+        "total_events_by_circuit",
+        "unmatched_edges_by_circuit",
+        "ignored_signatures",
+    }
+)
+_NILM_WORKER_STORE_FIELDS = (
+    "nilm_appliance_assignments_by_circuit",
+    "nilm_known_load_attributions_by_circuit",
+    "nilm_session_history_by_circuit",
+    "nilm_session_history_ingress_by_circuit",
+    "nilm_signatures",
+    "nilm_unknown_loads_by_circuit",
+    "nilm_unmatched_edges_by_circuit",
+)
+_NILM_WORKER_STATE_FIELDS = (
+    "always_on_power_w_by_circuit",
+    "latest_real_power_w_by_circuit",
+    "nilm_component_runtime_by_circuit",
+    "nilm_reconciliation_by_circuit",
+)
+
+
+def _nilm_worker_storage_snapshot(value: Any) -> Any:
+    """Copy JSON-like retained NILM data without one long C-level deepcopy."""
+    if isinstance(value, Mapping):
+        return {
+            key: _nilm_worker_storage_snapshot(item) for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_nilm_worker_storage_snapshot(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_nilm_worker_storage_snapshot(item) for item in value)
+    return value
 
 
 def _reference_link_number(value: Any, field: str) -> float | None:
@@ -286,16 +333,165 @@ class NilmController:
     ) -> list[AlertEvidence]:
         """Process one NILM sample off the event loop, then apply its result."""
         coordinator = self._coordinator
-        result = await coordinator.pipeline.async_run(
-            partial(
-                self._sample_processor.process,
-                sample,
-                config,
-                context or coordinator.context_builder.build(sample.timestamp),
-                events=events,
+        live_context = context or coordinator.context_builder.build(sample.timestamp)
+        event_snapshot = tuple(events)
+        async with self._review_transaction_lock:
+            worker_inputs = self._worker_inputs(config.circuit_id, event_snapshot)
+            worker, worker_context, topology_matches = (
+                await coordinator.pipeline.async_run(
+                    self._worker_snapshot,
+                    config.circuit_id,
+                    live_context,
+                    *worker_inputs,
+                )
+            )
+            result = await coordinator.pipeline.async_run(
+                partial(
+                    worker.process,
+                    sample,
+                    config,
+                    worker_context,
+                    events=event_snapshot,
+                )
+            )
+            self._apply_worker_snapshot(
+                config.circuit_id,
+                worker,
+                worker_context.store_data,
+            )
+            alerts = self._apply_sample_result(result)
+            for topology_config, match in topology_matches:
+                alert = self.observe_known_load_topology(
+                    topology_config,
+                    match,
+                    live_context,
+                )
+                if alert is not None:
+                    alerts.append(alert)
+            return alerts
+
+    def _worker_snapshot(
+        self,
+        circuit_id: str,
+        context: Any,
+        known_events: tuple[Any, ...],
+        helper_events: tuple[Any, ...],
+        topologies: Mapping[str, Any],
+        min_delta_w: float,
+    ) -> tuple[Any, Any, list[tuple[Any, Any]]]:
+        """Copy mutable NILM inputs while the event-loop owner holds the lock."""
+        worker = copy(self._sample_processor)
+        for name, value in self._sample_processor.__dict__.items():
+            if name in _NILM_WORKER_CALLBACK_FIELDS:
+                continue
+            if name == "_pending_known_load_events":
+                copied_pending = {
+                    key: tuple(items) for key, items in value.items()
+                }
+                setattr(worker, name, copied_pending)
+                continue
+            if name == "_helper_events_by_source":
+                copied_events = copy(value)
+                copied_events.update({key: list(items) for key, items in value.items()})
+                setattr(worker, name, copied_events)
+                continue
+            setattr(worker, name, deepcopy(value))
+
+        topology_matches: list[tuple[Any, Any]] = []
+        worker._nilm_enabled = lambda _config: True
+        worker._min_delta_w_for_circuit = lambda _circuit_id: min_delta_w
+        worker._known_load_events = lambda _circuit_id, _events: known_events
+        worker._helper_candidate_events = lambda _circuit_id, _events: helper_events
+        worker._known_load_topology = topologies.get
+        worker._observe_topology = (
+            lambda topology_config, match, _context: (
+                topology_matches.append((topology_config, match)) or ()
             )
         )
-        return self._apply_sample_result(result)
+
+        detached_store = SimpleNamespace(
+            **{
+                field: (
+                    {circuit_id: _nilm_worker_storage_snapshot(mapping[circuit_id])}
+                    if circuit_id in (mapping := getattr(context.store_data, field))
+                    else {}
+                )
+                for field in _NILM_WORKER_STORE_FIELDS
+            }
+        )
+        detached_state = SimpleNamespace(
+            **{
+                field: deepcopy(getattr(context.state, field))
+                for field in _NILM_WORKER_STATE_FIELDS
+            }
+        )
+        detached_context = type(context)(
+            now=context.now,
+            hass=None,
+            state=detached_state,
+            store_data=detached_store,
+            options=context.options,
+            entry_data=context.entry_data,
+            known_load_circuit_ids=context.known_load_circuit_ids,
+            sensitivity=context.sensitivity,
+            time_zone=context.time_zone,
+            thermostat_observations=context.thermostat_observations,
+            contextual_samples_cache={},
+        )
+        return worker, detached_context, topology_matches
+
+    def _worker_inputs(
+        self,
+        circuit_id: str,
+        events: tuple[Any, ...],
+    ) -> tuple[tuple[Any, ...], tuple[Any, ...], Mapping[str, Any], float]:
+        """Resolve Home Assistant-owned callbacks before executor dispatch."""
+        known_events = tuple(self.known_load_events(circuit_id, events))
+        helper_events = tuple(self.helper_candidate_events(circuit_id, events))
+        topology_ids = {
+            *(event.circuit_id for event in known_events),
+            *(
+                event.circuit_id
+                for pending in (
+                    self._sample_processor._pending_known_load_events.values()
+                )
+                for event in pending
+            ),
+        }
+        topologies = {
+            known_circuit_id: topology
+            for known_circuit_id in topology_ids
+            if (topology := self.known_load_topology(known_circuit_id)) is not None
+        }
+        min_delta_w = self._coordinator.settings_controller.nilm_min_delta_w(circuit_id)
+        return known_events, helper_events, topologies, min_delta_w
+
+    def _apply_worker_snapshot(
+        self,
+        circuit_id: str,
+        worker: Any,
+        detached_store: Any,
+    ) -> None:
+        """Publish completed worker-owned runtime and store data on the event loop."""
+        processor = self._sample_processor
+        for name, value in worker.__dict__.items():
+            if name in _NILM_WORKER_CALLBACK_FIELDS:
+                continue
+            if name in _NILM_WORKER_SHARED_FIELDS:
+                shared = getattr(processor, name)
+                shared.clear()
+                shared.update(value)
+            else:
+                setattr(processor, name, value)
+
+        live_store = self._coordinator.store_data
+        for field in _NILM_WORKER_STORE_FIELDS:
+            live_mapping = getattr(live_store, field)
+            detached_mapping = getattr(detached_store, field)
+            if circuit_id in detached_mapping:
+                live_mapping[circuit_id] = detached_mapping[circuit_id]
+            else:
+                live_mapping.pop(circuit_id, None)
 
     def _apply_sample_result(self, result: Any) -> list[AlertEvidence]:
         coordinator = self._coordinator
@@ -448,6 +644,92 @@ class NilmController:
                         (circuit_id, str(signature.get("signature_id", "")))
                     )
             self.refresh_state(circuit_id)
+
+    async def async_hydrate_state_from_store(self) -> None:
+        """Rebuild retained NILM models without blocking Home Assistant setup."""
+        coordinator = self._coordinator
+        async with self._review_transaction_lock:
+            rebuilt = self._normalize_legacy_expected_records()
+            rebuilt_models = await coordinator.pipeline.async_run(
+                self._rebuilt_assignment_models,
+                coordinator.store_data.nilm_appliance_assignments_by_circuit,
+                coordinator.store_data.nilm_session_history_by_circuit,
+                coordinator.store_data.nilm_label_intervals_by_circuit,
+                self._nilm_model_time_zone(),
+            )
+            for circuit_id, index, model in rebuilt_models:
+                assignments = (
+                    coordinator.store_data.nilm_appliance_assignments_by_circuit.get(
+                        circuit_id, ()
+                    )
+                )
+                if index < len(assignments):
+                    assignments[index].update(model)
+                    rebuilt = True
+            if rebuilt:
+                coordinator.store_persistence.mark_dirty()
+
+            for circuit_id, signatures in (
+                coordinator.store_data.nilm_signatures.items()
+            ):
+                for signature in signatures:
+                    if signature.get("ignored") is True:
+                        coordinator.ignored_nilm_signatures.add(
+                            (circuit_id, str(signature.get("signature_id", "")))
+                        )
+                context = coordinator.context_builder.build(coordinator.current_time())
+                worker_inputs = self._worker_inputs(circuit_id, ())
+                worker, worker_context, _topology_matches = (
+                    await coordinator.pipeline.async_run(
+                        self._worker_snapshot,
+                        circuit_id,
+                        context,
+                        *worker_inputs,
+                    )
+                )
+                result = await coordinator.pipeline.async_run(
+                    worker.refresh_state,
+                    circuit_id,
+                    worker_context,
+                )
+                self._apply_worker_snapshot(
+                    circuit_id,
+                    worker,
+                    worker_context.store_data,
+                )
+                self._apply_sample_result(result)
+        now = coordinator.current_time()
+        coordinator.ux_state.refresh_all(now, refresh_nilm=False)
+        coordinator._refresh_settings_recommendation_state(now)
+
+    def _rebuilt_assignment_models(
+        self,
+        assignments_by_circuit: Mapping[str, Any],
+        history_by_circuit: Mapping[str, Any],
+        label_intervals_by_circuit: Mapping[str, Any],
+        time_zone: str | None,
+    ) -> list[tuple[str, int, Mapping[str, Any]]]:
+        rebuilt: list[tuple[str, int, Mapping[str, Any]]] = []
+        for circuit_id, assignments in assignments_by_circuit.items():
+            history = history_by_circuit.get(circuit_id, ())
+            label_intervals = label_intervals_by_circuit.get(circuit_id, ())
+            for index, assignment in enumerate(assignments):
+                normalized = normalize_nilm_assignment_model(assignment)
+                model = normalized
+                if self._has_retained_assignment_evidence(
+                    assignment, history, label_intervals
+                ):
+                    candidate = build_nilm_assignment_model(
+                        assignment,
+                        history,
+                        label_intervals=label_intervals,
+                        time_zone=time_zone,
+                    )
+                    if self._model_has_usable_evidence(candidate):
+                        model = candidate
+                if self._assignment_model_changed(assignment, normalized, model):
+                    rebuilt.append((circuit_id, index, model))
+        return rebuilt
 
     @staticmethod
     def _has_retained_assignment_evidence(
