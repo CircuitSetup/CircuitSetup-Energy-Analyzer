@@ -3960,12 +3960,12 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
 
       context.window.location.search = "?nilm_workspace=1&circuit_id=mains&ambiguous_session_id=ambiguous-1";
       const deepLinked = panel._renderNilmSecondaryCollections(workspace);
-      assert.match(deepLinked, /<details[^>]*data-nilm-secondary-collections[^>]*\bopen\b[^>]*>/);
+      assert.match(deepLinked, /<details[^>]*data-nilm-secondary-collections[^>]*\\bopen\\b[^>]*>/);
 
       context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
       panel._nilmSessionPageError = "Session page failed";
       const withError = panel._renderNilmSecondaryCollections(workspace);
-      assert.match(withError, /<details[^>]*data-nilm-secondary-collections[^>]*\bopen\b[^>]*>/);
+      assert.match(withError, /<details[^>]*data-nilm-secondary-collections[^>]*\\bopen\\b[^>]*>/);
     }
 
     name = "test_nilm_validation_hides_without_reference_intervals";
