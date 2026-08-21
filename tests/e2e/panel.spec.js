@@ -7328,6 +7328,34 @@ test("NILM workspace uses Home Assistant surfaces", async ({ page }) => {
   await expect(panel.getByText("Feedback evidence score: 62%")).toHaveCount(2);
 });
 
+test("NILM assignment inspector distinguishes missing rates from real zero rates", async ({ page }) => {
+  await mockPanelApi(page);
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator('[data-nilm-lane="assigned"]').click();
+  await panel.locator('[data-nilm-review-item="assignment:dishwasher"]').click();
+
+  const inspector = panel.locator("[data-nilm-review-inspector]");
+  await expect(inspector).not.toContainText(/False positives \d+%, False negatives \d+%/);
+
+  await page.evaluate(() => {
+    Object.assign(window.__panel._nilmWorkspace.assignments[0], {
+      false_positive_rate: 0,
+      false_negative_rate: 0,
+    });
+    window.__panel._render();
+  });
+  await expect(inspector).toContainText("False positives 0%, False negatives 0%");
+
+  await page.evaluate(() => {
+    Object.assign(window.__panel._nilmWorkspace.assignments[0], {
+      false_positive_rate: 0.125,
+      false_negative_rate: 0.25,
+    });
+    window.__panel._render();
+  });
+  await expect(inspector).toContainText("False positives 13%, False negatives 25%");
+});
+
 test("NILM workspace says when an edge has no dominant leg", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/nilm_workspace")) return false;

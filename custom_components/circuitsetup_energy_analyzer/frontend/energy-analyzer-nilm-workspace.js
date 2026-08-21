@@ -4295,6 +4295,15 @@ export function createNilmWorkspaceMethods({
   _renderNilmReviewInspector(reviewItem) {
     const item = reviewItem.item;
     const title = item.display_label || item.display_name || item.label || item.likely_type || item.appliance_id || this._panelText("common.unknown_load");
+    const falsePositiveRate = this._nilmFiniteNumber(item.false_positive_rate);
+    const falseNegativeRate = this._nilmFiniteNumber(item.false_negative_rate);
+    const percent = (value) => Math.round(Math.max(0, Math.min(1, value)) * 100);
+    const validationRates = falsePositiveRate !== null && falseNegativeRate !== null
+      ? `<p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_rates", {
+        false_positive: percent(falsePositiveRate),
+        false_negative: percent(falseNegativeRate),
+      }))}</p>`
+      : "";
     const sessionValidation = reviewItem.kind === "session"
       && item.assignment_id
       && item.end
@@ -4309,7 +4318,7 @@ export function createNilmWorkspaceMethods({
     const content = reviewItem.kind === "assignment"
       ? `
         ${this._nilmConfidenceDescriptor(item, "assignment") ? `<p class="muted">${this._escape(this._nilmConfidenceDescriptor(item, "assignment").text)}</p>` : ""}
-        <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_rates", { false_positive: Math.round(Number(item.false_positive_rate || 0) * 100), false_negative: Math.round(Number(item.false_negative_rate || 0) * 100) }))}</p>
+        ${validationRates}
         <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_median_power_error", { power: this._formatMetricValue(item.median_power_error) }))}</p>
         <p class="muted">${this._escape(this._panelTextFormat("nilm_workspace.assignment_energy_error", { energy: this._formatMetricValue(item.energy_estimate_error) }))}</p>
         ${assignedIntervals.length ? `<div class="entity-list" data-nilm-assigned-intervals>${assignedIntervals.map(({ interval, index }) => `<div class="metric">
