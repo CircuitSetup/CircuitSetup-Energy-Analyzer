@@ -2039,7 +2039,6 @@
         "signatures_need": "signatures need",
         "next_to_review": "Next to review",
         "workspace_summary": "NILM review summary",
-        "model_evidence": "Model evidence",
         "workflow_guidance": "Review recurring loads, assign or identify them, validate sessions or link reference sensors, then publish when the estimate is trustworthy. The graph is measured source power; appliance power and energy are estimates. Uncertain or unexplained power remains unassigned.",
         "circuit": "Circuit",
         "review_progress": "Review progress",

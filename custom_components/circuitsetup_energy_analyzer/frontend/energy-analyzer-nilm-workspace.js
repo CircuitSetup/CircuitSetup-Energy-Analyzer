@@ -3087,11 +3087,13 @@ export function createNilmWorkspaceMethods({
         ${this._nilmRouteItemError ? `<p class="muted" data-nilm-deep-link-feedback role="status" aria-live="polite">${this._escape(this._nilmRouteItemError)}</p>` : ""}
         ${this._renderNilmWorkspaceSummary(workspace)}
         ${this._renderNilmConfiguredPrimary(workspace)}
-        ${this._renderNilmModelEvidence()}
         <section class="workspace-section nilm-graph-section section-surface">${this._renderNilmGraph(workspace, graphWindow, graphBands)}</section>
         ${intervalEditor || intervalFeedback ? `<section class="workspace-section nilm-interval-editor-section section-surface">${intervalEditor}${intervalFeedback}</section>` : ""}
-        <section class="workspace-section section-surface">${this._renderNilmWorkspaceLanes(workspace)}</section>
-        <section class="workspace-section section-surface">${this._renderNilmReviewLayout(workspace)}</section>
+        <section class="workspace-section section-surface" data-nilm-review-workspace>
+          ${this._nilmActiveLane === "needs_review" ? `<p class="muted">${this._escape(this._panelText("nilm_workspace.workflow_guidance"))}</p>` : ""}
+          ${this._renderNilmWorkspaceLanes(workspace)}
+          ${this._renderNilmReviewLayout(workspace)}
+        </section>
         ${this._renderNilmSecondaryCollections(workspace)}
       </div>
     `;
@@ -3184,13 +3186,6 @@ export function createNilmWorkspaceMethods({
           : this._panelText("nilm_workspace.primary_confirm"))}</button>` : ""}
       </div>` : ""}
       ${this._renderInlineFeedback("nilm-primary")}
-    </section>`;
-  }
-
-  _renderNilmModelEvidence() {
-    return `<section class="workspace-section section-surface" data-nilm-model-evidence>
-      <h2>${this._escape(this._panelText("nilm_workspace.model_evidence"))}</h2>
-      <p class="muted">${this._escape(this._panelText("nilm_workspace.workflow_guidance"))}</p>
     </section>`;
   }
 

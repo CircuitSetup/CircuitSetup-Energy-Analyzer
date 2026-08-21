@@ -7288,10 +7288,25 @@ test("NILM ambiguity audit drops a stale collection response after a route chang
 });
 
 
-test("NILM workspace uses Home Assistant surfaces", async ({ page }) => {
+test("NILM compact review workspace uses Home Assistant surfaces", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: [[
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T15:55:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "900", last_changed: "2026-07-13T16:00:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T18:45:00Z", effective_role: "real_power", source_unit: "W" },
+      ]] });
+      return true;
+    }
     if (!url.pathname.endsWith("/nilm_workspace")) return false;
     const payload = structuredClone(apiPayload(url.pathname));
+    payload.history = {
+      ...payload.history,
+      entities: ["sensor.mains_power"],
+      source_entities: ["sensor.mains_power"],
+      api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+      fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+    };
     Object.assign(payload.assignments[0], {
       feedback_evidence_score: 0.62,
       confidence_kind: "feedback_evidence",
@@ -7309,6 +7324,15 @@ test("NILM workspace uses Home Assistant surfaces", async ({ page }) => {
     root.setProperty("--ha-card-border-radius", "12px");
   });
 
+  const reviewWorkspace = panel.locator("[data-nilm-review-workspace]");
+  await expect(panel.locator("[data-nilm-model-evidence]")).toHaveCount(0);
+  await expect(reviewWorkspace).toHaveCount(1);
+  await expect(reviewWorkspace.locator("[role=tablist]")).toHaveCount(1);
+  await expect(reviewWorkspace.locator("#nilm_review_lane_panel")).toHaveCount(1);
+  await expect(reviewWorkspace).toContainText(
+    "Review recurring loads, assign or identify them, validate sessions or link reference sensors, then publish when the estimate is trustworthy. The graph is measured source power; appliance power and energy are estimates. Uncertain or unexplained power remains unassigned.",
+  );
+
   await expect(panel.locator(".nilm-lane").first()).toHaveCSS(
     "background-color",
     "rgb(229, 231, 235)",
@@ -7324,8 +7348,33 @@ test("NILM workspace uses Home Assistant surfaces", async ({ page }) => {
   await expect(panel.locator('[data-nilm-lane][aria-selected="true"]')).toBeVisible();
   await expect(panel.locator(".nilm-review-inspector")).toBeVisible();
   await expect(panel.locator("[data-nilm-apply-decision]")).toBeEnabled();
-  await panel.locator('[data-nilm-lane="assigned"]').click();
+  const needsReview = panel.locator('[data-nilm-lane="needs_review"]');
+  await needsReview.focus();
+  await needsReview.press("ArrowRight");
+  const assigned = panel.locator('[data-nilm-lane="assigned"]');
+  await expect(assigned).toBeFocused();
+  await expect(assigned).toHaveAttribute("aria-selected", "true");
+  await expect(needsReview).toHaveAttribute("aria-selected", "false");
+  await expect(reviewWorkspace).not.toContainText(
+    "Review recurring loads, assign or identify them, validate sessions or link reference sensors, then publish when the estimate is trustworthy. The graph is measured source power; appliance power and energy are estimates. Uncertain or unexplained power remains unassigned.",
+  );
   await expect(panel.getByText("Feedback evidence score: 62%")).toHaveCount(2);
+  await panel.locator('[data-nilm-review-item="assignment:dishwasher"]').click();
+  await expect(panel.locator("[data-nilm-review-inspector]")).toContainText("Dishwasher");
+  await expect.poll(() => page.evaluate(() => window.__panel._nilmFocusedInterval)).toMatchObject({
+    start: Date.parse("2026-07-13T18:00:00Z"),
+    end: Date.parse("2026-07-13T18:45:00Z"),
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await reviewWorkspace.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.evaluate(() => {
+    const root = document.documentElement.style;
+    root.removeProperty("--ha-card-background");
+    root.removeProperty("--divider-color");
+    root.removeProperty("--primary-color");
+    root.removeProperty("--ha-card-border-radius");
+  });
+  await toHaveNoViolations(page);
 });
 
 test("NILM assignment inspector distinguishes missing rates from real zero rates", async ({ page }) => {
@@ -11034,19 +11083,6 @@ test("NILM graph drag and edge marker Cancel restore pre-edit graph state", asyn
     failedRequest: window.__panel._nilmWorkspaceHistoryFailedRequest,
     serviceCalls: window.__serviceCalls.length,
   }))).toEqual(edgePreEdit);
-});
-
-test("NILM workspace explains lifecycle and model evidence on narrow layouts", async ({ page }) => {
-  await mockPanelApi(page);
-  await page.setViewportSize({ width: 390, height: 844 });
-  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
-  const evidence = panel.locator("[data-nilm-model-evidence]");
-
-  await expect(evidence).toContainText(
-    "Review recurring loads, assign or identify them, validate sessions or link reference sensors, then publish when the estimate is trustworthy. The graph is measured source power; appliance power and energy are estimates. Uncertain or unexplained power remains unassigned.",
-  );
-  await expect(evidence).toBeInViewport();
-  await toHaveNoViolations(page);
 });
 
 test("failed NILM request can be retried", async ({ page }) => {
