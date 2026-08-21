@@ -2380,8 +2380,24 @@ def test_nilm_workspace_reviews_closed_components_and_maps_stale_assignment() ->
     payload = nilm_workspace_payload([coordinator], circuit_id="hvac_2")
 
     assert payload["lanes"]["needs_review"]["signature_ids"] == []
-    assert len(payload["lanes"]["needs_review"]["session_ids"]) == 1
-    assert payload["lane_counts"]["needs_review"] == 1
+    needs_review_session_ids = payload["lanes"]["needs_review"]["session_ids"]
+    assert len(needs_review_session_ids) == 2
+    assert len(needs_review_session_ids) == len(set(needs_review_session_ids))
+    actionable_assigned_session_ids = [
+        session["session_id"]
+        for session in payload["sessions"]
+        if session.get("assignment_id")
+        and any(
+            session.get("actions", {}).get(action)
+            for action in ("validate", "reject")
+        )
+    ]
+    assert actionable_assigned_session_ids
+    assert all(
+        needs_review_session_ids.count(session_id) == 1
+        for session_id in actionable_assigned_session_ids
+    )
+    assert payload["lane_counts"]["needs_review"] == 2
     pump = next(
         item for item in payload["signatures"] if item["signature_id"] == "on-pump"
     )
@@ -7235,7 +7251,10 @@ def test_nilm_workspace_payload_keeps_shared_signature_sibling_in_review() -> No
     assert sessions[selected_id]["end"] == selected["end"]
     assert sessions[selected_id]["duration_seconds"] == selected["duration_seconds"]
     assert not sessions[sibling_id].get("assignment_id")
-    assert payload["lanes"]["needs_review"]["session_ids"] == [sibling_id]
+    needs_review_session_ids = payload["lanes"]["needs_review"]["session_ids"]
+    assert set(needs_review_session_ids) == {selected_id, sibling_id}
+    assert len(needs_review_session_ids) == len(set(needs_review_session_ids))
+    assert needs_review_session_ids.count(selected_id) == 1
 
     coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"].append(
         {
@@ -7254,6 +7273,10 @@ def test_nilm_workspace_payload_keeps_shared_signature_sibling_in_review() -> No
     }
     assert competing_sessions[selected_id]["assignment_id"] == "assignment-pump"
     assert competing_sessions[sibling_id]["assignment_id"] == "signature-owner"
+    assert set(competing["lanes"]["needs_review"]["session_ids"]) == {
+        selected_id,
+        sibling_id,
+    }
 
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mains": []}
     orphaned = nilm_workspace_payload([coordinator], circuit_id="mains")
@@ -7392,7 +7415,7 @@ def test_nilm_workspace_history_resolves_legacy_signature_owner() -> None:
     payload = nilm_workspace_payload([coordinator], circuit_id="mains")
 
     assert payload["sessions"][0]["assignment_id"] == "assignment-pump"
-    assert payload["lanes"]["needs_review"]["session_ids"] == []
+    assert payload["lanes"]["needs_review"]["session_ids"] == ["session-pump"]
 
 
 def test_nilm_workspace_virtual_appliance_uses_assignment_session_ids() -> None:
