@@ -3901,8 +3901,20 @@ export function createNilmWorkspaceMethods({
         && !needsReviewSessionIds.has(String(item && item.session_id || "").trim())
       ));
     const showDominantLeg = workspace.source && workspace.source.source_kind === "mains";
-    return `<section class="workspace-section section-surface" data-nilm-secondary-collections>
-      <h2>${this._escape(this._panelText("nilm_workspace.secondary_details"))}</h2>
+    const routeTarget = this._nilmRouteItemTarget(this._loadedRouteKey || this._routeKey());
+    const hasSecondaryDetailsError = Boolean(
+      this._nilmSessionPageError
+      || this._nilmAmbiguityAuditError
+      || this._nilmAmbiguityAuditGroupSummariesError
+      || Array.from(this._nilmAmbiguityAuditGroupResults?.values() || []).some((result) => result?.error),
+    );
+    const shouldOpen = this._nilmSecondaryDetailsOpen
+      || ["ambiguous_session", "known_load_attribution"].includes(routeTarget?.kind)
+      || hasSecondaryDetailsError;
+    const secondaryDetailsLabel = this._escape(this._panelText("nilm_workspace.secondary_details"));
+    return `<details class="workspace-section section-surface" data-nilm-secondary-collections ${shouldOpen ? "open" : ""}>
+      <summary>${secondaryDetailsLabel}</summary>
+      <div class="nilm-secondary-collections-content">
         ${this._renderNilmValidation(workspace.validation)}
         ${workspace.source && workspace.source.source_kind === "mains" ? this._renderNilmWorkspaceList(this._panelText("nilm_workspace.known_load_overlays"), workspace.known_load_overlays, this._panelText("nilm_workspace.known_load_overlays_empty"), (item) => `
         <div class="metric">
@@ -3961,7 +3973,8 @@ export function createNilmWorkspaceMethods({
         `, this._panelText("nilm_workspace.edges_description"), "data-nilm-edges-details")}
         ${this._renderNilmAmbiguityAudit(workspace)}
         ${this._renderNilmEvidenceDetails(workspace)}
-    </section>`;
+      </div>
+    </details>`;
   }
 
   _nilmLaneItems(workspace, laneKey = this._nilmActiveLane) {

@@ -6309,7 +6309,32 @@ test("NILM evidence quality and provenance remain bounded and accessible", async
 });
 
 
-test("NILM exact deep links fetch old items and keep ambiguity audit-only", async ({ page }) => {
+test("Secondary details is a persistent native disclosure", async ({ page }) => {
+  await mockPanelApi(page);
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  const secondaryDetails = panel.locator("[data-nilm-secondary-collections]");
+  const summary = secondaryDetails.locator(":scope > summary");
+
+  await expect(secondaryDetails).toHaveJSProperty("tagName", "DETAILS");
+  await expect(secondaryDetails).not.toHaveAttribute("open");
+  await summary.focus();
+  await summary.press("Space");
+  await expect(secondaryDetails).toHaveJSProperty("open", true);
+
+  await panel.locator('[data-nilm-lane="assigned"]').click();
+  await panel.locator('[data-nilm-lane="needs_review"]').click();
+  await expect(secondaryDetails).toHaveJSProperty("open", true);
+
+  await page.evaluate(() => {
+    history.pushState({}, "", `${location.pathname}?nilm_workspace=1&circuit_id=secondary`);
+  });
+  await expect.poll(() => page.evaluate(() => window.__panel._loadedRouteKey))
+    .toContain("circuit_id=secondary");
+  await expect(secondaryDetails).not.toHaveAttribute("open");
+  await toHaveNoViolations(page);
+});
+
+test("deep-linked NILM exact items keep ambiguity audit-only", async ({ page }) => {
   const itemPath = "/api/circuitsetup_energy_analyzer/nilm_workspace/item";
   const collectionPath = "/api/circuitsetup_energy_analyzer/nilm_workspace/collection";
   const exactRequests = [];
@@ -6418,6 +6443,7 @@ test("NILM exact deep links fetch old items and keep ambiguity audit-only", asyn
   );
   const audit = ambiguousPanel.locator("[data-nilm-ambiguity-audit]");
   const occurrence = audit.locator('[data-nilm-ambiguity-occurrence="ambiguous-only"]');
+  await expect(ambiguousPanel.locator("[data-nilm-secondary-collections]")).toHaveAttribute("open", "");
   await expect(audit.locator("[data-nilm-ambiguity-toggle]")).toHaveAttribute("aria-expanded", "true");
   await expect(occurrence).toBeVisible();
   await expect(occurrence.locator("[data-nilm-ambiguity-open-graph]")).toBeVisible();

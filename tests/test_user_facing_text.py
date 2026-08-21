@@ -2722,6 +2722,7 @@ def test_scoped_load_error_contracts() -> None:
         _busyAction: "nilm_label_interval_save",
         _historyLoading: true,
         _nilmActiveLane: "published",
+        _nilmSecondaryDetailsOpen: true,
         _nilmSelectedReviewKey: "assignment:a",
       });
       panel._loadedRouteKey = panel._routeKey();
@@ -2736,6 +2737,7 @@ def test_scoped_load_error_contracts() -> None:
       assert.equal(panel._busyAction, "");
       assert.ok(!panel._historyLoading);
       assert.equal(panel._nilmActiveLane, "needs_review");
+      assert.equal(panel._nilmSecondaryDetailsOpen, false);
       assert.equal(panel._nilmSelectedReviewKey, "");
       assert.ok(!panel._renderChart({}).includes("data-loading-skeleton"));
     }
@@ -2745,6 +2747,7 @@ def test_scoped_load_error_contracts() -> None:
       context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
       const panel = makePanel({
         _nilmActiveLane: "assigned",
+        _nilmSecondaryDetailsOpen: true,
         _nilmSelectedReviewKey: "assignment:one",
       });
       panel._loadedRouteKey = panel._routeKey();
@@ -2760,6 +2763,7 @@ def test_scoped_load_error_contracts() -> None:
         };
       await panel._loadEvidence({ routeKey: panel._routeKey() });
       assert.equal(panel._nilmActiveLane, "assigned");
+      assert.equal(panel._nilmSecondaryDetailsOpen, true);
       assert.equal(panel._nilmSelectedReviewKey, "assignment:one");
     }
   } catch (error) {
@@ -3846,7 +3850,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       assert.ok(graph >= 0 && graph < editor && editor < lanes);
       const secondary = panel._renderNilmSecondaryCollections(panel._nilmWorkspace);
       assert.ok(secondary.includes("data-nilm-secondary-collections"));
-      assert.ok(secondary.includes("<section"));
+      assert.ok(secondary.includes("<details"));
       assert.ok(!secondary.includes('class="nilm-interval-form"'));
     }
 
@@ -3917,10 +3921,11 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       assert.ok(!emptyGraph.includes("data-nilm-edit-focused-interval"));
     }
 
-    name = "test_nilm_secondary_collections_are_always_visible";
+    name = "test_nilm_secondary_collections_are_native_and_open_when_needed";
     {
-      const panel = makePanel();
-      const html = panel._renderNilmSecondaryCollections(makeWorkspace({ sessions: [
+      context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+      const panel = makePanel({ _nilmSecondaryDetailsOpen: false });
+      const workspace = makeWorkspace({ sessions: [
         { session_id: "assigned", assignment_id: "assignment-1",
           start: "OWNED_SESSION", actions: { assign: {} } },
         { session_id: "unassigned", start: "RAW_SESSION",
@@ -3929,8 +3934,12 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       collection_meta: {
         sessions: { total_count: 2, returned_count: 2, truncated: false, next_cursor: null },
       },
-      }));
+      });
+      const html = panel._renderNilmSecondaryCollections(workspace);
       assert.ok((html.match(/<details/g) || []).length >= 1);
+      assert.match(html, /<details[^>]*data-nilm-secondary-collections(?![^>]*\bopen\b)[^>]*>/);
+      assert.ok(html.includes("<summary>Sessions, validation, and technical details</summary>"));
+      assert.ok(html.includes("nilm-secondary-collections-content"));
       for (const expected of [
         "Sessions, validation, and technical details",
         "NILM Sessions",
@@ -3948,6 +3957,15 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       assert.ok(html.includes("RAW_SESSION"));
       assert.ok(html.includes('data-nilm-session-index="1" data-nilm-session-action="assign"'));
       assert.ok(!html.includes('data-nilm-session-index="0" data-nilm-session-action="assign"'));
+
+      context.window.location.search = "?nilm_workspace=1&circuit_id=mains&ambiguous_session_id=ambiguous-1";
+      const deepLinked = panel._renderNilmSecondaryCollections(workspace);
+      assert.match(deepLinked, /<details[^>]*data-nilm-secondary-collections[^>]*\bopen\b[^>]*>/);
+
+      context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+      panel._nilmSessionPageError = "Session page failed";
+      const withError = panel._renderNilmSecondaryCollections(workspace);
+      assert.match(withError, /<details[^>]*data-nilm-secondary-collections[^>]*\bopen\b[^>]*>/);
     }
 
     name = "test_nilm_validation_hides_without_reference_intervals";
