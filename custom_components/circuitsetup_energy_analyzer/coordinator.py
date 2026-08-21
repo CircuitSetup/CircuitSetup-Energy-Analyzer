@@ -740,7 +740,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 continue
             nilm_started_at = monotonic()
             try:
-                nilm_alerts = self.nilm_controller.process_sample(
+                nilm_alerts = await self.nilm_controller.async_process_sample(
                     config,
                     sample,
                     events,

@@ -3196,6 +3196,58 @@ async def test_enabled_nilm_processing_records_circuit_duration() -> None:
 
 
 @pytest.mark.asyncio
+async def test_enabled_nilm_processing_keeps_event_loop_responsive() -> None:
+    import threading
+    import time
+
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.base import (
+        FeatureResult,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "mains",
+                    "name": "Mains",
+                    "mode": "mains_nilm",
+                    "appliance_profile": "mains_nilm",
+                    CONF_NILM_DETECTION_ENABLED: True,
+                    "sensors": [],
+                }
+            ]
+        },
+    )
+    nilm_running = threading.Event()
+    event_loop_ran_during_nilm = asyncio.Event()
+
+    def slow_process_sample(*_args: Any, **_kwargs: Any) -> FeatureResult:
+        nilm_running.set()
+        time.sleep(0.05)
+        nilm_running.clear()
+        return FeatureResult()
+
+    async def heartbeat() -> None:
+        while not event_loop_ran_during_nilm.is_set():
+            await asyncio.sleep(0.005)
+            if nilm_running.is_set():
+                event_loop_ran_during_nilm.set()
+
+    coordinator.nilm_controller._sample_processor.process = slow_process_sample
+    heartbeat_task = asyncio.create_task(heartbeat())
+    try:
+        await coordinator.async_process_update()
+        assert event_loop_ran_during_nilm.is_set()
+    finally:
+        heartbeat_task.cancel()
+        await asyncio.gather(heartbeat_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_disabled_nilm_processing_is_not_invoked() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
@@ -4658,7 +4710,7 @@ def _record_source_scoped_update_work(coordinator: Any) -> dict[str, list[Any]]:
         )
         return []
 
-    def fake_process_sample(config, sample, events, context=None):
+    async def fake_process_sample(config, sample, events, context=None):
         calls["nilm"].append(config.circuit_id)
         return []
 
@@ -4674,7 +4726,7 @@ def _record_source_scoped_update_work(coordinator: Any) -> dict[str, list[Any]]:
 
     coordinator.pipeline.async_process_circuit = fake_process_circuit
     coordinator.pipeline.async_process_cross_circuit = fake_cross_circuit
-    coordinator.nilm_controller.process_sample = fake_process_sample
+    coordinator.nilm_controller.async_process_sample = fake_process_sample
     coordinator._rebuild_setting_recommendations = fake_rebuild_settings
     notify_settings = "async_notify_settings_recommendations_if_needed"
     setattr(coordinator.notification_controller, notify_settings, fake_notify_settings)

@@ -6,6 +6,7 @@ import math
 from collections.abc import Iterable, Mapping
 from copy import deepcopy
 from datetime import UTC, datetime
+from functools import partial
 from statistics import median
 from typing import Any
 
@@ -274,6 +275,30 @@ class NilmController:
             context or coordinator.context_builder.build(sample.timestamp),
             events=events,
         )
+        return self._apply_sample_result(result)
+
+    async def async_process_sample(
+        self,
+        config: Any,
+        sample: Any,
+        events: Iterable[Any],
+        context: Any | None = None,
+    ) -> list[AlertEvidence]:
+        """Process one NILM sample off the event loop, then apply its result."""
+        coordinator = self._coordinator
+        result = await coordinator.pipeline.async_run(
+            partial(
+                self._sample_processor.process,
+                sample,
+                config,
+                context or coordinator.context_builder.build(sample.timestamp),
+                events=events,
+            )
+        )
+        return self._apply_sample_result(result)
+
+    def _apply_sample_result(self, result: Any) -> list[AlertEvidence]:
+        coordinator = self._coordinator
         coordinator.state_reducer.apply_updates(
             coordinator.state,
             result.state_updates,

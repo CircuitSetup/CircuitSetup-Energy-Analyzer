@@ -73,25 +73,29 @@ class ProcessingPipeline:
         await asyncio.sleep(0)
         return applied
 
+    async def async_run(self, target: Any, *args: Any) -> Any:
+        """Run synchronous analyzer work without blocking the event loop."""
+        add_executor_job = getattr(
+            getattr(self._coordinator, "hass", None),
+            "async_add_executor_job",
+            None,
+        )
+        if add_executor_job is not None:
+            executor_job = add_executor_job(target, *args)
+        else:
+            executor_job = asyncio.to_thread(target, *args)
+        processor_task = asyncio.ensure_future(executor_job)
+        try:
+            return await asyncio.shield(processor_task)
+        except asyncio.CancelledError:
+            with suppress(asyncio.CancelledError, Exception):
+                await processor_task
+            raise
+
     async def _async_process(self, name: str, processor: Any, *args: Any) -> Any:
         started_at = monotonic()
         try:
-            add_executor_job = getattr(
-                getattr(self._coordinator, "hass", None),
-                "async_add_executor_job",
-                None,
-            )
-            if add_executor_job is not None:
-                executor_job = add_executor_job(processor.process, *args)
-            else:
-                executor_job = asyncio.to_thread(processor.process, *args)
-            processor_task = asyncio.ensure_future(executor_job)
-            try:
-                return await asyncio.shield(processor_task)
-            except asyncio.CancelledError:
-                with suppress(asyncio.CancelledError, Exception):
-                    await processor_task
-                raise
+            return await self.async_run(processor.process, *args)
         finally:
             record_performance = getattr(
                 self._coordinator, "_record_runtime_performance", None
