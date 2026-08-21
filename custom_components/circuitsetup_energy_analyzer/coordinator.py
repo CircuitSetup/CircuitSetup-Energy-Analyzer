@@ -499,7 +499,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         bucket["last_ms"] = elapsed_ms
         bucket["max_ms"] = max(float(bucket["max_ms"]), elapsed_ms)
 
-        if operation == "source_update" or operation.startswith("processor:"):
+        if operation in {"nilm", "source_update"} or operation.startswith(
+            "processor:"
+        ):
             return
         if elapsed_seconds <= SLOW_RUNTIME_OPERATION_SECONDS:
             return

@@ -2878,23 +2878,15 @@ def test_coordinator_runtime_performance_is_bounded_and_rate_limits_warnings(
 
     with caplog.at_level("WARNING"):
         coordinator._record_runtime_performance("source_update", 0.025)
-        coordinator._record_runtime_performance(
-            "nilm", 0.125, circuit_id="hvac_1"
-        )
-        coordinator._record_runtime_performance(
-            "nilm", 0.150, circuit_id="hvac_1"
-        )
-        coordinator._record_runtime_performance(
-            "nilm", 0.175, circuit_id="hvac_1"
-        )
+        coordinator._record_runtime_performance("source_ingest", 0.125)
+        coordinator._record_runtime_performance("source_ingest", 0.150)
+        coordinator._record_runtime_performance("source_ingest", 0.175)
 
     assert coordinator.runtime_performance_snapshot() == {
         "slow_operation_threshold_ms": 100.0,
-        "source_ingest": {"count": 0, "last_ms": 0.0, "max_ms": 0.0},
+        "source_ingest": {"count": 3, "last_ms": 175.0, "max_ms": 175.0},
         "source_update": {"count": 1, "last_ms": 25.0, "max_ms": 25.0},
-        "nilm_by_circuit": {
-            "hvac_1": {"count": 3, "last_ms": 175.0, "max_ms": 175.0}
-        },
+        "nilm_by_circuit": {},
         "nilm_enabled_by_circuit": {},
         "processors": {},
         "analysis_pending": False,
@@ -2903,8 +2895,8 @@ def test_coordinator_runtime_performance_is_bounded_and_rate_limits_warnings(
         record.message for record in caplog.records if record.levelname == "WARNING"
     ]
     assert warning_messages == [
-        "Slow CSEA nilm operation for hvac_1: 125.0 ms",
-        "Slow CSEA nilm operation for hvac_1: 175.0 ms",
+        "Slow CSEA source_ingest operation: 125.0 ms",
+        "Slow CSEA source_ingest operation: 175.0 ms",
     ]
 
 
@@ -2943,10 +2935,14 @@ def test_background_runtime_performance_does_not_warn(
     with caplog.at_level("WARNING"):
         coordinator._record_runtime_performance("source_update", 2.0)
         coordinator._record_runtime_performance("processor:events", 1.0)
+        coordinator._record_runtime_performance(
+            "nilm", 2.5, circuit_id="mains"
+        )
 
     performance = coordinator.runtime_performance_snapshot()
     assert performance["source_update"]["max_ms"] == 2000.0
     assert performance["processors"]["events"]["max_ms"] == 1000.0
+    assert performance["nilm_by_circuit"]["mains"]["max_ms"] == 2500.0
     assert not [
         record for record in caplog.records if record.levelname == "WARNING"
     ]
