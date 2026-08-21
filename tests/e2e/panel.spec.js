@@ -8388,6 +8388,46 @@ test("NILM workspace keeps recommendations qualified and permits manual helper c
   });
 });
 
+test("NILM workspace hides empty Helper evidence but retains confirmed Helper controls", async ({ page }) => {
+  let includeConfirmedHelper = false;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.assignments[0].helper_candidates = [];
+    payload.assignments[0].helper_options = [];
+    payload.assignments[0].helper_links = includeConfirmedHelper ? [{
+      helper_circuit_id: "old_helper",
+      helper_name: "Old helper",
+      matched_on_count: 7,
+      source_on_count: 10,
+      start_lag_seconds: 30,
+      relationship: "corroborates",
+      actions: {
+        remove: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "remove_nilm_helper_link",
+          data: { entry_id: "entry-1", circuit_id: "mains", assignment_id: "dishwasher", helper_circuit_id: "old_helper" },
+        },
+      },
+    }] : [];
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  let panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=mains");
+  await panel.locator('[data-nilm-lane="assigned"]').click();
+  await expect(panel.locator("[data-nilm-helper-list]")).toHaveCount(0);
+
+  includeConfirmedHelper = true;
+  panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=mains");
+  await panel.locator('[data-nilm-lane="assigned"]').click();
+  const helperEvidence = panel.locator("[data-nilm-helper-list]");
+  await expect(helperEvidence).toHaveCount(1);
+  await expect(helperEvidence.getByText("Runs with this load (evidence only)", { exact: true })).toBeVisible();
+  await expect(helperEvidence.locator('[data-nilm-assignment-action="helper_togglelink_0"]')).toBeVisible();
+  await expect(helperEvidence.locator('[data-nilm-assignment-action="helper_remove_0"]')).toBeVisible();
+});
+
 test("NILM assignment links authoritative state and separate power history", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/nilm_workspace")) return false;

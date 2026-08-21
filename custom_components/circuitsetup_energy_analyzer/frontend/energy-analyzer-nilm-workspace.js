@@ -2613,8 +2613,15 @@ export function createNilmWorkspaceMethods({
 
   _renderNilmHelperEvidence(assignment, index) {
     this._nilmSyncHelperSelection(this._nilmWorkspace);
+    const confirmedLinks = Array.isArray(assignment.helper_links)
+      ? assignment.helper_links.filter(Boolean)
+      : [];
+    const helperCandidates = Array.isArray(assignment.helper_candidates)
+      ? assignment.helper_candidates
+      : [];
+    const helperOptions = Array.isArray(assignment.helper_options) ? assignment.helper_options : [];
     const selectedIds = new Set((this._nilmSelectedHelpers && this._nilmSelectedHelpers[assignment.assignment_id]) || []);
-    const confirmedIds = new Set((assignment.helper_links || []).map((item) => item.helper_circuit_id));
+    const confirmedIds = new Set(confirmedLinks.map((item) => item.helper_circuit_id));
     const renderEvidence = (item, offset, confirmed) => {
       const selected = selectedIds.has(item.helper_circuit_id);
       const name = item.helper_name || item.helper_circuit_id;
@@ -2625,12 +2632,14 @@ export function createNilmWorkspaceMethods({
         ${confirmed ? `<span>${this._escape(this._panelText(`nilm_workspace.helper_relationship_${item.relationship}`))}</span><button type="button" class="secondary" data-nilm-assignment-index="${index}" data-nilm-assignment-action="helper_remove_${offset}">${this._escape(this._panelText("nilm_workspace.helper_remove"))}</button>` : `<span class="muted">${this._escape(this._panelText("nilm_workspace.helper_relationship_corroborates"))}</span><button type="button" data-nilm-assignment-index="${index}" data-nilm-assignment-action="helper_set_${offset}">${this._escape(this._panelText("nilm_workspace.helper_confirm"))}</button>`}
       </div>`;
     };
-    const candidates = (assignment.helper_candidates || [])
+    const candidates = helperCandidates
       .map((item, offset) => ({ item, offset }))
       .filter(({ item }) => !confirmedIds.has(item.helper_circuit_id)
         && Number(item.matched_on_count) > 0
         && Number(item.source_on_count) > 0);
-    const helperOptions = Array.isArray(assignment.helper_options) ? assignment.helper_options : [];
+    if (!confirmedLinks.length && !candidates.length && !helperOptions.length) {
+      return "";
+    }
     const helperPromptKey = confirmedIds.size
       ? "nilm_workspace.helper_manual_another"
       : "nilm_workspace.helper_manual";
@@ -2643,7 +2652,7 @@ export function createNilmWorkspaceMethods({
       <span class="muted">${this._escape(this._panelText("nilm_workspace.helper_relationship_corroborates"))}</span>
       <button type="button" data-nilm-assignment-index="${index}" data-nilm-assignment-action="helper_manual">${this._escape(this._panelText("nilm_workspace.helper_set"))}</button>
     </div>` : "";
-    return `<div class="nilm-helper-list" data-nilm-helper-list><h3>${this._escape(this._panelText("nilm_workspace.helper_evidence"))}</h3><p class="muted">${this._escape(this._panelText("nilm_workspace.helper_evidence_description"))}</p>${(assignment.helper_links || []).map((item, offset) => renderEvidence(item, offset, true)).join("")}${candidates.map(({ item, offset }) => renderEvidence(item, offset, false)).join("")}${manual}</div>`;
+    return `<div class="nilm-helper-list" data-nilm-helper-list><h3>${this._escape(this._panelText("nilm_workspace.helper_evidence"))}</h3><p class="muted">${this._escape(this._panelText("nilm_workspace.helper_evidence_description"))}</p>${confirmedLinks.map((item, offset) => renderEvidence(item, offset, true)).join("")}${candidates.map(({ item, offset }) => renderEvidence(item, offset, false)).join("")}${manual}</div>`;
   }
 
   _nilmReferenceDraft(assignment) {
