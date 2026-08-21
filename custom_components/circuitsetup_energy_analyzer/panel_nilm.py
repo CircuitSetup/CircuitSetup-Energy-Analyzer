@@ -3640,14 +3640,22 @@ def _nilm_workspace_lanes(
             lanes["needs_review"]["interval_ids"].append(interval_id)
     for session in sessions:
         session_id = str(session.get(ATTR_SESSION_ID) or "").strip()
+        assignment_id = str(session.get(ATTR_ASSIGNMENT_ID) or "").strip()
         actions = session.get("actions")
+        if not isinstance(actions, Mapping):
+            continue
+
+        assignable = not assignment_id and isinstance(actions.get("assign"), Mapping)
+        validatable = bool(assignment_id) and any(
+            isinstance(actions.get(action), Mapping)
+            for action in ("validate", "reject")
+        )
         if (
             session_id
             and bool(session.get("end"))
-            and not str(session.get(ATTR_ASSIGNMENT_ID) or "").strip()
             and not bool(session.get("ambiguous"))
-            and isinstance(actions, Mapping)
-            and isinstance(actions.get("assign"), Mapping)
+            and (assignable or validatable)
+            and session_id not in lanes["needs_review"]["session_ids"]
         ):
             lanes["needs_review"]["session_ids"].append(session_id)
     return lanes

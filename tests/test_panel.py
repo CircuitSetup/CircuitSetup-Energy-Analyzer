@@ -2785,7 +2785,7 @@ def test_nilm_workspace_session_assignment_includes_on_edge_id() -> None:
     }
 
 
-def test_nilm_workspace_lanes_review_only_assignable_unassigned_sessions() -> None:
+def test_nilm_workspace_lanes_include_each_actionable_completed_session_once() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         _nilm_workspace_lanes,
     )
@@ -2796,24 +2796,59 @@ def test_nilm_workspace_lanes_review_only_assignable_unassigned_sessions() -> No
         label_intervals=[],
         sessions=[
             {
-                "session_id": "clean",
+                "session_id": "unassigned-actionable",
                 "end": "2026-08-11T12:30:00+00:00",
                 "actions": {"assign": {}},
             },
             {
-                "session_id": "open",
+                "session_id": "assigned-actionable",
+                "assignment_id": "assignment-dishwasher",
+                "end": "2026-08-11T12:30:00+00:00",
+                "actions": {"validate": {}, "reject": {}},
+            },
+            {
+                "session_id": "assigned-one-action",
+                "assignment_id": "assignment-washer",
+                "end": "2026-08-11T12:30:00+00:00",
+                "actions": {"validate": {}},
+            },
+            {
+                "session_id": "no-actions",
+                "end": "2026-08-11T12:30:00+00:00",
+            },
+            {
+                "session_id": "open-actionable",
                 "end": None,
                 "actions": {"assign": {}},
             },
             {
-                "session_id": "ambiguous",
+                "session_id": "ambiguous-actionable",
                 "ambiguous": True,
+                "end": "2026-08-11T12:30:00+00:00",
                 "actions": {"assign": {}},
+            },
+            {
+                "session_id": "  ",
+                "end": "2026-08-11T12:30:00+00:00",
+                "actions": {"assign": {}},
+            },
+            {
+                "session_id": "assigned-actionable",
+                "assignment_id": "assignment-dishwasher",
+                "end": "2026-08-11T12:30:00+00:00",
+                "actions": {"validate": {}, "reject": {}},
             },
         ],
     )
 
-    assert lanes["needs_review"]["session_ids"] == ["clean"]
+    assert lanes["needs_review"]["session_ids"] == [
+        "unassigned-actionable",
+        "assigned-actionable",
+        "assigned-one-action",
+    ]
+    assert len(lanes["needs_review"]["session_ids"]) == len(
+        set(lanes["needs_review"]["session_ids"])
+    )
 
 
 def test_nilm_workspace_does_not_synthesize_unassigned_sessions_without_specs() -> None:
@@ -2920,7 +2955,8 @@ def test_nilm_workspace_prioritizes_validation_sessions_on_initial_page() -> Non
     }
 
 
-def test_nilm_workspace_payload_keeps_assigned_session_out_of_needs_review() -> None:
+def test_nilm_workspace_payload_routes_unreviewed_assigned_session_to_needs_review(
+) -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
@@ -2966,10 +3002,15 @@ def test_nilm_workspace_payload_keeps_assigned_session_out_of_needs_review() -> 
     )
 
     assert session["assignment_id"] == "assignment-dishwasher"
-    assert (
-        "session-dishwasher"
-        not in payload["lanes"]["needs_review"]["session_ids"]
-    )
+    assert session["actions"]["validate"]
+    assert session["actions"]["reject"]
+    assert "session-dishwasher" in payload["lanes"]["needs_review"]["session_ids"]
+    lane_session_ids = [
+        session_id
+        for lane in payload["lanes"].values()
+        for session_id in lane["session_ids"]
+    ]
+    assert lane_session_ids.count("session-dishwasher") == 1
 
 
 def test_nilm_workspace_visible_sessions_exclude_ambiguous_evidence() -> None:
