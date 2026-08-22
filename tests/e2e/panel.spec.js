@@ -7428,6 +7428,7 @@ test("NILM assignment inspector distinguishes missing rates from real zero rates
     [0, false],
     [[], 0],
     [0, []],
+    [{}, 0],
   ]) {
     await page.evaluate(({ falsePositiveRate, falseNegativeRate }) => {
       Object.assign(window.__panel._nilmWorkspace.assignments[0], {
@@ -7450,7 +7451,7 @@ test("NILM assignment inspector distinguishes missing rates from real zero rates
 
   await page.evaluate(() => {
     Object.assign(window.__panel._nilmWorkspace.assignments[0], {
-      false_positive_rate: 0.125,
+      false_positive_rate: " 0.125 ",
       false_negative_rate: 0.25,
     });
     window.__panel._render();
