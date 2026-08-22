@@ -7423,6 +7423,22 @@ test("NILM assignment inspector distinguishes missing rates from real zero rates
   const inspector = panel.locator("[data-nilm-review-inspector]");
   await expect(inspector).not.toContainText(/False positives \d+%, False negatives \d+%/);
 
+  for (const [falsePositiveRate, falseNegativeRate] of [
+    ["  ", 0],
+    [0, false],
+    [[], 0],
+    [0, []],
+  ]) {
+    await page.evaluate(({ falsePositiveRate, falseNegativeRate }) => {
+      Object.assign(window.__panel._nilmWorkspace.assignments[0], {
+        false_positive_rate: falsePositiveRate,
+        false_negative_rate: falseNegativeRate,
+      });
+      window.__panel._render();
+    }, { falsePositiveRate, falseNegativeRate });
+    await expect(inspector).not.toContainText(/False positives \d+%, False negatives \d+%/);
+  }
+
   await page.evaluate(() => {
     Object.assign(window.__panel._nilmWorkspace.assignments[0], {
       false_positive_rate: 0,
