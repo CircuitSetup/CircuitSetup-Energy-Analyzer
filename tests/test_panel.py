@@ -457,7 +457,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260820-1"
+    assert PANEL_MODULE_VERSION == "20260821-1"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -2380,8 +2380,24 @@ def test_nilm_workspace_reviews_closed_components_and_maps_stale_assignment() ->
     payload = nilm_workspace_payload([coordinator], circuit_id="hvac_2")
 
     assert payload["lanes"]["needs_review"]["signature_ids"] == []
-    assert len(payload["lanes"]["needs_review"]["session_ids"]) == 1
-    assert payload["lane_counts"]["needs_review"] == 1
+    needs_review_session_ids = payload["lanes"]["needs_review"]["session_ids"]
+    assert len(needs_review_session_ids) == 2
+    assert len(needs_review_session_ids) == len(set(needs_review_session_ids))
+    actionable_assigned_session_ids = [
+        session["session_id"]
+        for session in payload["sessions"]
+        if session.get("assignment_id")
+        and any(
+            session.get("actions", {}).get(action)
+            for action in ("validate", "reject")
+        )
+    ]
+    assert actionable_assigned_session_ids
+    assert all(
+        needs_review_session_ids.count(session_id) == 1
+        for session_id in actionable_assigned_session_ids
+    )
+    assert payload["lane_counts"]["needs_review"] == 2
     pump = next(
         item for item in payload["signatures"] if item["signature_id"] == "on-pump"
     )
@@ -2785,7 +2801,7 @@ def test_nilm_workspace_session_assignment_includes_on_edge_id() -> None:
     }
 
 
-def test_nilm_workspace_lanes_review_only_assignable_unassigned_sessions() -> None:
+def test_nilm_workspace_lanes_include_each_actionable_completed_session_once() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         _nilm_workspace_lanes,
     )
@@ -2796,24 +2812,59 @@ def test_nilm_workspace_lanes_review_only_assignable_unassigned_sessions() -> No
         label_intervals=[],
         sessions=[
             {
-                "session_id": "clean",
+                "session_id": "unassigned-actionable",
                 "end": "2026-08-11T12:30:00+00:00",
                 "actions": {"assign": {}},
             },
             {
-                "session_id": "open",
+                "session_id": "assigned-actionable",
+                "assignment_id": "assignment-dishwasher",
+                "end": "2026-08-11T12:30:00+00:00",
+                "actions": {"validate": {}, "reject": {}},
+            },
+            {
+                "session_id": "assigned-one-action",
+                "assignment_id": "assignment-washer",
+                "end": "2026-08-11T12:30:00+00:00",
+                "actions": {"validate": {}},
+            },
+            {
+                "session_id": "no-actions",
+                "end": "2026-08-11T12:30:00+00:00",
+            },
+            {
+                "session_id": "open-actionable",
                 "end": None,
                 "actions": {"assign": {}},
             },
             {
-                "session_id": "ambiguous",
+                "session_id": "ambiguous-actionable",
                 "ambiguous": True,
+                "end": "2026-08-11T12:30:00+00:00",
                 "actions": {"assign": {}},
+            },
+            {
+                "session_id": "  ",
+                "end": "2026-08-11T12:30:00+00:00",
+                "actions": {"assign": {}},
+            },
+            {
+                "session_id": "assigned-actionable",
+                "assignment_id": "assignment-dishwasher",
+                "end": "2026-08-11T12:30:00+00:00",
+                "actions": {"validate": {}, "reject": {}},
             },
         ],
     )
 
-    assert lanes["needs_review"]["session_ids"] == ["clean"]
+    assert lanes["needs_review"]["session_ids"] == [
+        "unassigned-actionable",
+        "assigned-actionable",
+        "assigned-one-action",
+    ]
+    assert len(lanes["needs_review"]["session_ids"]) == len(
+        set(lanes["needs_review"]["session_ids"])
+    )
 
 
 def test_nilm_workspace_does_not_synthesize_unassigned_sessions_without_specs() -> None:
@@ -2920,7 +2971,8 @@ def test_nilm_workspace_prioritizes_validation_sessions_on_initial_page() -> Non
     }
 
 
-def test_nilm_workspace_payload_keeps_assigned_session_out_of_needs_review() -> None:
+def test_nilm_workspace_payload_routes_unreviewed_assigned_session_to_needs_review(
+) -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         nilm_workspace_payload,
     )
@@ -2966,10 +3018,15 @@ def test_nilm_workspace_payload_keeps_assigned_session_out_of_needs_review() -> 
     )
 
     assert session["assignment_id"] == "assignment-dishwasher"
-    assert (
-        "session-dishwasher"
-        not in payload["lanes"]["needs_review"]["session_ids"]
-    )
+    assert session["actions"]["validate"]
+    assert session["actions"]["reject"]
+    assert "session-dishwasher" in payload["lanes"]["needs_review"]["session_ids"]
+    lane_session_ids = [
+        session_id
+        for lane in payload["lanes"].values()
+        for session_id in lane["session_ids"]
+    ]
+    assert lane_session_ids.count("session-dishwasher") == 1
 
 
 def test_nilm_workspace_visible_sessions_exclude_ambiguous_evidence() -> None:
@@ -7194,7 +7251,10 @@ def test_nilm_workspace_payload_keeps_shared_signature_sibling_in_review() -> No
     assert sessions[selected_id]["end"] == selected["end"]
     assert sessions[selected_id]["duration_seconds"] == selected["duration_seconds"]
     assert not sessions[sibling_id].get("assignment_id")
-    assert payload["lanes"]["needs_review"]["session_ids"] == [sibling_id]
+    needs_review_session_ids = payload["lanes"]["needs_review"]["session_ids"]
+    assert set(needs_review_session_ids) == {selected_id, sibling_id}
+    assert len(needs_review_session_ids) == len(set(needs_review_session_ids))
+    assert needs_review_session_ids.count(selected_id) == 1
 
     coordinator.store_data.nilm_appliance_assignments_by_circuit["mains"].append(
         {
@@ -7213,6 +7273,10 @@ def test_nilm_workspace_payload_keeps_shared_signature_sibling_in_review() -> No
     }
     assert competing_sessions[selected_id]["assignment_id"] == "assignment-pump"
     assert competing_sessions[sibling_id]["assignment_id"] == "signature-owner"
+    assert set(competing["lanes"]["needs_review"]["session_ids"]) == {
+        selected_id,
+        sibling_id,
+    }
 
     coordinator.store_data.nilm_appliance_assignments_by_circuit = {"mains": []}
     orphaned = nilm_workspace_payload([coordinator], circuit_id="mains")
@@ -7351,7 +7415,7 @@ def test_nilm_workspace_history_resolves_legacy_signature_owner() -> None:
     payload = nilm_workspace_payload([coordinator], circuit_id="mains")
 
     assert payload["sessions"][0]["assignment_id"] == "assignment-pump"
-    assert payload["lanes"]["needs_review"]["session_ids"] == []
+    assert payload["lanes"]["needs_review"]["session_ids"] == ["session-pump"]
 
 
 def test_nilm_workspace_virtual_appliance_uses_assignment_session_ids() -> None:

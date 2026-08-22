@@ -1403,12 +1403,19 @@ export class PanelShellMethods {
           gap: 10px;
           min-width: 0;
         }
-        .nilm-evidence-details > summary {
+        .nilm-evidence-details > summary,
+        [data-nilm-secondary-collections] > summary {
           cursor: pointer;
           font-size: 18px;
           font-weight: 700;
           min-height: 44px;
           padding-block: 8px;
+        }
+        .nilm-secondary-collections-content {
+          display: grid;
+          gap: 12px;
+          min-width: 0;
+          padding-top: 12px;
         }
         .nilm-evidence-summary {
           background: transparent;
@@ -1994,6 +2001,14 @@ export class PanelShellMethods {
       });
     }
     this._configureNilmReferencePickers();
+    const secondaryDetails = this.shadowRoot.querySelector(
+      "[data-nilm-secondary-collections]",
+    );
+    if (secondaryDetails) {
+      secondaryDetails.addEventListener("toggle", () => {
+        this._nilmSecondaryDetailsOpen = secondaryDetails.open;
+      });
+    }
     for (const details of this.shadowRoot.querySelectorAll("[data-nilm-reference-details]")) {
       details.addEventListener("toggle", () => {
         const draft = this._nilmReferenceDrafts.get(details.dataset.nilmReferenceKey);

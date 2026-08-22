@@ -9502,7 +9502,10 @@ async def test_session_assignment_persists_one_projected_session() -> None:
         "condensate-pump"
     )
     assert not refreshed_sessions[sibling_id].get("assignment_id")
-    assert refreshed["lanes"]["needs_review"]["session_ids"] == [sibling_id]
+    assert refreshed["lanes"]["needs_review"]["session_ids"] == [
+        action["data"]["session_id"],
+        sibling_id,
+    ]
 
 
 @pytest.mark.asyncio

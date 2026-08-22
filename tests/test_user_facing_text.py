@@ -2722,6 +2722,7 @@ def test_scoped_load_error_contracts() -> None:
         _busyAction: "nilm_label_interval_save",
         _historyLoading: true,
         _nilmActiveLane: "published",
+        _nilmSecondaryDetailsOpen: true,
         _nilmSelectedReviewKey: "assignment:a",
       });
       panel._loadedRouteKey = panel._routeKey();
@@ -2736,6 +2737,7 @@ def test_scoped_load_error_contracts() -> None:
       assert.equal(panel._busyAction, "");
       assert.ok(!panel._historyLoading);
       assert.equal(panel._nilmActiveLane, "needs_review");
+      assert.equal(panel._nilmSecondaryDetailsOpen, false);
       assert.equal(panel._nilmSelectedReviewKey, "");
       assert.ok(!panel._renderChart({}).includes("data-loading-skeleton"));
     }
@@ -2745,6 +2747,7 @@ def test_scoped_load_error_contracts() -> None:
       context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
       const panel = makePanel({
         _nilmActiveLane: "assigned",
+        _nilmSecondaryDetailsOpen: true,
         _nilmSelectedReviewKey: "assignment:one",
       });
       panel._loadedRouteKey = panel._routeKey();
@@ -2760,6 +2763,7 @@ def test_scoped_load_error_contracts() -> None:
         };
       await panel._loadEvidence({ routeKey: panel._routeKey() });
       assert.equal(panel._nilmActiveLane, "assigned");
+      assert.equal(panel._nilmSecondaryDetailsOpen, true);
       assert.equal(panel._nilmSelectedReviewKey, "assignment:one");
     }
   } catch (error) {
@@ -3846,7 +3850,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       assert.ok(graph >= 0 && graph < editor && editor < lanes);
       const secondary = panel._renderNilmSecondaryCollections(panel._nilmWorkspace);
       assert.ok(secondary.includes("data-nilm-secondary-collections"));
-      assert.ok(secondary.includes("<section"));
+      assert.ok(secondary.includes("<details"));
       assert.ok(!secondary.includes('class="nilm-interval-form"'));
     }
 
@@ -3917,10 +3921,11 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       assert.ok(!emptyGraph.includes("data-nilm-edit-focused-interval"));
     }
 
-    name = "test_nilm_secondary_collections_are_always_visible";
+    name = "test_nilm_secondary_collections_are_native_and_open_when_needed";
     {
-      const panel = makePanel();
-      const html = panel._renderNilmSecondaryCollections(makeWorkspace({ sessions: [
+      context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+      const panel = makePanel({ _nilmSecondaryDetailsOpen: false });
+      const workspace = makeWorkspace({ sessions: [
         { session_id: "assigned", assignment_id: "assignment-1",
           start: "OWNED_SESSION", actions: { assign: {} } },
         { session_id: "unassigned", start: "RAW_SESSION",
@@ -3929,8 +3934,12 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       collection_meta: {
         sessions: { total_count: 2, returned_count: 2, truncated: false, next_cursor: null },
       },
-      }));
+      });
+      const html = panel._renderNilmSecondaryCollections(workspace);
       assert.ok((html.match(/<details/g) || []).length >= 1);
+      assert.match(html, /<details[^>]*data-nilm-secondary-collections(?![^>]*\\bopen\\b)[^>]*>/);
+      assert.ok(html.includes("<summary>Sessions, validation, and technical details</summary>"));
+      assert.ok(html.includes("nilm-secondary-collections-content"));
       for (const expected of [
         "Sessions, validation, and technical details",
         "NILM Sessions",
@@ -3944,10 +3953,19 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       assert.ok(!html.includes("Estimated Appliances"));
       assert.ok(!html.includes("Manual Labels"));
       assert.ok(!html.includes("data-nilm-decision"));
-      assert.ok(html.includes("OWNED_SESSION"));
+      assert.ok(!html.includes("OWNED_SESSION"));
       assert.ok(html.includes("RAW_SESSION"));
       assert.ok(html.includes('data-nilm-session-index="1" data-nilm-session-action="assign"'));
       assert.ok(!html.includes('data-nilm-session-index="0" data-nilm-session-action="assign"'));
+
+      context.window.location.search = "?nilm_workspace=1&circuit_id=mains&ambiguous_session_id=ambiguous-1";
+      const deepLinked = panel._renderNilmSecondaryCollections(workspace);
+      assert.match(deepLinked, /<details[^>]*data-nilm-secondary-collections[^>]*\\bopen\\b[^>]*>/);
+
+      context.window.location.search = "?nilm_workspace=1&circuit_id=mains";
+      panel._nilmSessionPageError = "Session page failed";
+      const withError = panel._renderNilmSecondaryCollections(workspace);
+      assert.match(withError, /<details[^>]*data-nilm-secondary-collections[^>]*\\bopen\\b[^>]*>/);
     }
 
     name = "test_nilm_validation_hides_without_reference_intervals";
@@ -4009,7 +4027,7 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
         assert.equal(html.split(input).length - 1, 0);
         for (const action of ["validate", "reject"]) {
           const marker = `data-nilm-session-index="${index}" data-nilm-session-action="${action}"`;
-          assert.equal(html.split(marker).length - 1, 1);
+          assert.equal(html.split(marker).length - 1, 0);
         }
         const assign = `data-nilm-session-index="${index}" data-nilm-session-action="assign"`;
         assert.equal(html.split(assign).length - 1, 0);
@@ -4042,53 +4060,51 @@ def test_nilm_workspace_disclosure_and_ownership_contracts() -> None:
       estimated_energy_kwh: 0.61,
       actions: { validate: {}, reject: {} },
     };
-    name = "test_nilm_workspace_renders_session_validation_cards";
+    name = "test_nilm_workspace_renders_session_validation_in_review_inspector";
     {
-      const panel = makePanel({ _nilmWorkspace: makeWorkspace({
+      const workspace = makeWorkspace({
         signatures: [{ signature_id: "sig-dishwasher",
           feedback_fingerprint: "dishwasher-fingerprint", actions: { ignore: {} } }],
         sessions: [validationSession],
-      }) });
+      });
+      workspace.lanes.needs_review = {
+        ...workspace.lanes.needs_review,
+        signature_ids: [],
+        session_ids: ["session-dishwasher"],
+      };
+      const panel = makePanel({ _nilmWorkspace: workspace });
       const html = panel._renderNilmWorkspaceBody();
       for (const expected of [
-        "Session Validation", "Predicted Dishwasher", "2026-06-24", "51m",
+        "Predicted Dishwasher", "2026-06-24", "51m",
         "Estimated by NILM", "Pairing confidence: 82%", "Correct", "Wrong appliance",
         "Adjust Interval", 'data-nilm-session-action="validate"',
         'data-nilm-session-action="reject"', 'data-nilm-session-interval-index="0"',
       ]) assert.ok(html.includes(expected), expected);
-      for (const duplicate of ["Ignore Similar", 'data-nilm-action="ignore"']) {
+      for (const duplicate of [
+        "Session Validation",
+        "data-nilm-session-validation-card",
+        "Ignore Similar",
+        'data-nilm-action="ignore"',
+      ]) {
         assert.ok(!html.includes(duplicate), duplicate);
       }
     }
 
-    name = "test_nilm_workspace_hides_already_reviewed_session_validation_cards";
-    {
-      const workspace = makeWorkspace({
-        assignments: [{ assignment_id: "assignment-dishwasher",
-          confirmed_session_ids: ["session-confirmed"],
-          rejected_session_ids: ["session-rejected"] }],
-        sessions: [
-          { ...validationSession, session_id: "session-confirmed", display_label: "Already Confirmed" },
-          { ...validationSession, session_id: "session-rejected", display_label: "Already Rejected" },
-          { ...validationSession, session_id: "session-pending", display_label: "Pending Dishwasher" },
-        ],
-      });
-      const html = makePanel({ _nilmWorkspace: workspace })._renderNilmWorkspaceBody();
-      for (const hidden of ["Already Confirmed", "Already Rejected"]) {
-        assert.ok(!html.includes(hidden), hidden);
-      }
-      assert.ok(html.includes("Predicted Pending Dishwasher"));
-    }
-
     name = "test_nilm_workspace_marks_low_confidence_estimated_sessions";
     {
+      const workspace = makeWorkspace({
+        history: { start: "2026-06-24T18:00:00Z", end: "2026-06-24T19:10:00Z" },
+        sessions: [{ ...validationSession, pairing_confidence: 0.7 }],
+      });
+      workspace.lanes.needs_review = {
+        ...workspace.lanes.needs_review,
+        signature_ids: [],
+        session_ids: ["session-dishwasher"],
+      };
       const panel = makePanel({
         _nilmFocusedSignature: "dishwasher-fingerprint",
         _nilmFocusedOccurrenceIndex: 0,
-        _nilmWorkspace: makeWorkspace({
-          history: { start: "2026-06-24T18:00:00Z", end: "2026-06-24T19:10:00Z" },
-          sessions: [{ ...validationSession, pairing_confidence: 0.7 }],
-        }),
+        _nilmWorkspace: workspace,
       });
       panel._nilmWorkspaceHistorySeries = [[
         { entity_id: "sensor.mains_power", state: "200",
@@ -5660,7 +5676,6 @@ def test_dynamic_panel_static_text_lives_in_translations() -> None:
         "NILM Signatures",
         "Estimated Appliances",
         "Label appliance interval",
-        "Session Validation",
         "Prediction Preview",
         "Power: measured {measured}, estimated {estimated}, error {error}",
         "Energy: measured {measured}, estimated {estimated}, error {error}",
@@ -9150,8 +9165,8 @@ def test_readme_describes_current_nilm_workspace_flow() -> None:
         "highlights the active graph selection and matching time fields",
         "sends the saved evidence directly to Needs Review",
         "false-positive and false-negative rates",
-        "The workspace groups work into five lanes",
-        "Needs Review, Assigned, Published, Expected, and Removed",
+        "The workspace groups work into four lanes",
+        "Needs Review, Assigned, Published, and Removed",
         "dynamic dashboard NILM card can show the same lane counts "
         "when it is available",
         "Published NILM appliances are marked as estimated",

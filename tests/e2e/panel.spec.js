@@ -6054,6 +6054,7 @@ test("NILM ambiguity audit is neutral, bounded, and focuses without editing", as
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   const audit = panel.locator("[data-nilm-ambiguity-audit]");
   const toggle = audit.locator("[data-nilm-ambiguity-toggle]");
 
@@ -6269,6 +6270,7 @@ test("NILM evidence quality and provenance remain bounded and accessible", async
     window.__panel._render();
   });
   const loadMore = panel.locator("[data-nilm-load-more-sessions]");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   await expect(panel.locator("[data-nilm-session-page-status]")).toContainText("Showing 1 of 2 sessions.");
   await loadMore.click();
   await expect.poll(() => pageRequests).toBe(1);
@@ -6309,7 +6311,32 @@ test("NILM evidence quality and provenance remain bounded and accessible", async
 });
 
 
-test("NILM exact deep links fetch old items and keep ambiguity audit-only", async ({ page }) => {
+test("Secondary details is a persistent native disclosure", async ({ page }) => {
+  await mockPanelApi(page);
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  const secondaryDetails = panel.locator("[data-nilm-secondary-collections]");
+  const summary = secondaryDetails.locator(":scope > summary");
+
+  await expect(secondaryDetails).toHaveJSProperty("tagName", "DETAILS");
+  await expect(secondaryDetails).not.toHaveAttribute("open");
+  await summary.focus();
+  await summary.press("Space");
+  await expect(secondaryDetails).toHaveJSProperty("open", true);
+
+  await panel.locator('[data-nilm-lane="assigned"]').click();
+  await panel.locator('[data-nilm-lane="needs_review"]').click();
+  await expect(secondaryDetails).toHaveJSProperty("open", true);
+
+  await page.evaluate(() => {
+    history.pushState({}, "", `${location.pathname}?nilm_workspace=1&circuit_id=secondary`);
+  });
+  await expect.poll(() => page.evaluate(() => window.__panel._loadedRouteKey))
+    .toContain("circuit_id=secondary");
+  await expect(secondaryDetails).not.toHaveAttribute("open");
+  await toHaveNoViolations(page);
+});
+
+test("deep-linked NILM exact items keep ambiguity audit-only", async ({ page }) => {
   const itemPath = "/api/circuitsetup_energy_analyzer/nilm_workspace/item";
   const collectionPath = "/api/circuitsetup_energy_analyzer/nilm_workspace/collection";
   const exactRequests = [];
@@ -6418,6 +6445,7 @@ test("NILM exact deep links fetch old items and keep ambiguity audit-only", asyn
   );
   const audit = ambiguousPanel.locator("[data-nilm-ambiguity-audit]");
   const occurrence = audit.locator('[data-nilm-ambiguity-occurrence="ambiguous-only"]');
+  await expect(ambiguousPanel.locator("[data-nilm-secondary-collections]")).toHaveAttribute("open", "");
   await expect(audit.locator("[data-nilm-ambiguity-toggle]")).toHaveAttribute("aria-expanded", "true");
   await expect(occurrence).toBeVisible();
   await expect(occurrence.locator("[data-nilm-ambiguity-open-graph]")).toBeVisible();
@@ -6579,6 +6607,7 @@ test("NILM ignores a stale session page after a route change", async ({ page }) 
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   await panel.locator("[data-nilm-load-more-sessions]").click();
   await pageStarted;
   await page.evaluate(() => {
@@ -6687,6 +6716,7 @@ test("NILM ambiguity audit reveals additional groups without moving keyboard foc
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   const audit = panel.locator("[data-nilm-ambiguity-audit]");
   await audit.locator("[data-nilm-ambiguity-toggle]").click();
   await expect(audit.locator("[data-nilm-ambiguity-group]")).toHaveCount(3);
@@ -6772,6 +6802,7 @@ test("NILM ambiguity audit clears an in-flight group-summary fetch when collapse
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   const audit = panel.locator("[data-nilm-ambiguity-audit]");
   const toggle = audit.locator("[data-nilm-ambiguity-toggle]");
   await toggle.click();
@@ -6868,6 +6899,7 @@ test("NILM ambiguity audit clears an in-flight occurrence fetch when its group c
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   const audit = panel.locator("[data-nilm-ambiguity-audit]");
   await audit.locator("[data-nilm-ambiguity-toggle]").click();
   const group = audit.locator(`[data-nilm-ambiguity-group="${groupId}"]`);
@@ -6957,6 +6989,7 @@ test("NILM ambiguity audit loads further bounded occurrence pages", async ({ pag
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   const audit = panel.locator("[data-nilm-ambiguity-audit]");
   await audit.locator("[data-nilm-ambiguity-toggle]").click();
   await audit.locator(`[data-nilm-ambiguity-group="${groupId}"]`).click();
@@ -7049,6 +7082,7 @@ test("NILM ambiguity audit drops a stale group response after a route change", a
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   await panel.locator("[data-nilm-ambiguity-toggle]").click();
   await expect(panel.locator(`[data-nilm-ambiguity-group="${delayedGroupId}"]`)).toBeVisible();
   await panel.locator(`[data-nilm-ambiguity-group="${delayedGroupId}"]`).click();
@@ -7136,6 +7170,7 @@ test("NILM ambiguity audit coalesces a refresh that arrives during its reload", 
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   const audit = panel.locator("[data-nilm-ambiguity-audit]");
   await audit.locator("[data-nilm-ambiguity-toggle]").click();
   await expect.poll(() => collectionRequests).toBe(1);
@@ -7204,6 +7239,7 @@ test("NILM ambiguity audit refreshes cached evidence after an accepted workspace
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   const audit = panel.locator("[data-nilm-ambiguity-audit]");
   await audit.locator("[data-nilm-ambiguity-toggle]").click();
   const group = audit.locator(`[data-nilm-ambiguity-group="${groupId}"]`);
@@ -7275,6 +7311,7 @@ test("NILM ambiguity audit drops a stale collection response after a route chang
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   await panel.locator("[data-nilm-ambiguity-toggle]").click();
   await expect.poll(() => collectionStarted).toBe(true);
   await page.evaluate(() => {
@@ -7288,10 +7325,25 @@ test("NILM ambiguity audit drops a stale collection response after a route chang
 });
 
 
-test("NILM workspace uses Home Assistant surfaces", async ({ page }) => {
+test("NILM compact review workspace uses Home Assistant surfaces", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: [[
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T15:55:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "900", last_changed: "2026-07-13T16:00:00Z", effective_role: "real_power", source_unit: "W" },
+        { entity_id: "sensor.mains_power", state: "0", last_changed: "2026-07-13T18:45:00Z", effective_role: "real_power", source_unit: "W" },
+      ]] });
+      return true;
+    }
     if (!url.pathname.endsWith("/nilm_workspace")) return false;
     const payload = structuredClone(apiPayload(url.pathname));
+    payload.history = {
+      ...payload.history,
+      entities: ["sensor.mains_power"],
+      source_entities: ["sensor.mains_power"],
+      api_path: "circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+      fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
+    };
     Object.assign(payload.assignments[0], {
       feedback_evidence_score: 0.62,
       confidence_kind: "feedback_evidence",
@@ -7309,6 +7361,15 @@ test("NILM workspace uses Home Assistant surfaces", async ({ page }) => {
     root.setProperty("--ha-card-border-radius", "12px");
   });
 
+  const reviewWorkspace = panel.locator("[data-nilm-review-workspace]");
+  await expect(panel.locator("[data-nilm-model-evidence]")).toHaveCount(0);
+  await expect(reviewWorkspace).toHaveCount(1);
+  await expect(reviewWorkspace.locator("[role=tablist]")).toHaveCount(1);
+  await expect(reviewWorkspace.locator("#nilm_review_lane_panel")).toHaveCount(1);
+  await expect(reviewWorkspace).toContainText(
+    "Review recurring loads, assign or identify them, validate sessions or link reference sensors, then publish when the estimate is trustworthy. The graph is measured source power; appliance power and energy are estimates. Uncertain or unexplained power remains unassigned.",
+  );
+
   await expect(panel.locator(".nilm-lane").first()).toHaveCSS(
     "background-color",
     "rgb(229, 231, 235)",
@@ -7324,8 +7385,78 @@ test("NILM workspace uses Home Assistant surfaces", async ({ page }) => {
   await expect(panel.locator('[data-nilm-lane][aria-selected="true"]')).toBeVisible();
   await expect(panel.locator(".nilm-review-inspector")).toBeVisible();
   await expect(panel.locator("[data-nilm-apply-decision]")).toBeEnabled();
-  await panel.locator('[data-nilm-lane="assigned"]').click();
+  const needsReview = panel.locator('[data-nilm-lane="needs_review"]');
+  await needsReview.focus();
+  await needsReview.press("ArrowRight");
+  const assigned = panel.locator('[data-nilm-lane="assigned"]');
+  await expect(assigned).toBeFocused();
+  await expect(assigned).toHaveAttribute("aria-selected", "true");
+  await expect(needsReview).toHaveAttribute("aria-selected", "false");
+  await expect(reviewWorkspace).not.toContainText(
+    "Review recurring loads, assign or identify them, validate sessions or link reference sensors, then publish when the estimate is trustworthy. The graph is measured source power; appliance power and energy are estimates. Uncertain or unexplained power remains unassigned.",
+  );
   await expect(panel.getByText("Feedback evidence score: 62%")).toHaveCount(2);
+  await panel.locator('[data-nilm-review-item="assignment:dishwasher"]').click();
+  await expect(panel.locator("[data-nilm-review-inspector]")).toContainText("Dishwasher");
+  await expect.poll(() => page.evaluate(() => window.__panel._nilmFocusedInterval)).toMatchObject({
+    start: Date.parse("2026-07-13T18:00:00Z"),
+    end: Date.parse("2026-07-13T18:45:00Z"),
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await reviewWorkspace.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.evaluate(() => {
+    const root = document.documentElement.style;
+    root.removeProperty("--ha-card-background");
+    root.removeProperty("--divider-color");
+    root.removeProperty("--primary-color");
+    root.removeProperty("--ha-card-border-radius");
+  });
+  await toHaveNoViolations(page);
+});
+
+test("NILM assignment inspector distinguishes missing rates from real zero rates", async ({ page }) => {
+  await mockPanelApi(page);
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  await panel.locator('[data-nilm-lane="assigned"]').click();
+  await panel.locator('[data-nilm-review-item="assignment:dishwasher"]').click();
+
+  const inspector = panel.locator("[data-nilm-review-inspector]");
+  await expect(inspector).not.toContainText(/False positives \d+%, False negatives \d+%/);
+
+  for (const [falsePositiveRate, falseNegativeRate] of [
+    ["  ", 0],
+    [0, false],
+    [[], 0],
+    [0, []],
+    [{}, 0],
+  ]) {
+    await page.evaluate(({ falsePositiveRate, falseNegativeRate }) => {
+      Object.assign(window.__panel._nilmWorkspace.assignments[0], {
+        false_positive_rate: falsePositiveRate,
+        false_negative_rate: falseNegativeRate,
+      });
+      window.__panel._render();
+    }, { falsePositiveRate, falseNegativeRate });
+    await expect(inspector).not.toContainText(/False positives \d+%, False negatives \d+%/);
+  }
+
+  await page.evaluate(() => {
+    Object.assign(window.__panel._nilmWorkspace.assignments[0], {
+      false_positive_rate: 0,
+      false_negative_rate: 0,
+    });
+    window.__panel._render();
+  });
+  await expect(inspector).toContainText("False positives 0%, False negatives 0%");
+
+  await page.evaluate(() => {
+    Object.assign(window.__panel._nilmWorkspace.assignments[0], {
+      false_positive_rate: " 0.125 ",
+      false_negative_rate: 0.25,
+    });
+    window.__panel._render();
+  });
+  await expect(inspector).toContainText("False positives 13%, False negatives 25%");
 });
 
 test("NILM workspace says when an edge has no dominant leg", async ({ page }) => {
@@ -8285,6 +8416,46 @@ test("NILM workspace keeps recommendations qualified and permits manual helper c
   });
 });
 
+test("NILM workspace hides empty Helper evidence but retains confirmed Helper controls", async ({ page }) => {
+  let includeConfirmedHelper = false;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const payload = structuredClone(apiPayload(url.pathname));
+    payload.assignments[0].helper_candidates = [];
+    payload.assignments[0].helper_options = [];
+    payload.assignments[0].helper_links = includeConfirmedHelper ? [{
+      helper_circuit_id: "old_helper",
+      helper_name: "Old helper",
+      matched_on_count: 7,
+      source_on_count: 10,
+      start_lag_seconds: 30,
+      relationship: "corroborates",
+      actions: {
+        remove: {
+          domain: "circuitsetup_energy_analyzer",
+          service: "remove_nilm_helper_link",
+          data: { entry_id: "entry-1", circuit_id: "mains", assignment_id: "dishwasher", helper_circuit_id: "old_helper" },
+        },
+      },
+    }] : [];
+    await route.fulfill({ json: payload });
+    return true;
+  });
+
+  let panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=mains");
+  await panel.locator('[data-nilm-lane="assigned"]').click();
+  await expect(panel.locator("[data-nilm-helper-list]")).toHaveCount(0);
+
+  includeConfirmedHelper = true;
+  panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=mains");
+  await panel.locator('[data-nilm-lane="assigned"]').click();
+  const helperEvidence = panel.locator("[data-nilm-helper-list]");
+  await expect(helperEvidence).toHaveCount(1);
+  await expect(helperEvidence.getByText("Runs with this load (evidence only)", { exact: true })).toBeVisible();
+  await expect(helperEvidence.locator('[data-nilm-assignment-action="helper_togglelink_0"]')).toBeVisible();
+  await expect(helperEvidence.locator('[data-nilm-assignment-action="helper_remove_0"]')).toBeVisible();
+});
+
 test("NILM assignment links authoritative state and separate power history", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (!url.pathname.endsWith("/nilm_workspace")) return false;
@@ -8436,6 +8607,7 @@ test("NILM validation renders evaluable prediction count and estimate error deta
   });
 
   const panel = await openPanel(page, "?nilm_workspace=1&entry_id=entry-1&circuit_id=mains");
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
 
   const referenceMetric = panel.locator(".metric").filter({ hasText: "Reference intervals" });
   await expect(referenceMetric).toContainText("2");
@@ -9173,7 +9345,76 @@ test("alert responses and setting preview actions call their services", async ({
   ]);
 });
 
-test("NILM review supports decisions, validation, and interval labeling", async ({ page }) => {
+test("NILM workspace reviews an assigned session once in the Needs Review lane", async ({ page }) => {
+  const sessionId = "nilm-session-1";
+  const validateData = {
+    circuit_id: "mains",
+    session_id: sessionId,
+    assignment_id: "dishwasher",
+  };
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.pathname.endsWith("/nilm_workspace_history")) {
+      await route.fulfill({ json: [] });
+      return true;
+    }
+    if (!url.pathname.endsWith("/nilm_workspace")) return false;
+    const validated = await page.evaluate(() => window.__serviceCalls?.some((call) => (
+      call.service === "validate_nilm_session"
+      && call.data?.session_id === "nilm-session-1"
+    )) || false);
+    const payload = structuredClone(apiPayload(url.pathname));
+    const session = payload.sessions.find((item) => item.session_id === sessionId);
+    session.assignment_id = "dishwasher";
+    session.ambiguous = false;
+    session.actions = {
+      validate: {
+        domain: "circuitsetup_energy_analyzer",
+        service: "validate_nilm_session",
+        data: validateData,
+      },
+      reject: {
+        domain: "circuitsetup_energy_analyzer",
+        service: "reject_nilm_session",
+        data: validateData,
+      },
+    };
+    payload.lanes.needs_review = {
+      ...payload.lanes.needs_review,
+      signature_ids: [],
+      session_ids: validated ? [] : [sessionId],
+    };
+    payload.lane_counts.needs_review = validated ? 0 : 1;
+    if (validated) {
+      payload.sessions = payload.sessions.filter((item) => item.session_id !== sessionId);
+    }
+    await route.fulfill({ json: payload });
+    return true;
+  });
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
+  const reviewCard = panel.locator(`[data-nilm-review-item="session:${sessionId}"]`);
+
+  await expect(reviewCard).toHaveCount(1);
+  await expect(panel.locator("[data-nilm-session-validation-card]")).toHaveCount(0);
+  await reviewCard.click();
+
+  const inspector = panel.locator("[data-nilm-review-inspector]");
+  await expect(inspector).toBeVisible();
+  await expect(inspector.locator('[data-nilm-session-action="validate"]')).toHaveText("Correct");
+  await expect(inspector.locator('[data-nilm-session-action="reject"]')).toHaveText("Wrong appliance");
+  await expect(inspector.locator("[data-nilm-session-interval-index]")).toHaveText("Adjust Interval");
+  await inspector.locator('[data-nilm-session-action="validate"]').click();
+
+  await expect.poll(() => page.evaluate(() => window.__serviceCalls.find((call) => (
+    call.service === "validate_nilm_session"
+  )))).toMatchObject({
+    domain: "circuitsetup_energy_analyzer",
+    service: "validate_nilm_session",
+    data: validateData,
+  });
+  await expect(reviewCard).toHaveCount(0);
+});
+
+test("NILM review supports decisions and interval labeling", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
     if (url.pathname.endsWith("/nilm_workspace_history")) {
       await route.fulfill({ json: [] });
@@ -9232,25 +9473,6 @@ test("NILM review supports decisions, validation, and interval labeling", async 
       fetch_path: "/api/circuitsetup_energy_analyzer/nilm_workspace_history?circuit_id=mains&hours=8",
       max_hours: 24,
     };
-    const completed = payload.sessions.find((session) => session.assignment_id === "dishwasher");
-    completed.confidence = 0.7;
-    completed.pairing_confidence = 0.7;
-    completed.ambiguous = true;
-    payload.sessions.push(
-      { ...completed, session_id: "nilm-session-alternate", start: "2026-07-13T17:00:00Z", end: "2026-07-13T17:20:00Z", ambiguous: false, alternate_match_count: 2 },
-      { ...completed, session_id: "nilm-session-overlap", start: "2026-07-13T15:00:00Z", end: "2026-07-13T15:20:00Z", ambiguous: false, alternate_match_count: 0, overlap_count: 1 },
-      { ...completed, session_id: "nilm-session-known", start: "2026-07-13T14:00:00Z", end: "2026-07-13T14:20:00Z", ambiguous: false, alternate_match_count: 0, overlap_count: 0, known_load_masked: true },
-    );
-    payload.sessions.push({
-      session_id: "nilm-session-open",
-      assignment_id: "dishwasher",
-      display_label: "Dishwasher",
-      start: "2026-07-13T19:00:00Z",
-      end: null,
-      confidence: 0.82,
-      median_power_w: 900,
-      estimated_energy_kwh: null,
-    });
     await route.fulfill({ json: payload });
     return true;
   });
@@ -9263,34 +9485,14 @@ test("NILM review supports decisions, validation, and interval labeling", async 
   await expect(panel.getByText("Suggested Settings", { exact: true })).toHaveCount(0);
   await expect(panel.getByText("Applied Suggested Settings", { exact: true })).toHaveCount(0);
   await expect(panel.locator("[data-nilm-secondary-details]")).toHaveCount(0);
-  await expect(panel.getByRole("heading", { name: "Session Validation" })).toBeVisible();
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   await expect(panel.getByRole("heading", { name: "Known Load Overlays" })).toBeVisible();
-  await expect(panel.locator('[data-nilm-session-action="validate"]').first()).toBeVisible();
-  const card = panel.locator("[data-nilm-session-validation-card]").first();
-  await expect(card.locator("strong")).toContainText("Predicted");
-  await expect(card.locator("[data-nilm-session-range]")).toBeVisible();
-  const openCard = panel.locator('[data-nilm-session-validation-card][data-nilm-open="true"]');
-  await expect(openCard).toContainText("Pairing confidence");
-  await expect(openCard.locator("[data-nilm-session-action]")).toHaveCount(0);
-  await expect(openCard.locator("[data-nilm-session-interval-index]")).toHaveCount(0);
-  const closedCards = panel.locator('[data-nilm-session-validation-card][data-nilm-open="false"]');
-  await expect(closedCards).toHaveCount(4);
-  const closedCard = closedCards.first();
-  await closedCard.locator("[data-nilm-session-interval-index]").click();
-  await expect(panel.locator("[data-nilm-interval-editor]")).toBeVisible();
-  await panel.locator("[data-nilm-cancel-interval-editor]").click();
-  await expect(panel.getByText("Pairing confidence is lower because the session match is ambiguous.")).toBeVisible();
-  await expect(panel.getByText("Pairing confidence is lower because other edge matches were plausible.")).toBeVisible();
-  await expect(panel.getByText("Pairing confidence is lower because a competing session overlapped this run.")).toBeVisible();
-  await expect(panel.getByText("Pairing confidence is lower because known-load activity affected this run.")).toBeVisible();
 
   await expect(panel.getByText("This detection matches Unknown 900 W load; this decision applies to the signature and future matching detections.")).toBeVisible();
   await expect(panel.locator('[data-nilm-decision][value="mark_expected"]')).toHaveCount(0);
   await panel.locator('[data-nilm-decision][value="identify"]').check();
   await panel.locator('[data-nilm-existing-assignment="session_0"]').selectOption("mains-configured-primary");
   await panel.locator("[data-nilm-apply-decision]").click();
-
-  await panel.locator('[data-nilm-session-action="validate"]').first().click();
 
   await panel.locator('[data-nilm-lane="assigned"]').click();
   await panel.locator('[data-nilm-assignment-action="validate_history"]').click();
@@ -9315,7 +9517,6 @@ test("NILM review supports decisions, validation, and interval labeling", async 
 
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.map((call) => call.service))).toEqual([
     "assign_session_to_appliance",
-    "validate_nilm_session",
     "validate_nilm_assignment_history",
     "set_nilm_detection_sensitivity",
     "save_nilm_interval_changes",
@@ -9326,6 +9527,7 @@ test("NILM review supports decisions, validation, and interval labeling", async 
       removed_interval_ids: [],
     },
   });
+  await panel.locator("[data-nilm-secondary-collections] > summary").click();
   await toHaveNoViolations(page);
 });
 
@@ -9594,7 +9796,6 @@ test("Needs Review session assignment preserves review state when assignment mem
   await expect(panel.locator(".inline-feedback.success")).toHaveCount(0);
   await expect(panel.locator('[data-nilm-review-item="session:nilm-session-0"]'))
     .toHaveAttribute("aria-pressed", "true");
-  await expect(panel.locator('#nilm_label_session_0')).toHaveValue("Keep this review label");
   await expect.poll(() => page.evaluate(() => ({
     decision: window.__panel._nilmDecisionDrafts.get("signature-1"),
     label: window.__panel._nilmLabelDrafts.get("signature-1"),
@@ -10978,19 +11179,6 @@ test("NILM graph drag and edge marker Cancel restore pre-edit graph state", asyn
     failedRequest: window.__panel._nilmWorkspaceHistoryFailedRequest,
     serviceCalls: window.__serviceCalls.length,
   }))).toEqual(edgePreEdit);
-});
-
-test("NILM workspace explains lifecycle and model evidence on narrow layouts", async ({ page }) => {
-  await mockPanelApi(page);
-  await page.setViewportSize({ width: 390, height: 844 });
-  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
-  const evidence = panel.locator("[data-nilm-model-evidence]");
-
-  await expect(evidence).toContainText(
-    "Review recurring loads, assign or identify them, validate sessions or link reference sensors, then publish when the estimate is trustworthy. The graph is measured source power; appliance power and energy are estimates. Uncertain or unexplained power remains unassigned.",
-  );
-  await expect(evidence).toBeInViewport();
-  await toHaveNoViolations(page);
 });
 
 test("failed NILM request can be retried", async ({ page }) => {
