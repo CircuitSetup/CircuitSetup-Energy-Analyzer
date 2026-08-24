@@ -763,11 +763,11 @@ export function createApplianceViewMethods({
     return `
       <section class="panel">
         <h2>${this._escape(this._setupHealthText("checklist_heading"))}</h2>
-        ${this._renderSetupHealthChecklist(payload.checklist, payload.issues)}
+        ${this._renderSetupHealthChecklist(payload.checklist)}
       </section>
       <section class="panel" data-needs-attention>
         <h2>${this._escape(this._panelText("headers.needs_attention"))}</h2>
-        ${this._renderNeedsAttention(payload.needs_attention)}
+        ${this._renderNeedsAttention(payload.needs_attention, payload.issues)}
       </section>
       ${this._renderWeeklyDigest(payload.weekly_digest, payload.weekly_digest_settings)}
     `;
@@ -836,9 +836,26 @@ export function createApplianceViewMethods({
     return result;
   }
 
-  _renderNeedsAttention(items) {
+  _renderNeedsAttention(items, setupIssues = []) {
     const safeItems = Array.isArray(items) ? items : [];
-    if (!safeItems.length) {
+    const detailedSourceCircuits = new Set(safeItems
+      .filter((item) => item.category === "fix_setup_or_data")
+      .map((item) => item.appliance_key));
+    const sourceIssueKeys = new Set([
+      "missing_source_entities",
+      "missing_source_sensor",
+      "stale_source",
+      "invalid_source_state",
+      "invalid_source_sensor",
+      "invalid_source_timestamp",
+      "source_data_quality",
+    ]);
+    const safeSetupIssues = (Array.isArray(setupIssues) ? setupIssues : [])
+      .filter((item) => !(
+        sourceIssueKeys.has(item.issue)
+        && detailedSourceCircuits.has(`circuit:${item.affected_circuit}`)
+      ));
+    if (!safeItems.length && !safeSetupIssues.length) {
       return `<p class="muted">${this._escape(this._panelText("attention.none"))}</p>`;
     }
     const labels = {
@@ -846,7 +863,14 @@ export function createApplianceViewMethods({
       review_appliance_behavior: this._panelText("attention.review_appliance_behavior"),
       validate_nilm: this._panelText("attention.validate_nilm"),
     };
-    return `<div class="entity-list">${safeItems.map((item) => `
+    return `<div class="entity-list">${safeSetupIssues.map((item) => `
+      <div class="metric" data-setup-health-issue="${this._escape(item.issue || "")}">
+        <span>${this._escape(this._friendlyFeature(item.severity || item.state || "review"))}</span>
+        <strong>${this._escape(item.fix || item.recommended_action || item.state || this._setupHealthText("fallbacks.review_setup"))}</strong>
+        <p>${this._escape(item.reason || this._setupHealthText("fallbacks.review_item_reason"))}</p>
+        ${this._setupHealthAction(item.open_path, item.fix || item.recommended_action)}
+      </div>
+    `).join("")}${safeItems.map((item) => `
       <div class="metric" data-attention-item="${this._escape(item.item_id || "")}">
         <span>${this._escape(labels[item.category] || this._friendlyFeature(item.category))}</span>
         <strong>${this._escape(item.display_name || item.appliance_key)}</strong>
@@ -857,12 +881,9 @@ export function createApplianceViewMethods({
     `).join("")}</div>`;
   }
 
-  _renderSetupHealthChecklist(items, issues) {
+  _renderSetupHealthChecklist(items) {
     const safeItems = Array.isArray(items) ? items : [];
-    const rows = [
-      ...this._renderSetupHealthIssueItems(issues),
-      ...safeItems.map((item) => this._renderSetupHealthChecklistItem(item)),
-    ];
+    const rows = safeItems.map((item) => this._renderSetupHealthChecklistItem(item));
     if (!rows.length) {
       return `<p class="muted">${this._escape(this._setupHealthText("empty_checklist"))}</p>`;
     }
@@ -905,18 +926,6 @@ export function createApplianceViewMethods({
         ${item.fix ? this._setupHealthAction(path, item.fix) : ""}
       </div>
     `;
-  }
-
-  _renderSetupHealthIssueItems(issues) {
-    const safeIssues = Array.isArray(issues) ? issues : [];
-    return safeIssues.map((item) => `
-      <div class="metric">
-        <span>${this._escape(this._friendlyFeature(item.severity || item.state || "review"))}</span>
-        <strong>${this._escape(item.fix || item.recommended_action || item.state || this._setupHealthText("fallbacks.review_setup"))}</strong>
-        <p>${this._escape(item.reason || this._setupHealthText("fallbacks.review_item_reason"))}</p>
-        ${this._setupHealthAction(item.open_path, item.fix || item.recommended_action)}
-      </div>
-    `);
   }
 
   _setupHealthAction(path, fallbackText) {

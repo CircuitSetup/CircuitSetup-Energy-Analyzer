@@ -5446,7 +5446,7 @@ def test_appliance_insights_panel_has_stable_source_and_detail_deep_link_hooks()
         assert expected in asset
 
 
-def test_setup_health_panel_renders_next_step_only_in_checklist() -> None:
+def test_setup_health_panel_renders_only_checklist_items() -> None:
     body = """
 const panel = new context.Panel();
 const integrationPath = "/config/integrations/integration/circuitsetup_energy_analyzer";
@@ -5464,7 +5464,11 @@ panel._setupHealth = {
   checklist_ready_count: 2,
   checklist_total_count: 4,
   checklist: [
-    { item_id: "source_data_found", status: "needs_attention" },
+    {
+      item_id: "source_data_found",
+      status: "needs_attention",
+      fix: "See Needs Attention below for affected circuits and next steps.",
+    },
     {
       item_id: "notifications_enabled",
       status: "ok",
@@ -5484,12 +5488,35 @@ panel._setupHealth = {
       severity: "warning",
       fix: "Configure breaker amps for HVAC",
       reason: "Capacity tracking needs the circuit breaker size.",
+      affected_circuit: "hvac",
       affected_circuit_name: "HVAC",
       open_path: integrationPath,
+    },
+    {
+      issue: "stale_source",
+      severity: "warning",
+      fix: "Fix stale source sensor data for AC 2",
+      reason: "One or more selected source sensors have not updated recently.",
+      affected_circuit: "outside_ac2",
+      affected_circuit_name: "AC 2",
+      open_path: integrationPath,
+    },
+  ],
+  needs_attention: [
+    {
+      item_id: "circuit:outside_ac2:data_quality",
+      appliance_key: "circuit:outside_ac2",
+      display_name: "AC 2",
+      category: "fix_setup_or_data",
+      reason: "Analyzer source data is missing, stale, or invalid.",
+      next_step: "Review the source entities shown in Appliance Detail.",
+      action_path: "/circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=outside_ac2",
     },
   ],
 };
 const rendered = panel._renderSetupHealthContent();
+const attentionMarker = '<section class="panel" data-needs-attention>';
+const [checklistSection, attentionSection = ""] = rendered.split(attentionMarker);
 const waitingSource = panel._renderSetupHealthChecklistItem({
   item_id: "source_data_found",
   status: "learning",
@@ -5512,13 +5539,19 @@ for (const unexpected of [
     throw new Error(`unexpected setup health duplicate or raw text: ${unexpected}`);
   }
 }
-const nextStepCount = (
+const duplicateIssueCount = (
   rendered.match(/Configure breaker amps for HVAC/g) || []
 ).length;
-if (nextStepCount !== 1) {
+if (duplicateIssueCount !== 1 || !attentionSection.includes("Configure breaker amps for HVAC")) {
   throw new Error(
-    `expected one next-step rendering in checklist, got ${nextStepCount}`,
+    `expected one capacity issue under Needs Attention, got ${duplicateIssueCount}`,
   );
+}
+if (rendered.includes("Fix stale source sensor data for AC 2")) {
+  throw new Error(`source setup issue was not deduplicated: ${rendered}`);
+}
+if (!attentionSection.includes("Analyzer source data is missing, stale, or invalid.")) {
+  throw new Error(`missing detailed source attention item: ${attentionSection}`);
 }
 for (const expected of [
   'icon="mdi:check-circle"',
@@ -5540,14 +5573,22 @@ if (rendered.includes("<span>Needs attention</span>")) {
 for (const expected of [
   "Source data needs attention",
   "Confirms Home Assistant is receiving live readings for each circuit.",
+  "See Needs Attention below for affected circuits and next steps.",
   "Notifications enabled",
   "NILM enabled",
-  "Capacity tracking needs the circuit breaker size.",
-  "Open integration options",
-  integrationHref,
 ]) {
   if (!rendered.includes(expected)) {
     throw new Error(`missing setup health checklist content: ${expected}`);
+  }
+}
+for (const unexpected of [
+  "Capacity tracking needs the circuit breaker size.",
+  "Open integration options",
+  integrationHref,
+  "data-setup-health-path",
+]) {
+  if (checklistSection.includes(unexpected)) {
+    throw new Error(`unexpected setup health checklist content: ${unexpected}`);
   }
 }
 """

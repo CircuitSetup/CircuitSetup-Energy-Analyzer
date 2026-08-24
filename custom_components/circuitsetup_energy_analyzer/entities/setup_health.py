@@ -57,7 +57,6 @@ _MAX_SETUP_HEALTH_SOURCE_ENTITIES_PER_ISSUE = 2
 _MAX_SETUP_HEALTH_ATTRIBUTE_STRING_LENGTH = 80
 _MAX_SETUP_HEALTH_CHECKLIST_AFFECTED_CIRCUITS = 3
 _SETUP_HEALTH_CHECKLIST_OPTION_STEPS = {
-    "source_data_found": "sources",
     "circuit_assignments_reviewed": "assign",
     "ct_direction_valid": "assign",
     "cumulative_kwh_sources_found": "sources",
@@ -356,11 +355,13 @@ def _setup_health_checklist(
             affected_circuits=source_circuits,
             fix=(
                 _setup_health_checklist_value("source_data_found", "fix")
-                if has_circuits
+                if has_circuits and source_data_status == "needs_attention"
                 else _setup_health_checklist_value(
                     "circuit_assignments_reviewed",
                     "fix",
                 )
+                if not has_circuits
+                else ""
             ),
             compact=compact,
         ),
@@ -1050,7 +1051,6 @@ def _setup_health_data_quality_issue(
         "data_quality_checklist_by_circuit",
         circuit.circuit_id,
     )
-    quality_issues = _setup_health_quality_issues(checklist)
     issue_details = _setup_health_data_quality_issue_details(
         state,
         checklist,
@@ -1068,11 +1068,6 @@ def _setup_health_data_quality_issue(
             detail
             for detail in issue_details
             if not _setup_health_is_stale_issue_text(detail)
-        ]
-        quality_issues = [
-            issue
-            for issue in quality_issues
-            if not _setup_health_is_stale_issue_text(issue)
         ]
     issue_text = " ".join(issue_details).lower()
 
@@ -1159,14 +1154,6 @@ def _setup_health_data_quality_issue(
             "A configured circuit is missing a required source sensor.",
             issue="missing_source_sensor",
         )
-    if quality_issues:
-        return _setup_health_issue(
-            "Review circuit assignments",
-            f"Review source data for {circuit.name}",
-            circuit,
-            "A configured circuit has source-data quality issues.",
-            issue="source_data_quality",
-        )
     return None
 
 
@@ -1217,7 +1204,7 @@ def _setup_health_mapping_value(state: Any, field_name: str, circuit_id: str) ->
 
 def _setup_health_learning_in_progress(state: Any, circuit_id: str) -> bool:
     progress = _setup_health_mapping(state, "learning_progress_by_circuit", circuit_id)
-    return progress is not None and progress.get("alert_ready") is False
+    return progress is not None and progress.get("learning") is True
 
 
 def _setup_health_learning_issue(

@@ -1296,7 +1296,7 @@
             "title_attention": "Source data needs attention",
             "title_learning": "Waiting to verify source data",
             "why_it_matters": "Confirms Home Assistant is receiving live readings for each circuit.",
-            "fix": "Review source sensors"
+            "fix": "See Needs Attention below for affected circuits and next steps."
           },
           "circuit_assignments_reviewed": {
             "title": "Circuit assignments reviewed",
