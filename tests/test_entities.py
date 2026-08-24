@@ -1593,9 +1593,7 @@ def test_setup_health_unassigned_source_waits_for_verification() -> None:
         "Waiting to verify source data"
     )
     assert checklist["source_data_found"]["fix"] == "Review circuit assignments"
-    assert checklist["source_data_found"]["open_path"].startswith(
-        "/config/integrations/"
-    )
+    assert "open_path" not in checklist["source_data_found"]
     assert checklist["circuit_assignments_reviewed"]["status"] == "needs_attention"
 
 
@@ -2022,6 +2020,22 @@ def test_setup_health_prioritizes_actionable_next_steps() -> None:
     )
     assert setup_health_value(truncated_negative_power) == "Check CT direction"
 
+    advisory_quality = coordinator_for(
+        fridge,
+        AnalyzerState(
+            data_quality_checklist_by_circuit={
+                "fridge": {
+                    "sample_observed": True,
+                    "quality_issues": ["one_leg_low_power"],
+                    "required_sensors_present": True,
+                    "source_data_fresh": True,
+                    "numeric_states_valid": True,
+                }
+            }
+        ),
+    )
+    assert setup_health_value(advisory_quality) == "Ready"
+
     assert setup_health_value(coordinator_for(hvac)) == "Configure breaker amps"
 
     optional_weather_context = coordinator_for(
@@ -2098,7 +2112,11 @@ def test_setup_health_learning_next_step_uses_specific_progress_reason() -> None
     cycle_learning = SimpleNamespace(
         data=AnalyzerState(
             learning_progress_by_circuit={
-                "washer": {"cycle_count": 5, "alert_ready": False}
+                "washer": {
+                    "cycle_count": 5,
+                    "learning": True,
+                    "alert_ready": False,
+                }
             }
         ),
         circuit_configs=(
@@ -2115,6 +2133,36 @@ def test_setup_health_learning_next_step_uses_specific_progress_reason() -> None
     )
     cycle_attrs = setup_health_attributes(cycle_learning)
     assert cycle_attrs["next_step"] == "Learning: 3 more run cycles needed for Washer"
+
+    suppressed_after_learning = SimpleNamespace(
+        data=AnalyzerState(
+            data_quality_checklist_by_circuit={
+                "washer": {
+                    "sample_observed": True,
+                    "quality_issues": ["sensor.washer_power stale"],
+                    "required_sensors_present": True,
+                    "source_data_fresh": False,
+                    "numeric_states_valid": True,
+                }
+            },
+            learning_by_circuit={"washer": False},
+            learning_progress_by_circuit={
+                "washer": {
+                    "cycle_count": 8,
+                    "learning": False,
+                    "alert_ready": False,
+                    "suppression_reason": "data_quality",
+                }
+            },
+        ),
+        circuit_configs=cycle_learning.circuit_configs,
+        store_data=FeatureStoreData(),
+        options={},
+    )
+    suppressed_attrs = setup_health_attributes(suppressed_after_learning)
+    assert [issue["issue"] for issue in suppressed_attrs["issues"]] == [
+        "stale_source"
+    ]
 
 
 def test_setup_health_stale_source_lists_source_entities_and_circuits() -> None:
@@ -2153,6 +2201,11 @@ def test_setup_health_stale_source_lists_source_entities_and_circuits() -> None:
     assert attrs["stale_sources"] == ["sensor.fridge_power"]
     assert attrs["stale_source_circuits"] == ["fridge"]
     assert attrs["issues"][0]["source_entities"] == ["sensor.fridge_power"]
+    checklist = {item["item_id"]: item for item in attrs["checklist"]}
+    assert checklist["source_data_found"]["fix"] == (
+        "See Needs Attention below for affected circuits and next steps."
+    )
+    assert "open_path" not in checklist["source_data_found"]
 
 
 def test_setup_health_attributes_are_bounded_for_recorder() -> None:

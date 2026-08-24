@@ -763,7 +763,7 @@ export function createApplianceViewMethods({
     return `
       <section class="panel">
         <h2>${this._escape(this._setupHealthText("checklist_heading"))}</h2>
-        ${this._renderSetupHealthChecklist(payload.checklist, payload.issues)}
+        ${this._renderSetupHealthChecklist(payload.checklist)}
       </section>
       <section class="panel" data-needs-attention>
         <h2>${this._escape(this._panelText("headers.needs_attention"))}</h2>
@@ -857,12 +857,9 @@ export function createApplianceViewMethods({
     `).join("")}</div>`;
   }
 
-  _renderSetupHealthChecklist(items, issues) {
+  _renderSetupHealthChecklist(items) {
     const safeItems = Array.isArray(items) ? items : [];
-    const rows = [
-      ...this._renderSetupHealthIssueItems(issues),
-      ...safeItems.map((item) => this._renderSetupHealthChecklistItem(item)),
-    ];
+    const rows = safeItems.map((item) => this._renderSetupHealthChecklistItem(item));
     if (!rows.length) {
       return `<p class="muted">${this._escape(this._setupHealthText("empty_checklist"))}</p>`;
     }
@@ -905,18 +902,6 @@ export function createApplianceViewMethods({
         ${item.fix ? this._setupHealthAction(path, item.fix) : ""}
       </div>
     `;
-  }
-
-  _renderSetupHealthIssueItems(issues) {
-    const safeIssues = Array.isArray(issues) ? issues : [];
-    return safeIssues.map((item) => `
-      <div class="metric">
-        <span>${this._escape(this._friendlyFeature(item.severity || item.state || "review"))}</span>
-        <strong>${this._escape(item.fix || item.recommended_action || item.state || this._setupHealthText("fallbacks.review_setup"))}</strong>
-        <p>${this._escape(item.reason || this._setupHealthText("fallbacks.review_item_reason"))}</p>
-        ${this._setupHealthAction(item.open_path, item.fix || item.recommended_action)}
-      </div>
-    `);
   }
 
   _setupHealthAction(path, fallbackText) {

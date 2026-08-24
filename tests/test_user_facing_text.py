@@ -5446,7 +5446,7 @@ def test_appliance_insights_panel_has_stable_source_and_detail_deep_link_hooks()
         assert expected in asset
 
 
-def test_setup_health_panel_renders_next_step_only_in_checklist() -> None:
+def test_setup_health_panel_renders_only_checklist_items() -> None:
     body = """
 const panel = new context.Panel();
 const integrationPath = "/config/integrations/integration/circuitsetup_energy_analyzer";
@@ -5464,7 +5464,11 @@ panel._setupHealth = {
   checklist_ready_count: 2,
   checklist_total_count: 4,
   checklist: [
-    { item_id: "source_data_found", status: "needs_attention" },
+    {
+      item_id: "source_data_found",
+      status: "needs_attention",
+      fix: "See Needs Attention below for affected circuits and next steps.",
+    },
     {
       item_id: "notifications_enabled",
       status: "ok",
@@ -5512,12 +5516,12 @@ for (const unexpected of [
     throw new Error(`unexpected setup health duplicate or raw text: ${unexpected}`);
   }
 }
-const nextStepCount = (
+const duplicateIssueCount = (
   rendered.match(/Configure breaker amps for HVAC/g) || []
 ).length;
-if (nextStepCount !== 1) {
+if (duplicateIssueCount !== 0) {
   throw new Error(
-    `expected one next-step rendering in checklist, got ${nextStepCount}`,
+    `expected no issue-card rendering in checklist, got ${duplicateIssueCount}`,
   );
 }
 for (const expected of [
@@ -5540,14 +5544,22 @@ if (rendered.includes("<span>Needs attention</span>")) {
 for (const expected of [
   "Source data needs attention",
   "Confirms Home Assistant is receiving live readings for each circuit.",
+  "See Needs Attention below for affected circuits and next steps.",
   "Notifications enabled",
   "NILM enabled",
-  "Capacity tracking needs the circuit breaker size.",
-  "Open integration options",
-  integrationHref,
 ]) {
   if (!rendered.includes(expected)) {
     throw new Error(`missing setup health checklist content: ${expected}`);
+  }
+}
+for (const unexpected of [
+  "Capacity tracking needs the circuit breaker size.",
+  "Open integration options",
+  integrationHref,
+  "data-setup-health-path",
+]) {
+  if (rendered.includes(unexpected)) {
+    throw new Error(`unexpected setup health checklist content: ${unexpected}`);
   }
 }
 """
