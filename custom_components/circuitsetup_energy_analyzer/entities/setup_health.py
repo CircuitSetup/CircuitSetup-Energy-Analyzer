@@ -355,11 +355,13 @@ def _setup_health_checklist(
             affected_circuits=source_circuits,
             fix=(
                 _setup_health_checklist_value("source_data_found", "fix")
-                if has_circuits
+                if has_circuits and source_data_status == "needs_attention"
                 else _setup_health_checklist_value(
                     "circuit_assignments_reviewed",
                     "fix",
                 )
+                if not has_circuits
+                else ""
             ),
             compact=compact,
         ),

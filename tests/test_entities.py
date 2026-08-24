@@ -1571,6 +1571,7 @@ def test_setup_health_waits_to_verify_configured_source_data() -> None:
     assert checklist["source_data_found"]["title"] == (
         "Waiting to verify source data"
     )
+    assert not checklist["source_data_found"].get("fix")
 
 
 def test_setup_health_unassigned_source_waits_for_verification() -> None:

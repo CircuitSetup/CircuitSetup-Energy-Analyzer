@@ -5488,12 +5488,35 @@ panel._setupHealth = {
       severity: "warning",
       fix: "Configure breaker amps for HVAC",
       reason: "Capacity tracking needs the circuit breaker size.",
+      affected_circuit: "hvac",
       affected_circuit_name: "HVAC",
       open_path: integrationPath,
+    },
+    {
+      issue: "stale_source",
+      severity: "warning",
+      fix: "Fix stale source sensor data for AC 2",
+      reason: "One or more selected source sensors have not updated recently.",
+      affected_circuit: "outside_ac2",
+      affected_circuit_name: "AC 2",
+      open_path: integrationPath,
+    },
+  ],
+  needs_attention: [
+    {
+      item_id: "circuit:outside_ac2:data_quality",
+      appliance_key: "circuit:outside_ac2",
+      display_name: "AC 2",
+      category: "fix_setup_or_data",
+      reason: "Analyzer source data is missing, stale, or invalid.",
+      next_step: "Review the source entities shown in Appliance Detail.",
+      action_path: "/circuitsetup-energy-analyzer-evidence?appliance_detail=1&circuit_id=outside_ac2",
     },
   ],
 };
 const rendered = panel._renderSetupHealthContent();
+const attentionMarker = '<section class="panel" data-needs-attention>';
+const [checklistSection, attentionSection = ""] = rendered.split(attentionMarker);
 const waitingSource = panel._renderSetupHealthChecklistItem({
   item_id: "source_data_found",
   status: "learning",
@@ -5519,10 +5542,16 @@ for (const unexpected of [
 const duplicateIssueCount = (
   rendered.match(/Configure breaker amps for HVAC/g) || []
 ).length;
-if (duplicateIssueCount !== 0) {
+if (duplicateIssueCount !== 1 || !attentionSection.includes("Configure breaker amps for HVAC")) {
   throw new Error(
-    `expected no issue-card rendering in checklist, got ${duplicateIssueCount}`,
+    `expected one capacity issue under Needs Attention, got ${duplicateIssueCount}`,
   );
+}
+if (rendered.includes("Fix stale source sensor data for AC 2")) {
+  throw new Error(`source setup issue was not deduplicated: ${rendered}`);
+}
+if (!attentionSection.includes("Analyzer source data is missing, stale, or invalid.")) {
+  throw new Error(`missing detailed source attention item: ${attentionSection}`);
 }
 for (const expected of [
   'icon="mdi:check-circle"',
@@ -5558,7 +5587,7 @@ for (const unexpected of [
   integrationHref,
   "data-setup-health-path",
 ]) {
-  if (rendered.includes(unexpected)) {
+  if (checklistSection.includes(unexpected)) {
     throw new Error(`unexpected setup health checklist content: ${unexpected}`);
   }
 }
