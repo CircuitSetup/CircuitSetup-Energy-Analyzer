@@ -1863,20 +1863,14 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         circuit_events: Iterable[CircuitEvent] | None = None,
         circuit_alerts: Iterable[AlertEvidence] | None = None,
     ) -> None:
-        started_at = monotonic()
-        try:
-            self.ux_state.refresh_config(
-                config,
-                sample,
-                now,
-                context,
-                circuit_events=circuit_events,
-                circuit_alerts=circuit_alerts,
-            )
-        finally:
-            self._record_runtime_performance(
-                "synchronous:ux_state", monotonic() - started_at
-            )
+        self.ux_state.refresh_config(
+            config,
+            sample,
+            now,
+            context,
+            circuit_events=circuit_events,
+            circuit_alerts=circuit_alerts,
+        )
 
     def _latest_alert_for_circuit(self: Self, circuit_id: str) -> AlertEvidence | None:
         return self.ux_state.latest_alert_for_circuit(circuit_id)

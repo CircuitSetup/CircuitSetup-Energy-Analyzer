@@ -112,7 +112,9 @@ async def test_analysis_exposes_synchronous_phases_and_nilm_snapshot_cost() -> N
     coordinator.store_persistence.mark_dirty()
     await coordinator.async_process_update()
     performance = coordinator.runtime_performance_snapshot()
-    for operation in ("ux_state", "settings_recommendations", "retention"):
+    # UX is refreshed once during hydration and once during analysis.
+    assert performance["synchronous"]["ux_state"]["count"] == 2
+    for operation in ("settings_recommendations", "retention"):
         assert performance["synchronous"][operation]["count"] == 1
     for operation in ("nilm_snapshot", "nilm_process"):
         assert performance["executor_execution"][operation]["count"] == 1
@@ -121,3 +123,14 @@ async def test_analysis_exposes_synchronous_phases_and_nilm_snapshot_cost() -> N
     assert coordinator.runtime_performance_snapshot()["synchronous"][
         "settings_recommendations"
     ]["count"] == 2
+
+    ux_count = coordinator.runtime_performance_snapshot()["synchronous"]["ux_state"][
+        "count"
+    ]
+    now = coordinator.current_time()
+    coordinator.refresh_ux_state_for_circuit("mains", now)
+    coordinator.refresh_all_ux_state(now)
+    coordinator.ux_state.refresh_all(now, refresh_nilm=False)
+    assert coordinator.runtime_performance_snapshot()["synchronous"]["ux_state"][
+        "count"
+    ] == ux_count + 3
