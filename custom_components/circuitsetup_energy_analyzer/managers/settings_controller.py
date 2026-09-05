@@ -159,7 +159,7 @@ class SettingsController:
         """Rebuild pending advanced-setting recommendations from retained data."""
         coordinator = self._coordinator
         now = coordinator.current_time()
-        if self.rebuild_setting_recommendations(now, circuit_id=circuit_id):
+        if coordinator._rebuild_setting_recommendations(now, circuit_id=circuit_id):
             coordinator.store_persistence.mark_dirty()
         coordinator.async_set_updated_data(coordinator.state)
         await coordinator.store_persistence.async_save_if_dirty(now)

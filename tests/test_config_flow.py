@@ -7008,7 +7008,17 @@ async def test_options_flow_does_not_emit_non_actionable_mapping_suggestions() -
 
 
 def test_flow_schemas_serialize_for_home_assistant_frontend() -> None:
-    import voluptuous_serialize
+    try:
+        from homeassistant.helpers import config_validation as cv
+    except ModuleNotFoundError:
+        cv = None
+
+    if cv is not None and hasattr(cv, "to_field_list"):
+        convert = cv.to_field_list
+        unsupported = cv.UNSUPPORTED
+    else:
+        from voluptuous_serialize import UNSUPPORTED as unsupported
+        from voluptuous_serialize import convert
 
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         DATA_SCHEMA,
@@ -7022,28 +7032,26 @@ def test_flow_schemas_serialize_for_home_assistant_frontend() -> None:
         serializer = getattr(schema, "serialize", None)
         if callable(serializer):
             return serializer()
-        return voluptuous_serialize.UNSUPPORTED
+        return unsupported
 
-    assert voluptuous_serialize.convert(
+    assert convert(
         DATA_SCHEMA,
         custom_serializer=serialize_ha_selector,
     )
-    assert voluptuous_serialize.convert(
+    assert convert(
         _options_schema(SimpleNamespace(data={}, options={})),
         custom_serializer=serialize_ha_selector,
     )
-    assert voluptuous_serialize.convert(
+    assert convert(
         _entity_detail_schema(SimpleNamespace(data={}, options={})),
         custom_serializer=serialize_ha_selector,
     )
     assert _time_selector().serialize() == {"selector": {"time": {}}}
 
-    try:
-        from homeassistant.helpers import config_validation as cv
-    except ModuleNotFoundError:
+    if cv is None:
         return
 
-    assert voluptuous_serialize.convert(
+    assert convert(
         _advanced_settings_schema({}),
         custom_serializer=cv.custom_serializer,
     )

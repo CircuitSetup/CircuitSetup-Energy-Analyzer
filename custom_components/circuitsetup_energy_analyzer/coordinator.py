@@ -503,7 +503,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         bucket["last_ms"] = elapsed_ms
         bucket["max_ms"] = max(float(bucket["max_ms"]), elapsed_ms)
 
-        if elapsed_seconds <= SLOW_RUNTIME_OPERATION_SECONDS:
+        if (
+            elapsed_seconds <= SLOW_RUNTIME_OPERATION_SECONDS
+            or operation.startswith(("executor_queue:", "executor_execution:"))
+        ):
             return
         observed_at = monotonic()
         previous_warning_at = self._last_slow_runtime_warning_at.get(key)
@@ -514,16 +517,22 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         ):
             return
         self._last_slow_runtime_warning_at[key] = observed_at
-        if circuit_id:
+        if operation == "event_loop_lag":
             _LOGGER.warning(
-                "Slow CSEA %s operation for %s: %.1f ms",
+                "HA event loop lag observed by CSEA: %.1f ms "
+                "(scheduler delay; not necessarily caused by CSEA)",
+                elapsed_ms,
+            )
+        elif circuit_id:
+            _LOGGER.warning(
+                "Slow CSEA %s operation for %s: %.1f ms elapsed (includes waiting)",
                 operation,
                 circuit_id,
                 elapsed_ms,
             )
         else:
             _LOGGER.warning(
-                "Slow CSEA %s operation: %.1f ms",
+                "Slow CSEA %s operation: %.1f ms elapsed (includes waiting)",
                 operation,
                 elapsed_ms,
             )
@@ -532,6 +541,20 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         """Return JSON-safe bounded runtime performance diagnostics."""
         return {
             "slow_operation_threshold_ms": SLOW_RUNTIME_OPERATION_SECONDS * 1000.0,
+            "event_loop_lag": dict(
+                self._runtime_performance_by_operation.get(
+                    "event_loop_lag",
+                    {"count": 0, "last_ms": 0.0, "max_ms": 0.0},
+                )
+            ),
+            **{
+                phase: {
+                    key.removeprefix(f"{phase}:"): dict(value)
+                    for key, value in self._runtime_performance_by_operation.items()
+                    if key.startswith(f"{phase}:")
+                }
+                for phase in ("executor_queue", "executor_execution", "synchronous")
+            },
             "source_ingest": dict(
                 self._runtime_performance_by_operation.get(
                     "source_ingest",
@@ -1058,10 +1081,16 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         circuit_id: str | None = None,
     ) -> bool:
         """Rebuild pending recommendations without saving or notifying."""
-        return self.settings_controller.rebuild_setting_recommendations(
-            now,
-            circuit_id=circuit_id,
-        )
+        started_at = monotonic()
+        try:
+            return self.settings_controller.rebuild_setting_recommendations(
+                now,
+                circuit_id=circuit_id,
+            )
+        finally:
+            self._record_runtime_performance(
+                "synchronous:settings_recommendations", monotonic() - started_at
+            )
 
     async def async_apply_setting_recommendation(
         self: Self,

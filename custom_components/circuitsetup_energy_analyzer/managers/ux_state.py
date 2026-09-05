@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import datetime
+from time import monotonic
 from typing import Any
 
 from ..contextual_baseline import (
@@ -73,6 +74,33 @@ class UxStateManager:
             self.refresh_config(config, None, now)
 
     def refresh_config(
+        self,
+        config: CircuitConfig,
+        sample: NormalizedCircuitSample | None,
+        now: datetime,
+        context: Any | None = None,
+        *,
+        circuit_events: Sequence[Any] | None = None,
+        circuit_alerts: Sequence[AlertEvidence] | None = None,
+        refresh_nilm: bool = True,
+    ) -> None:
+        started_at = monotonic()
+        try:
+            self._refresh_config(
+                config,
+                sample,
+                now,
+                context,
+                circuit_events=circuit_events,
+                circuit_alerts=circuit_alerts,
+                refresh_nilm=refresh_nilm,
+            )
+        finally:
+            self._coordinator._record_runtime_performance(
+                "synchronous:ux_state", monotonic() - started_at
+            )
+
+    def _refresh_config(
         self,
         config: CircuitConfig,
         sample: NormalizedCircuitSample | None,

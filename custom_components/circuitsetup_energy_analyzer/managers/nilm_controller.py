@@ -343,6 +343,7 @@ class NilmController:
                     config.circuit_id,
                     live_context,
                     *worker_inputs,
+                    operation="nilm_snapshot",
                 )
             )
             result = await coordinator.pipeline.async_run(
@@ -352,7 +353,8 @@ class NilmController:
                     config,
                     worker_context,
                     events=event_snapshot,
-                )
+                ),
+                operation="nilm_process",
             )
             self._apply_worker_snapshot(
                 config.circuit_id,
@@ -656,6 +658,7 @@ class NilmController:
                 coordinator.store_data.nilm_session_history_by_circuit,
                 coordinator.store_data.nilm_label_intervals_by_circuit,
                 self._nilm_model_time_zone(),
+                operation="nilm_hydrate_models",
             )
             for circuit_id, index, model in rebuilt_models:
                 assignments = (
@@ -685,12 +688,14 @@ class NilmController:
                         circuit_id,
                         context,
                         *worker_inputs,
+                        operation="nilm_snapshot",
                     )
                 )
                 result = await coordinator.pipeline.async_run(
                     worker.refresh_state,
                     circuit_id,
                     worker_context,
+                    operation="nilm_refresh",
                 )
                 self._apply_worker_snapshot(
                     circuit_id,

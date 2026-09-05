@@ -2370,6 +2370,7 @@ async def test_delete_assignment_rollback_survives_retention_copy() -> None:
         ),
         _store=store,
         async_set_updated_data=lambda _state: None,
+        _record_runtime_performance=lambda *_args: None,
         state=SimpleNamespace(),
         config_entry_controller=SimpleNamespace(async_reload=reload),
     )

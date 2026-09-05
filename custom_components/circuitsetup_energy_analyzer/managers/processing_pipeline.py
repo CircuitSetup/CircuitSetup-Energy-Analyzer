@@ -73,17 +73,30 @@ class ProcessingPipeline:
         await asyncio.sleep(0)
         return applied
 
-    async def async_run(self, target: Any, *args: Any) -> Any:
+    async def async_run(
+        self, target: Any, *args: Any, operation: str = "executor"
+    ) -> Any:
         """Run synchronous analyzer work without blocking the event loop."""
+        submitted_at = monotonic()
+        timings: dict[str, float] = {}
+
+        def run() -> Any:
+            started_at = monotonic()
+            timings["executor_queue"] = started_at - submitted_at
+            try:
+                return target(*args)
+            finally:
+                timings["executor_execution"] = monotonic() - started_at
+
         add_executor_job = getattr(
             getattr(self._coordinator, "hass", None),
             "async_add_executor_job",
             None,
         )
         if add_executor_job is not None:
-            executor_job = add_executor_job(target, *args)
+            executor_job = add_executor_job(run)
         else:
-            executor_job = asyncio.to_thread(target, *args)
+            executor_job = asyncio.to_thread(run)
         processor_task = asyncio.ensure_future(executor_job)
         try:
             return await asyncio.shield(processor_task)
@@ -91,11 +104,18 @@ class ProcessingPipeline:
             with suppress(asyncio.CancelledError, Exception):
                 await processor_task
             raise
+        finally:
+            record = getattr(self._coordinator, "_record_runtime_performance", None)
+            if record is not None and "executor_execution" in timings:
+                for phase, elapsed in timings.items():
+                    record(f"{phase}:{operation}", elapsed)
 
     async def _async_process(self, name: str, processor: Any, *args: Any) -> Any:
         started_at = monotonic()
         try:
-            return await self.async_run(processor.process, *args)
+            return await self.async_run(
+                processor.process, *args, operation=f"processor:{name}"
+            )
         finally:
             record_performance = getattr(
                 self._coordinator, "_record_runtime_performance", None

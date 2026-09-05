@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from time import monotonic
 from typing import Any
 
 from ..alert_feedback import alert_feedback_is_expired
@@ -300,7 +301,13 @@ class StorePersistenceManager:
             if not force and not self._dirty_save_due(now):
                 return
             if self._dirty_save_retention_due(now):
-                self.apply_retention(now)
+                started_at = monotonic()
+                try:
+                    self.apply_retention(now)
+                finally:
+                    self._coordinator._record_runtime_performance(
+                        "synchronous:retention", monotonic() - started_at
+                    )
                 self._last_dirty_save_retention_at = now
             store.data = self._coordinator.store_data
             while self.dirty:
@@ -341,11 +348,14 @@ class StorePersistenceManager:
     def prune_events(self, now: datetime) -> None:
         """Apply retention caps to stored circuit events."""
         store_data = self._coordinator.store_data
+        cutoffs = {
+            circuit_id: now - self._retention_window_for_circuit(circuit_id)
+            for circuit_id in {event.circuit_id for event in store_data.events}
+        }
         retained_events = [
             event
             for event in store_data.events
-            if event.timestamp
-            >= now - self._retention_window_for_circuit(event.circuit_id)
+            if event.timestamp >= cutoffs[event.circuit_id]
         ]
         if len(retained_events) != len(store_data.events):
             store_data.events = retained_events

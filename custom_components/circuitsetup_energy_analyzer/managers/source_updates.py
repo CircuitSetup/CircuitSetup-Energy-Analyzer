@@ -5,6 +5,8 @@ from collections.abc import Callable, Iterable, Mapping
 from contextlib import suppress
 from typing import Any
 
+LOOP_LAG_SAMPLE_SECONDS = 0.1
+
 
 class SourceUpdateManager:
     """Manage source entity listener lifecycle and debounced updates."""
@@ -36,6 +38,7 @@ class SourceUpdateManager:
         self._batch_started_at: float | None = None
         self._latest_source_update_at: float | None = None
         self._unsub_state_change: Any = None
+        self._loop_lag_handle: asyncio.TimerHandle | None = None
 
     @property
     def source_update_task(self) -> asyncio.Task[Any] | None:
@@ -58,6 +61,7 @@ class SourceUpdateManager:
 
         self.source_entities = tuple(source_entities)
         self._coordinator.started = True
+        self._schedule_loop_lag_sample()
 
         if self._track_state_change_event is None or not self.source_entities:
             return
@@ -77,6 +81,7 @@ class SourceUpdateManager:
             self._unsub_state_change()
             self._unsub_state_change = None
         self._coordinator.started = False
+        self._cancel_loop_lag_sample()
         for pending_task in (self._source_update_task, self._analysis_update_task):
             if (
                 pending_task is not None
@@ -87,6 +92,26 @@ class SourceUpdateManager:
                 with suppress(asyncio.CancelledError):
                     await pending_task
         self.cancel_pending_source_update()
+
+    def _cancel_loop_lag_sample(self) -> None:
+        if self._loop_lag_handle is not None:
+            self._loop_lag_handle.cancel()
+            self._loop_lag_handle = None
+
+    def _schedule_loop_lag_sample(self) -> None:
+        self._cancel_loop_lag_sample()
+        loop = asyncio.get_running_loop()
+        due_at = loop.time() + LOOP_LAG_SAMPLE_SECONDS
+        self._loop_lag_handle = loop.call_at(due_at, self._record_loop_lag, due_at)
+
+    def _record_loop_lag(self, due_at: float) -> None:
+        self._loop_lag_handle = None
+        if not self._coordinator.started:
+            return
+        self._coordinator._record_runtime_performance(
+            "event_loop_lag", max(asyncio.get_running_loop().time() - due_at, 0.0)
+        )
+        self._schedule_loop_lag_sample()
 
     async def async_handle_source_state_change(self, event: Any) -> None:
         """Handle Home Assistant source state changes."""
