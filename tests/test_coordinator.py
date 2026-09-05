@@ -2891,6 +2891,10 @@ def test_coordinator_runtime_performance_is_bounded_and_rate_limits_warnings(
 
     assert coordinator.runtime_performance_snapshot() == {
         "slow_operation_threshold_ms": 100.0,
+        "event_loop_lag": {"count": 0, "last_ms": 0.0, "max_ms": 0.0},
+        "executor_queue": {},
+        "executor_execution": {},
+        "synchronous": {},
         "source_ingest": {"count": 0, "last_ms": 0.0, "max_ms": 0.0},
         "source_update": {"count": 1, "last_ms": 25.0, "max_ms": 25.0},
         "nilm_by_circuit": {
@@ -2904,8 +2908,8 @@ def test_coordinator_runtime_performance_is_bounded_and_rate_limits_warnings(
         record.message for record in caplog.records if record.levelname == "WARNING"
     ]
     assert warning_messages == [
-        "Slow CSEA nilm operation for hvac_1: 125.0 ms",
-        "Slow CSEA nilm operation for hvac_1: 175.0 ms",
+        "Slow CSEA nilm operation for hvac_1: 125.0 ms elapsed (includes waiting)",
+        "Slow CSEA nilm operation for hvac_1: 175.0 ms elapsed (includes waiting)",
     ]
 
 
@@ -2955,9 +2959,9 @@ def test_background_runtime_performance_remains_observable(
     assert [
         record.message for record in caplog.records if record.levelname == "WARNING"
     ] == [
-        "Slow CSEA source_update operation: 2000.0 ms",
-        "Slow CSEA processor:events operation: 1000.0 ms",
-        "Slow CSEA nilm operation for mains: 2500.0 ms",
+        "Slow CSEA source_update operation: 2000.0 ms elapsed (includes waiting)",
+        "Slow CSEA processor:events operation: 1000.0 ms elapsed (includes waiting)",
+        "Slow CSEA nilm operation for mains: 2500.0 ms elapsed (includes waiting)",
     ]
 
 
@@ -4232,6 +4236,7 @@ async def test_coordinator_listens_for_configured_schedule_entities(
         "sensor.pool_pump_power",
         "schedule.pool_pump",
     )
+    await coordinator.async_stop()
 
 
 @pytest.mark.asyncio
@@ -4470,6 +4475,7 @@ async def test_coordinator_coalesces_rapid_source_state_changes(monkeypatch) -> 
         "sensor.fridge_power",
         "sensor.fridge_var",
     )
+    await coordinator.async_stop()
 
 
 @pytest.mark.asyncio
@@ -4499,12 +4505,12 @@ async def test_coordinator_waits_for_quiet_source_state_changes(
     monkeypatch.setattr(
         coordinator_module,
         "SOURCE_STATE_UPDATE_DEBOUNCE_SECONDS",
-        0.05,
+        0.2,
     )
     monkeypatch.setattr(
         coordinator_module,
         "SOURCE_STATE_UPDATE_MAX_BATCH_SECONDS",
-        0.2,
+        1.0,
         raising=False,
     )
     monkeypatch.setattr(coordinator_module, "SOURCE_ANALYSIS_INTERVAL_SECONDS", 0.0)
@@ -4518,9 +4524,9 @@ async def test_coordinator_waits_for_quiet_source_state_changes(
     await coordinator.async_start(["sensor.fridge_power"])
 
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_power"}))
-    await asyncio.sleep(0.03)
+    await asyncio.sleep(0.15)
     await callbacks[0](SimpleNamespace(data={"entity_id": "sensor.fridge_current"}))
-    await asyncio.sleep(0.04)
+    await asyncio.sleep(0.1)
 
     assert changed_entity_batches == []
 
@@ -4530,6 +4536,7 @@ async def test_coordinator_waits_for_quiet_source_state_changes(
         await asyncio.sleep(0.01)
 
     assert changed_entity_batches == [("sensor.fridge_current", "sensor.fridge_power")]
+    await coordinator.async_stop()
 
 
 @pytest.mark.asyncio
@@ -4588,6 +4595,7 @@ async def test_coordinator_max_source_update_batch_window(monkeypatch) -> None:
     assert changed_entity_batches == [
         ("sensor.fridge_current", "sensor.fridge_power", "sensor.fridge_var")
     ]
+    await coordinator.async_stop()
 
 
 @pytest.mark.asyncio
@@ -4640,6 +4648,7 @@ async def test_coordinator_passes_changed_source_entities_to_process_update(
     await asyncio.wait_for(coordinator.source_updates.source_update_task, timeout=1)
 
     assert changed_entity_batches == [("sensor.fridge_current", "sensor.fridge_power")]
+    await coordinator.async_stop()
 
 
 @pytest.mark.asyncio
@@ -4704,6 +4713,7 @@ async def test_coordinator_reschedules_source_update_added_during_processing(
     assert process_calls == 2
     assert coordinator.pending_source_update_entities == ()
     assert coordinator.last_source_update_entities == ("sensor.fridge_current",)
+    await coordinator.async_stop()
 
 
 @pytest.mark.asyncio
@@ -5650,6 +5660,7 @@ async def test_setup_entry_listens_to_synthetic_mains_source_entities() -> None:
 
     coordinator = hass.data[DOMAIN]["entry-1"]
     assert coordinator.source_entities == ("sensor.mains_l1_power",)
+    await coordinator.async_stop()
 
 
 @pytest.mark.asyncio
@@ -5679,6 +5690,7 @@ async def test_setup_entry_listens_to_outdoor_temperature_entity() -> None:
         "sensor.hvac_power",
         "sensor.outdoor_temperature",
     )
+    await coordinator.async_stop()
 
 
 def test_coordinator_imports_configured_utility_and_advanced_settings() -> None:
@@ -6723,6 +6735,7 @@ async def test_setup_entry_loads_feature_store_and_runtime_saves(monkeypatch) ->
 
     assert saved
     assert "fridge:real_power" not in saved[-1].baselines
+    await coordinator.async_stop()
 
 
 @pytest.mark.asyncio
@@ -16220,6 +16233,7 @@ async def test_timed_maintenance_expires_without_a_source_update(trigger: str) -
 
     assert coordinator.store_data.maintenance_by_circuit["fridge"]["active"] is False
     assert "fridge" not in coordinator.paused_circuits
+    await coordinator.async_stop()
 
 
 @pytest.mark.asyncio

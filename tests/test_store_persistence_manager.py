@@ -23,6 +23,35 @@ from custom_components.circuitsetup_energy_analyzer.storage import (
 )
 
 
+def test_event_retention_resolves_each_policy_once_per_pass() -> None:
+    now = datetime(2026, 6, 30, 12, 0, tzinfo=UTC)
+    windows = {"fridge": timedelta(days=18), "washer": timedelta(days=45)}
+    calls = []
+
+    def retention_window(circuit_id):
+        calls.append(circuit_id)
+        return windows[circuit_id]
+
+    expired = CircuitEvent(now - timedelta(days=19), "fridge", EventType.START)
+    boundary = CircuitEvent(now - timedelta(days=18), "fridge", EventType.STOP)
+    retained = CircuitEvent(now - timedelta(days=19), "washer", EventType.START)
+    store = FeatureStoreData(events=[expired, boundary, retained] * 100)
+    manager = object.__new__(StorePersistenceManager)
+    manager._coordinator = SimpleNamespace(store_data=store)
+    manager._retention_window_for_circuit = retention_window
+
+    manager.prune_events(now)
+    assert store.events == [boundary, retained] * 100
+    assert sorted(calls) == ["fridge", "washer"]
+
+    # A later policy change must take effect; cutoffs cannot persist between passes.
+    calls.clear()
+    windows["washer"] = timedelta(days=1)
+    manager.prune_events(now)
+    assert store.events == [boundary] * 100
+    assert sorted(calls) == ["fridge", "washer"]
+
+
 def test_store_persistence_resets_circuit_baselines_and_alerts() -> None:
     now = datetime(2026, 6, 30, 12, 0, tzinfo=UTC)
     store_data = FeatureStoreData(

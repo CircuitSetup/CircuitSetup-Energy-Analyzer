@@ -1069,6 +1069,9 @@ async def test_settings_controller_recalculates_and_records_decisions(
         "build_settings_recommendations",
         lambda inputs: [updated_recommendation],
     )
+    coordinator._rebuild_setting_recommendations = (
+        controller.rebuild_setting_recommendations
+    )
 
     await controller.async_recalculate_setting_recommendations("fridge")
     await controller.async_dismiss_setting_recommendation(
