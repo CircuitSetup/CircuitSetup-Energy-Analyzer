@@ -2,6 +2,17 @@
 
 @C:\Users\John\.codex\RTK.md
 
+## GPT-6 Astra Working Guidance
+
+Based on [official OpenAI prompting guidance](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-6-astra#prompting-best-practices).
+
+- Treat action requests as authorization to complete the stated task. Make routine assumptions from context and continue until the requested result is verified or a concrete blocker remains.
+- Ask only when missing information materially affects correctness or scope. Continue independent authorized work while awaiting an answer; never infer approval from silence.
+- Reuse existing authorization. When approval is required, prepare the reviewable result first and identify the exact action needing approval.
+- User instructions override skill guidelines, subject to system and developer instructions. If a skill blocks progress, link its `SKILL.md`, quote the blocking rule, and explain its application; distinguish requirements from interpretation.
+- Keep responses concise and plain. Lead with the result, relevant verification, and remaining limitations; avoid repetitive summaries and unnecessary formatting.
+- Delegate only when the user or an applicable instruction explicitly calls for parallel agent work. Give each agent a bounded, independent task and review its result. Activate Subculture only on the standalone instruction `SUBCULTURE`.
+
 ## Project Workflow
 
 - This repository uses GitHub Flow with protected `master`.
@@ -49,6 +60,8 @@
 
 ## Verification
 
+- For documentation-only changes, review the diff and run `rtk git diff --check`; application tests are unnecessary unless executable examples or behavior change. Required GitHub checks still apply before merge.
+- For code changes, complete the applicable checks below. Add meaningful regression coverage for changed behavior; avoid tests that merely repeat the implementation. Repeat or broaden verification only for new changes, failures, or unresolved concerns.
 - Normal PR verification:
   - `rtk git diff --check`
   - `rtk ruff check .`
