@@ -1119,25 +1119,36 @@ def _expand_segment(
     sources = {sensor.role: sensor.entity_id for sensor in circuit.sensors}
     start_t = int(raw["start_t"])
     interval = int(raw["interval_seconds"])
+    pre_boundary_seconds = int(raw.get("pre_boundary_seconds", 0))
     energy = float(raw["energy_start_kwh"])
     samples: list[CalibrationSample] = []
     for index, usage in enumerate(_required_list(raw, "daily_usage_kwh")):
         energy = round(energy + float(usage), 3)
-        t = start_t + index * interval
-        states: dict[str, Any] = {}
-        _set_role_state(states, sources, SensorRole.REAL_POWER, raw, "power_w", index)
-        _set_role_state(states, sources, SensorRole.CURRENT, raw, "current_a", index)
-        _set_role_state(states, sources, SensorRole.VOLTAGE, raw, "voltage_v", index)
-        if energy_entity := sources.get(SensorRole.ENERGY):
-            states[energy_entity] = energy
-        samples.append(
-            CalibrationSample(
-                timestamp=start_time + timedelta(seconds=t),
-                t=t,
-                states=states,
-                completes_prior_energy_days=True,
+        boundary_t = start_t + index * interval
+        points = [(boundary_t, True)]
+        if pre_boundary_seconds:
+            points.insert(0, (boundary_t - pre_boundary_seconds, False))
+        for t, complete in points:
+            states: dict[str, Any] = {}
+            _set_role_state(
+                states, sources, SensorRole.REAL_POWER, raw, "power_w", index
             )
-        )
+            _set_role_state(
+                states, sources, SensorRole.CURRENT, raw, "current_a", index
+            )
+            _set_role_state(
+                states, sources, SensorRole.VOLTAGE, raw, "voltage_v", index
+            )
+            if energy_entity := sources.get(SensorRole.ENERGY):
+                states[energy_entity] = energy
+            samples.append(
+                CalibrationSample(
+                    timestamp=start_time + timedelta(seconds=t),
+                    t=t,
+                    states=states,
+                    completes_prior_energy_days=complete,
+                )
+            )
     return samples
 
 

@@ -15990,6 +15990,7 @@ async def test_export_history_csv_stores_retained_history_snapshot() -> None:
 
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
         SimpleNamespace(),
+        now_fn=lambda: datetime(2026, 6, 2, tzinfo=UTC),
         store_data=FeatureStoreData(
             energy_usage_by_circuit={
                 "fridge": {"days": [{"date": "2026-06-01", "usage_kwh": 8.5}]}

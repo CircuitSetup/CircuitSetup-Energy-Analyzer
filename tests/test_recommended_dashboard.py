@@ -2491,6 +2491,9 @@ class _FakeLovelaceStorage:
         self.saved: list[dict[str, object]] = []
         self.deleted = False
 
+    async def async_load(self, *_args: object) -> dict[str, object]:
+        return self.config
+
     async def async_save(self, config: dict[str, object]) -> None:
         self.saved.append(config)
 
@@ -2820,6 +2823,9 @@ async def test_coordinator_updates_existing_recommended_dashboard() -> None:
         entry_data={"circuits": _circuit_dicts()},
         options={"dashboard_layout": DASHBOARD_LAYOUT_EXPERT},
     )
+    dashboard_store.config[dashboard_storage._DASHBOARD_OWNER_KEY] = (
+        coordinator.entry_id
+    )
 
     await coordinator.async_create_dashboard()
 
@@ -2859,6 +2865,9 @@ async def test_coordinator_updates_existing_dashboard_with_valid_fields() -> Non
         entry_data={"circuits": _circuit_dicts()},
         options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
     )
+    dashboard_store.config[dashboard_storage._DASHBOARD_OWNER_KEY] = (
+        coordinator.entry_id
+    )
 
     await coordinator.async_create_dashboard()
 
@@ -2893,6 +2902,9 @@ async def test_coordinator_updates_attribute_shaped_existing_dashboard() -> None
         hass,
         entry_data={"circuits": _circuit_dicts()},
         options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
+    )
+    dashboard_store.config[dashboard_storage._DASHBOARD_OWNER_KEY] = (
+        coordinator.entry_id
     )
 
     await coordinator.async_create_dashboard()
@@ -3033,11 +3045,22 @@ async def test_coordinator_skips_duplicate_dashboard_when_update_unavailable() -
     )
 
     collection = _FakeExistingDashboardWithoutUpdate()
-    hass = SimpleNamespace(data={"lovelace": {"dashboards_collection": collection}})
+    dashboard_store = _FakeLovelaceStorage({})
+    hass = SimpleNamespace(
+        data={
+            "lovelace": {
+                "dashboards_collection": collection,
+                "dashboards": {DASHBOARD_URL_PATH: dashboard_store},
+            }
+        }
+    )
     coordinator = EnergyAnalyzerCoordinator(
         hass,
         entry_data={"circuits": _circuit_dicts()},
         options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
+    )
+    dashboard_store.config[dashboard_storage._DASHBOARD_OWNER_KEY] = (
+        coordinator.entry_id
     )
 
     await coordinator.async_create_dashboard()
@@ -3074,6 +3097,9 @@ async def test_coordinator_removes_existing_recommended_dashboard() -> None:
         hass,
         entry_data={"circuits": _circuit_dicts()},
         options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
+    )
+    dashboard_store.config[dashboard_storage._DASHBOARD_OWNER_KEY] = (
+        coordinator.entry_id
     )
 
     await coordinator.async_remove_dashboard()
@@ -3133,6 +3159,9 @@ async def test_coordinator_removes_orphaned_recommended_dashboard_config() -> No
         entry_data={"circuits": _circuit_dicts()},
         options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
     )
+    dashboard_store.config[dashboard_storage._DASHBOARD_OWNER_KEY] = (
+        coordinator.entry_id
+    )
 
     await coordinator.async_remove_dashboard()
 
@@ -3167,6 +3196,9 @@ async def test_coordinator_does_not_remove_yaml_dashboard_as_orphan() -> None:
         hass,
         entry_data={"circuits": _circuit_dicts()},
         options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
+    )
+    dashboard_store.config[dashboard_storage._DASHBOARD_OWNER_KEY] = (
+        coordinator.entry_id
     )
 
     await coordinator.async_remove_dashboard()
@@ -3210,6 +3242,9 @@ async def test_coordinator_removes_live_dashboard_after_loading_fresh_collection
         hass,
         entry_data={"circuits": _circuit_dicts()},
         options={"dashboard_layout": DASHBOARD_LAYOUT_STANDARD},
+    )
+    dashboard_store.config[dashboard_storage._DASHBOARD_OWNER_KEY] = (
+        coordinator.entry_id
     )
 
     await coordinator.async_remove_dashboard()
