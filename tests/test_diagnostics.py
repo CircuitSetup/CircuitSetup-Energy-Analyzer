@@ -281,6 +281,49 @@ async def test_diagnostics_includes_appliance_detail_runtime_summaries() -> None
 
 
 @pytest.mark.asyncio
+async def test_diagnostics_redacts_nested_source_ids_and_retained_export() -> None:
+    from custom_components.circuitsetup_energy_analyzer.diagnostics import (
+        async_get_config_entry_diagnostics,
+    )
+
+    coordinator = SimpleNamespace(
+        state=AnalyzerState(
+            latest_real_power_w_by_circuit={"washer": 84.0},
+            daily_energy_usage_by_circuit={"washer": 2.4},
+            water_flow_context_by_circuit={
+                "washer": {
+                    "status": "tracking",
+                    "flow_sensor_entities": ["sensor.private_water_meter"],
+                }
+            },
+        ),
+        circuit_configs=(
+            CircuitConfig(
+                circuit_id="washer",
+                name="Washer",
+                appliance_profile=ApplianceProfile.WASHER,
+                mode=CircuitMode.SINGLE_PHASE,
+            ),
+        ),
+        store_data=FeatureStoreData(),
+        last_exported_diagnostics={
+            "context": {"thermostat": "climate.private_thermostat"},
+            "summary": "Source sensor.private_water_meter was unavailable",
+        },
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+    entry = SimpleNamespace(entry_id="entry-1", title="Test", data={}, options={})
+
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+
+    assert diagnostics["runtime"]["appliance_details"][0]["daily_energy_kwh"] == 2.4
+    serialized = json.dumps(diagnostics)
+    assert "sensor.private_water_meter" not in serialized
+    assert "climate.private_thermostat" not in serialized
+    assert "[redacted]" in serialized
+
+
+@pytest.mark.asyncio
 async def test_diagnostics_includes_entity_display_metadata() -> None:
     from custom_components.circuitsetup_energy_analyzer.diagnostics import (
         async_get_config_entry_diagnostics,

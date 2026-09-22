@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import re
 from collections import Counter, defaultdict
+from collections.abc import Mapping
 from typing import Any
 
 from homeassistant.helpers import device_registry as dr
@@ -15,6 +17,8 @@ from .const import (
     DOMAIN,
 )
 from .entity_catalog import selected_entity_groups_for_coordinator
+
+_ENTITY_ID = re.compile(r"(?<![a-z0-9_])[a-z_]+\.[a-z0-9_]+(?![a-z0-9_])")
 
 
 async def async_get_config_entry_diagnostics(hass: Any, entry: Any) -> dict[str, Any]:
@@ -34,7 +38,20 @@ async def async_get_config_entry_diagnostics(hass: Any, entry: Any) -> dict[str,
     runtime = _runtime_summary(hass, entry_id)
     if runtime is not None:
         diagnostics["runtime"] = runtime
-    return diagnostics
+    return _redact_entity_ids(diagnostics)
+
+
+def _redact_entity_ids(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            _redact_entity_ids(key): _redact_entity_ids(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_redact_entity_ids(item) for item in value]
+    if isinstance(value, str):
+        return _ENTITY_ID.sub("[redacted]", value)
+    return value
 
 
 def _devices_for_entry(hass: Any, entry_id: str) -> list[dict[str, Any]]:
