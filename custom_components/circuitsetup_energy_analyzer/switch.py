@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.util import slugify
 
 from .const import DOMAIN
 from .entity import (
@@ -81,9 +80,6 @@ class CircuitMaintenanceSwitch(CircuitAnalyzerEntity, SwitchEntity):
         self._attr_icon = description.icon
         self._attr_suggested_object_id = f"{self.circuit_id}_{description.key}"
         self._attr_translation_key = description.translation_key
-        self.entity_id = (
-            f"switch.{slugify(self.circuit_name)}_{self._attr_suggested_object_id}"
-        )
 
     @property
     def suggested_object_id(self) -> str:

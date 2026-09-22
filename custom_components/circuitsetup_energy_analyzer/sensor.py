@@ -15,7 +15,6 @@ from homeassistant.const import (
     UnitOfEnergy,
     UnitOfPower,
 )
-from homeassistant.util import slugify
 
 from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH
 from .appliance_metadata import appliance_icon_for_profile
@@ -1525,6 +1524,13 @@ SENSOR_ICONS: Mapping[str, str] = {
     "always_on_limit_usage": "mdi:power-cycle",
 }
 
+_LEGACY_SENSOR_OBJECT_ID_SUFFIXES = {
+    "nilm_signature_count": "nilm_discovered_signatures",
+    "daily_energy_usage": "energy_usage_today",
+    "capacity_usage": "circuit_capacity_usage",
+    "capacity_status": "circuit_capacity_status",
+}
+
 
 SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     DiagnosticSensorDescription(
@@ -2580,7 +2586,10 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
             key=description.key,
         )
         self.entity_description = description
-        self.entity_id = f"sensor.{slugify(self.circuit_name)}_{description.key}"
+        self._attr_suggested_object_id = _LEGACY_SENSOR_OBJECT_ID_SUFFIXES.get(
+            description.key,
+            description.key,
+        )
         self._attr_entity_category = description.entity_category
         self._attr_entity_registry_enabled_default = entity_enabled_default_for_tier(
             description.entity_tier,

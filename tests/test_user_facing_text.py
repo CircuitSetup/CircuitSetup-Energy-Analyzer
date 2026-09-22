@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import struct
@@ -414,32 +415,25 @@ def test_service_copy_is_owned_by_the_translation_catalog() -> None:
     services = yaml.safe_load(
         (INTEGRATION_DIR / "services.yaml").read_text(encoding="utf-8")
     )
-    baseline = yaml.safe_load(
-        subprocess.run(
-            [
-                "git",
-                "show",
-                "31b6aa5dc91d2a886fad3d33f8d95e7216e9d512:"
-                "custom_components/circuitsetup_energy_analyzer/services.yaml",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            cwd=ROOT,
-        ).stdout
-    )
     catalog = _translations()["services"]
 
     assert set(catalog) == set(services)
-    assert set(services) == set(baseline)
+    behavior_schema = {
+        service_id: _service_behavior_schema(service)
+        for service_id, service in services.items()
+    }
+    assert hashlib.sha256(
+        json.dumps(
+            behavior_schema,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest() == "c10c676b2fae6a9e4d08be17a06a12b6e234e266c7839fa60b321a1b14e2c763"
     for service_id, service in services.items():
         assert "name" not in service
         assert "description" not in service
         assert catalog[service_id]["name"]
         assert catalog[service_id]["description"]
-        assert _service_behavior_schema(service) == _service_behavior_schema(
-            baseline[service_id]
-        )
         for field_id, field in service.get("fields", {}).items():
             assert "name" not in field
             assert "description" not in field

@@ -6,7 +6,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-import voluptuous as vol
+
+try:
+    from homeassistant.helpers.config_validation import probatio as vol
+except ImportError:
+    import voluptuous as vol
 
 from custom_components.circuitsetup_energy_analyzer.const import (
     CONF_ADVANCED_SETTINGS,
@@ -7008,12 +7012,12 @@ async def test_options_flow_does_not_emit_non_actionable_mapping_suggestions() -
 
 
 def test_flow_schemas_serialize_for_home_assistant_frontend() -> None:
-    try:
-        from homeassistant.helpers import config_validation as cv
-    except ModuleNotFoundError:
-        cv = None
+    from homeassistant.helpers import config_validation as cv
 
-    if cv is not None and hasattr(cv, "to_field_list"):
+    if hasattr(cv, "probatio"):
+        convert = cv.probatio.to_field_list
+        unsupported = cv.probatio.UNSUPPORTED
+    elif hasattr(cv, "to_field_list"):
         convert = cv.to_field_list
         unsupported = cv.UNSUPPORTED
     else:
@@ -7047,9 +7051,6 @@ def test_flow_schemas_serialize_for_home_assistant_frontend() -> None:
         custom_serializer=serialize_ha_selector,
     )
     assert _time_selector().serialize() == {"selector": {"time": {}}}
-
-    if cv is None:
-        return
 
     assert convert(
         _advanced_settings_schema({}),

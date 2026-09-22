@@ -5,7 +5,6 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
-from homeassistant.util import slugify
 
 from .const import (
     CONF_ADVANCED_SETTINGS,
@@ -117,6 +116,10 @@ BINARY_SENSOR_ICONS = {
     "water_flow_mismatch": "mdi:pipe-leak",
 }
 
+_LEGACY_BINARY_SENSOR_OBJECT_ID_SUFFIXES = {
+    "maintenance": "alerts_paused",
+}
+
 
 BINARY_SENSOR_DESCRIPTIONS: tuple[DiagnosticBinarySensorDescription, ...] = (
     DiagnosticBinarySensorDescription(
@@ -188,8 +191,11 @@ class CircuitAnalyzerBinarySensor(CircuitAnalyzerEntity, BinarySensorEntity):
             key=description.key,
         )
         self.entity_description = description
-        self.entity_id = (
-            f"binary_sensor.{slugify(self.circuit_name)}_{description.key}"
+        self._attr_suggested_object_id = (
+            _LEGACY_BINARY_SENSOR_OBJECT_ID_SUFFIXES.get(
+                description.key,
+                description.key,
+            )
         )
         self._appliance_profile = _appliance_profile(
             getattr(circuit, "appliance_profile", None)

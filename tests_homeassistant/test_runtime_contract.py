@@ -268,6 +268,16 @@ async def test_platform_setup_uses_home_assistant_runtime_registries(
         registry_entry.device_id == fridge_device.id
         for registry_entry in registry_entries.values()
     )
+    assert entity_registry.async_get_entity_id(
+        "sensor",
+        DOMAIN,
+        "runtime-entry_fridge_daily_energy_usage",
+    ) == "sensor.kitchen_fridge_energy_usage_today"
+    assert entity_registry.async_get_entity_id(
+        "binary_sensor",
+        DOMAIN,
+        "runtime-entry_fridge_maintenance",
+    ) == "binary_sensor.kitchen_fridge_alerts_paused"
 
     special_entity_id = entity_registry.async_get_entity_id(
         "sensor",

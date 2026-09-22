@@ -2297,7 +2297,7 @@
         "name": "Water flow mismatch"
       },
       "running": {
-        "name": "Running"
+        "name": "Estimated running"
       }
     },
     "switch": {
