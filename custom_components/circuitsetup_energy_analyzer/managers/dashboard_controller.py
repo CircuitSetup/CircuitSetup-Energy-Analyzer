@@ -18,6 +18,8 @@ from ..dashboard import (
     normalize_dashboard_layout,
 )
 
+_DASHBOARD_OWNER_KEY = "circuitsetup_energy_analyzer_entry_id"
+
 
 class DashboardController:
     """Own recommended-dashboard create, remove, and layout workflows."""
@@ -140,6 +142,7 @@ class DashboardController:
 
         items = await _async_lovelace_method_result(items_method())
         dashboard_config = _lovelace_dashboard_config(payload)
+        dashboard_config[_DASHBOARD_OWNER_KEY] = self._coordinator.entry_id
         storage_payload = _lovelace_dashboard_storage_payload(payload)
         existing = next(
             (
@@ -153,6 +156,10 @@ class DashboardController:
         if existing is None:
             existing = _runtime_lovelace_dashboard(lovelace_data, payload)
         if existing is not None:
+            if not await _async_lovelace_dashboard_is_owned(
+                lovelace_data, self._coordinator.entry_id
+            ):
+                return "unavailable", "dashboard_not_owned"
             if not runtime_only and not callable(update_method):
                 return "unavailable", "dashboard_update_unavailable"
             item_id = _lovelace_dashboard_item_id(existing, payload)
@@ -215,6 +222,12 @@ class DashboardController:
             )
 
         payload = {"url_path": DASHBOARD_URL_PATH}
+        dashboards = _lovelace_dashboards(lovelace_data)
+        if dashboards is not None and DASHBOARD_URL_PATH in dashboards:
+            if not await _async_lovelace_dashboard_is_owned(
+                lovelace_data, self._coordinator.entry_id
+            ):
+                return "unavailable", "dashboard_not_owned"
         if collection is not None:
             items_method = getattr(collection, "async_items", None)
             delete_method = getattr(collection, "async_delete_item", None)
@@ -239,6 +252,8 @@ class DashboardController:
                     return "deleted", None
                 return "missing", None
 
+            if dashboards is None or DASHBOARD_URL_PATH not in dashboards:
+                return "unavailable", "dashboard_not_owned"
             item_id = _lovelace_dashboard_item_id(existing, payload)
             if not item_id:
                 return "unavailable", "lovelace_dashboard_delete_unavailable"
@@ -338,6 +353,21 @@ async def _async_load_lovelace_dashboards_collection(
 def _lovelace_dashboards(lovelace_data: Any) -> MutableMapping[Any, Any] | None:
     dashboards = _lovelace_dashboard_item_value(lovelace_data, "dashboards")
     return dashboards if isinstance(dashboards, MutableMapping) else None
+
+
+async def _async_lovelace_dashboard_is_owned(
+    lovelace_data: Any, entry_id: str
+) -> bool:
+    dashboards = _lovelace_dashboards(lovelace_data)
+    store = dashboards.get(DASHBOARD_URL_PATH) if dashboards is not None else None
+    load = getattr(store, "async_load", None)
+    if not callable(load):
+        return False
+    try:
+        config = await _async_lovelace_method_result(load(False))
+    except Exception:
+        return False
+    return isinstance(config, Mapping) and config.get(_DASHBOARD_OWNER_KEY) == entry_id
 
 
 def _lovelace_dashboard_storage_payload(
