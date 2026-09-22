@@ -2563,6 +2563,39 @@ async def test_options_sources_step_auto_routes_new_mains_sources() -> None:
 
 
 @pytest.mark.asyncio
+async def test_options_sources_step_can_clear_water_flow_selection() -> None:
+    from types import SimpleNamespace
+
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+    from custom_components.circuitsetup_energy_analyzer.context_sources import (
+        configured_context_entities,
+    )
+
+    entry = SimpleNamespace(
+        data={CONF_WATER_FLOW_SENSOR_ENTITIES: ["sensor.legacy_flow"]},
+        options={CONF_WATER_FLOW_SENSOR_ENTITIES: ["sensor.old_flow"]},
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    sources = {CONF_EXTRA_SOURCE_ENTITIES: ["sensor.fridge_power"]}
+
+    omitted = await flow.async_step_sources(sources)
+    cleared = await flow.async_step_sources(
+        {**sources, CONF_WATER_FLOW_SENSOR_ENTITIES: []}
+    )
+
+    assert omitted["data"][CONF_WATER_FLOW_SENSOR_ENTITIES] == ["sensor.old_flow"]
+    assert cleared["data"][CONF_WATER_FLOW_SENSOR_ENTITIES] == []
+    assert (
+        configured_context_entities(
+            entry.data, cleared["data"], CONF_WATER_FLOW_SENSOR_ENTITIES
+        )
+        == ()
+    )
+
+
+@pytest.mark.asyncio
 async def test_options_flow_creates_recommended_dashboard(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

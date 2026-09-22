@@ -668,7 +668,7 @@ def validate_options_input(
     validated[CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES] = (
         thermostat_temperature_sensor_entities
     )
-    if water_flow_sensor_entities:
+    if CONF_WATER_FLOW_SENSOR_ENTITIES in user_input:
         validated[CONF_WATER_FLOW_SENSOR_ENTITIES] = water_flow_sensor_entities
     source_entities = _strict_string_list(
         user_input.get(CONF_SOURCE_ENTITIES, []),
