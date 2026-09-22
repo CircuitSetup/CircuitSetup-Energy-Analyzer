@@ -50,6 +50,7 @@ class BillingCycleProcessor:
             timestamp=context.now,
             energy_kwh=sample.energy,
             settings=self._settings_for_config(circuit_config, circuit_id),
+            time_zone=context.time_zone,
         )
         if result is None:
             return FeatureResult()

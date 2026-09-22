@@ -108,3 +108,40 @@ def test_record_billing_cycle_usage_ignores_meter_reset_delta() -> None:
 
     assert result.cycle_usage_kwh == 42.0
     assert history["last_energy_kwh"] == 5.0
+
+
+def test_billing_cycle_uses_home_assistant_local_date_at_rollover() -> None:
+    history = {
+        "cycle_start": "2026-06-15",
+        "cycle_usage_kwh": 10.0,
+        "last_energy_kwh": 100.0,
+        "last_sample_at": "2026-07-14T23:00:00+00:00",
+    }
+    settings = BillingCycleSettings(cycle_start_day=15)
+
+    before_midnight = record_billing_cycle_usage(
+        history,
+        circuit_id="pool",
+        timestamp=datetime(2026, 7, 15, 2, tzinfo=UTC),
+        energy_kwh=101.0,
+        settings=settings,
+        time_zone="America/New_York",
+    )
+    after_midnight = record_billing_cycle_usage(
+        history,
+        circuit_id="pool",
+        timestamp=datetime(2026, 7, 15, 5, tzinfo=UTC),
+        energy_kwh=102.0,
+        settings=settings,
+        time_zone="America/New_York",
+    )
+
+    assert (before_midnight.cycle_start, before_midnight.cycle_usage_kwh) == (
+        "2026-06-15",
+        11.0,
+    )
+    assert before_midnight.elapsed_days == 30
+    assert (after_midnight.cycle_start, after_midnight.cycle_usage_kwh) == (
+        "2026-07-15",
+        0.0,
+    )
