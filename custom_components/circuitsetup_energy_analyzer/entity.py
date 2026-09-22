@@ -71,15 +71,14 @@ def entity_enabled_default_for_tier(
 async def async_call_or_raise(
     target: Any,
     method_name: str,
-    action_label: str,
     *args: Any,
 ) -> None:
     """Call a coordinator action or raise the shared Home Assistant error."""
     method = getattr(target, method_name, None)
     if not callable(method):
         raise HomeAssistantError(
-            f"Cannot {action_label.strip().lower()} right now because the "
-            "analyzer action is unavailable."
+            translation_domain=DOMAIN,
+            translation_key="action_unavailable",
         )
     result = method(*args)
     if inspect.isawaitable(result):
@@ -412,7 +411,7 @@ class CircuitAnalyzerEntity(CoordinatorEntity):
     """Base entity for diagnostics associated with one configured circuit."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -421,14 +420,13 @@ class CircuitAnalyzerEntity(CoordinatorEntity):
         entry_id: str,
         circuit: CircuitInfo,
         key: str,
-        name_suffix: str,
     ) -> None:
         super().__init__(coordinator)
         self._entry_id = entry_id
         self._circuit_id = circuit.circuit_id
         self._circuit_name = circuit.name
         self._appliance_profile = circuit.appliance_profile
-        self._attr_name = f"{circuit.name} {name_suffix}"
+        self._attr_translation_key = key
         self._attr_unique_id = f"{entry_id}_{circuit.circuit_id}_{key}"
 
     @property
@@ -440,11 +438,6 @@ class CircuitAnalyzerEntity(CoordinatorEntity):
     def circuit_name(self) -> str:
         """Configured circuit display name."""
         return self._circuit_name
-
-    @property
-    def name(self) -> str:
-        """Entity display name for fallback tests."""
-        return self._attr_name
 
     @property
     def unique_id(self) -> str:

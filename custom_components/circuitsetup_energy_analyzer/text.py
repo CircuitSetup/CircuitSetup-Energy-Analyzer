@@ -19,17 +19,18 @@ from .tariff import global_cost_settings
 class GlobalTimeOfUseNameText(TextEntity):
     """Text entity for the analyzer-wide Time-of-Use label."""
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
     _attr_entity_category = None
     _attr_icon = "mdi:tag-text-outline"
     _attr_native_max = 64
+    _attr_translation_key = "tou_name"
 
     def __init__(self, coordinator: Any, *, entry_id: str) -> None:
         self.coordinator = coordinator
         self._entry_id = entry_id
-        self._attr_name = "CircuitSetup Energy Analyzer Time-Of-Use Name"
         self._attr_unique_id = f"{entry_id}_tou_name"
         self._attr_suggested_object_id = "circuitsetup_energy_analyzer_tou_name"
+        self.entity_id = "text.circuitsetup_energy_analyzer_tou_name"
 
     @property
     def unique_id(self) -> str:
@@ -40,11 +41,6 @@ class GlobalTimeOfUseNameText(TextEntity):
     def suggested_object_id(self) -> str:
         """Return the stable object ID for fallback tests."""
         return self._attr_suggested_object_id
-
-    @property
-    def name(self) -> str:
-        """Return the visible entity name."""
-        return self._attr_name
 
     @property
     def native_value(self) -> str:
@@ -70,7 +66,6 @@ class GlobalTimeOfUseNameText(TextEntity):
         await async_call_or_raise(
             self.coordinator,
             "async_set_global_tou_name",
-            "set Time-of-Use name",
             str(value),
         )
 

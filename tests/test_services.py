@@ -1043,6 +1043,7 @@ def test_nilm_reference_intervals_generate_from_on_off_history() -> None:
 def test_nilm_reference_intervals_do_not_fabricate_a_boundary_across_unknown_history(
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
+        ServiceValidationError,
         _nilm_reference_intervals_from_history,
     )
 
@@ -1085,7 +1086,7 @@ def test_nilm_reference_intervals_do_not_fabricate_a_boundary_across_unknown_his
         ("2026-08-01T00:40:00+00:00", "2026-08-01T00:50:00+00:00"),
     ]
 
-    with pytest.raises(Exception, match="threshold"):
+    with pytest.raises(ServiceValidationError) as exc_info:
         _nilm_reference_intervals_from_history(
             [],
             "binary_sensor.dishwasher",
@@ -1093,6 +1094,7 @@ def test_nilm_reference_intervals_do_not_fabricate_a_boundary_across_unknown_his
             end="2026-08-01T01:00:00+00:00",
             threshold_w=-1,
         )
+    assert exc_info.value.translation_key == "invalid_reference_threshold"
 
 
 def test_nilm_reference_history_calculates_measured_power_and_energy() -> None:
@@ -2319,17 +2321,19 @@ async def test_setting_recommendation_undo_requires_changed_recommendation() -> 
 
     await async_setup_services(hass)
 
-    with pytest.raises(HomeAssistantError, match="could not be changed"):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await hass.services.registered[(DOMAIN, SERVICE_UNDO_SETTING_RECOMMENDATION)](
             SimpleNamespace(data={"recommendation_id": "rec-undo"})
         )
+    assert exc_info.value.translation_key == "recommendation_not_changed"
+    assert exc_info.value.translation_placeholders == {"recommendation_id": "rec-undo"}
 
 
 @pytest.mark.asyncio
 async def test_circuit_services_fail_fast_for_unknown_circuit_id() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_RELEARN_BASELINE,
-        HomeAssistantError,
+        ServiceValidationError,
         async_setup_services,
     )
 
@@ -2370,10 +2374,14 @@ async def test_circuit_services_fail_fast_for_unknown_circuit_id() -> None:
 
     await async_setup_services(hass)
 
-    with pytest.raises(HomeAssistantError, match="Unknown circuit_id 'freezer'"):
+    with pytest.raises(ServiceValidationError) as exc_info:
         await hass.services.registered[(DOMAIN, SERVICE_RELEARN_BASELINE)](
             SimpleNamespace(data={"circuit_id": "freezer"})
         )
+
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "circuit_not_found"
+    assert exc_info.value.translation_placeholders == {"circuit_id": "freezer"}
 
     assert coordinator.calls == []
 
@@ -2591,10 +2599,7 @@ async def test_circuit_services_reject_conflicting_circuit_and_entity_targets() 
 
     await async_setup_services(hass)
 
-    with pytest.raises(
-        HomeAssistantError,
-        match=("circuit_id 'hvac' does not match entity_id target circuit 'fridge'"),
-    ):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await hass.services.registered[(DOMAIN, SERVICE_RELEARN_BASELINE)](
             SimpleNamespace(
                 data={
@@ -2603,6 +2608,11 @@ async def test_circuit_services_reject_conflicting_circuit_and_entity_targets() 
                 }
             )
         )
+    assert exc_info.value.translation_key == "circuit_id_mismatch"
+    assert exc_info.value.translation_placeholders == {
+        "circuit_id": "hvac",
+        "entity_circuit_id": "fridge",
+    }
 
 
 @pytest.mark.asyncio
@@ -2659,10 +2669,7 @@ async def test_circuit_services_reject_ambiguous_renamed_entity_targets(
 
     await async_setup_services(hass)
 
-    with pytest.raises(
-        HomeAssistantError,
-        match="entity_id target resolved to multiple circuits: fridge, hvac",
-    ):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await hass.services.registered[(DOMAIN, SERVICE_RELEARN_BASELINE)](
             SimpleNamespace(
                 data={
@@ -2673,6 +2680,8 @@ async def test_circuit_services_reject_ambiguous_renamed_entity_targets(
                 }
             )
         )
+    assert exc_info.value.translation_key == "multiple_target_circuits"
+    assert exc_info.value.translation_placeholders == {"circuit_ids": "fridge, hvac"}
 
 
 @pytest.mark.asyncio
@@ -2713,15 +2722,14 @@ async def test_circuit_services_fail_fast_for_unknown_entity_target() -> None:
 
     await async_setup_services(hass)
 
-    with pytest.raises(
-        HomeAssistantError,
-        match=(
-            "Could not derive circuit_id from entity_id 'sensor.unknown_health_summary'"
-        ),
-    ):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await hass.services.registered[(DOMAIN, SERVICE_RELEARN_BASELINE)](
             SimpleNamespace(data={"entity_id": "sensor.unknown_health_summary"})
         )
+    assert exc_info.value.translation_key == "entity_circuit_id_invalid"
+    assert exc_info.value.translation_placeholders == {
+        "entity_id": "sensor.unknown_health_summary"
+    }
 
     assert coordinator.calls == []
 
@@ -2826,26 +2834,28 @@ async def test_setting_recommendation_services_require_unique_or_explicit_entry(
     await async_setup_services(hass)
     handler = hass.services.registered[(DOMAIN, SERVICE_APPLY_SETTING_RECOMMENDATION)]
 
-    with pytest.raises(
-        HomeAssistantError,
-        match="recommendation_id 'duplicate:daily_spike_ratio:v1' matched multiple",
-    ):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await handler(
             SimpleNamespace(
                 data={"recommendation_id": "duplicate:daily_spike_ratio:v1"}
             )
         )
+    assert exc_info.value.translation_key == "recommendation_multiple_entries"
+    assert exc_info.value.translation_placeholders == {
+        "recommendation_id": "duplicate:daily_spike_ratio:v1"
+    }
 
     assert first.calls == []
     assert second.calls == []
 
-    with pytest.raises(
-        HomeAssistantError,
-        match="Unknown recommendation_id 'missing:daily_spike_ratio:v1'",
-    ):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await handler(
             SimpleNamespace(data={"recommendation_id": "missing:daily_spike_ratio:v1"})
         )
+    assert exc_info.value.translation_key == "recommendation_not_found"
+    assert exc_info.value.translation_placeholders == {
+        "recommendation_id": "missing:daily_spike_ratio:v1"
+    }
 
     await handler(
         SimpleNamespace(
@@ -3198,16 +3208,16 @@ async def test_setting_recommendation_entity_target_rejects_ambiguous_recommenda
     await async_setup_services(hass)
     handler = hass.services.registered[(DOMAIN, SERVICE_APPLY_SETTING_RECOMMENDATION)]
 
-    with pytest.raises(
-        HomeAssistantError,
-        match=(
-            "entity_id target for circuit_id 'fridge' has multiple setting "
-            "recommendations"
-        ),
-    ):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await handler(
             SimpleNamespace(data={"entity_id": "sensor.fridge_health_summary"})
         )
+    assert exc_info.value.translation_key == "multiple_recommendations"
+    assert exc_info.value.translation_placeholders == {
+        "recommendation_ids": (
+            "fridge:daily_spike_ratio:v1, fridge:standby_threshold_w:v1"
+        )
+    }
 
     assert coordinator.calls == []
 
@@ -3217,7 +3227,7 @@ async def test_nilm_signature_services_fail_fast_for_unknown_signature_id() -> N
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_IGNORE_NILM_SIGNATURE,
         SERVICE_MERGE_NILM_SIGNATURES,
-        HomeAssistantError,
+        ServiceValidationError,
         async_setup_services,
     )
 
@@ -3277,20 +3287,18 @@ async def test_nilm_signature_services_fail_fast_for_unknown_signature_id() -> N
 
     await async_setup_services(hass)
 
-    with pytest.raises(
-        HomeAssistantError,
-        match="Unknown signature_id 'missing'. Known signature IDs for mains: "
-        "signature_1, signature_2.",
-    ):
+    with pytest.raises(ServiceValidationError) as exc_info:
         await hass.services.registered[(DOMAIN, SERVICE_IGNORE_NILM_SIGNATURE)](
             SimpleNamespace(data={"circuit_id": "mains", "signature_id": "missing"})
         )
+    assert exc_info.value.translation_key == "signature_not_found"
+    assert exc_info.value.translation_placeholders == {
+        "circuit_id": "mains",
+        "signature_id": "missing",
+        "known_ids": "signature_1, signature_2",
+    }
 
-    with pytest.raises(
-        HomeAssistantError,
-        match="Unknown signature_id 'missing-target'. Known signature IDs for mains: "
-        "signature_1, signature_2.",
-    ):
+    with pytest.raises(ServiceValidationError) as exc_info:
         await hass.services.registered[(DOMAIN, SERVICE_MERGE_NILM_SIGNATURES)](
             SimpleNamespace(
                 data={
@@ -3300,6 +3308,12 @@ async def test_nilm_signature_services_fail_fast_for_unknown_signature_id() -> N
                 }
             )
         )
+    assert exc_info.value.translation_key == "signature_not_found"
+    assert exc_info.value.translation_placeholders == {
+        "circuit_id": "mains",
+        "signature_id": "missing-target",
+        "known_ids": "signature_1, signature_2",
+    }
 
     await hass.services.registered[(DOMAIN, SERVICE_IGNORE_NILM_SIGNATURE)](
         SimpleNamespace(data={"circuit_id": "mains", "signature_id": "signature_1"})
@@ -3308,6 +3322,90 @@ async def test_nilm_signature_services_fail_fast_for_unknown_signature_id() -> N
     assert coordinator.calls == [
         ("async_ignore_nilm_signature", ("mains", "signature_1"))
     ]
+
+
+def test_nilm_lookup_errors_do_not_invent_known_ids() -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        ServiceValidationError,
+        _target_nilm_interval_coordinators,
+        _target_nilm_signature_coordinators,
+    )
+
+    coordinator = SimpleNamespace(
+        async_set_updated_data=lambda _: None,
+        has_circuit=lambda circuit_id: circuit_id == "mains",
+        store_data=SimpleNamespace(
+            nilm_signatures={},
+            nilm_label_intervals_by_circuit={},
+        ),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    with pytest.raises(ServiceValidationError) as signature_error:
+        _target_nilm_signature_coordinators(hass, "mains", "missing-signature")
+    assert signature_error.value.translation_key == "signature_not_found_no_known_ids"
+    assert signature_error.value.translation_placeholders == {
+        "circuit_id": "mains",
+        "signature_id": "missing-signature",
+    }
+
+    with pytest.raises(ServiceValidationError) as interval_error:
+        _target_nilm_interval_coordinators(hass, "mains", "missing-interval")
+    assert interval_error.value.translation_key == "interval_not_found_no_known_ids"
+    assert interval_error.value.translation_placeholders == {
+        "circuit_id": "mains",
+        "interval_id": "missing-interval",
+    }
+
+
+def test_nilm_target_lookup_errors_use_semantic_keys() -> None:
+    from custom_components.circuitsetup_energy_analyzer import services
+
+    coordinator = SimpleNamespace(
+        async_set_updated_data=lambda _: None,
+        circuit_configs=[SimpleNamespace(circuit_id="mixed")],
+        store_data=SimpleNamespace(nilm_appliance_assignments_by_circuit={}),
+    )
+    hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
+
+    with pytest.raises(services.ServiceValidationError) as assignment_error:
+        services._target_nilm_assignment_coordinator(
+            hass,
+            "mixed",
+            "missing-assignment",
+        )
+    assert assignment_error.value.translation_key == "nilm_assignment_target_not_found"
+    assert assignment_error.value.translation_placeholders is None
+
+    with pytest.raises(services.ServiceValidationError) as helper_error:
+        services._target_nilm_helper_link_coordinator(
+            hass,
+            "mixed",
+            "missing-assignment",
+            "helper",
+        )
+    assert helper_error.value.translation_key == "nilm_helper_link_target_not_found"
+    assert helper_error.value.translation_placeholders is None
+
+
+@pytest.mark.asyncio
+async def test_invalid_nilm_interval_range_has_no_label_placeholder() -> None:
+    from custom_components.circuitsetup_energy_analyzer import services
+
+    with pytest.raises(services.ServiceValidationError) as exc_info:
+        await services._async_manual_interval_evidence(
+            SimpleNamespace(),
+            SimpleNamespace(),
+            "mains",
+            [
+                {
+                    "start": "2026-01-01T02:00:00+00:00",
+                    "end": "2026-01-01T01:00:00+00:00",
+                }
+            ],
+        )
+    assert exc_info.value.translation_key == "invalid_interval_range"
+    assert exc_info.value.translation_placeholders is None
 
 
 @pytest.mark.asyncio
@@ -4663,10 +4761,7 @@ async def test_nilm_signature_services_reject_self_merge() -> None:
 
     await async_setup_services(hass)
 
-    with pytest.raises(
-        HomeAssistantError,
-        match="source_signature_id and target_signature_id must be different",
-    ):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await hass.services.registered[(DOMAIN, SERVICE_MERGE_NILM_SIGNATURES)](
             SimpleNamespace(
                 data={
@@ -4676,6 +4771,7 @@ async def test_nilm_signature_services_reject_self_merge() -> None:
                 }
             )
         )
+    assert exc_info.value.translation_key == "duplicate_signature_ids"
 
 
 @pytest.mark.asyncio
@@ -4742,13 +4838,12 @@ async def test_alert_feedback_services_reject_unknown_alert_ids() -> None:
         SERVICE_MARK_NILM_APPLIANCE_CORRECT,
         SERVICE_MARK_NILM_APPLIANCE_WRONG,
     ):
-        with pytest.raises(
-            services_module.HomeAssistantError,
-            match="Unknown alert_id 'stale-alert'",
-        ):
+        with pytest.raises(services_module.HomeAssistantError) as exc_info:
             await hass.services.registered[(DOMAIN, service)](
                 SimpleNamespace(data={"alert_id": "stale-alert"})
             )
+        assert exc_info.value.translation_key == "alert_not_found"
+        assert exc_info.value.translation_placeholders == {"alert_id": "stale-alert"}
 
 
 @pytest.mark.asyncio
@@ -4905,13 +5000,14 @@ async def test_alert_feedback_services_reject_ambiguous_entity_target() -> None:
 
     await async_setup_services(hass)
 
-    with pytest.raises(
-        HomeAssistantError,
-        match="entity_id target for circuit_id 'fridge' has multiple active alerts",
-    ):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await hass.services.registered[(DOMAIN, SERVICE_MARK_ALERT_EXPECTED)](
             SimpleNamespace(data={"entity_id": "sensor.fridge_health_summary"})
         )
+    assert exc_info.value.translation_key == "multiple_active_alerts"
+    assert exc_info.value.translation_placeholders == {
+        "alert_ids": "alert-a, alert-b"
+    }
 
 
 @pytest.mark.asyncio
@@ -5461,7 +5557,7 @@ async def test_user_experience_services_dispatch_to_loaded_coordinators() -> Non
 async def test_set_circuit_sensitivity_service_rejects_unknown_preset() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_SET_CIRCUIT_SENSITIVITY,
-        HomeAssistantError,
+        ServiceValidationError,
         async_setup_services,
     )
 
@@ -5498,10 +5594,15 @@ async def test_set_circuit_sensitivity_service_rejects_unknown_preset() -> None:
 
     await async_setup_services(hass)
 
-    with pytest.raises(HomeAssistantError, match="alert sensitivity"):
+    with pytest.raises(ServiceValidationError) as exc_info:
         await hass.services.registered[(DOMAIN, SERVICE_SET_CIRCUIT_SENSITIVITY)](
             SimpleNamespace(data={"circuit_id": "fridge", "preset": "noisy"})
         )
+    assert exc_info.value.translation_key == "invalid_sensitivity"
+    assert exc_info.value.translation_placeholders == {
+        "value": "noisy",
+        "choices": "quiet, balanced, sensitive",
+    }
 
     assert coordinator.calls == []
 
@@ -5510,7 +5611,7 @@ async def test_set_circuit_sensitivity_service_rejects_unknown_preset() -> None:
 async def test_set_nilm_detection_sensitivity_service_rejects_unknown_preset() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         SERVICE_SET_NILM_DETECTION_SENSITIVITY,
-        HomeAssistantError,
+        ServiceValidationError,
         async_setup_services,
     )
 
@@ -5547,10 +5648,15 @@ async def test_set_nilm_detection_sensitivity_service_rejects_unknown_preset() -
 
     await async_setup_services(hass)
 
-    with pytest.raises(HomeAssistantError, match="NILM detection sensitivity"):
+    with pytest.raises(ServiceValidationError) as exc_info:
         await hass.services.registered[
             (DOMAIN, SERVICE_SET_NILM_DETECTION_SENSITIVITY)
         ](SimpleNamespace(data={"circuit_id": "mains", "preset": "noisy"}))
+    assert exc_info.value.translation_key == "invalid_sensitivity"
+    assert exc_info.value.translation_placeholders == {
+        "value": "noisy",
+        "choices": "quiet, balanced, sensitive",
+    }
 
     assert coordinator.calls == []
 
@@ -5771,8 +5877,10 @@ def test_nilm_direct_meter_conversion_boolean_values_are_coerced_safely() -> Non
     assert _boolean_value("false") is False
     assert _boolean_value("true") is True
     assert _boolean_value(0) is False
-    with pytest.raises(Exception, match="Expected a boolean"):
+    with pytest.raises(Exception) as exc_info:
         _boolean_value("sometimes")
+    assert exc_info.value.translation_key == "invalid_boolean"
+    assert exc_info.value.translation_placeholders == {"field": "value"}
 
 
 def test_nilm_helper_link_service_schemas_are_exact() -> None:
@@ -5887,10 +5995,12 @@ async def test_nilm_reference_link_services_are_entry_isolated() -> None:
         "reference_power_entity_id": "sensor.load_power",
         "reference_threshold_w": 12.5,
     }
-    with pytest.raises(services.HomeAssistantError, match="ambiguous"):
+    with pytest.raises(services.HomeAssistantError) as exc_info:
         await services._dispatch_service(
             hass, services.SERVICE_SET_NILM_REFERENCE_LINK, data
         )
+    assert exc_info.value.translation_key == "nilm_assignment_target_ambiguous"
+    assert exc_info.value.translation_placeholders is None
 
     await services._dispatch_service(
         hass,
@@ -5990,12 +6100,14 @@ async def test_nilm_helper_link_services_are_entry_isolated() -> None:
         "assignment_id": "assignment-load",
         "helper_circuit_id": "helper",
     }
-    with pytest.raises(services.HomeAssistantError, match="ambiguous"):
+    with pytest.raises(services.HomeAssistantError) as exc_info:
         await services._dispatch_service(
             hass,
             services.SERVICE_SET_NILM_HELPER_LINK,
             {**data, "relationship": "corroborates"},
         )
+    assert exc_info.value.translation_key == "nilm_helper_link_target_ambiguous"
+    assert exc_info.value.translation_placeholders is None
     first.async_set_nilm_helper_link.assert_not_awaited()
     await services._dispatch_service(
         hass,
@@ -6258,9 +6370,18 @@ async def test_mark_circuit_mixed_rejects_invalid_scoped_target(
     )
     hass = SimpleNamespace(data={DOMAIN: {"entry-1": coordinator}})
 
-    with pytest.raises(HomeAssistantError, match=message):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await _dispatch_service(
             hass,
             SERVICE_MARK_CIRCUIT_MIXED,
             {ATTR_ENTRY_ID: entry_id, ATTR_CIRCUIT_ID: circuit_id},
         )
+    if entry_id == "missing":
+        assert exc_info.value.translation_key == "entry_not_found"
+        assert exc_info.value.translation_placeholders == {"entry_id": entry_id}
+    else:
+        assert exc_info.value.translation_key == "entry_circuit_not_found"
+        assert exc_info.value.translation_placeholders == {
+            "circuit_id": circuit_id,
+            "entry_id": entry_id,
+        }

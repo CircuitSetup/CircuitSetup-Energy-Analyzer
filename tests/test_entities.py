@@ -72,11 +72,14 @@ async def test_async_call_or_raise_awaits_action_and_reports_missing_method() ->
     async def action(value: str) -> None:
         calls.append(value)
 
-    await async_call_or_raise(SimpleNamespace(action=action), "action", "Run", "ok")
+    await async_call_or_raise(SimpleNamespace(action=action), "action", "ok")
 
     assert calls == ["ok"]
-    with pytest.raises(HomeAssistantError, match="analyzer action is unavailable"):
-        await async_call_or_raise(SimpleNamespace(), "missing", "Run")
+    with pytest.raises(HomeAssistantError) as exc_info:
+        await async_call_or_raise(SimpleNamespace(), "missing")
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "action_unavailable"
+    assert exc_info.value.translation_placeholders is None
 
 
 def test_stale_device_registry_device_ids_returns_removed_circuit_devices() -> None:
@@ -129,7 +132,6 @@ def test_circuit_device_info_uses_only_device_registry_fields() -> None:
             appliance_profile=ApplianceProfile.REFRIGERATOR.value,
         ),
         key="health_summary",
-        name_suffix="Health Summary",
     )
 
     assert entity.device_info == {
@@ -164,7 +166,6 @@ def test_circuit_device_info_matches_ranked_existing_area_names(
             appliance_profile=ApplianceProfile.MAINS_NILM.value,
         ),
         key="activity_summary",
-        name_suffix="Activity Summary",
     )
 
     assert analyzer_entity.device_info["suggested_area"] == "Basement"
@@ -2651,6 +2652,43 @@ def test_sensor_descriptions_include_home_assistant_entity_defaults() -> None:
     assert ENTITY_DETAIL_SIMPLE == "simple"
 
 
+def test_entity_descriptions_do_not_expose_hardcoded_display_names() -> None:
+    from custom_components.circuitsetup_energy_analyzer.binary_sensor import (
+        BINARY_SENSOR_DESCRIPTIONS,
+    )
+    from custom_components.circuitsetup_energy_analyzer.button import (
+        CIRCUIT_BUTTON_DESCRIPTIONS,
+        GLOBAL_BUTTON_DESCRIPTIONS,
+    )
+    from custom_components.circuitsetup_energy_analyzer.number import (
+        CIRCUIT_NUMBER_DESCRIPTIONS,
+    )
+    from custom_components.circuitsetup_energy_analyzer.select import (
+        CIRCUIT_SELECT_DESCRIPTIONS,
+    )
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        NILM_VIRTUAL_SENSOR_DESCRIPTIONS,
+        SENSOR_DESCRIPTIONS,
+    )
+    from custom_components.circuitsetup_energy_analyzer.switch import (
+        CIRCUIT_SWITCH_DESCRIPTIONS,
+    )
+
+    descriptions = (
+        *SENSOR_DESCRIPTIONS,
+        *NILM_VIRTUAL_SENSOR_DESCRIPTIONS,
+        *BINARY_SENSOR_DESCRIPTIONS,
+        *CIRCUIT_BUTTON_DESCRIPTIONS,
+        *GLOBAL_BUTTON_DESCRIPTIONS,
+        *CIRCUIT_NUMBER_DESCRIPTIONS,
+        *CIRCUIT_SELECT_DESCRIPTIONS,
+        *CIRCUIT_SWITCH_DESCRIPTIONS,
+    )
+    for description in descriptions:
+        assert not hasattr(description, "name_suffix")
+        assert getattr(description, "name", None) is None
+
+
 def test_daily_energy_and_cost_sensor_descriptions() -> None:
     from custom_components.circuitsetup_energy_analyzer.sensor import (
         SENSOR_DESCRIPTIONS,
@@ -2671,7 +2709,6 @@ def test_daily_energy_and_cost_sensor_descriptions() -> None:
         appliance_profile="refrigerator",
     )
 
-    assert descriptions["daily_energy_usage"].name_suffix == "Energy Usage Today"
     assert descriptions["daily_energy_usage"].device_class == "energy"
     assert descriptions["daily_energy_usage"].state_class == "total_increasing"
     assert descriptions["cost_today"].value_fn(state, "fridge") == 0.56
@@ -2792,7 +2829,6 @@ def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
     assert normal_entity_keys <= set(descriptions)
     assert "electrical_health" not in descriptions
     assert "standby_status" not in descriptions
-    assert descriptions["settings_suggestions"].name_suffix == "Settings Suggestions"
     assert descriptions["settings_suggestions"].entity_registry_enabled_default is False
     assert descriptions["settings_suggestions"].entity_registry_visible_default is False
     assert descriptions["health_summary"].entity_tier is EntityTier.SUMMARY
@@ -3030,7 +3066,6 @@ def test_weather_context_sensor_metadata_is_user_facing_and_visible() -> None:
         description=description,
     )
 
-    assert description.name_suffix == "Weather Context"
     assert description.entity_category is None
     assert description.entity_registry_visible_default is True
     assert entity.icon == "mdi:thermometer-lines"
@@ -3769,7 +3804,8 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
         "entry-1_fridge_average_kwh_per_day",
     ]
     setup_health = added_entities[0]
-    assert setup_health.name == "CircuitSetup Energy Analyzer Setup Health"
+    assert setup_health._attr_has_entity_name is True
+    assert setup_health._attr_translation_key == "setup_health"
     assert setup_health.suggested_object_id == (
         "circuitsetup_energy_analyzer_setup_health"
     )
@@ -3778,11 +3814,12 @@ async def test_sensor_setup_entry_adds_diagnostic_entities_without_ha() -> None:
     assert setup_health.extra_state_attributes["next_step"] == "No setup action needed"
     assert getattr(setup_health, "device_info", None) is None
     effective_rate = added_entities[1]
-    assert effective_rate.name == "CircuitSetup Energy Analyzer Electricity Rate"
+    assert effective_rate._attr_has_entity_name is True
+    assert effective_rate._attr_translation_key == "electricity_rate"
     assert effective_rate.native_value == 0.0
     assert effective_rate.device_info["identifiers"] == {(DOMAIN, "entry-1")}
     assert added_entities[2].device_info["identifiers"] == {(DOMAIN, "entry-1_fridge")}
-    assert not isinstance(added_entities[2].state, AnalyzerState)
+    assert added_entities[2]._attr_translation_key == "health_summary"
     assert added_entities[2].coordinator_state is coordinator.data
 
 

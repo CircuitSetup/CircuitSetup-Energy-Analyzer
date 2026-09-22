@@ -26,6 +26,8 @@ export const LAST_ACTION_MESSAGE_STORAGE_KEY = "circuitsetupEnergyAnalyzerLastAc
 export const ROUTE_CHANGE_EVENT = "circuitsetup-energy-analyzer-route-change";
 export const ROUTE_CHANGE_INSTALL_KEY = "__circuitsetupEnergyAnalyzerRouteChangeInstalled";
 export const NILM_EDGE_SNAP_MS = 5 * 60 * 1000;
+const PANEL_TRANSLATION_CATEGORY = "config_panel";
+const PANEL_TRANSLATION_DOMAIN = "circuitsetup_energy_analyzer";
 export const ACTION_SERVICE_NAMES = {
   acknowledge: "acknowledge_alert",
   mark_expected: "mark_alert_expected",
@@ -275,6 +277,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     super();
     this.attachShadow({ mode: "open" });
     this._hass = null;
+    this._panelEnglishText = null;
+    this._panelTranslationLanguage = null;
+    this._panelTranslationGeneration = 0;
+    this._panelTranslationLocalize = null;
+    this._panelTranslationRenderControl = null;
     this._payload = null;
     this._historySeries = [];
     this._nilmWorkspace = null;
@@ -372,6 +379,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    this._requestPanelTranslations(hass);
     if (this.isConnected) {
       this._loadEvidenceIfRouteChanged();
     }
@@ -379,6 +387,17 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
   set panel(panel) {
     this._panel = panel;
+    const text = panel && panel.config && panel.config.text;
+    if (this._panelEnglishText === null && text && typeof text === "object" && !Array.isArray(text)) {
+      try {
+        const snapshot = JSON.parse(JSON.stringify(text));
+        if (snapshot && typeof snapshot === "object" && !Array.isArray(snapshot)) {
+          this._panelEnglishText = snapshot;
+        }
+      } catch (_error) {
+        // Keep source discovery as the fallback if the bundled text is not JSON-safe.
+      }
+    }
   }
 
   connectedCallback() {
@@ -387,6 +406,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._addRouteListeners();
     const recoveredHass = this._upgradeProperty("hass");
     this._upgradeProperty("panel");
+    this._requestPanelTranslations(this._hass);
     if (!recoveredHass && this._hass && this._hass.callApi) {
       this._loadEvidenceIfRouteChanged({ force: true });
     }
@@ -403,7 +423,74 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this._panelTranslationGeneration += 1;
+    this._panelTranslationLanguage = null;
+    this._panelTranslationLocalize = null;
+    this._panelTranslationRenderControl = null;
     this._removeRouteListeners();
+  }
+
+  _requestPanelTranslations(hass) {
+    const language = hass && (hass.language ?? (hass.locale && hass.locale.language));
+    const languageKey = language ? String(language) : "";
+    if (languageKey === this._panelTranslationLanguage) {
+      return;
+    }
+    const generation = ++this._panelTranslationGeneration;
+    this._panelTranslationLanguage = languageKey;
+    this._panelTranslationLocalize = null;
+    if (!languageKey || !hass || typeof hass.loadBackendTranslation !== "function") {
+      return;
+    }
+    let request;
+    try {
+      request = hass.loadBackendTranslation(PANEL_TRANSLATION_CATEGORY, PANEL_TRANSLATION_DOMAIN);
+    } catch (_error) {
+      return;
+    }
+    Promise.resolve(request).then((localize) => {
+      if (
+        generation !== this._panelTranslationGeneration
+        || languageKey !== this._panelTranslationLanguage
+        || typeof localize !== "function"
+      ) {
+        return;
+      }
+      this._panelTranslationLocalize = localize;
+      if (this.isConnected) {
+        this._renderAfterPanelTranslation();
+      }
+    }).catch(() => {});
+  }
+
+  _renderAfterPanelTranslation() {
+    const active = this.shadowRoot && this.shadowRoot.activeElement;
+    if (!active || typeof active.matches !== "function" || !active.matches("input, select, textarea")) {
+      this._render();
+      return;
+    }
+    if (typeof this._resumeAfterControlBlur === "function") {
+      this._deferredHassRender = true;
+      this._resumeAfterControlBlur(active);
+      return;
+    }
+    if (this._panelTranslationRenderControl === active || typeof active.addEventListener !== "function") {
+      return;
+    }
+    this._panelTranslationRenderControl = active;
+    active.addEventListener("blur", () => {
+      if (this._panelTranslationRenderControl === active) {
+        this._panelTranslationRenderControl = null;
+      }
+      Promise.resolve().then(() => {
+        const current = this.shadowRoot && this.shadowRoot.activeElement;
+        if (current && typeof current.matches === "function" && current.matches("input, select, textarea")) {
+          this._renderAfterPanelTranslation();
+          return;
+        }
+        this._render();
+      });
+    }, { once: true });
   }
 
   _addRouteListeners() {
@@ -879,6 +966,14 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _panelText(path) {
+    const localized = this._localizedPanelText(path);
+    if (localized !== null) {
+      return localized;
+    }
+    return this._panelTextFallback(path);
+  }
+
+  _panelTextFallback(path) {
     const parts = path.split(".");
     let value = this._panelTextObject();
     for (const part of parts) {
@@ -891,17 +986,68 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _panelTextFormat(path, values = {}) {
-    return this._panelText(path).replace(/\{([^}]+)\}/g, (_match, key) => (
-      values[key] !== undefined && values[key] !== null ? String(values[key]) : ""
+    const localized = this._localizedPanelText(path, values);
+    if (localized !== null) {
+      return localized;
+    }
+    return this._formatPanelText(this._panelTextFallback(path), values);
+  }
+
+  _localizedPanelText(path, values) {
+    const localize = this._panelTranslationLocalize;
+    if (typeof localize !== "function") {
+      return null;
+    }
+    const key = `component.${PANEL_TRANSLATION_DOMAIN}.config_panel.panel.${path}`;
+    try {
+      const result = values === undefined
+        ? localize(key)
+        : localize(key, this._panelTextValues(values));
+      if (
+        typeof result !== "string"
+        || !result.trim()
+        || result === key
+        || result === path
+        || result === `panel.${path}`
+        || result.includes("[object Object]")
+        || /^Translation(?: error| )/i.test(result)
+      ) {
+        return null;
+      }
+      return result;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  _panelTextValues(values) {
+    const safeValues = {};
+    if (!values || typeof values !== "object") {
+      return safeValues;
+    }
+    for (const [key, value] of Object.entries(values)) {
+      safeValues[key] = value === null || value === undefined || typeof value === "object" || typeof value === "function"
+        ? ""
+        : String(value);
+    }
+    return safeValues;
+  }
+
+  _formatPanelText(text, values) {
+    const safeValues = this._panelTextValues(values);
+    return String(text || "").replace(/\{([^}]+)\}/g, (_match, key) => (
+      safeValues[key] === undefined ? "" : String(safeValues[key])
     ));
   }
 
   _panelTextObject() {
-    const sources = [
-      this._payload && this._payload.text,
-      this._panel && this._panel.config && this._panel.config.text,
-      this._dashboardConfig && this._dashboardConfig.text,
-    ];
+    const sources = this._panelEnglishText !== null
+      ? [this._panelEnglishText]
+      : [
+        this._payload && this._payload.text,
+        this._panel && this._panel.config && this._panel.config.text,
+        this._dashboardConfig && this._dashboardConfig.text,
+      ];
     for (const text of sources) {
       if (!text || typeof text !== "object") {
         continue;

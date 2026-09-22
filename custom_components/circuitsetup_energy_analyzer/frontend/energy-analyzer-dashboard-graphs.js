@@ -110,6 +110,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     set hass(value) {
       const initial = !this._hass;
       this._hass = value;
+      this._requestPanelTranslations(value);
       if (!localStorage.getItem(RANGE_KEY)) {
         const todayKey = this._chartDateKey(Date.now());
         this._dashboardRange = this._rangeFromDateKeys(todayKey, todayKey);

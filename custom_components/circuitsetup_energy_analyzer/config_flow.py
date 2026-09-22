@@ -6,10 +6,14 @@ from collections.abc import Iterable, Mapping
 from contextlib import suppress
 from typing import Any
 
-import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import section
+
+try:
+    from homeassistant.helpers.config_validation import probatio as vol
+except ImportError:
+    import voluptuous as vol
 from homeassistant.helpers.selector import Selector as _HASelector
 from homeassistant.helpers.selector import selector as ha_selector
 

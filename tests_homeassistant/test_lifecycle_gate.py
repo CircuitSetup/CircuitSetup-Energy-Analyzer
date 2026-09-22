@@ -38,6 +38,15 @@ EXPECTED_PLATFORM_DOMAINS = frozenset(
         "time",
     }
 )
+
+
+def _uses_hierarchical_entity_ids() -> bool:
+    return (
+        "object_id_base"
+        in er.EntityRegistry.async_get_or_create.__code__.co_varnames
+    )
+
+
 EXPECTED_SOURCE_WORKFLOW_PLATFORM_DOMAINS = frozenset(
     {
         "button",
@@ -803,6 +812,12 @@ async def test_config_entry_setup_registers_published_nilm_device(
         if item.unique_id.startswith(f"{entry_id}_nilm_assignment-washer_")
     }
     assert set(assignment_entries) == expected_unique_ids
+    running_entry = assignment_entries[
+        f"{entry_id}_nilm_assignment-washer_estimated_running"
+    ]
+    if not _uses_hierarchical_entity_ids():
+        assert running_entry.entity_id == "binary_sensor.washer_estimated_running"
+    assert running_entry.original_name == "Estimated running"
     entity_registry.async_remove(
         assignment_entries[
             f"{entry_id}_nilm_assignment-washer_health_summary"

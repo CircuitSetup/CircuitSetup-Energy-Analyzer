@@ -24,7 +24,6 @@ from .entity_catalog import compact_descriptions_for_setup
 @dataclass(frozen=True, slots=True)
 class CircuitButtonDescription:
     key: str
-    name_suffix: str
     method_name: str
     args_fn: Callable[[str], tuple[Any, ...]]
     icon: str
@@ -42,7 +41,6 @@ class CircuitButtonDescription:
 @dataclass(frozen=True, slots=True)
 class GlobalButtonDescription:
     key: str
-    name: str
     method_name: str
     args: tuple[Any, ...]
     icon: str
@@ -60,7 +58,6 @@ class GlobalButtonDescription:
 CIRCUIT_BUTTON_DESCRIPTIONS: tuple[CircuitButtonDescription, ...] = (
     CircuitButtonDescription(
         key="relearn_baseline",
-        name_suffix="Relearn Baseline",
         method_name="async_relearn_baseline",
         args_fn=lambda circuit_id: (circuit_id,),
         icon="mdi:school-outline",
@@ -70,14 +67,12 @@ CIRCUIT_BUTTON_DESCRIPTIONS: tuple[CircuitButtonDescription, ...] = (
 GLOBAL_BUTTON_DESCRIPTIONS: tuple[GlobalButtonDescription, ...] = (
     GlobalButtonDescription(
         key="run_mapping_checks",
-        name="CircuitSetup Energy Analyzer Run Mapping Checks",
         method_name="async_run_mapping_checks",
         args=(),
         icon="mdi:map-check-outline",
     ),
     GlobalButtonDescription(
         key="recalculate_suggestions",
-        name="CircuitSetup Energy Analyzer Recalculate Suggestions",
         method_name="async_recalculate_setting_recommendations",
         args=(None,),
         icon="mdi:tune-variant",
@@ -103,11 +98,11 @@ class CircuitAnalyzerButton(CircuitAnalyzerEntity, ButtonEntity):
             entry_id=entry_id,
             circuit=circuit,
             key=description.key,
-            name_suffix=description.name_suffix,
         )
         self.entity_description = description
         self._attr_icon = description.icon
         self._attr_suggested_object_id = f"{self.circuit_id}_{description.key}"
+        self.entity_id = f"button.{self.circuit_id}_{description.key}"
 
     @property
     def suggested_object_id(self) -> str:
@@ -149,14 +144,12 @@ class CircuitAnalyzerButton(CircuitAnalyzerEntity, ButtonEntity):
         )
         if reason is not None:
             raise HomeAssistantError(
-                f"Cannot {self.entity_description.name_suffix.strip().lower()} "
-                f"right now because {reason.replace('_', ' ')}: "
-                f"{_availability_reason_label(reason)}"
+                translation_domain=DOMAIN,
+                translation_key="action_unavailable",
             )
         await async_call_or_raise(
             self.coordinator,
             self.entity_description.method_name,
-            self.entity_description.name_suffix,
             *self.entity_description.args_fn(self.circuit_id),
         )
 
@@ -164,7 +157,7 @@ class CircuitAnalyzerButton(CircuitAnalyzerEntity, ButtonEntity):
 class GlobalAnalyzerButton(ButtonEntity):
     """Button entity exposing an integration-wide action."""
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
     _attr_entity_category = None
 
     def __init__(
@@ -177,17 +170,13 @@ class GlobalAnalyzerButton(ButtonEntity):
         self.coordinator = coordinator
         self.entity_description = description
         self._entry_id = entry_id
-        self._attr_name = description.name
+        self._attr_translation_key = description.translation_key or description.key
         self._attr_unique_id = f"{entry_id}_{description.key}"
         self._attr_suggested_object_id = (
             f"circuitsetup_energy_analyzer_{description.key}"
         )
+        self.entity_id = f"button.circuitsetup_energy_analyzer_{description.key}"
         self._attr_icon = description.icon
-
-    @property
-    def name(self) -> str:
-        """Return the visible entity name for fallback tests."""
-        return self._attr_name
 
     @property
     def unique_id(self) -> str:
@@ -248,7 +237,6 @@ class GlobalAnalyzerButton(ButtonEntity):
         await async_call_or_raise(
             self.coordinator,
             self.entity_description.method_name,
-            self.entity_description.name,
             *self.entity_description.args,
         )
 

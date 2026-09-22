@@ -1,5 +1,1511 @@
 {
   "title": "CircuitSetup Energy Analyzer",
+  "services": {
+    "save_nilm_interval_changes": {
+      "name": "Save NILM interval changes",
+      "description": "Advanced/script action: atomically save a NILM appliance's interval membership. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured mains NILM circuit identifier."
+        },
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional analyzer config entry to target when circuit IDs are duplicated."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "Existing appliance assignment to update."
+        },
+        "label": {
+          "name": "Label",
+          "description": "Friendly appliance name for saved intervals."
+        },
+        "intervals": {
+          "name": "Intervals",
+          "description": "Bounded list of interval mappings with start and end timestamps."
+        },
+        "removed_interval_ids": {
+          "name": "Removed interval IDs",
+          "description": "Bounded list of saved interval IDs to unassign without deleting evidence."
+        }
+      }
+    },
+    "delete_nilm_appliance_assignment": {
+      "name": "Delete retired NILM appliance assignment",
+      "description": "Advanced/script action: permanently delete a retired NILM assignment while preserving its evidence for review. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured mains NILM circuit identifier."
+        },
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional analyzer config entry to target when circuit IDs are duplicated."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "Retired appliance assignment identifier to delete."
+        }
+      }
+    },
+    "mark_circuit_mixed": {
+      "name": "Mark circuit mixed",
+      "description": "Advanced/script action: confirm that a circuit supplies multiple appliances and remove direct-appliance state. The normal user path is the evidence panel's This circuit powers other loads action.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Circuit to classify as mixed."
+        },
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional analyzer config entry to target when circuit IDs are duplicated. Panel actions include this automatically."
+        }
+      }
+    },
+    "relearn_baseline": {
+      "name": "Relearn baseline",
+      "description": "Advanced/script action: relearn the baseline for a configured circuit. The normal user path is the circuit Relearn Baseline button entity.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity."
+        }
+      }
+    },
+    "pause_alerts": {
+      "name": "Pause alerts",
+      "description": "Advanced/script action: pause alert notifications for a configured circuit. The normal user path is the circuit Pause alerts switch entity.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity."
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "How long alert notifications should stay paused."
+        }
+      }
+    },
+    "acknowledge_alert": {
+      "name": "Acknowledge alert",
+      "description": "Advanced/script action: acknowledge an alert evidence notification. The normal user path is the Acknowledge button in the evidence panel.",
+      "fields": {
+        "alert_id": {
+          "name": "Alert ID",
+          "description": "Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for a circuit with exactly one active alert."
+        }
+      }
+    },
+    "export_diagnostics": {
+      "name": "Export diagnostics",
+      "description": "Advanced/script action: export diagnostics for a configured circuit. The normal user path is the evidence panel and entity details.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        }
+      }
+    },
+    "export_history_csv": {
+      "name": "Export history CSV",
+      "description": "Advanced/script action: export retained analyzer history for a configured circuit. The normal user path is the dashboard/export card or automation.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        }
+      }
+    },
+    "run_mapping_checks": {
+      "name": "Run mapping checks",
+      "description": "Advanced/script action: run configured source-entity mapping checks. The normal user path is the integration Run Mapping Checks button entity.",
+      "fields": {}
+    },
+    "label_nilm_signature": {
+      "name": "Label NILM signature",
+      "description": "Advanced/script action: label a detected NILM signature for a mains circuit. The normal user path is the NILM/evidence panel button.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "signature_id": {
+          "name": "Signature ID",
+          "description": "Detected NILM signature identifier to label."
+        },
+        "label": {
+          "name": "Label",
+          "description": "Friendly load name to assign to the signature."
+        }
+      }
+    },
+    "ignore_nilm_signature": {
+      "name": "Ignore NILM signature",
+      "description": "Advanced/script action: ignore a detected NILM signature for a mains circuit. The normal user path is the NILM/evidence panel button.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "signature_id": {
+          "name": "Signature ID",
+          "description": "Detected NILM signature identifier to ignore."
+        }
+      }
+    },
+    "label_nilm_interval": {
+      "name": "Label NILM interval",
+      "description": "Advanced/script action: save or adjust a manually selected NILM graph interval. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "interval_id": {
+          "name": "Interval ID",
+          "description": "Existing interval identifier when adjusting a saved label."
+        },
+        "label": {
+          "name": "Label",
+          "description": "Friendly load name for the selected graph interval."
+        },
+        "start": {
+          "name": "Start",
+          "description": "ISO timestamp for the start of the selected interval."
+        },
+        "end": {
+          "name": "End",
+          "description": "ISO timestamp for the end of the selected interval."
+        },
+        "appliance_id": {
+          "name": "Appliance ID",
+          "description": "Optional stable appliance/profile identifier for this label."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "Optional existing appliance assignment to update with this interval."
+        },
+        "appliance_profile": {
+          "name": "Appliance Profile",
+          "description": "Optional appliance type. When supplied, the interval is attached to an appliance assignment for review."
+        },
+        "mains_entity_id": {
+          "name": "Mains Entity",
+          "description": "Optional mains power entity used for this interval."
+        },
+        "ground_truth_entity_id": {
+          "name": "Reference Entity",
+          "description": "Optional directly measured appliance entity used as reference evidence for this interval."
+        }
+      }
+    },
+    "delete_nilm_label_interval": {
+      "name": "Delete NILM label interval",
+      "description": "Advanced/script action: delete a manually saved NILM graph interval label. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "interval_id": {
+          "name": "Interval ID",
+          "description": "Saved NILM label interval identifier to delete."
+        }
+      }
+    },
+    "generate_nilm_sensor_label_intervals": {
+      "name": "Generate NILM sensor label intervals",
+      "description": "Advanced/script action: create NILM label intervals from a directly metered appliance power sensor history. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "label": {
+          "name": "Label",
+          "description": "Friendly appliance name for generated reference intervals."
+        },
+        "start": {
+          "name": "Start",
+          "description": "ISO timestamp for the start of the sensor history range."
+        },
+        "end": {
+          "name": "End",
+          "description": "ISO timestamp for the end of the sensor history range."
+        },
+        "ground_truth_entity_id": {
+          "name": "Reference Entity",
+          "description": "On/off entity or directly metered real-power entity used to generate reference intervals."
+        },
+        "threshold_w": {
+          "name": "Threshold W",
+          "description": "Numeric sensor watts above this threshold are treated as appliance running. On/off entities ignore this value."
+        },
+        "reference_power_entity_id": {
+          "name": "Reference Power Entity",
+          "description": "Optional separate W-family real-power sensor used to measure each generated interval."
+        },
+        "appliance_id": {
+          "name": "Appliance ID",
+          "description": "Optional stable appliance/profile identifier for generated intervals."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "Optional existing NILM assignment that owns the generated intervals."
+        },
+        "mains_entity_id": {
+          "name": "Mains Entity",
+          "description": "Optional mains power entity associated with generated intervals."
+        }
+      }
+    },
+    "assign_signature_to_appliance": {
+      "name": "Assign signature to appliance",
+      "description": "Advanced/script action: assign a NILM signature to an appliance. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "signature_id": {
+          "name": "Signature ID",
+          "description": "Detected NILM signature identifier to assign."
+        },
+        "label": {
+          "name": "Label",
+          "description": "Friendly appliance name for this assignment."
+        },
+        "appliance_id": {
+          "name": "Appliance ID",
+          "description": "Optional stable appliance identifier for merging related assignments."
+        },
+        "appliance_profile": {
+          "name": "Appliance Profile",
+          "description": "Optional appliance profile hint, such as dishwasher or custom."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "Optional existing NILM appliance assignment identifier to update."
+        }
+      }
+    },
+    "assign_session_to_appliance": {
+      "name": "Assign session to appliance",
+      "description": "Advanced/script action: assign a NILM session to an appliance. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "session_id": {
+          "name": "Session ID",
+          "description": "NILM session identifier to assign."
+        },
+        "on_edge_id": {
+          "name": "On-edge ID",
+          "description": "Optional stable on-edge identifier for resolving a revised session."
+        },
+        "signature_fingerprint": {
+          "name": "Signature Fingerprint",
+          "description": "Optional signature fingerprint associated with the selected session."
+        },
+        "label": {
+          "name": "Label",
+          "description": "Friendly appliance name for this assignment."
+        },
+        "appliance_id": {
+          "name": "Appliance ID",
+          "description": "Optional stable appliance identifier for merging related assignments."
+        },
+        "appliance_profile": {
+          "name": "Appliance Profile",
+          "description": "Optional appliance profile hint, such as dishwasher or custom."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "Optional existing NILM appliance assignment identifier to update."
+        }
+      }
+    },
+    "assign_interval_to_appliance": {
+      "name": "Assign interval to appliance",
+      "description": "Advanced/script action: assign a NILM label interval to an appliance. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "interval_id": {
+          "name": "Interval ID",
+          "description": "Saved NILM label interval identifier to assign."
+        },
+        "label": {
+          "name": "Label",
+          "description": "Friendly appliance name for this assignment."
+        },
+        "appliance_id": {
+          "name": "Appliance ID",
+          "description": "Optional stable appliance identifier for merging related assignments."
+        },
+        "appliance_profile": {
+          "name": "Appliance Profile",
+          "description": "Optional appliance profile hint, such as dishwasher or custom."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "Optional existing NILM appliance assignment identifier to update."
+        }
+      }
+    },
+    "validate_nilm_session": {
+      "name": "Validate NILM session",
+      "description": "Advanced/script action: confirm that a NILM session matched its assigned appliance. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "session_id": {
+          "name": "Session ID",
+          "description": "NILM session identifier to confirm."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "Optional NILM appliance assignment identifier. The NILM workspace passes this internally."
+        }
+      }
+    },
+    "reject_nilm_session": {
+      "name": "Reject NILM session",
+      "description": "Advanced/script action: mark a NILM session as the wrong appliance so the assignment needs review. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "session_id": {
+          "name": "Session ID",
+          "description": "NILM session identifier to reject."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "Optional NILM appliance assignment identifier. The NILM workspace passes this internally."
+        }
+      }
+    },
+    "validate_nilm_assignment_history": {
+      "name": "Validate NILM assignment history",
+      "description": "Advanced/script action: confirm stored NILM sessions that overlap saved reference intervals for an assignment. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "NILM appliance assignment identifier to validate against saved reference intervals. The NILM workspace passes this internally."
+        }
+      }
+    },
+    "confirm_nilm_configured_primary": {
+      "name": "Confirm configured primary appliance",
+      "description": "Advanced/script action: approve the appliance identity already configured for a primary-mixed circuit. Detection evidence continues to model its usage. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Configured primary-mixed circuit identifier."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "Stable configured-primary assignment identifier."
+        }
+      }
+    },
+    "rename_nilm_appliance": {
+      "name": "Rename NILM appliance",
+      "description": "Advanced/script action: rename a NILM appliance assignment without changing its stable entity identifiers. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "NILM appliance assignment identifier to rename. The NILM workspace passes this internally."
+        },
+        "label": {
+          "name": "Label",
+          "description": "New friendly appliance name."
+        }
+      }
+    },
+    "change_nilm_appliance_profile": {
+      "name": "Change NILM appliance profile",
+      "description": "Advanced/script action: change the appliance profile hint for a NILM assignment. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "NILM appliance assignment identifier to update. The NILM workspace passes this internally."
+        },
+        "appliance_profile": {
+          "name": "Appliance Profile",
+          "description": "New appliance profile hint, such as dishwasher or custom."
+        }
+      }
+    },
+    "convert_nilm_appliance_to_direct_meter": {
+      "name": "Use direct meter for NILM appliance",
+      "description": "Advanced/script action: link a NILM appliance identity and its validation history to a configured direct-meter circuit. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured mains NILM circuit identifier, such as mains."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the mains NILM circuit."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "NILM appliance assignment identifier to link."
+        },
+        "direct_circuit_id": {
+          "name": "Direct Circuit ID",
+          "description": "Configured direct-meter circuit that now represents this appliance."
+        },
+        "keep_assignment_for_masking": {
+          "name": "Keep Assignment For Masking",
+          "description": "Keep the NILM assignment available for known-load masking and validation."
+        },
+        "keep_published_estimate": {
+          "name": "Keep Published Estimate",
+          "description": "Keep publishing duplicate estimated entities. Disabled by default."
+        }
+      }
+    },
+    "merge_nilm_assignments": {
+      "name": "Merge NILM assignments",
+      "description": "Advanced/script action: merge one duplicate NILM appliance assignment into another. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "source_assignment_id": {
+          "name": "Source Assignment ID",
+          "description": "Duplicate NILM appliance assignment to merge away. The NILM workspace passes this internally."
+        },
+        "target_assignment_id": {
+          "name": "Target Assignment ID",
+          "description": "NILM appliance assignment to keep. The NILM workspace passes this internally."
+        }
+      }
+    },
+    "set_nilm_helper_link": {
+      "name": "Set NILM helper link",
+      "description": "Advanced/script action: confirm a configured circuit as evidence for one NILM appliance assignment. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Configured Load Separation source circuit identifier."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "NILM appliance assignment receiving the helper evidence."
+        },
+        "helper_circuit_id": {
+          "name": "Helper circuit ID",
+          "description": "Configured circuit providing the helper evidence."
+        },
+        "relationship": {
+          "name": "Relationship",
+          "description": "Evidence only corroborates the estimate; direct component means the circuit directly measures load included in the source."
+        },
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional config entry that owns the source and helper circuits."
+        }
+      }
+    },
+    "remove_nilm_helper_link": {
+      "name": "Remove NILM helper link",
+      "description": "Advanced/script action: remove a confirmed circuit relationship from one NILM appliance assignment. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Configured Load Separation source circuit identifier."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "NILM appliance assignment losing the helper evidence."
+        },
+        "helper_circuit_id": {
+          "name": "Helper circuit ID",
+          "description": "Configured helper circuit relationship to remove."
+        },
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional config entry that owns the source and helper circuits."
+        }
+      }
+    },
+    "set_nilm_reference_link": {
+      "name": "Set NILM reference sensors",
+      "description": "Advanced/script action: link authoritative state and optional measured-power evidence to one NILM appliance. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Load Separation source circuit identifier."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "NILM appliance assignment receiving the reference sensors."
+        },
+        "reference_state_entity_id": {
+          "name": "Reference State Entity",
+          "description": "Optional switch, binary sensor, or input boolean that authoritatively reports on/off state."
+        },
+        "reference_power_entity_id": {
+          "name": "Reference Power Entity",
+          "description": "Optional separate real-power sensor used as supporting evidence."
+        },
+        "reference_threshold_w": {
+          "name": "Reference Threshold W",
+          "description": "Watts above this threshold indicate running when no state entity is linked."
+        },
+        "reference_on_threshold": {
+          "name": "Reference ON Threshold",
+          "description": "Optional watts threshold to enter the active state for numeric references."
+        },
+        "reference_off_threshold": {
+          "name": "Reference OFF Threshold",
+          "description": "Optional watts threshold to leave the active state; it must not exceed the ON threshold."
+        },
+        "reference_on_dwell_seconds": {
+          "name": "Reference ON Dwell Seconds",
+          "description": "Optional time the numeric reference must remain above its ON threshold before becoming active."
+        },
+        "reference_off_dwell_seconds": {
+          "name": "Reference OFF Dwell Seconds",
+          "description": "Optional time the numeric reference must remain below its OFF threshold before becoming inactive."
+        },
+        "reference_minimum_interval_seconds": {
+          "name": "Reference Minimum Interval Seconds",
+          "description": "Optional minimum duration retained for an active reference interval."
+        },
+        "reference_merge_gap_seconds": {
+          "name": "Reference Merge Gap Seconds",
+          "description": "Optional inactive gap duration that can join adjacent active reference intervals."
+        },
+        "reference_maximum_unknown_gap_seconds": {
+          "name": "Reference Maximum Unknown Gap Seconds",
+          "description": "Optional maximum unavailable-state gap before reference evidence becomes uncertain."
+        },
+        "reference_maximum_power_gap_seconds": {
+          "name": "Reference Maximum Power Gap Seconds",
+          "description": "Optional maximum gap permitted when integrating reference power evidence."
+        },
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional config entry that owns the source circuit and assignment."
+        }
+      }
+    },
+    "remove_nilm_reference_link": {
+      "name": "Remove NILM reference sensors",
+      "description": "Advanced/script action: remove linked reference sensors without deleting imported validation intervals. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Load Separation source circuit identifier."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "NILM appliance assignment losing the reference sensors."
+        },
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional config entry that owns the source circuit and assignment."
+        }
+      }
+    },
+    "publish_nilm_appliance_assignment": {
+      "name": "Publish NILM appliance assignment",
+      "description": "Advanced/script action: create estimated Home Assistant appliance entities for a NILM assignment after user confirmation. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "NILM appliance assignment identifier to publish."
+        }
+      }
+    },
+    "unpublish_nilm_appliance_assignment": {
+      "name": "Unpublish NILM appliance assignment",
+      "description": "Advanced/script action: stop creating estimated Home Assistant appliance entities for a NILM assignment. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "NILM appliance assignment identifier to unpublish."
+        }
+      }
+    },
+    "retire_nilm_appliance_assignment": {
+      "name": "Retire NILM appliance assignment",
+      "description": "Advanced/script action: retire a NILM appliance assignment and stop creating estimated Home Assistant entities for it. The normal user path is the NILM workspace panel.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "NILM appliance assignment identifier to retire."
+        }
+      }
+    },
+    "restore_nilm_item": {
+      "name": "Restore NILM item",
+      "description": "Advanced/script action: restore one Expected, Ignored, or Retired NILM item, or revert a direct-meter conversion. The normal user path is the Restore action in the NILM workspace. Provide exactly one assignment ID or signature ID.",
+      "fields": {
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Config entry that owns the Load Separation source."
+        },
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Load Separation source circuit identifier."
+        },
+        "assignment_id": {
+          "name": "Assignment ID",
+          "description": "Hidden assignment to restore. Do not also provide a signature ID."
+        },
+        "signature_id": {
+          "name": "Signature ID",
+          "description": "Hidden signature to restore. Do not also provide an assignment ID."
+        }
+      }
+    },
+    "set_circuit_sensitivity": {
+      "name": "Set circuit sensitivity",
+      "description": "Advanced/script action: set the alert sensitivity preset for one configured circuit. The normal user path is the circuit Alert Sensitivity select entity.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity."
+        },
+        "preset": {
+          "name": "Preset",
+          "description": "Alert sensitivity preset for the circuit."
+        }
+      }
+    },
+    "set_nilm_detection_sensitivity": {
+      "name": "Set NILM detection sensitivity",
+      "description": "Advanced/script action: set the NILM edge detection sensitivity preset for one configured Load Separation circuit. The normal user path is the NILM workspace.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured Load Separation circuit identifier, such as mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity."
+        },
+        "preset": {
+          "name": "Preset",
+          "description": "NILM detection sensitivity preset for the circuit."
+        }
+      }
+    },
+    "set_energy_usage_settings": {
+      "name": "Set energy usage settings",
+      "description": "Advanced/script action: set daily energy usage spike tracking for one configured circuit. The normal user path is Advanced Circuit Settings.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "window_days": {
+          "name": "Window Days",
+          "description": "Rolling energy baseline window in days for the circuit."
+        },
+        "daily_spike_ratio": {
+          "name": "Daily Spike Ratio",
+          "description": "Daily usage share that can trigger a possible-issue alert."
+        }
+      }
+    },
+    "set_energy_goal_settings": {
+      "name": "Set energy goal settings",
+      "description": "Advanced/script action: set daily kWh goal tracking for one configured circuit. The normal user path is the circuit Daily Energy Goal number entity.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity."
+        },
+        "daily_goal_kwh": {
+          "name": "Daily Goal kWh",
+          "description": "Daily kWh target for this circuit; use 0 to clear it."
+        },
+        "goal_alert_ratio": {
+          "name": "Goal Alert Ratio",
+          "description": "Goal share that can trigger daily energy goal notices."
+        }
+      }
+    },
+    "set_demand_settings": {
+      "name": "Set demand settings",
+      "description": "Advanced/script action: set rolling demand tracking for one configured circuit. The normal user path is Advanced Circuit Settings.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "window_minutes": {
+          "name": "Window Minutes",
+          "description": "Rolling demand averaging window in minutes for the circuit."
+        },
+        "demand_limit_w": {
+          "name": "Demand Limit W",
+          "description": "Optional rolling demand limit in watts for notifications."
+        }
+      }
+    },
+    "set_capacity_settings": {
+      "name": "Set capacity settings",
+      "description": "Advanced/script action: set breaker amp capacity tracking for one configured circuit. The normal user path is Advanced Circuit Settings.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier, such as ev or hvac. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "breaker_amps": {
+          "name": "Breaker Amps",
+          "description": "Breaker or circuit rating in amps used for capacity diagnostics."
+        },
+        "warning_ratio": {
+          "name": "Warning Ratio",
+          "description": "Share of breaker amps that can trigger repeated capacity alerts."
+        }
+      }
+    },
+    "set_leg_imbalance_settings": {
+      "name": "Set leg imbalance settings",
+      "description": "Advanced/script action: set split-phase leg imbalance thresholds for one circuit. The normal user path is Advanced Circuit Settings.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional dual-phase circuit identifier, such as hvac. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "warning_ratio": {
+          "name": "Warning Ratio",
+          "description": "Leg imbalance ratio that can trigger repeated possible-issue alerts."
+        },
+        "minimum_total_power_w": {
+          "name": "Minimum Total Power W",
+          "description": "Total active watts required before leg imbalance is evaluated."
+        }
+      }
+    },
+    "set_metric_consistency_settings": {
+      "name": "Set metric consistency settings",
+      "description": "Advanced/script action: set W, VA, and power-factor consistency thresholds for one circuit. The normal user path is Advanced Circuit Settings.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier, such as hvac or fridge. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "apparent_power_tolerance_percent": {
+          "name": "Apparent Power Tolerance Percent",
+          "description": "Allowed VA mismatch percent before the metric state changes."
+        },
+        "power_factor_tolerance": {
+          "name": "Power Factor Tolerance",
+          "description": "Allowed power factor mismatch before consistency is flagged."
+        },
+        "minimum_apparent_power_va": {
+          "name": "Minimum Apparent Power VA",
+          "description": "Minimum apparent power before metric consistency is evaluated."
+        }
+      }
+    },
+    "set_mains_balance_settings": {
+      "name": "Set mains balance settings",
+      "description": "Advanced/script action: set mains-minus-monitored balance thresholds for a mains circuit. The normal user path is Advanced Circuit Settings.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional mains aggregate circuit identifier, usually mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "negative_tolerance_w": {
+          "name": "Negative Tolerance W",
+          "description": "Negative watts allowed before mains balance is flagged."
+        }
+      }
+    },
+    "set_solar_flow_settings": {
+      "name": "Set solar flow settings",
+      "description": "Advanced/script action: set solar export and flexible-load thresholds for a mains circuit. The normal user path is Advanced Circuit Settings.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional mains aggregate circuit identifier, usually mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "export_tolerance_w": {
+          "name": "Export Tolerance W",
+          "description": "Extra export watts allowed before solar flow is flagged inconsistent."
+        },
+        "solar_surplus_threshold_w": {
+          "name": "Solar Surplus Threshold W",
+          "description": "Export watts needed before surplus is considered available."
+        },
+        "high_solar_surplus_threshold_w": {
+          "name": "High Solar Surplus Threshold W",
+          "description": "Export watts that classify the current surplus as high."
+        },
+        "flexible_load_running_threshold_w": {
+          "name": "Flexible Load Running Threshold W",
+          "description": "Watts that classify a flexible load as currently active."
+        }
+      }
+    },
+    "set_activity_alert_settings": {
+      "name": "Set activity alert settings",
+      "description": "Advanced/script action: set user-configured activity alert limits for one circuit. The normal user path is Advanced Circuit Settings.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "max_active_minutes": {
+          "name": "Max Active Minutes",
+          "description": "Notify when the circuit stays active longer than this many minutes."
+        },
+        "max_idle_minutes": {
+          "name": "Max Idle Minutes",
+          "description": "Notify when the circuit shows no activity longer than this many minutes."
+        }
+      }
+    },
+    "set_billing_cycle_settings": {
+      "name": "Set billing cycle settings",
+      "description": "Advanced/script action: set billing-cycle usage forecasting for one configured circuit. The normal user path is Advanced Circuit Settings.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "cycle_start_day": {
+          "name": "Cycle Start Day",
+          "description": "Day of the month when the utility billing cycle starts."
+        },
+        "budget_kwh": {
+          "name": "Budget kWh",
+          "description": "Optional kWh budget for the current billing cycle."
+        },
+        "budget_alert_ratio": {
+          "name": "Budget Alert Ratio",
+          "description": "Budget share that can trigger projected-over-budget alerts."
+        }
+      }
+    },
+    "set_cost_settings": {
+      "name": "Set cost settings",
+      "description": "Advanced/script action: set the cost-cycle start day for one configured circuit. The normal user path is the integration's cost controls.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "cycle_start_day": {
+          "name": "Cycle Start Day",
+          "description": "Day of the month when the utility billing cycle starts."
+        }
+      }
+    },
+    "set_standby_settings": {
+      "name": "Set standby settings",
+      "description": "Advanced/script action: set Always On and standby tracking for one configured circuit. The normal user path is Advanced Circuit Settings.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "window_hours": {
+          "name": "Window Hours",
+          "description": "Rolling Always On analysis window in hours for the circuit."
+        },
+        "standby_threshold_w": {
+          "name": "Standby Threshold W",
+          "description": "Power at or below this wattage is treated as standby."
+        },
+        "always_on_alert_w": {
+          "name": "Always On Alert W",
+          "description": "Optional Always On wattage limit for possible-issue alerts."
+        }
+      }
+    },
+    "set_utility_comparison_settings": {
+      "name": "Set utility comparison settings",
+      "description": "Advanced/script action: compare utility-reported kWh with mains or summed circuit kWh sensors. The normal user path is Configure > Utility / Opower Comparison.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional aggregate circuit identifier, usually mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "utility_energy_entity": {
+          "name": "Utility Energy Entity",
+          "description": "Utility kWh sensor representing the same period as measured data."
+        },
+        "utility_cost_entity": {
+          "name": "Utility Cost Entity",
+          "description": "Optional Opower or utility cost sensor for the same billing period. Its cost divided by the utility kWh source becomes the analyzer-wide electricity rate."
+        },
+        "utility_statistic_id": {
+          "name": "Recorder Statistic ID (advanced)",
+          "description": "Optional utility kWh recorder statistic without an entity; otherwise use Utility Energy Entity."
+        },
+        "utility_source_type": {
+          "name": "Utility Source Type",
+          "description": "Choose entity for sensor state, statistics for Opower data, or auto."
+        },
+        "utility_statistic_period": {
+          "name": "Utility Statistic Period",
+          "description": "Recorder statistic period to compare for Opower or utility statistics."
+        },
+        "measured_energy_entities": {
+          "name": "Measured Energy Entities",
+          "description": "Optional mains kWh sensors; leave empty to sum configured load circuit energy sensors."
+        },
+        "tolerance_percent": {
+          "name": "Tolerance Percent",
+          "description": "Percent difference allowed before repeated observations create a possible-issue alert."
+        }
+      }
+    },
+    "start_maintenance": {
+      "name": "Pause alerts",
+      "description": "Advanced/script action: pause appliance alert notifications while a circuit is being serviced. The normal user path is the circuit Pause alerts switch entity.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity."
+        },
+        "note": {
+          "name": "Note",
+          "description": "Optional pause note stored with the circuit."
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "How long alerts should stay paused."
+        },
+        "relearn_on_end": {
+          "name": "Relearn On End",
+          "description": "Relearn the circuit baseline when alerts resume."
+        }
+      }
+    },
+    "end_maintenance": {
+      "name": "Resume alerts",
+      "description": "Advanced/script action: resume appliance alert notifications for a serviced circuit. The normal user path is the circuit Pause alerts switch entity.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity."
+        },
+        "relearn": {
+          "name": "Relearn",
+          "description": "Relearn the circuit baseline after resuming alerts."
+        }
+      }
+    },
+    "mark_alert_expected": {
+      "name": "Mark alert expected",
+      "description": "Advanced/script action: mark an alert pattern as expected so repeated notifications are suppressed. The normal user path is the evidence panel button.",
+      "fields": {
+        "alert_id": {
+          "name": "Alert ID",
+          "description": "Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for a circuit with exactly one active alert."
+        }
+      }
+    },
+    "mark_alert_confirmed": {
+      "name": "Confirm alert issue",
+      "description": "Advanced/script action: confirm an alert as a real issue. For HVAC efficiency alerts, the affected abnormal episodes are excluded from future baselines. The normal user path is the evidence panel button.",
+      "fields": {
+        "alert_id": {
+          "name": "Alert ID",
+          "description": "Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for a circuit with exactly one active alert."
+        }
+      }
+    },
+    "mark_alert_unhelpful": {
+      "name": "Mark alert unhelpful",
+      "description": "Advanced/script action: mark an alert pattern as unhelpful so repeated notifications are suppressed. The normal user path is the evidence panel button.",
+      "fields": {
+        "alert_id": {
+          "name": "Alert ID",
+          "description": "Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for a circuit with exactly one active alert."
+        }
+      }
+    },
+    "mark_nilm_appliance_correct": {
+      "name": "Mark NILM appliance correct",
+      "description": "Advanced/script action: mark an estimated NILM appliance notification as correct. The normal user path is the evidence panel button.",
+      "fields": {
+        "alert_id": {
+          "name": "Alert ID",
+          "description": "Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for a circuit with exactly one active alert."
+        }
+      }
+    },
+    "mark_nilm_appliance_wrong": {
+      "name": "Mark NILM appliance wrong",
+      "description": "Advanced/script action: mark an estimated NILM appliance notification as the wrong appliance. The normal user path is the evidence panel button.",
+      "fields": {
+        "alert_id": {
+          "name": "Alert ID",
+          "description": "Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for a circuit with exactly one active alert."
+        }
+      }
+    },
+    "merge_nilm_signatures": {
+      "name": "Merge NILM signatures",
+      "description": "Advanced/script action: merge two experimental NILM signatures that represent the same load. The normal user path is the NILM/evidence panel button.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        },
+        "source_signature_id": {
+          "name": "Source Signature ID",
+          "description": "Signature identifier to merge into the target signature."
+        },
+        "target_signature_id": {
+          "name": "Target Signature ID",
+          "description": "Signature identifier that should keep the merged history."
+        }
+      }
+    },
+    "recalculate_setting_recommendations": {
+      "name": "Recalculate setting recommendations",
+      "description": "Advanced/script action: recalculate advanced setting recommendations. The normal user path is the Recalculate Suggestions button entity and Suggested Settings UI.",
+      "fields": {
+        "circuit_id": {
+          "name": "Circuit ID",
+          "description": "Optional configured circuit identifier to recalculate; choose an analyzer entity, or leave empty for all circuits."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity."
+        }
+      }
+    },
+    "apply_setting_recommendation": {
+      "name": "Apply setting recommendation",
+      "description": "Advanced/script action: apply an advanced setting recommendation by ID or by selecting an analyzer entity with exactly one pending recommendation. The normal user path is the Suggested Settings UI button.",
+      "fields": {
+        "recommendation_id": {
+          "name": "Recommendation ID",
+          "description": "Optional recommendation identifier shown with the advanced setting suggestion. Use this when more than one recommendation exists for the target circuit."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit. If the circuit has exactly one pending recommendation, it is applied without typing the recommendation ID."
+        },
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional integration entry ID to use when more than one analyzer entry has the same recommendation ID."
+        }
+      }
+    },
+    "deny_setting_recommendation": {
+      "name": "Deny setting recommendation",
+      "description": "Advanced/script action: deny an advanced setting recommendation by ID or by selecting an analyzer entity with exactly one pending recommendation. The normal user path is the Suggested Settings UI button.",
+      "fields": {
+        "recommendation_id": {
+          "name": "Recommendation ID",
+          "description": "Optional recommendation identifier shown with the advanced setting suggestion. Use this when more than one recommendation exists for the target circuit."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit. If the circuit has exactly one pending recommendation, it is denied without typing the recommendation ID."
+        },
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional integration entry ID to use when more than one analyzer entry has the same recommendation ID."
+        }
+      }
+    },
+    "dismiss_setting_recommendation": {
+      "name": "Dismiss setting recommendation",
+      "description": "Advanced/script action: dismiss an advanced setting recommendation by ID or by selecting an analyzer entity with exactly one pending recommendation. The normal user path is the Suggested Settings UI button.",
+      "fields": {
+        "recommendation_id": {
+          "name": "Recommendation ID",
+          "description": "Optional recommendation identifier shown with the advanced setting suggestion. Use this when more than one recommendation exists for the target circuit."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit. If the circuit has exactly one pending recommendation, it is dismissed without typing the recommendation ID."
+        },
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional integration entry ID to use when more than one analyzer entry has the same recommendation ID."
+        }
+      }
+    },
+    "undo_setting_recommendation": {
+      "name": "Undo setting recommendation",
+      "description": "Advanced/script action: undo an applied advanced setting recommendation by ID or by selecting an analyzer entity with exactly one pending recommendation. The normal user path is the Suggested Settings UI button.",
+      "fields": {
+        "recommendation_id": {
+          "name": "Recommendation ID",
+          "description": "Optional recommendation identifier shown with the advanced setting suggestion. Use this when more than one recommendation exists for the target circuit."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit. If the circuit has exactly one pending recommendation, it is undone without typing the recommendation ID."
+        },
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional integration entry ID to use when more than one analyzer entry has the same recommendation ID."
+        }
+      }
+    },
+    "reset_setting_recommendation": {
+      "name": "Reset setting recommendation",
+      "description": "Advanced/script action: reset an advanced setting recommendation's setting to its built-in default by ID or by selecting an analyzer entity with exactly one pending recommendation. The normal user path is the Suggested Settings UI button.",
+      "fields": {
+        "recommendation_id": {
+          "name": "Recommendation ID",
+          "description": "Optional recommendation identifier shown with the advanced setting suggestion. Use this when more than one recommendation exists for the target circuit."
+        },
+        "entity_id": {
+          "name": "Analyzer Entity",
+          "description": "Optional analyzer entity for the circuit. If the circuit has exactly one pending recommendation, its setting is reset without typing the recommendation ID."
+        },
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional integration entry ID to use when more than one analyzer entry has the same recommendation ID."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "action_unavailable": {
+      "message": "The requested action is unavailable right now."
+    },
+    "invalid_select_option": {
+      "message": "{option} is not a valid option. Choose one of: {choices}."
+    },
+    "circuit_not_found": {
+      "message": "Circuit {circuit_id} was not found."
+    },
+    "invalid_boolean": {
+      "message": "Expected a boolean value for {field}."
+    },
+    "recommendation_not_changed": {
+      "message": "Recommendation {recommendation_id} could not be changed. Refresh the evidence panel and try again."
+    },
+    "invalid_interval_range": {
+      "message": "The interval end must be later than the interval start."
+    },
+    "reference_state_required": {
+      "message": "A stored reference state entity or ground-truth entity is required for reference import."
+    },
+    "no_reference_intervals": {
+      "message": "No active ground-truth sensor intervals were found."
+    },
+    "invalid_reference_power_entity": {
+      "message": "The reference power entity must report real power in W, kW, mW, or MW."
+    },
+    "session_assignment_failed": {
+      "message": "The NILM session assignment was not applied. Refresh the evidence panel and try again."
+    },
+    "duplicate_assignment_ids": {
+      "message": "The source and target assignment IDs must be different."
+    },
+    "circuit_id_mismatch": {
+      "message": "Circuit {circuit_id} does not match the target entity circuit {entity_circuit_id}."
+    },
+    "missing_circuit_id": {
+      "message": "A circuit ID is required."
+    },
+    "invalid_sensitivity": {
+      "message": "The sensitivity value {value} is invalid. Choose one of: {choices}."
+    },
+    "multiple_target_circuits": {
+      "message": "The entity target resolves to multiple circuits: {circuit_ids}. Pass circuit_id explicitly."
+    },
+    "entity_circuit_id_invalid": {
+      "message": "A circuit ID could not be derived from entity {entity_id}."
+    },
+    "entry_not_found": {
+      "message": "Entry {entry_id} was not found."
+    },
+    "entry_circuit_not_found": {
+      "message": "Circuit {circuit_id} was not found for entry {entry_id}."
+    },
+    "nilm_helper_link_target_ambiguous": {
+      "message": "The NILM helper link target matches multiple entries."
+    },
+    "nilm_helper_link_target_not_found": {
+      "message": "The NILM helper link target was not found."
+    },
+    "nilm_assignment_target_ambiguous": {
+      "message": "The NILM assignment target matches multiple entries."
+    },
+    "nilm_assignment_target_not_found": {
+      "message": "The NILM assignment target was not found."
+    },
+    "alert_not_found": {
+      "message": "Alert {alert_id} was not found."
+    },
+    "multiple_active_alerts": {
+      "message": "The target circuit has multiple active alerts: {alert_ids}. Pass alert_id explicitly."
+    },
+    "no_active_alerts": {
+      "message": "The target circuit has no active alerts. Pass alert_id explicitly."
+    },
+    "multiple_recommendations": {
+      "message": "The target circuit has multiple setting recommendations: {recommendation_ids}. Pass recommendation_id explicitly."
+    },
+    "no_recommendations": {
+      "message": "The target circuit has no setting recommendations. Pass recommendation_id explicitly."
+    },
+    "missing_recommendation_id": {
+      "message": "A recommendation ID is required."
+    },
+    "recommendation_not_found_for_entry": {
+      "message": "Recommendation {recommendation_id} was not found for entry {entry_id}."
+    },
+    "recommendation_multiple_entries": {
+      "message": "Recommendation {recommendation_id} matched multiple entries. Pass entry_id explicitly."
+    },
+    "recommendation_not_found": {
+      "message": "Recommendation {recommendation_id} was not found."
+    },
+    "missing_signature_id": {
+      "message": "A signature ID is required."
+    },
+    "duplicate_signature_ids": {
+      "message": "The source and target signature IDs must be different."
+    },
+    "signature_not_found": {
+      "message": "Signature {signature_id} was not found for circuit {circuit_id}. Known signature IDs: {known_ids}."
+    },
+    "signature_not_found_no_known_ids": {
+      "message": "Signature {signature_id} was not found for circuit {circuit_id}."
+    },
+    "missing_interval_id": {
+      "message": "An interval ID is required."
+    },
+    "interval_not_found": {
+      "message": "Interval {interval_id} was not found for circuit {circuit_id}. Known interval IDs: {known_ids}."
+    },
+    "interval_not_found_no_known_ids": {
+      "message": "Interval {interval_id} was not found for circuit {circuit_id}."
+    },
+    "assignment_not_found": {
+      "message": "NILM assignment {assignment_id} was not found."
+    },
+    "invalid_reference_threshold": {
+      "message": "The NILM reference threshold value {value} is invalid."
+    },
+    "invalid_datetime": {
+      "message": "{field} is not a valid date and time."
+    }
+  },
   "config": {
     "step": {
       "user": {
@@ -585,6 +2091,38 @@
       "setup_health": {
         "name": "Setup Health / Next Step"
       },
+      "circuit_mode": {
+        "name": "Circuit mode",
+        "state": {
+          "single_phase": "Single phase",
+          "dual_phase": "Dual phase",
+          "mixed": "Mixed",
+          "mains_nilm": "Mains NILM"
+        }
+      },
+      "power_flow": {
+        "name": "Power flow",
+        "state": {
+          "load": "Load",
+          "generation": "Generation",
+          "mains_net": "Mains net"
+        }
+      },
+      "power_quality_score": {
+        "name": "Power quality score"
+      },
+      "reactive_power_drift": {
+        "name": "Reactive power drift"
+      },
+      "apparent_power_drift": {
+        "name": "Apparent power drift"
+      },
+      "power_factor_drift": {
+        "name": "Power factor drift"
+      },
+      "electricity_rate": {
+        "name": "Electricity rate"
+      },
       "anomaly_score": {
         "name": "Anomaly score"
       },
@@ -737,6 +2275,12 @@
       },
       "always_on_limit_usage": {
         "name": "Always On limit usage"
+      },
+      "estimated_power": {
+        "name": "Estimated power"
+      },
+      "estimated_daily_energy": {
+        "name": "Estimated daily energy"
       }
     },
     "binary_sensor": {
@@ -751,11 +2295,68 @@
       },
       "water_flow_mismatch": {
         "name": "Water flow mismatch"
+      },
+      "running": {
+        "name": "Estimated running"
       }
     },
     "switch": {
       "maintenance": {
         "name": "Pause alerts"
+      },
+      "tou_weekday": {
+        "name": "Time-of-use {weekday}"
+      }
+    },
+    "button": {
+      "relearn_baseline": {
+        "name": "Relearn baseline"
+      },
+      "run_mapping_checks": {
+        "name": "Run mapping checks"
+      },
+      "recalculate_suggestions": {
+        "name": "Recalculate suggestions"
+      }
+    },
+    "select": {
+      "alert_sensitivity": {
+        "name": "Alert sensitivity"
+      },
+      "entity_detail_level": {
+        "name": "Entity detail level",
+        "state": {
+          "simple": "Simple",
+          "standard": "Standard",
+          "expert": "Expert"
+        }
+      },
+      "dashboard_layout": {
+        "name": "Dashboard layout"
+      }
+    },
+    "number": {
+      "daily_energy_goal": {
+        "name": "Daily energy goal"
+      },
+      "electricity_rate": {
+        "name": "Electricity rate"
+      },
+      "tou_rate": {
+        "name": "Time-of-use rate"
+      }
+    },
+    "text": {
+      "tou_name": {
+        "name": "Time-of-use name"
+      }
+    },
+    "time": {
+      "tou_start": {
+        "name": "Time-of-use start"
+      },
+      "tou_end": {
+        "name": "Time-of-use end"
       }
     }
   },
@@ -1226,7 +2827,6 @@
         "no_weather_data": "Waiting for outdoor temperature",
         "no_data": "Waiting for HVAC runtime",
         "tracking": "Tracking thermostat response",
-        "needs_attention": "Needs attention",
         "stable": "Stable",
         "faster": "Faster",
         "slower": "Slower",
@@ -1589,7 +3189,7 @@
           "accept_assignment": "Accept Assignment",
           "delete_permanently": "Delete Permanently",
           "save_label": "Save Label",
-          "show_on_graph": "Show on Graph",
+          "show_on_graph": "Show on graph",
           "undo": "Undo",
           "validate_history": "Validate History",
           "wrong_appliance": "Wrong Appliance",
@@ -1599,7 +3199,6 @@
           "adjust_interval": "Adjust Interval",
           "adjust_label": "Adjust Label",
           "complete_interval": "Complete Interval",
-          "show_on_graph": "Show on graph",
           "convert_to_direct_meter": "Use Direct Meter",
           "remove_interval": "Remove Interval",
           "restore": "Restore"

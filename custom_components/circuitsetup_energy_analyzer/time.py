@@ -16,26 +16,27 @@ from .entity import (
 )
 from .tariff import global_cost_settings
 
-_TOU_TIME_DETAILS = {
-    "tou_start": ("Time-Of-Use Start", "mdi:clock-start"),
-    "tou_end": ("Time-Of-Use End", "mdi:clock-end"),
+_TOU_TIME_ICONS = {
+    "tou_start": "mdi:clock-start",
+    "tou_end": "mdi:clock-end",
 }
 
 
 class GlobalTimeOfUseTime(TimeEntity):
     """Time entity for one analyzer-wide Time-of-Use boundary."""
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
     _attr_entity_category = None
 
     def __init__(self, coordinator: Any, *, entry_id: str, field: str) -> None:
         self.coordinator = coordinator
         self._entry_id = entry_id
         self._field = field
-        name_suffix, self._attr_icon = _TOU_TIME_DETAILS[field]
-        self._attr_name = f"CircuitSetup Energy Analyzer {name_suffix}"
+        self._attr_icon = _TOU_TIME_ICONS[field]
+        self._attr_translation_key = field
         self._attr_unique_id = f"{entry_id}_{field}"
         self._attr_suggested_object_id = f"circuitsetup_energy_analyzer_{field}"
+        self.entity_id = f"time.circuitsetup_energy_analyzer_{field}"
 
     @property
     def unique_id(self) -> str:
@@ -46,11 +47,6 @@ class GlobalTimeOfUseTime(TimeEntity):
     def suggested_object_id(self) -> str:
         """Return the stable object ID for fallback tests."""
         return self._attr_suggested_object_id
-
-    @property
-    def name(self) -> str:
-        """Return the visible entity name."""
-        return self._attr_name
 
     @property
     def native_value(self) -> time_of_day | None:
@@ -80,7 +76,6 @@ class GlobalTimeOfUseTime(TimeEntity):
         await async_call_or_raise(
             self.coordinator,
             "async_set_global_tou_time",
-            f"set {self._field}",
             self._field,
             value,
         )
@@ -92,7 +87,7 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
     coordinator = hass.data[DOMAIN][entry_id]
     entities = [
         GlobalTimeOfUseTime(coordinator, entry_id=entry_id, field=field)
-        for field in _TOU_TIME_DETAILS
+        for field in _TOU_TIME_ICONS
     ]
     prune_stale_entity_registry_entries(
         hass,

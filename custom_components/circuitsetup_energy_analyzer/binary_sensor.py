@@ -93,7 +93,6 @@ class DiagnosticBinarySensorDescription:
     """Description for one diagnostic binary sensor entity."""
 
     key: str
-    name_suffix: str
     value_fn: Callable[[Any, str, ApplianceProfile | None], bool]
     device_class: str | None = None
     entity_category: Any | None = EntityCategory.DIAGNOSTIC
@@ -117,32 +116,32 @@ BINARY_SENSOR_ICONS = {
     "water_flow_mismatch": "mdi:pipe-leak",
 }
 
+_LEGACY_BINARY_SENSOR_OBJECT_ID_SUFFIXES = {
+    "maintenance": "alerts_paused",
+}
+
 
 BINARY_SENSOR_DESCRIPTIONS: tuple[DiagnosticBinarySensorDescription, ...] = (
     DiagnosticBinarySensorDescription(
         key="learning",
-        name_suffix="Learning",
         value_fn=is_learning,
         entity_registry_enabled_default=False,
         entity_registry_visible_default=False,
     ),
     DiagnosticBinarySensorDescription(
         key="data_quality_problem",
-        name_suffix="Data Quality Problem",
         value_fn=has_data_quality_problem,
         entity_registry_enabled_default=False,
         entity_registry_visible_default=False,
     ),
     DiagnosticBinarySensorDescription(
         key="maintenance",
-        name_suffix="Alerts Paused",
         value_fn=is_maintenance_active,
         entity_registry_enabled_default=False,
         entity_registry_visible_default=False,
     ),
     DiagnosticBinarySensorDescription(
         key="water_flow_mismatch",
-        name_suffix="Water Flow Mismatch",
         value_fn=has_water_flow_mismatch,
         device_class="problem",
         entity_category=None,
@@ -190,9 +189,14 @@ class CircuitAnalyzerBinarySensor(CircuitAnalyzerEntity, BinarySensorEntity):
             entry_id=entry_id,
             circuit=circuit,
             key=description.key,
-            name_suffix=description.name_suffix,
         )
         self.entity_description = description
+        self._attr_suggested_object_id = (
+            _LEGACY_BINARY_SENSOR_OBJECT_ID_SUFFIXES.get(
+                description.key,
+                description.key,
+            )
+        )
         self._appliance_profile = _appliance_profile(
             getattr(circuit, "appliance_profile", None)
         )
@@ -235,8 +239,9 @@ class NilmVirtualApplianceRunningBinarySensor(CoordinatorEntity, BinarySensorEnt
     _attr_entity_category = None
     _attr_entity_registry_enabled_default = True
     _attr_entity_registry_visible_default = True
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
     _attr_icon = "mdi:power-cycle"
+    _attr_translation_key = "running"
 
     def __init__(
         self,
@@ -249,17 +254,11 @@ class NilmVirtualApplianceRunningBinarySensor(CoordinatorEntity, BinarySensorEnt
         self._entry_id = entry_id
         self._nilm_state = state
         self._assignment_id = state.assignment_id
-        self._attr_name = f"{state.display_name} Estimated Running"
         self._attr_unique_id = nilm_virtual_unique_id(
             entry_id,
             state,
             "estimated_running",
         )
-
-    @property
-    def name(self) -> str:
-        """Entity display name for fallback tests."""
-        return self._attr_name
 
     @property
     def unique_id(self) -> str:

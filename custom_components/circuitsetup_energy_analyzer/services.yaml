@@ -1,98 +1,64 @@
 save_nilm_interval_changes:
-  name: Save NILM interval changes
-  description: "Advanced/script action: atomically save a NILM appliance's interval membership. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured mains NILM circuit identifier.
       required: false
       selector:
         text:
     entry_id:
-      name: Entry ID
-      description: Optional analyzer config entry to target when circuit IDs are duplicated.
       required: false
       selector:
         text:
     assignment_id:
-      name: Assignment ID
-      description: Existing appliance assignment to update.
       required: false
       selector:
         text:
     label:
-      name: Label
-      description: Friendly appliance name for saved intervals.
       required: true
       selector:
         text:
     intervals:
-      name: Intervals
-      description: Bounded list of interval mappings with start and end timestamps.
       required: true
       selector:
         object:
     removed_interval_ids:
-      name: Removed interval IDs
-      description: Bounded list of saved interval IDs to unassign without deleting evidence.
       required: false
       selector:
         object:
 
 delete_nilm_appliance_assignment:
-  name: Delete retired NILM appliance assignment
-  description: "Advanced/script action: permanently delete a retired NILM assignment while preserving its evidence for review. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured mains NILM circuit identifier.
       required: false
       selector:
         text:
     entry_id:
-      name: Entry ID
-      description: Optional analyzer config entry to target when circuit IDs are duplicated.
       required: false
       selector:
         text:
     assignment_id:
-      name: Assignment ID
-      description: Retired appliance assignment identifier to delete.
       required: true
       selector:
         text:
 
 mark_circuit_mixed:
-  name: Mark circuit mixed
-  description: "Advanced/script action: confirm that a circuit supplies multiple appliances and remove direct-appliance state. The normal user path is the evidence panel's This circuit powers other loads action."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Circuit to classify as mixed.
       required: true
       selector:
         text:
     entry_id:
-      name: Entry ID
-      description: Optional analyzer config entry to target when circuit IDs are duplicated. Panel actions include this automatically.
       required: false
       selector:
         text:
 
 relearn_baseline:
-  name: Relearn baseline
-  description: "Advanced/script action: relearn the baseline for a configured circuit. The normal user path is the circuit Relearn Baseline button entity."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
       required: false
       example: fridge
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity.
       required: false
       selector:
         entity:
@@ -104,19 +70,13 @@ relearn_baseline:
             - number
             - switch
 pause_alerts:
-  name: Pause alerts
-  description: "Advanced/script action: pause alert notifications for a configured circuit. The normal user path is the circuit Pause alerts switch entity."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
       required: false
       example: fridge
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity.
       required: false
       selector:
         entity:
@@ -128,26 +88,18 @@ pause_alerts:
             - number
             - switch
     duration:
-      name: Duration
-      description: How long alert notifications should stay paused.
       required: false
       example: "01:00:00"
       selector:
         text:
 acknowledge_alert:
-  name: Acknowledge alert
-  description: "Advanced/script action: acknowledge an alert evidence notification. The normal user path is the Acknowledge button in the evidence panel."
   fields:
     alert_id:
-      name: Alert ID
-      description: Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert.
       required: false
       example: circuitsetup_energy_analyzer_alert_fridge_cycle_duration_s
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for a circuit with exactly one active alert.
       required: false
       selector:
         entity:
@@ -158,19 +110,13 @@ acknowledge_alert:
             - select
             - number
 export_diagnostics:
-  name: Export diagnostics
-  description: "Advanced/script action: export diagnostics for a configured circuit. The normal user path is the evidence panel and entity details."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -181,19 +127,13 @@ export_diagnostics:
             - select
             - number
 export_history_csv:
-  name: Export history CSV
-  description: "Advanced/script action: export retained analyzer history for a configured circuit. The normal user path is the dashboard/export card or automation."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
       required: false
       example: fridge
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -204,23 +144,15 @@ export_history_csv:
             - select
             - number
 run_mapping_checks:
-  name: Run mapping checks
-  description: "Advanced/script action: run configured source-entity mapping checks. The normal user path is the integration Run Mapping Checks button entity."
   fields: {}
 label_nilm_signature:
-  name: Label NILM signature
-  description: "Advanced/script action: label a detected NILM signature for a mains circuit. The normal user path is the NILM/evidence panel button."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -231,33 +163,23 @@ label_nilm_signature:
             - select
             - number
     signature_id:
-      name: Signature ID
-      description: Detected NILM signature identifier to label.
       required: true
       example: signature_1
       selector:
         text:
     label:
-      name: Label
-      description: Friendly load name to assign to the signature.
       required: true
       example: Microwave
       selector:
         text:
 ignore_nilm_signature:
-  name: Ignore NILM signature
-  description: "Advanced/script action: ignore a detected NILM signature for a mains circuit. The normal user path is the NILM/evidence panel button."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -268,26 +190,18 @@ ignore_nilm_signature:
             - select
             - number
     signature_id:
-      name: Signature ID
-      description: Detected NILM signature identifier to ignore.
       required: true
       example: signature_1
       selector:
         text:
 label_nilm_interval:
-  name: Label NILM interval
-  description: "Advanced/script action: save or adjust a manually selected NILM graph interval. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -298,57 +212,41 @@ label_nilm_interval:
             - select
             - number
     interval_id:
-      name: Interval ID
-      description: Existing interval identifier when adjusting a saved label.
       required: false
       example: label-abc123def456
       selector:
         text:
     label:
-      name: Label
-      description: Friendly load name for the selected graph interval.
       required: true
       example: Dishwasher
       selector:
         text:
     start:
-      name: Start
-      description: ISO timestamp for the start of the selected interval.
       required: true
       example: "2026-06-02T12:00:00+00:00"
       selector:
         text:
     end:
-      name: End
-      description: ISO timestamp for the end of the selected interval.
       required: true
       example: "2026-06-02T12:45:00+00:00"
       selector:
         text:
     appliance_id:
-      name: Appliance ID
-      description: Optional stable appliance/profile identifier for this label.
       required: false
       example: dishwasher
       selector:
         text:
     assignment_id:
-      name: Assignment ID
-      description: Optional existing appliance assignment to update with this interval.
       required: false
       example: assignment-dishwasher
       selector:
         text:
     appliance_profile:
-      name: Appliance Profile
-      description: Optional appliance type. When supplied, the interval is attached to an appliance assignment for review.
       required: false
       example: dishwasher
       selector:
         text:
     mains_entity_id:
-      name: Mains Entity
-      description: Optional mains power entity used for this interval.
       required: false
       example: sensor.mains_power
       selector:
@@ -356,8 +254,6 @@ label_nilm_interval:
           domain:
             - sensor
     ground_truth_entity_id:
-      name: Reference Entity
-      description: Optional directly measured appliance entity used as reference evidence for this interval.
       required: false
       example: sensor.dishwasher_power
       selector:
@@ -365,20 +261,14 @@ label_nilm_interval:
           domain:
             - sensor
 delete_nilm_label_interval:
-  name: Delete NILM label interval
-  description: "Advanced/script action: delete a manually saved NILM graph interval label. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
 
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -389,26 +279,18 @@ delete_nilm_label_interval:
             - select
             - number
     interval_id:
-      name: Interval ID
-      description: Saved NILM label interval identifier to delete.
       required: true
       example: label-abc123def456
       selector:
         text:
 generate_nilm_sensor_label_intervals:
-  name: Generate NILM sensor label intervals
-  description: "Advanced/script action: create NILM label intervals from a directly metered appliance power sensor history. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -419,29 +301,21 @@ generate_nilm_sensor_label_intervals:
             - select
             - number
     label:
-      name: Label
-      description: Friendly appliance name for generated reference intervals.
       required: true
       example: Dishwasher
       selector:
         text:
     start:
-      name: Start
-      description: ISO timestamp for the start of the sensor history range.
       required: true
       example: "2026-06-02T12:00:00+00:00"
       selector:
         text:
     end:
-      name: End
-      description: ISO timestamp for the end of the sensor history range.
       required: true
       example: "2026-06-02T14:00:00+00:00"
       selector:
         text:
     ground_truth_entity_id:
-      name: Reference Entity
-      description: On/off entity or directly metered real-power entity used to generate reference intervals.
       required: false
       example: sensor.dishwasher_power
       selector:
@@ -452,8 +326,6 @@ generate_nilm_sensor_label_intervals:
             - switch
             - input_boolean
     threshold_w:
-      name: Threshold W
-      description: Numeric sensor watts above this threshold are treated as appliance running. On/off entities ignore this value.
       required: false
       example: 25
       selector:
@@ -462,29 +334,21 @@ generate_nilm_sensor_label_intervals:
           max: 100000
           mode: box
     reference_power_entity_id:
-      name: Reference Power Entity
-      description: Optional separate W-family real-power sensor used to measure each generated interval.
       required: false
       selector:
         entity:
           domain:
             - sensor
     appliance_id:
-      name: Appliance ID
-      description: Optional stable appliance/profile identifier for generated intervals.
       required: false
       example: dishwasher
       selector:
         text:
     assignment_id:
-      name: Assignment ID
-      description: Optional existing NILM assignment that owns the generated intervals.
       required: false
       selector:
         text:
     mains_entity_id:
-      name: Mains Entity
-      description: Optional mains power entity associated with generated intervals.
       required: false
       example: sensor.mains_power
       selector:
@@ -492,19 +356,13 @@ generate_nilm_sensor_label_intervals:
           domain:
             - sensor
 assign_signature_to_appliance:
-  name: Assign signature to appliance
-  description: "Advanced/script action: assign a NILM signature to an appliance. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -515,54 +373,38 @@ assign_signature_to_appliance:
             - select
             - number
     signature_id:
-      name: Signature ID
-      description: Detected NILM signature identifier to assign.
       required: true
       example: signature_1
       selector:
         text:
     label:
-      name: Label
-      description: Friendly appliance name for this assignment.
       required: true
       example: Dishwasher
       selector:
         text:
     appliance_id:
-      name: Appliance ID
-      description: Optional stable appliance identifier for merging related assignments.
       required: false
       example: dishwasher
       selector:
         text:
     appliance_profile:
-      name: Appliance Profile
-      description: Optional appliance profile hint, such as dishwasher or custom.
       required: false
       example: dishwasher
       selector:
         text:
     assignment_id:
-      name: Assignment ID
-      description: Optional existing NILM appliance assignment identifier to update.
       required: false
       example: assignment-abc123def456
       selector:
         text:
 assign_session_to_appliance:
-  name: Assign session to appliance
-  description: "Advanced/script action: assign a NILM session to an appliance. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -573,68 +415,48 @@ assign_session_to_appliance:
             - select
             - number
     session_id:
-      name: Session ID
-      description: NILM session identifier to assign.
       required: true
       example: session_1
       selector:
         text:
     on_edge_id:
-      name: On-edge ID
-      description: Optional stable on-edge identifier for resolving a revised session.
       required: false
       example: on-edge-1
       selector:
         text:
     signature_fingerprint:
-      name: Signature Fingerprint
-      description: Optional signature fingerprint associated with the selected session.
       required: false
       example: fingerprint_1
       selector:
         text:
     label:
-      name: Label
-      description: Friendly appliance name for this assignment.
       required: true
       example: Dishwasher
       selector:
         text:
     appliance_id:
-      name: Appliance ID
-      description: Optional stable appliance identifier for merging related assignments.
       required: false
       example: dishwasher
       selector:
         text:
     appliance_profile:
-      name: Appliance Profile
-      description: Optional appliance profile hint, such as dishwasher or custom.
       required: false
       example: dishwasher
       selector:
         text:
     assignment_id:
-      name: Assignment ID
-      description: Optional existing NILM appliance assignment identifier to update.
       required: false
       example: assignment-abc123def456
       selector:
         text:
 assign_interval_to_appliance:
-  name: Assign interval to appliance
-  description: "Advanced/script action: assign a NILM label interval to an appliance. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -645,54 +467,38 @@ assign_interval_to_appliance:
             - select
             - number
     interval_id:
-      name: Interval ID
-      description: Saved NILM label interval identifier to assign.
       required: true
       example: label-abc123def456
       selector:
         text:
     label:
-      name: Label
-      description: Friendly appliance name for this assignment.
       required: true
       example: Dishwasher
       selector:
         text:
     appliance_id:
-      name: Appliance ID
-      description: Optional stable appliance identifier for merging related assignments.
       required: false
       example: dishwasher
       selector:
         text:
     appliance_profile:
-      name: Appliance Profile
-      description: Optional appliance profile hint, such as dishwasher or custom.
       required: false
       example: dishwasher
       selector:
         text:
     assignment_id:
-      name: Assignment ID
-      description: Optional existing NILM appliance assignment identifier to update.
       required: false
       example: assignment-abc123def456
       selector:
         text:
 validate_nilm_session:
-  name: Validate NILM session
-  description: "Advanced/script action: confirm that a NILM session matched its assigned appliance. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -703,33 +509,23 @@ validate_nilm_session:
             - select
             - number
     session_id:
-      name: Session ID
-      description: NILM session identifier to confirm.
       required: true
       example: session_1
       selector:
         text:
     assignment_id:
-      name: Assignment ID
-      description: Optional NILM appliance assignment identifier. The NILM workspace passes this internally.
       required: false
       example: assignment-abc123def456
       selector:
         text:
 reject_nilm_session:
-  name: Reject NILM session
-  description: "Advanced/script action: mark a NILM session as the wrong appliance so the assignment needs review. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -740,33 +536,23 @@ reject_nilm_session:
             - select
             - number
     session_id:
-      name: Session ID
-      description: NILM session identifier to reject.
       required: true
       example: session_1
       selector:
         text:
     assignment_id:
-      name: Assignment ID
-      description: Optional NILM appliance assignment identifier. The NILM workspace passes this internally.
       required: false
       example: assignment-abc123def456
       selector:
         text:
 validate_nilm_assignment_history:
-  name: Validate NILM assignment history
-  description: "Advanced/script action: confirm stored NILM sessions that overlap saved reference intervals for an assignment. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -777,44 +563,30 @@ validate_nilm_assignment_history:
             - select
             - number
     assignment_id:
-      name: Assignment ID
-      description: NILM appliance assignment identifier to validate against saved reference intervals. The NILM workspace passes this internally.
       required: true
       example: assignment-abc123def456
       selector:
         text:
 confirm_nilm_configured_primary:
-  name: Confirm configured primary appliance
-  description: "Advanced/script action: approve the appliance identity already configured for a primary-mixed circuit. Detection evidence continues to model its usage. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Configured primary-mixed circuit identifier.
       required: true
       example: hvac_1
       selector:
         text:
     assignment_id:
-      name: Assignment ID
-      description: Stable configured-primary assignment identifier.
       required: true
       example: hvac_1-configured-primary
       selector:
         text:
 rename_nilm_appliance:
-  name: Rename NILM appliance
-  description: "Advanced/script action: rename a NILM appliance assignment without changing its stable entity identifiers. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -825,33 +597,23 @@ rename_nilm_appliance:
             - select
             - number
     assignment_id:
-      name: Assignment ID
-      description: NILM appliance assignment identifier to rename. The NILM workspace passes this internally.
       required: true
       example: assignment-abc123def456
       selector:
         text:
     label:
-      name: Label
-      description: New friendly appliance name.
       required: true
       example: Kitchen Dishwasher
       selector:
         text:
 change_nilm_appliance_profile:
-  name: Change NILM appliance profile
-  description: "Advanced/script action: change the appliance profile hint for a NILM assignment. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -862,33 +624,23 @@ change_nilm_appliance_profile:
             - select
             - number
     assignment_id:
-      name: Assignment ID
-      description: NILM appliance assignment identifier to update. The NILM workspace passes this internally.
       required: true
       example: assignment-abc123def456
       selector:
         text:
     appliance_profile:
-      name: Appliance Profile
-      description: New appliance profile hint, such as dishwasher or custom.
       required: true
       example: dishwasher_heated_dry
       selector:
         text:
 convert_nilm_appliance_to_direct_meter:
-  name: Use direct meter for NILM appliance
-  description: "Advanced/script action: link a NILM appliance identity and its validation history to a configured direct-meter circuit. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured mains NILM circuit identifier, such as mains.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the mains NILM circuit.
       required: false
       selector:
         entity:
@@ -899,47 +651,33 @@ convert_nilm_appliance_to_direct_meter:
             - select
             - number
     assignment_id:
-      name: Assignment ID
-      description: NILM appliance assignment identifier to link.
       required: true
       example: assignment-abc123def456
       selector:
         text:
     direct_circuit_id:
-      name: Direct Circuit ID
-      description: Configured direct-meter circuit that now represents this appliance.
       required: true
       example: kitchen_dishwasher
       selector:
         text:
     keep_assignment_for_masking:
-      name: Keep Assignment For Masking
-      description: Keep the NILM assignment available for known-load masking and validation.
       required: false
       default: true
       selector:
         boolean:
     keep_published_estimate:
-      name: Keep Published Estimate
-      description: Keep publishing duplicate estimated entities. Disabled by default.
       required: false
       default: false
       selector:
         boolean:
 merge_nilm_assignments:
-  name: Merge NILM assignments
-  description: "Advanced/script action: merge one duplicate NILM appliance assignment into another. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -950,44 +688,30 @@ merge_nilm_assignments:
             - select
             - number
     source_assignment_id:
-      name: Source Assignment ID
-      description: Duplicate NILM appliance assignment to merge away. The NILM workspace passes this internally.
       required: true
       example: assignment-source
       selector:
         text:
     target_assignment_id:
-      name: Target Assignment ID
-      description: NILM appliance assignment to keep. The NILM workspace passes this internally.
       required: true
       example: assignment-target
       selector:
         text:
 set_nilm_helper_link:
-  name: Set NILM helper link
-  description: 'Advanced/script action: confirm a configured circuit as evidence for one NILM appliance assignment. The normal user path is the NILM workspace panel.'
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Configured Load Separation source circuit identifier.
       required: true
       selector:
         text:
     assignment_id:
-      name: Assignment ID
-      description: NILM appliance assignment receiving the helper evidence.
       required: true
       selector:
         text:
     helper_circuit_id:
-      name: Helper circuit ID
-      description: Configured circuit providing the helper evidence.
       required: true
       selector:
         text:
     relationship:
-      name: Relationship
-      description: Evidence only corroborates the estimate; direct component means the circuit directly measures load included in the source.
       required: true
       selector:
         select:
@@ -997,58 +721,38 @@ set_nilm_helper_link:
             - label: Directly measures this load (included in source)
               value: direct_component
     entry_id:
-      name: Entry ID
-      description: Optional config entry that owns the source and helper circuits.
       required: false
       selector:
         text:
 remove_nilm_helper_link:
-  name: Remove NILM helper link
-  description: 'Advanced/script action: remove a confirmed circuit relationship from one NILM appliance assignment. The normal user path is the NILM workspace panel.'
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Configured Load Separation source circuit identifier.
       required: true
       selector:
         text:
     assignment_id:
-      name: Assignment ID
-      description: NILM appliance assignment losing the helper evidence.
       required: true
       selector:
         text:
     helper_circuit_id:
-      name: Helper circuit ID
-      description: Configured helper circuit relationship to remove.
       required: true
       selector:
         text:
     entry_id:
-      name: Entry ID
-      description: Optional config entry that owns the source and helper circuits.
       required: false
       selector:
         text:
 set_nilm_reference_link:
-  name: Set NILM reference sensors
-  description: "Advanced/script action: link authoritative state and optional measured-power evidence to one NILM appliance. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Load Separation source circuit identifier.
       required: true
       selector:
         text:
     assignment_id:
-      name: Assignment ID
-      description: NILM appliance assignment receiving the reference sensors.
       required: true
       selector:
         text:
     reference_state_entity_id:
-      name: Reference State Entity
-      description: Optional switch, binary sensor, or input boolean that authoritatively reports on/off state.
       required: false
       selector:
         entity:
@@ -1057,16 +761,12 @@ set_nilm_reference_link:
             - binary_sensor
             - input_boolean
     reference_power_entity_id:
-      name: Reference Power Entity
-      description: Optional separate real-power sensor used as supporting evidence.
       required: false
       selector:
         entity:
           domain:
             - sensor
     reference_threshold_w:
-      name: Reference Threshold W
-      description: Watts above this threshold indicate running when no state entity is linked.
       required: false
       default: 0
       selector:
@@ -1075,8 +775,6 @@ set_nilm_reference_link:
           max: 100000
           mode: box
     reference_on_threshold:
-      name: Reference ON Threshold
-      description: Optional watts threshold to enter the active state for numeric references.
       required: false
       selector:
         number:
@@ -1084,8 +782,6 @@ set_nilm_reference_link:
           max: 100000
           mode: box
     reference_off_threshold:
-      name: Reference OFF Threshold
-      description: Optional watts threshold to leave the active state; it must not exceed the ON threshold.
       required: false
       selector:
         number:
@@ -1093,8 +789,6 @@ set_nilm_reference_link:
           max: 100000
           mode: box
     reference_on_dwell_seconds:
-      name: Reference ON Dwell Seconds
-      description: Optional time the numeric reference must remain above its ON threshold before becoming active.
       required: false
       selector:
         number:
@@ -1102,8 +796,6 @@ set_nilm_reference_link:
           max: 86400
           mode: box
     reference_off_dwell_seconds:
-      name: Reference OFF Dwell Seconds
-      description: Optional time the numeric reference must remain below its OFF threshold before becoming inactive.
       required: false
       selector:
         number:
@@ -1111,8 +803,6 @@ set_nilm_reference_link:
           max: 86400
           mode: box
     reference_minimum_interval_seconds:
-      name: Reference Minimum Interval Seconds
-      description: Optional minimum duration retained for an active reference interval.
       required: false
       selector:
         number:
@@ -1120,8 +810,6 @@ set_nilm_reference_link:
           max: 86400
           mode: box
     reference_merge_gap_seconds:
-      name: Reference Merge Gap Seconds
-      description: Optional inactive gap duration that can join adjacent active reference intervals.
       required: false
       selector:
         number:
@@ -1129,8 +817,6 @@ set_nilm_reference_link:
           max: 86400
           mode: box
     reference_maximum_unknown_gap_seconds:
-      name: Reference Maximum Unknown Gap Seconds
-      description: Optional maximum unavailable-state gap before reference evidence becomes uncertain.
       required: false
       selector:
         number:
@@ -1138,8 +824,6 @@ set_nilm_reference_link:
           max: 86400
           mode: box
     reference_maximum_power_gap_seconds:
-      name: Reference Maximum Power Gap Seconds
-      description: Optional maximum gap permitted when integrating reference power evidence.
       required: false
       selector:
         number:
@@ -1147,47 +831,31 @@ set_nilm_reference_link:
           max: 86400
           mode: box
     entry_id:
-      name: Entry ID
-      description: Optional config entry that owns the source circuit and assignment.
       required: false
       selector:
         text:
 remove_nilm_reference_link:
-  name: Remove NILM reference sensors
-  description: "Advanced/script action: remove linked reference sensors without deleting imported validation intervals. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Load Separation source circuit identifier.
       required: true
       selector:
         text:
     assignment_id:
-      name: Assignment ID
-      description: NILM appliance assignment losing the reference sensors.
       required: true
       selector:
         text:
     entry_id:
-      name: Entry ID
-      description: Optional config entry that owns the source circuit and assignment.
       required: false
       selector:
         text:
 publish_nilm_appliance_assignment:
-  name: Publish NILM appliance assignment
-  description: "Advanced/script action: create estimated Home Assistant appliance entities for a NILM assignment after user confirmation. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -1198,26 +866,18 @@ publish_nilm_appliance_assignment:
             - select
             - number
     assignment_id:
-      name: Assignment ID
-      description: NILM appliance assignment identifier to publish.
       required: true
       example: assignment-abc123def456
       selector:
         text:
 unpublish_nilm_appliance_assignment:
-  name: Unpublish NILM appliance assignment
-  description: "Advanced/script action: stop creating estimated Home Assistant appliance entities for a NILM assignment. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -1228,26 +888,18 @@ unpublish_nilm_appliance_assignment:
             - select
             - number
     assignment_id:
-      name: Assignment ID
-      description: NILM appliance assignment identifier to unpublish.
       required: true
       example: assignment-abc123def456
       selector:
         text:
 retire_nilm_appliance_assignment:
-  name: Retire NILM appliance assignment
-  description: "Advanced/script action: retire a NILM appliance assignment and stop creating estimated Home Assistant entities for it. The normal user path is the NILM workspace panel."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured mains NILM circuit identifier, such as mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -1258,54 +910,36 @@ retire_nilm_appliance_assignment:
             - select
             - number
     assignment_id:
-      name: Assignment ID
-      description: NILM appliance assignment identifier to retire.
       required: true
       example: assignment-abc123def456
       selector:
         text:
 restore_nilm_item:
-  name: Restore NILM item
-  description: "Advanced/script action: restore one Expected, Ignored, or Retired NILM item, or revert a direct-meter conversion. The normal user path is the Restore action in the NILM workspace. Provide exactly one assignment ID or signature ID."
   fields:
     entry_id:
-      name: Entry ID
-      description: Config entry that owns the Load Separation source.
       required: true
       selector:
         text:
     circuit_id:
-      name: Circuit ID
-      description: Load Separation source circuit identifier.
       required: true
       selector:
         text:
     assignment_id:
-      name: Assignment ID
-      description: Hidden assignment to restore. Do not also provide a signature ID.
       required: false
       selector:
         text:
     signature_id:
-      name: Signature ID
-      description: Hidden signature to restore. Do not also provide an assignment ID.
       required: false
       selector:
         text:
 set_circuit_sensitivity:
-  name: Set circuit sensitivity
-  description: "Advanced/script action: set the alert sensitivity preset for one configured circuit. The normal user path is the circuit Alert Sensitivity select entity."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
       required: false
       example: fridge
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity.
       required: false
       selector:
         entity:
@@ -1317,8 +951,6 @@ set_circuit_sensitivity:
             - number
             - switch
     preset:
-      name: Preset
-      description: Alert sensitivity preset for the circuit.
       required: true
       example: balanced
       selector:
@@ -1331,19 +963,13 @@ set_circuit_sensitivity:
             - value: sensitive
               label: Sensitive
 set_nilm_detection_sensitivity:
-  name: Set NILM detection sensitivity
-  description: "Advanced/script action: set the NILM edge detection sensitivity preset for one configured Load Separation circuit. The normal user path is the NILM workspace."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured Load Separation circuit identifier, such as mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity.
       required: false
       selector:
         entity:
@@ -1355,8 +981,6 @@ set_nilm_detection_sensitivity:
             - number
             - switch
     preset:
-      name: Preset
-      description: NILM detection sensitivity preset for the circuit.
       required: true
       example: balanced
       selector:
@@ -1369,19 +993,13 @@ set_nilm_detection_sensitivity:
             - value: sensitive
               label: Sensitive
 set_energy_usage_settings:
-  name: Set energy usage settings
-  description: "Advanced/script action: set daily energy usage spike tracking for one configured circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
       required: false
       example: fridge
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -1392,8 +1010,6 @@ set_energy_usage_settings:
             - select
             - number
     window_days:
-      name: Window Days
-      description: Rolling energy baseline window in days for the circuit.
       required: false
       example: 7
       selector:
@@ -1402,8 +1018,6 @@ set_energy_usage_settings:
           max: 60
           mode: box
     daily_spike_ratio:
-      name: Daily Spike Ratio
-      description: Daily usage share that can trigger a possible-issue alert.
       required: false
       example: 0.25
       selector:
@@ -1413,19 +1027,13 @@ set_energy_usage_settings:
           step: 0.01
           mode: box
 set_energy_goal_settings:
-  name: Set energy goal settings
-  description: "Advanced/script action: set daily kWh goal tracking for one configured circuit. The normal user path is the circuit Daily Energy Goal number entity."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
       required: false
       example: fridge
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity.
       required: false
       selector:
         entity:
@@ -1437,8 +1045,6 @@ set_energy_goal_settings:
             - number
             - switch
     daily_goal_kwh:
-      name: Daily Goal kWh
-      description: Daily kWh target for this circuit; use 0 to clear it.
       required: false
       example: 12
       selector:
@@ -1448,8 +1054,6 @@ set_energy_goal_settings:
           step: 0.1
           mode: box
     goal_alert_ratio:
-      name: Goal Alert Ratio
-      description: Goal share that can trigger daily energy goal notices.
       required: false
       example: 1.0
       selector:
@@ -1459,19 +1063,13 @@ set_energy_goal_settings:
           step: 0.01
           mode: box
 set_demand_settings:
-  name: Set demand settings
-  description: "Advanced/script action: set rolling demand tracking for one configured circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
       required: false
       example: hvac
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -1482,8 +1080,6 @@ set_demand_settings:
             - select
             - number
     window_minutes:
-      name: Window Minutes
-      description: Rolling demand averaging window in minutes for the circuit.
       required: false
       example: 15
       selector:
@@ -1492,8 +1088,6 @@ set_demand_settings:
           max: 240
           mode: box
     demand_limit_w:
-      name: Demand Limit W
-      description: Optional rolling demand limit in watts for notifications.
       required: false
       example: 4500
       selector:
@@ -1502,19 +1096,13 @@ set_demand_settings:
           max: 100000
           mode: box
 set_capacity_settings:
-  name: Set capacity settings
-  description: "Advanced/script action: set breaker amp capacity tracking for one configured circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as ev or hvac. You can choose an analyzer entity instead.
       required: false
       example: ev
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -1525,8 +1113,6 @@ set_capacity_settings:
             - select
             - number
     breaker_amps:
-      name: Breaker Amps
-      description: Breaker or circuit rating in amps used for capacity diagnostics.
       required: false
       example: 40
       selector:
@@ -1536,8 +1122,6 @@ set_capacity_settings:
           step: 0.1
           mode: box
     warning_ratio:
-      name: Warning Ratio
-      description: Share of breaker amps that can trigger repeated capacity alerts.
       required: false
       example: 0.8
       selector:
@@ -1547,19 +1131,13 @@ set_capacity_settings:
           step: 0.01
           mode: box
 set_leg_imbalance_settings:
-  name: Set leg imbalance settings
-  description: "Advanced/script action: set split-phase leg imbalance thresholds for one circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional dual-phase circuit identifier, such as hvac. You can choose an analyzer entity instead.
       required: false
       example: hvac
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -1570,8 +1148,6 @@ set_leg_imbalance_settings:
             - select
             - number
     warning_ratio:
-      name: Warning Ratio
-      description: Leg imbalance ratio that can trigger repeated possible-issue alerts.
       required: false
       example: 0.5
       selector:
@@ -1581,8 +1157,6 @@ set_leg_imbalance_settings:
           step: 0.01
           mode: box
     minimum_total_power_w:
-      name: Minimum Total Power W
-      description: Total active watts required before leg imbalance is evaluated.
       required: false
       example: 500
       selector:
@@ -1592,19 +1166,13 @@ set_leg_imbalance_settings:
           step: 1
           mode: box
 set_metric_consistency_settings:
-  name: Set metric consistency settings
-  description: "Advanced/script action: set W, VA, and power-factor consistency thresholds for one circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as hvac or fridge. You can choose an analyzer entity instead.
       required: false
       example: hvac
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -1615,8 +1183,6 @@ set_metric_consistency_settings:
             - select
             - number
     apparent_power_tolerance_percent:
-      name: Apparent Power Tolerance Percent
-      description: Allowed VA mismatch percent before the metric state changes.
       required: false
       example: 15
       selector:
@@ -1626,8 +1192,6 @@ set_metric_consistency_settings:
           step: 0.1
           mode: box
     power_factor_tolerance:
-      name: Power Factor Tolerance
-      description: Allowed power factor mismatch before consistency is flagged.
       required: false
       example: 0.15
       selector:
@@ -1637,8 +1201,6 @@ set_metric_consistency_settings:
           step: 0.001
           mode: box
     minimum_apparent_power_va:
-      name: Minimum Apparent Power VA
-      description: Minimum apparent power before metric consistency is evaluated.
       required: false
       example: 80
       selector:
@@ -1648,19 +1210,13 @@ set_metric_consistency_settings:
           step: 1
           mode: box
 set_mains_balance_settings:
-  name: Set mains balance settings
-  description: "Advanced/script action: set mains-minus-monitored balance thresholds for a mains circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional mains aggregate circuit identifier, usually mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -1671,8 +1227,6 @@ set_mains_balance_settings:
             - select
             - number
     negative_tolerance_w:
-      name: Negative Tolerance W
-      description: Negative watts allowed before mains balance is flagged.
       required: false
       example: 100
       selector:
@@ -1682,19 +1236,13 @@ set_mains_balance_settings:
           step: 1
           mode: box
 set_solar_flow_settings:
-  name: Set solar flow settings
-  description: "Advanced/script action: set solar export and flexible-load thresholds for a mains circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional mains aggregate circuit identifier, usually mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -1705,8 +1253,6 @@ set_solar_flow_settings:
             - select
             - number
     export_tolerance_w:
-      name: Export Tolerance W
-      description: Extra export watts allowed before solar flow is flagged inconsistent.
       required: false
       example: 100
       selector:
@@ -1716,8 +1262,6 @@ set_solar_flow_settings:
           step: 1
           mode: box
     solar_surplus_threshold_w:
-      name: Solar Surplus Threshold W
-      description: Export watts needed before surplus is considered available.
       required: false
       example: 500
       selector:
@@ -1727,8 +1271,6 @@ set_solar_flow_settings:
           step: 1
           mode: box
     high_solar_surplus_threshold_w:
-      name: High Solar Surplus Threshold W
-      description: Export watts that classify the current surplus as high.
       required: false
       example: 1500
       selector:
@@ -1738,8 +1280,6 @@ set_solar_flow_settings:
           step: 1
           mode: box
     flexible_load_running_threshold_w:
-      name: Flexible Load Running Threshold W
-      description: Watts that classify a flexible load as currently active.
       required: false
       example: 100
       selector:
@@ -1749,19 +1289,13 @@ set_solar_flow_settings:
           step: 1
           mode: box
 set_activity_alert_settings:
-  name: Set activity alert settings
-  description: "Advanced/script action: set user-configured activity alert limits for one circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
       required: false
       example: fridge
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -1772,8 +1306,6 @@ set_activity_alert_settings:
             - select
             - number
     max_active_minutes:
-      name: Max Active Minutes
-      description: Notify when the circuit stays active longer than this many minutes.
       required: false
       example: 45
       selector:
@@ -1782,8 +1314,6 @@ set_activity_alert_settings:
           max: 10080
           mode: box
     max_idle_minutes:
-      name: Max Idle Minutes
-      description: Notify when the circuit shows no activity longer than this many minutes.
       required: false
       example: 120
       selector:
@@ -1792,19 +1322,13 @@ set_activity_alert_settings:
           max: 10080
           mode: box
 set_billing_cycle_settings:
-  name: Set billing cycle settings
-  description: "Advanced/script action: set billing-cycle usage forecasting for one configured circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
       required: false
       example: fridge
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -1815,8 +1339,6 @@ set_billing_cycle_settings:
             - select
             - number
     cycle_start_day:
-      name: Cycle Start Day
-      description: Day of the month when the utility billing cycle starts.
       required: false
       example: 15
       selector:
@@ -1825,8 +1347,6 @@ set_billing_cycle_settings:
           max: 31
           mode: box
     budget_kwh:
-      name: Budget kWh
-      description: Optional kWh budget for the current billing cycle.
       required: false
       example: 300
       selector:
@@ -1835,8 +1355,6 @@ set_billing_cycle_settings:
           max: 100000
           mode: box
     budget_alert_ratio:
-      name: Budget Alert Ratio
-      description: Budget share that can trigger projected-over-budget alerts.
       required: false
       example: 1.0
       selector:
@@ -1846,19 +1364,13 @@ set_billing_cycle_settings:
           step: 0.01
           mode: box
 set_cost_settings:
-  name: Set cost settings
-  description: "Advanced/script action: set the cost-cycle start day for one configured circuit. The normal user path is the integration's cost controls."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
       required: false
       example: fridge
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -1869,8 +1381,6 @@ set_cost_settings:
             - select
             - number
     cycle_start_day:
-      name: Cycle Start Day
-      description: Day of the month when the utility billing cycle starts.
       required: false
       example: 1
       selector:
@@ -1879,19 +1389,13 @@ set_cost_settings:
           max: 31
           mode: box
 set_standby_settings:
-  name: Set standby settings
-  description: "Advanced/script action: set Always On and standby tracking for one configured circuit. The normal user path is Advanced Circuit Settings."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
       required: false
       example: fridge
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -1902,8 +1406,6 @@ set_standby_settings:
             - select
             - number
     window_hours:
-      name: Window Hours
-      description: Rolling Always On analysis window in hours for the circuit.
       required: false
       example: 24
       selector:
@@ -1912,8 +1414,6 @@ set_standby_settings:
           max: 168
           mode: box
     standby_threshold_w:
-      name: Standby Threshold W
-      description: Power at or below this wattage is treated as standby.
       required: false
       example: 8
       selector:
@@ -1922,8 +1422,6 @@ set_standby_settings:
           max: 100000
           mode: box
     always_on_alert_w:
-      name: Always On Alert W
-      description: Optional Always On wattage limit for possible-issue alerts.
       required: false
       example: 25
       selector:
@@ -1932,19 +1430,13 @@ set_standby_settings:
           max: 100000
           mode: box
 set_utility_comparison_settings:
-  name: Set utility comparison settings
-  description: "Advanced/script action: compare utility-reported kWh with mains or summed circuit kWh sensors. The normal user path is Configure > Utility / Opower Comparison."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional aggregate circuit identifier, usually mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -1955,30 +1447,22 @@ set_utility_comparison_settings:
             - select
             - number
     utility_energy_entity:
-      name: Utility Energy Entity
-      description: Utility kWh sensor representing the same period as measured data.
       required: false
       example: sensor.opower_current_bill_usage
       selector:
         entity:
           domain: sensor
     utility_cost_entity:
-      name: Utility Cost Entity
-      description: Optional Opower or utility cost sensor for the same billing period. Its cost divided by the utility kWh source becomes the analyzer-wide electricity rate.
       required: false
       selector:
         entity:
           domain: sensor
     utility_statistic_id:
-      name: Recorder Statistic ID (advanced)
-      description: Optional utility kWh recorder statistic without an entity; otherwise use Utility Energy Entity.
       required: false
       example: opower:utility_elec_consumption
       selector:
         text:
     utility_source_type:
-      name: Utility Source Type
-      description: Choose entity for sensor state, statistics for Opower data, or auto.
       required: false
       example: auto
       selector:
@@ -1988,8 +1472,6 @@ set_utility_comparison_settings:
             - entity
             - statistics
     utility_statistic_period:
-      name: Utility Statistic Period
-      description: Recorder statistic period to compare for Opower or utility statistics.
       required: false
       example: day
       selector:
@@ -1999,8 +1481,6 @@ set_utility_comparison_settings:
             - day
             - month
     measured_energy_entities:
-      name: Measured Energy Entities
-      description: Optional mains kWh sensors; leave empty to sum configured load circuit energy sensors.
       required: false
       example:
         - sensor.panel_import_energy
@@ -2009,8 +1489,6 @@ set_utility_comparison_settings:
           domain: sensor
           multiple: true
     tolerance_percent:
-      name: Tolerance Percent
-      description: Percent difference allowed before repeated observations create a possible-issue alert.
       required: false
       example: 10
       selector:
@@ -2020,19 +1498,13 @@ set_utility_comparison_settings:
           step: 0.1
           mode: box
 start_maintenance:
-  name: Pause alerts
-  description: "Advanced/script action: pause appliance alert notifications while a circuit is being serviced. The normal user path is the circuit Pause alerts switch entity."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
       required: false
       example: fridge
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity.
       required: false
       selector:
         entity:
@@ -2044,40 +1516,28 @@ start_maintenance:
             - number
             - switch
     note:
-      name: Note
-      description: Optional pause note stored with the circuit.
       required: false
       example: Cleaned coils
       selector:
         text:
     duration:
-      name: Duration
-      description: How long alerts should stay paused.
       required: false
       example: "02:00:00"
       selector:
         duration:
     relearn_on_end:
-      name: Relearn On End
-      description: Relearn the circuit baseline when alerts resume.
       required: false
       example: false
       selector:
         boolean:
 end_maintenance:
-  name: Resume alerts
-  description: "Advanced/script action: resume appliance alert notifications for a serviced circuit. The normal user path is the circuit Pause alerts switch entity."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
       required: false
       example: fridge
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, number, or switch entity.
       required: false
       selector:
         entity:
@@ -2089,26 +1549,18 @@ end_maintenance:
             - number
             - switch
     relearn:
-      name: Relearn
-      description: Relearn the circuit baseline after resuming alerts.
       required: false
       example: false
       selector:
         boolean:
 mark_alert_expected:
-  name: Mark alert expected
-  description: "Advanced/script action: mark an alert pattern as expected so repeated notifications are suppressed. The normal user path is the evidence panel button."
   fields:
     alert_id:
-      name: Alert ID
-      description: Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert.
       required: false
       example: circuitsetup_energy_analyzer_alert_fridge_reactive_power
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for a circuit with exactly one active alert.
       required: false
       selector:
         entity:
@@ -2119,19 +1571,13 @@ mark_alert_expected:
             - select
             - number
 mark_alert_confirmed:
-  name: Confirm alert issue
-  description: "Advanced/script action: confirm an alert as a real issue. For HVAC efficiency alerts, the affected abnormal episodes are excluded from future baselines. The normal user path is the evidence panel button."
   fields:
     alert_id:
-      name: Alert ID
-      description: Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert.
       required: false
       example: circuitsetup_energy_analyzer_alert_hvac_hvac_response_slower
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for a circuit with exactly one active alert.
       required: false
       selector:
         entity:
@@ -2142,19 +1588,13 @@ mark_alert_confirmed:
             - select
             - number
 mark_alert_unhelpful:
-  name: Mark alert unhelpful
-  description: "Advanced/script action: mark an alert pattern as unhelpful so repeated notifications are suppressed. The normal user path is the evidence panel button."
   fields:
     alert_id:
-      name: Alert ID
-      description: Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert.
       required: false
       example: circuitsetup_energy_analyzer_alert_fridge_reactive_power
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for a circuit with exactly one active alert.
       required: false
       selector:
         entity:
@@ -2165,19 +1605,13 @@ mark_alert_unhelpful:
             - select
             - number
 mark_nilm_appliance_correct:
-  name: Mark NILM appliance correct
-  description: "Advanced/script action: mark an estimated NILM appliance notification as correct. The normal user path is the evidence panel button."
   fields:
     alert_id:
-      name: Alert ID
-      description: Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert.
       required: false
       example: circuitsetup_energy_analyzer_alert_mains_nilm_appliance_finished
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for a circuit with exactly one active alert.
       required: false
       selector:
         entity:
@@ -2188,19 +1622,13 @@ mark_nilm_appliance_correct:
             - select
             - number
 mark_nilm_appliance_wrong:
-  name: Mark NILM appliance wrong
-  description: "Advanced/script action: mark an estimated NILM appliance notification as the wrong appliance. The normal user path is the evidence panel button."
   fields:
     alert_id:
-      name: Alert ID
-      description: Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert.
       required: false
       example: circuitsetup_energy_analyzer_alert_mains_nilm_appliance_finished
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for a circuit with exactly one active alert.
       required: false
       selector:
         entity:
@@ -2211,19 +1639,13 @@ mark_nilm_appliance_wrong:
             - select
             - number
 merge_nilm_signatures:
-  name: Merge NILM signatures
-  description: "Advanced/script action: merge two experimental NILM signatures that represent the same load. The normal user path is the NILM/evidence panel button."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead.
       required: false
       example: mains
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -2234,33 +1656,23 @@ merge_nilm_signatures:
             - select
             - number
     source_signature_id:
-      name: Source Signature ID
-      description: Signature identifier to merge into the target signature.
       required: true
       example: signature_2
       selector:
         text:
     target_signature_id:
-      name: Target Signature ID
-      description: Signature identifier that should keep the merged history.
       required: true
       example: signature_1
       selector:
         text:
 recalculate_setting_recommendations:
-  name: Recalculate setting recommendations
-  description: "Advanced/script action: recalculate advanced setting recommendations. The normal user path is the Recalculate Suggestions button entity and Suggested Settings UI."
   fields:
     circuit_id:
-      name: Circuit ID
-      description: Optional configured circuit identifier to recalculate; choose an analyzer entity, or leave empty for all circuits.
       required: false
       example: fridge
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit, such as a health summary sensor, running binary sensor, control button, select, or number entity.
       required: false
       selector:
         entity:
@@ -2271,19 +1683,13 @@ recalculate_setting_recommendations:
             - select
             - number
 apply_setting_recommendation:
-  name: Apply setting recommendation
-  description: "Advanced/script action: apply an advanced setting recommendation by ID or by selecting an analyzer entity with exactly one pending recommendation. The normal user path is the Suggested Settings UI button."
   fields:
     recommendation_id:
-      name: Recommendation ID
-      description: Optional recommendation identifier shown with the advanced setting suggestion. Use this when more than one recommendation exists for the target circuit.
       required: false
       example: fridge:daily_spike_ratio:v1
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit. If the circuit has exactly one pending recommendation, it is applied without typing the recommendation ID.
       required: false
       selector:
         entity:
@@ -2295,26 +1701,18 @@ apply_setting_recommendation:
             - select
             - number
     entry_id:
-      name: Entry ID
-      description: Optional integration entry ID to use when more than one analyzer entry has the same recommendation ID.
       required: false
       example: 01JZEXAMPLEENTRYID
       selector:
         text:
 deny_setting_recommendation:
-  name: Deny setting recommendation
-  description: "Advanced/script action: deny an advanced setting recommendation by ID or by selecting an analyzer entity with exactly one pending recommendation. The normal user path is the Suggested Settings UI button."
   fields:
     recommendation_id:
-      name: Recommendation ID
-      description: Optional recommendation identifier shown with the advanced setting suggestion. Use this when more than one recommendation exists for the target circuit.
       required: false
       example: fridge:daily_spike_ratio:v1
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit. If the circuit has exactly one pending recommendation, it is denied without typing the recommendation ID.
       required: false
       selector:
         entity:
@@ -2326,26 +1724,18 @@ deny_setting_recommendation:
             - select
             - number
     entry_id:
-      name: Entry ID
-      description: Optional integration entry ID to use when more than one analyzer entry has the same recommendation ID.
       required: false
       example: 01JZEXAMPLEENTRYID
       selector:
         text:
 dismiss_setting_recommendation:
-  name: Dismiss setting recommendation
-  description: "Advanced/script action: dismiss an advanced setting recommendation by ID or by selecting an analyzer entity with exactly one pending recommendation. The normal user path is the Suggested Settings UI button."
   fields:
     recommendation_id:
-      name: Recommendation ID
-      description: Optional recommendation identifier shown with the advanced setting suggestion. Use this when more than one recommendation exists for the target circuit.
       required: false
       example: fridge:daily_spike_ratio:v1
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit. If the circuit has exactly one pending recommendation, it is dismissed without typing the recommendation ID.
       required: false
       selector:
         entity:
@@ -2357,26 +1747,18 @@ dismiss_setting_recommendation:
             - select
             - number
     entry_id:
-      name: Entry ID
-      description: Optional integration entry ID to use when more than one analyzer entry has the same recommendation ID.
       required: false
       example: 01JZEXAMPLEENTRYID
       selector:
         text:
 undo_setting_recommendation:
-  name: Undo setting recommendation
-  description: "Advanced/script action: undo an applied advanced setting recommendation by ID or by selecting an analyzer entity with exactly one pending recommendation. The normal user path is the Suggested Settings UI button."
   fields:
     recommendation_id:
-      name: Recommendation ID
-      description: Optional recommendation identifier shown with the advanced setting suggestion. Use this when more than one recommendation exists for the target circuit.
       required: false
       example: fridge:daily_spike_ratio:v1
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit. If the circuit has exactly one pending recommendation, it is undone without typing the recommendation ID.
       required: false
       selector:
         entity:
@@ -2388,26 +1770,18 @@ undo_setting_recommendation:
             - select
             - number
     entry_id:
-      name: Entry ID
-      description: Optional integration entry ID to use when more than one analyzer entry has the same recommendation ID.
       required: false
       example: 01JZEXAMPLEENTRYID
       selector:
         text:
 reset_setting_recommendation:
-  name: Reset setting recommendation
-  description: "Advanced/script action: reset an advanced setting recommendation's setting to its built-in default by ID or by selecting an analyzer entity with exactly one pending recommendation. The normal user path is the Suggested Settings UI button."
   fields:
     recommendation_id:
-      name: Recommendation ID
-      description: Optional recommendation identifier shown with the advanced setting suggestion. Use this when more than one recommendation exists for the target circuit.
       required: false
       example: fridge:daily_spike_ratio:v1
       selector:
         text:
     entity_id:
-      name: Analyzer Entity
-      description: Optional analyzer entity for the circuit. If the circuit has exactly one pending recommendation, its setting is reset without typing the recommendation ID.
       required: false
       selector:
         entity:
@@ -2419,8 +1793,6 @@ reset_setting_recommendation:
             - select
             - number
     entry_id:
-      name: Entry ID
-      description: Optional integration entry ID to use when more than one analyzer entry has the same recommendation ID.
       required: false
       example: 01JZEXAMPLEENTRYID
       selector:

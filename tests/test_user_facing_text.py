@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import struct
 import subprocess
+from copy import deepcopy
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).parents[1]
 INTEGRATION_DIR = ROOT / "custom_components" / "circuitsetup_energy_analyzer"
+TRANSLATIONS_PATH = INTEGRATION_DIR / "translations" / "en.json"
 FRONTEND_DIR = INTEGRATION_DIR / "frontend"
 PANEL_ASSET = FRONTEND_DIR / "energy-analyzer-panel.js"
 PANEL_MAIN_ASSET = FRONTEND_DIR / "energy-analyzer-panel-main.js"
@@ -36,6 +40,155 @@ PANEL_RUNTIME_ASSETS = (
     PANEL_MAIN_ASSET,
     *PANEL_METHOD_ASSETS,
     DASHBOARD_GRAPHS_ASSET,
+)
+
+INCOMPATIBLE_PUBLISHED_SENSOR_STATES = {
+    "health_summary": (
+        "Learning",
+        "Ready",
+        "Needs data",
+        "Observation recorded",
+        "Paused",
+        "Possible issue",
+        "Mixed observation",
+        "NILM review",
+        "Estimated",
+    ),
+    "activity_summary": (
+        "Running",
+        "Idle",
+        "Unavailable",
+        "On",
+        "Standby",
+        "Off",
+        "No Activity",
+    ),
+    "energy_summary": (
+        "Needs Energy Data",
+        "High Usage",
+        "Watch",
+        "Learning",
+        "Normal",
+    ),
+    "energy_dashboard_status": (
+        "Ready",
+        "Power Ready",
+        "Needs Metadata",
+        "Needs Energy Source",
+    ),
+    "nilm_topology_status": (
+        "No Match",
+        "Not Evaluated",
+        "Unknown Topology",
+        "Topology Mismatch",
+        "Leg Mismatch",
+        "Consistent",
+        "Compound Unknown Topology",
+        "Low Confidence Match",
+    ),
+    "energy_usage_status": (
+        "Waiting For Energy Change",
+        "Learning",
+        "Tracking",
+        "Over Threshold",
+        "Context Explained",
+    ),
+    "energy_goal_status": ("Unconfigured", "Tracking", "Near Goal", "Over Goal"),
+    "demand_peak_status": (
+        "Unavailable",
+        "Below Monthly Peak",
+        "Monthly Peak",
+        "Near Monthly Peak",
+    ),
+    "demand_status": ("Unconfigured", "Tracking", "Over Limit", "Context Explained"),
+    "capacity_status": ("Unconfigured", "Missing Current", "Tracking", "Over Limit"),
+    "balance_status": (
+        "Missing Mains",
+        "No Monitored Circuits",
+        "Negative Balance",
+        "Tracking",
+    ),
+    "solar_flow_status": (
+        "Missing Mains",
+        "Missing Generation",
+        "Inconsistent Export",
+        "No Generation",
+        "Exporting",
+        "Importing",
+        "Self Powered",
+    ),
+    "solar_surplus_status": (
+        "Missing Mains",
+        "Missing Generation",
+        "Inconsistent Export",
+        "No Generation",
+        "High Surplus",
+        "Surplus Available",
+        "No Surplus",
+    ),
+    "utility_comparison_status": (
+        "Unconfigured",
+        "Missing Utility",
+        "Missing Measured",
+        "Tracking",
+        "Mismatch",
+    ),
+    "circuit_mode": (
+        "Single Phase",
+        "Dual Phase",
+        "Mixed",
+        "Mains NILM",
+        "Unknown",
+    ),
+    "power_flow": (
+        "Load",
+        "Generation / Solar Export",
+        "Mains Net / Import-Export",
+        "Unknown",
+    ),
+    "weather_context": (
+        "No Temperature Source",
+        "Learning",
+        "Weather Correlated",
+        "Above Weather-Adjusted Range",
+    ),
+    "rain_pump_correlation": (
+        "Unconfigured",
+        "Learning",
+        "Normal",
+        "Rain Explained",
+        "Compressor Explained",
+        "Weather Explained",
+        "Possible Excess Pump Activity",
+        "Possible Missing Pump Activity",
+        "Possible Flow Without Load",
+        "Possible Load Without Flow",
+        "Possible Sensor Problem",
+        "Sensor Unavailable",
+    ),
+    "water_flow_correlation": (
+        "Unconfigured",
+        "Learning",
+        "Normal",
+        "Rain Explained",
+        "Compressor Explained",
+        "Weather Explained",
+        "Possible Excess Pump Activity",
+        "Possible Missing Pump Activity",
+        "Possible Flow Without Load",
+        "Possible Load Without Flow",
+        "Possible Sensor Problem",
+        "Sensor Unavailable",
+    ),
+}
+
+LEGACY_TITLE_CASE_SELECT_OPTIONS = (
+    "Quiet",
+    "Balanced",
+    "Sensitive",
+    "Simple",
+    "Standard",
+    "Expert",
 )
 
 
@@ -116,6 +269,8 @@ const context = {{
   Intl,
   URL,
   URLSearchParams,
+  setTimeout,
+  clearTimeout,
   requestAnimationFrame(callback) {{ callback(); }},
   Event: class {{}},
   CustomEvent: class {{}},
@@ -197,10 +352,120 @@ function makeAction(service, data = {{}}) {{
     subprocess.run(["node", "-e", script], check=True, cwd=ROOT)
 
 
-def _translations() -> dict:
+def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise AssertionError(f"duplicate translation key: {key}")
+        result[key] = value
+    return result
+
+
+def _load_translation_catalog() -> dict[str, object]:
     return json.loads(
-        (INTEGRATION_DIR / "translations" / "en.json").read_text(encoding="utf-8")
+        TRANSLATIONS_PATH.read_text(encoding="utf-8"),
+        object_pairs_hook=_reject_duplicate_json_keys,
     )
+
+
+def _translations() -> dict[str, object]:
+    return json.loads(TRANSLATIONS_PATH.read_text(encoding="utf-8"))
+
+
+def test_translation_catalog_loader_rejects_duplicate_keys() -> None:
+    with pytest.raises(AssertionError, match="duplicate translation key: duplicate"):
+        json.loads(
+            '{"duplicate": 1, "duplicate": 2}',
+            object_pairs_hook=_reject_duplicate_json_keys,
+        )
+
+    assert json.loads(
+        '{"valid": {"key": "value"}}',
+        object_pairs_hook=_reject_duplicate_json_keys,
+    ) == {"valid": {"key": "value"}}
+
+
+def test_translation_catalog_has_no_duplicate_keys() -> None:
+    assert isinstance(_load_translation_catalog(), dict)
+
+
+def test_translation_catalog_uses_supported_custom_integration_shape() -> None:
+    assert TRANSLATIONS_PATH.is_file()
+    catalog = _translations()
+
+    assert "services" in catalog
+    assert "config_panel" in catalog
+    assert not (INTEGRATION_DIR / "strings.json").exists()
+
+
+def _service_behavior_schema(service: dict[str, object]) -> dict[str, object]:
+    result = deepcopy(service)
+    result.pop("name", None)
+    result.pop("description", None)
+    for section in result.get("sections", {}).values():
+        section.pop("name", None)
+        section.pop("description", None)
+    for field in result.get("fields", {}).values():
+        field.pop("name", None)
+        field.pop("description", None)
+    return result
+
+
+def test_service_copy_is_owned_by_the_translation_catalog() -> None:
+    services = yaml.safe_load(
+        (INTEGRATION_DIR / "services.yaml").read_text(encoding="utf-8")
+    )
+    catalog = _translations()["services"]
+
+    assert set(catalog) == set(services)
+    behavior_schema = {
+        service_id: _service_behavior_schema(service)
+        for service_id, service in services.items()
+    }
+    assert hashlib.sha256(
+        json.dumps(
+            behavior_schema,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest() == "c10c676b2fae6a9e4d08be17a06a12b6e234e266c7839fa60b321a1b14e2c763"
+    for service_id, service in services.items():
+        assert "name" not in service
+        assert "description" not in service
+        assert catalog[service_id]["name"]
+        assert catalog[service_id]["description"]
+        for field_id, field in service.get("fields", {}).items():
+            assert "name" not in field
+            assert "description" not in field
+            assert catalog[service_id]["fields"][field_id]["name"]
+            assert catalog[service_id]["fields"][field_id]["description"]
+
+
+def test_published_legacy_option_values_remain_exact() -> None:
+    from custom_components.circuitsetup_energy_analyzer.select import (
+        DASHBOARD_LAYOUT_OPTIONS,
+        SENSITIVITY_OPTIONS,
+    )
+
+    assert (*SENSITIVITY_OPTIONS, *DASHBOARD_LAYOUT_OPTIONS) == (
+        LEGACY_TITLE_CASE_SELECT_OPTIONS
+    )
+
+
+def test_incompatible_published_states_are_explicitly_excluded() -> None:
+    catalog = _translations()
+    sensors = catalog["entity"]["sensor"]
+
+    for key, incompatible_states in INCOMPATIBLE_PUBLISHED_SENSOR_STATES.items():
+        catalog_states = set(sensors[key].get("state", {}))
+        assert catalog_states.isdisjoint(incompatible_states)
+
+    select_states = {
+        raw_state
+        for description in catalog["entity"]["select"].values()
+        for raw_state in (description.get("state") or {})
+    }
+    assert select_states.isdisjoint(LEGACY_TITLE_CASE_SELECT_OPTIONS)
 
 
 def test_hvac_associations_card_text_has_required_labels_and_placeholders() -> None:
@@ -840,20 +1105,23 @@ def test_config_flow_descriptions_do_not_show_non_actionable_mapping_suggestions
 
 def test_service_fields_have_human_readable_names_and_descriptions() -> None:
     services = yaml.safe_load((INTEGRATION_DIR / "services.yaml").read_text())
+    catalog = _translations()["services"]
 
-    for service in services.values():
-        for field_name, field in service.get("fields", {}).items():
-            assert field["name"] == EXPECTED_SERVICE_FIELD_NAMES[field_name]
-            assert "_" not in field["name"]
-            assert field["description"].endswith(".")
-            assert 20 <= len(field["description"]) <= 160
+    for service_name, service in services.items():
+        for field_name in service.get("fields", {}):
+            translated = catalog[service_name]["fields"][field_name]
+            assert translated["name"] == EXPECTED_SERVICE_FIELD_NAMES[field_name]
+            assert "_" not in translated["name"]
+            assert translated["description"].endswith(".")
+            assert 20 <= len(translated["description"]) <= 160
 
 
 def test_services_are_labeled_as_advanced_script_paths() -> None:
     services = yaml.safe_load((INTEGRATION_DIR / "services.yaml").read_text())
+    catalog = _translations()["services"]
 
-    for service_name, service in services.items():
-        description = service["description"]
+    for service_name in services:
+        description = catalog[service_name]["description"]
         assert description.startswith("Advanced/script action:"), service_name
         assert "normal user path" in description.lower(), service_name
 
@@ -4782,6 +5050,7 @@ def test_alert_evidence_panel_reads_fallback_text_from_panel_config() -> None:
     _run_panel_node_script(
         """
 const panel = new context.Panel();
+panel._panelEnglishText = null;
 panel._panel = {
   config: {
     text: {
@@ -5978,6 +6247,194 @@ panel.connectedCallback();
 assert.equal(panel._hass, authenticatedHass);
 assert.equal(loads, 1);
 assert.equal(Object.prototype.hasOwnProperty.call(panel, "hass"), false);
+"""
+    )
+
+
+def test_panel_loads_active_language_text_after_english_first_render() -> None:
+    _run_panel_node_script(
+        r"""
+(async () => {
+  const panel = new context.Panel();
+  let loads = 0;
+  let resolveTranslation;
+  panel._loadEvidenceIfRouteChanged = () => {};
+  panel.hass = {
+    language: "en",
+    loadBackendTranslation(category, domain) {
+      loads += 1;
+      assert.equal(category, "config_panel");
+      assert.equal(domain, "circuitsetup_energy_analyzer");
+      return new Promise((resolve) => { resolveTranslation = resolve; });
+    },
+  };
+
+  assert.equal(panel._panelText("headers.alert_evidence"), "Alert Evidence");
+  assert.equal(
+    panel._panelTextFormat("headers.nilm_workspace_message_for_circuit", { name: "雪 {0}" }),
+    "Experimental NILM for 雪 {0}: source power is measured while components are estimated.",
+  );
+  panel._panel.config.text.headers.alert_evidence = "MUTATED source";
+  panel._panel = { config: { text: { headers: { alert_evidence: "REPLACED panel" } } } };
+  panel._payload = { text: { headers: { alert_evidence: "REPLACED payload" } } };
+  panel._dashboardConfig = { text: { headers: { alert_evidence: "REPLACED dashboard" } } };
+  assert.equal(panel._panelEnglishText.headers.alert_evidence, "Alert Evidence");
+  assert.equal(panel._panelText("headers.alert_evidence"), "Alert Evidence");
+  assert.equal(loads, 1);
+
+  let localizedValues;
+  resolveTranslation((key, values) => {
+    if (key.endsWith(".headers.alert_evidence")) return "ALT evidence";
+    if (key.endsWith(".headers.nilm_workspace_message_for_circuit")) return `ALT ${values.name}`;
+    if (key.endsWith(".errors.load_alert_evidence")) {
+      localizedValues = values;
+      return `ALT ${values.path}: ${values.message}`;
+    }
+    return key;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(panel._panelText("headers.alert_evidence"), "ALT evidence");
+  assert.equal(
+    panel._panelTextFormat("headers.nilm_workspace_message_for_circuit", { name: "雪 {0}" }),
+    "ALT 雪 {0}",
+  );
+  assert.equal(
+    panel._panelTextFormat("errors.load_alert_evidence", { path: 0, message: "雪 {0}" }),
+    "ALT 0: 雪 {0}",
+  );
+  assert.equal(localizedValues.path, "0");
+  assert.equal(localizedValues.message, "雪 {0}");
+  panel.hass = { language: "en", states: { changed: true } };
+  assert.equal(loads, 1);
+  assert.equal(panel._panel.config.text.headers.alert_evidence, "REPLACED panel");
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+"""
+    )
+
+
+def test_panel_translation_failures_fall_back_per_key_and_ignore_stale_results() -> None:
+    _run_panel_node_script(
+        r"""
+(async () => {
+  const makePanel = () => {
+    const panel = new context.Panel();
+    panel._loadEvidenceIfRouteChanged = () => {};
+    return panel;
+  };
+  const english = "Alert Evidence";
+
+  for (const behavior of [
+    "absent",
+    "throw",
+    "reject",
+    "invalid",
+  ]) {
+    const panel = makePanel();
+    let loads = 0;
+    panel.hass = {
+      language: behavior,
+      loadBackendTranslation() {
+        loads += 1;
+        if (behavior === "absent") return undefined;
+        if (behavior === "throw") throw new Error("loader failed");
+        if (behavior === "reject") return Promise.reject(new Error("loader failed"));
+        return Promise.resolve("not a localizer");
+      },
+    };
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(loads, 1);
+    assert.equal(panel._panelText("headers.alert_evidence"), english);
+  }
+
+  const fallbackPanel = makePanel();
+  fallbackPanel.hass = {
+    language: "fallbacks",
+    loadBackendTranslation: async () => (key) => {
+      if (key.endsWith(".headers.alert_evidence")) return "ALT evidence";
+      if (key.endsWith(".headers.suggested_settings")) return key;
+      if (key.endsWith(".headers.appliance_detail")) return "Translation error: malformed";
+      if (key.endsWith(".headers.nilm_workspace")) throw new Error("formatter failed");
+      if (key.endsWith(".errors.load_alert_evidence")) return "Translation error: malformed";
+      return "";
+    },
+  };
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(fallbackPanel._panelText("headers.alert_evidence"), "ALT evidence");
+  assert.equal(fallbackPanel._panelText("headers.suggested_settings"), "Suggested Settings");
+  assert.equal(fallbackPanel._panelText("headers.appliance_detail"), "Appliance Detail");
+  assert.equal(fallbackPanel._panelText("headers.nilm_workspace"), "Load Separation");
+  assert.equal(
+    fallbackPanel._panelTextFormat("errors.load_alert_evidence", { path: 0, message: "" }),
+    "Could not load alert evidence from 0: ",
+  );
+  assert.equal(
+    fallbackPanel._panelTextFormat("errors.load_alert_evidence", { path: {}, message: undefined }),
+    "Could not load alert evidence from : ",
+  );
+  assert.equal(
+    fallbackPanel._panelTextFormat("errors.load_alert_evidence", { path: false, message: 42 }),
+    "Could not load alert evidence from false: 42",
+  );
+
+  const racePanel = makePanel();
+  const pending = {};
+  let loads = 0;
+  const load = (language) => {
+    loads += 1;
+    return new Promise((resolve) => { pending[language] = resolve; });
+  };
+  racePanel.hass = { language: "old", loadBackendTranslation: () => load("old") };
+  racePanel.hass = { language: "new", loadBackendTranslation: () => load("new") };
+  assert.equal(loads, 2);
+  pending.new((key) => key.endsWith(".headers.alert_evidence") ? "NEW evidence" : key);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(racePanel._panelText("headers.alert_evidence"), "NEW evidence");
+  pending.old((key) => key.endsWith(".headers.alert_evidence") ? "OLD evidence" : key);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(racePanel._panelText("headers.alert_evidence"), "NEW evidence");
+})().catch((error) => { console.error(error); process.exitCode = 1; });
+"""
+    )
+
+
+def test_panel_translation_completion_preserves_focused_control_state() -> None:
+    _run_panel_node_script(
+        r"""
+(async () => {
+  const panel = new context.Panel();
+  panel.isConnected = true;
+  panel._loadEvidenceIfRouteChanged = () => {};
+  let renders = 0;
+  panel._render = () => { renders += 1; };
+  let blur;
+  const control = {
+    value: "draft 雪 {0}",
+    matches: (selector) => selector === "input, select, textarea",
+    addEventListener: (_event, callback) => { blur = callback; },
+  };
+  panel.shadowRoot.activeElement = control;
+  panel._pendingConfirmationAction = "relearn_baseline";
+  const draft = new Map([["signature", "draft"]]);
+  panel._nilmLabelDrafts = draft;
+
+  let resolveTranslation;
+  panel.hass = {
+    language: "focused",
+    loadBackendTranslation: () => new Promise((resolve) => { resolveTranslation = resolve; }),
+  };
+  resolveTranslation((key) => key.endsWith(".headers.alert_evidence") ? "ALT evidence" : key);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(renders, 0);
+  assert.equal(panel._pendingConfirmationAction, "relearn_baseline");
+  assert.equal(panel._nilmLabelDrafts, draft);
+  panel.shadowRoot.activeElement = null;
+  blur();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(renders, 1);
+  assert.equal(panel._pendingConfirmationAction, "relearn_baseline");
+  assert.equal(panel._nilmLabelDrafts, draft);
+  assert.equal(panel._panelText("headers.alert_evidence"), "ALT evidence");
+})().catch((error) => { console.error(error); process.exitCode = 1; });
 """
     )
 
@@ -8694,6 +9151,7 @@ def test_daily_action_services_document_entity_targets() -> None:
     services = yaml.safe_load(
         (INTEGRATION_DIR / "services.yaml").read_text(encoding="utf-8")
     )
+    catalog = _translations()["services"]
 
     for service_name in (
         "relearn_baseline",
@@ -8706,7 +9164,9 @@ def test_daily_action_services_document_entity_targets() -> None:
         fields = services[service_name]["fields"]
         assert fields["circuit_id"]["required"] is False
         assert fields["entity_id"]["required"] is False
-        assert "analyzer entity" in fields["entity_id"]["description"]
+        assert "analyzer entity" in catalog[service_name]["fields"]["entity_id"][
+            "description"
+        ]
         assert fields["entity_id"]["selector"] == {
             "entity": {
                 "domain": [
@@ -8725,6 +9185,7 @@ def test_advanced_circuit_services_document_entity_targets() -> None:
     services = yaml.safe_load(
         (INTEGRATION_DIR / "services.yaml").read_text(encoding="utf-8")
     )
+    catalog = _translations()["services"]
 
     for service_name in (
         "export_diagnostics",
@@ -8747,13 +9208,16 @@ def test_advanced_circuit_services_document_entity_targets() -> None:
         fields = services[service_name]["fields"]
         assert fields["circuit_id"]["required"] is False
         assert fields["entity_id"]["required"] is False
-        assert "analyzer entity" in fields["entity_id"]["description"]
+        assert "analyzer entity" in catalog[service_name]["fields"]["entity_id"][
+            "description"
+        ]
 
 
 def test_nilm_signature_services_document_entity_targets() -> None:
     services = yaml.safe_load(
         (INTEGRATION_DIR / "services.yaml").read_text(encoding="utf-8")
     )
+    catalog = _translations()["services"]
 
     for service_name in (
         "label_nilm_signature",
@@ -8778,13 +9242,16 @@ def test_nilm_signature_services_document_entity_targets() -> None:
         fields = services[service_name]["fields"]
         assert fields["circuit_id"]["required"] is False
         assert fields["entity_id"]["required"] is False
-        assert "analyzer entity" in fields["entity_id"]["description"]
+        assert "analyzer entity" in catalog[service_name]["fields"]["entity_id"][
+            "description"
+        ]
 
 
 def test_alert_feedback_services_document_entity_targets() -> None:
     services = yaml.safe_load(
         (INTEGRATION_DIR / "services.yaml").read_text(encoding="utf-8")
     )
+    catalog = _translations()["services"]
 
     for service_name in (
         "acknowledge_alert",
@@ -8795,14 +9262,19 @@ def test_alert_feedback_services_document_entity_targets() -> None:
         fields = services[service_name]["fields"]
         assert fields["alert_id"]["required"] is False
         assert fields["entity_id"]["required"] is False
-        assert "exactly one active alert" in fields["alert_id"]["description"]
-        assert "exactly one active alert" in fields["entity_id"]["description"]
+        assert "exactly one active alert" in catalog[service_name]["fields"][
+            "alert_id"
+        ]["description"]
+        assert "exactly one active alert" in catalog[service_name]["fields"][
+            "entity_id"
+        ]["description"]
 
 
 def test_recommendation_action_services_document_entity_targets() -> None:
     services = yaml.safe_load(
         (INTEGRATION_DIR / "services.yaml").read_text(encoding="utf-8")
     )
+    catalog = _translations()["services"]
 
     for service_name in (
         "apply_setting_recommendation",
@@ -8814,9 +9286,12 @@ def test_recommendation_action_services_document_entity_targets() -> None:
         fields = services[service_name]["fields"]
         assert fields["recommendation_id"]["required"] is False
         assert fields["entity_id"]["required"] is False
-        assert "analyzer entity" in fields["entity_id"]["description"]
+        assert "analyzer entity" in catalog[service_name]["fields"]["entity_id"][
+            "description"
+        ]
         assert (
-            "exactly one pending recommendation" in fields["entity_id"]["description"]
+            "exactly one pending recommendation"
+            in catalog[service_name]["fields"]["entity_id"]["description"]
         )
 
 

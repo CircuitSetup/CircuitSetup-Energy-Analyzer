@@ -1,27 +1,25 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.entity import EntityCategory
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.circuitsetup_energy_analyzer import (
     binary_sensor,
-    button,
-    number,
-    select,
     sensor,
-    switch,
 )
 from custom_components.circuitsetup_energy_analyzer.const import (
-    CONF_DASHBOARD_LAYOUT,
+    CONF_CIRCUITS,
     CONF_ENTITY_DETAIL_LEVEL,
-    DASHBOARD_LAYOUT_EXPERT,
+    CONF_SELECTED_ENTITY_GROUPS,
+    CONF_SOURCE_ENTITIES,
     DOMAIN,
+    ENTITY_DETAIL_EXPERT,
     ENTITY_DETAIL_STANDARD,
 )
 from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
@@ -34,51 +32,10 @@ from custom_components.circuitsetup_energy_analyzer.models import (
 )
 from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
-
-
-def _circuit() -> CircuitConfig:
-    return CircuitConfig(
-        circuit_id="fridge",
-        name="Kitchen Fridge",
-        appliance_profile=ApplianceProfile.REFRIGERATOR,
-        mode=CircuitMode.SINGLE_PHASE,
-        sensors=(
-            SensorRef("sensor.fridge_power", SensorRole.REAL_POWER),
-            SensorRef("sensor.fridge_energy", SensorRole.ENERGY),
-        ),
-    )
-
-
-def _mains_nilm_circuit() -> CircuitConfig:
-    return CircuitConfig(
-        circuit_id="mains",
-        name="Mains NILM",
-        appliance_profile=ApplianceProfile.MAINS_NILM,
-        mode=CircuitMode.MAINS_NILM,
-        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
-    )
-
-
-class _RuntimeCoordinator:
-    def __init__(self, hass: Any) -> None:
-        self.hass = hass
-        self.data = AnalyzerState(
-            energy_dashboard_status_by_circuit={"fridge": "ready"},
-            latest_real_power_w_by_circuit={"fridge": 84.0},
-            sensitivity_by_circuit={"fridge": "balanced"},
-        )
-        self.circuit_configs = (_circuit(),)
-        self.entry_data = {}
-        self.options = {
-            CONF_DASHBOARD_LAYOUT: DASHBOARD_LAYOUT_EXPERT,
-            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_STANDARD,
-        }
-        self.dashboard_layout = DASHBOARD_LAYOUT_EXPERT
-        self.store_data = SimpleNamespace(
-            energy_goal_settings_by_circuit={
-                "fridge": {"daily_goal_kwh": 4.5},
-            },
-        )
+from tests_homeassistant.test_lifecycle_gate import (
+    _point_custom_components_at_worktree,
+    _uses_hierarchical_entity_ids,
+)
 
 
 class _NilmRuntimeCoordinator:
@@ -121,18 +78,79 @@ class _NilmRuntimeCoordinator:
         }
 
 
+def _mains_nilm_circuit() -> CircuitConfig:
+    return CircuitConfig(
+        circuit_id="mains",
+        name="Mains NILM",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+
+
+@pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
 @pytest.mark.asyncio
-async def test_platform_setup_uses_home_assistant_runtime_registries(hass: Any) -> None:
+async def test_platform_setup_uses_home_assistant_runtime_registries(
+    hass: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _point_custom_components_at_worktree(monkeypatch)
+    hass.states.async_set(
+        "sensor.fridge_power",
+        "84",
+        {"unit_of_measurement": "W", "device_class": "power"},
+    )
+    hass.states.async_set(
+        "sensor.fridge_energy",
+        "120.5",
+        {"unit_of_measurement": "kWh", "device_class": "energy"},
+    )
+    hass.states.async_set(
+        "sensor.laundry_power",
+        "42",
+        {"unit_of_measurement": "W", "device_class": "power"},
+    )
     entry = MockConfigEntry(
         domain=DOMAIN,
         entry_id="runtime-entry",
         title="Runtime Contract",
-        data={},
-        options={},
+        data={
+            CONF_SOURCE_ENTITIES: [
+                "sensor.fridge_power",
+                "sensor.fridge_energy",
+                "sensor.laundry_power",
+            ],
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "fridge",
+                    "name": "Kitchen Fridge",
+                    "mode": "single_phase",
+                    "appliance_profile": "refrigerator",
+                    "sensors": [
+                        {"entity_id": "sensor.fridge_power", "role": "real_power"},
+                        {"entity_id": "sensor.fridge_energy", "role": "energy"},
+                    ],
+                },
+                {
+                    "circuit_id": "laundry_east",
+                    "name": "Café, Laundry {East}",
+                    "mode": "single_phase",
+                    "appliance_profile": "motor_load",
+                    "sensors": [
+                        {
+                            "entity_id": "sensor.laundry_power",
+                            "role": "real_power",
+                        },
+                    ],
+                },
+            ],
+        },
+        options={
+            CONF_ENTITY_DETAIL_LEVEL: ENTITY_DETAIL_EXPERT,
+            CONF_SELECTED_ENTITY_GROUPS: ["developer_diagnostics"],
+        },
     )
     entry.add_to_hass(hass)
-    coordinator = _RuntimeCoordinator(hass)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     entity_registry = er.async_get(hass)
     stale_entity = entity_registry.async_get_or_create(
@@ -149,21 +167,10 @@ async def test_platform_setup_uses_home_assistant_runtime_registries(hass: Any) 
         manufacturer="CircuitSetup",
         name="Old Circuit",
     )
-    added_entities: list[Any] = []
 
-    for platform in (sensor, binary_sensor, button, select, number, switch):
-        await platform.async_setup_entry(hass, entry, added_entities.extend)
+    assert await hass.config_entries.async_setup(entry.entry_id) is True
+    await hass.async_block_till_done()
 
-    unique_ids = {entity.unique_id for entity in added_entities}
-    assert {
-        "runtime-entry_setup_health",
-        "runtime-entry_fridge_activity_summary",
-        "runtime-entry_run_mapping_checks",
-        "runtime-entry_dashboard_layout",
-        "runtime-entry_entity_detail_level",
-        "runtime-entry_fridge_daily_energy_goal",
-        "runtime-entry_fridge_maintenance",
-    } <= unique_ids
     assert (
         entity_registry.async_get_entity_id("sensor", DOMAIN, stale_entity.unique_id)
         is None
@@ -173,6 +180,160 @@ async def test_platform_setup_uses_home_assistant_runtime_registries(hass: Any) 
         for item in dr.async_entries_for_config_entry(device_registry, entry.entry_id)
     )
     assert stale_device.id
+
+    expected_entities = {
+        "sensor": (
+            "runtime-entry_fridge_activity_summary",
+            "sensor.kitchen_fridge_activity_summary",
+            "Activity summary",
+            None,
+            True,
+            False,
+        ),
+        "binary_sensor": (
+            "runtime-entry_fridge_learning",
+            "binary_sensor.kitchen_fridge_learning",
+            "Learning",
+            EntityCategory.DIAGNOSTIC,
+            True,
+            True,
+        ),
+        "button": (
+            "runtime-entry_fridge_relearn_baseline",
+            "button.fridge_relearn_baseline",
+            "Relearn baseline",
+            None,
+            True,
+            False,
+        ),
+        "switch": (
+            "runtime-entry_fridge_maintenance",
+            "switch.kitchen_fridge_fridge_maintenance",
+            "Pause alerts",
+            None,
+            True,
+            False,
+        ),
+        "select": (
+            "runtime-entry_fridge_alert_sensitivity",
+            "select.fridge_alert_sensitivity",
+            "Alert sensitivity",
+            None,
+            True,
+            False,
+        ),
+        "number": (
+            "runtime-entry_fridge_daily_energy_goal",
+            "number.fridge_daily_energy_goal",
+            "Daily energy goal",
+            None,
+            True,
+            False,
+        ),
+    }
+    uses_hierarchical_entity_ids = _uses_hierarchical_entity_ids()
+    registry_entries: dict[str, Any] = {}
+    for domain, (
+        unique_id,
+        entity_id,
+        expected_name,
+        expected_category,
+        enabled_by_default,
+        hidden_by_default,
+    ) in expected_entities.items():
+        registered_entity_id = entity_registry.async_get_entity_id(
+            domain,
+            DOMAIN,
+            unique_id,
+        )
+        assert registered_entity_id is not None
+        if not uses_hierarchical_entity_ids:
+            assert registered_entity_id == entity_id
+        registry_entry = entity_registry.async_get(registered_entity_id)
+        assert registry_entry is not None
+        registry_entries[domain] = registry_entry
+        assert registry_entry.unique_id == unique_id
+        assert registry_entry.original_name == expected_name
+        assert registry_entry.has_entity_name is True
+        assert registry_entry.translation_key is not None
+        assert registry_entry.entity_category == expected_category
+        assert (registry_entry.disabled_by is None) is enabled_by_default
+        assert (registry_entry.hidden_by is not None) is hidden_by_default
+        state = hass.states.get(registered_entity_id)
+        assert state is not None
+        assert state.attributes["friendly_name"] == f"Kitchen Fridge {expected_name}"
+
+    fridge_device = next(
+        device
+        for device in dr.async_entries_for_config_entry(
+            device_registry,
+            entry.entry_id,
+        )
+        if (DOMAIN, "runtime-entry_fridge") in device.identifiers
+    )
+    assert fridge_device.name == "Kitchen Fridge"
+    assert fridge_device.manufacturer == "CircuitSetup"
+    assert all(
+        registry_entry.device_id == fridge_device.id
+        for registry_entry in registry_entries.values()
+    )
+    if not uses_hierarchical_entity_ids:
+        assert entity_registry.async_get_entity_id(
+            "sensor",
+            DOMAIN,
+            "runtime-entry_fridge_daily_energy_usage",
+        ) == "sensor.kitchen_fridge_energy_usage_today"
+        assert entity_registry.async_get_entity_id(
+            "binary_sensor",
+            DOMAIN,
+            "runtime-entry_fridge_maintenance",
+        ) == "binary_sensor.kitchen_fridge_alerts_paused"
+
+    special_entity_id = entity_registry.async_get_entity_id(
+        "sensor",
+        DOMAIN,
+        "runtime-entry_laundry_east_activity_summary",
+    )
+    assert special_entity_id is not None
+    if not uses_hierarchical_entity_ids:
+        assert special_entity_id == "sensor.cafe_laundry_east_activity_summary"
+    special_entry = entity_registry.async_get(special_entity_id)
+    assert special_entry is not None
+    assert special_entry.original_name == "Activity summary"
+    assert special_entry.has_entity_name is True
+    assert special_entry.translation_key is not None
+    special_device = next(
+        device
+        for device in dr.async_entries_for_config_entry(
+            device_registry,
+            entry.entry_id,
+        )
+        if (DOMAIN, "runtime-entry_laundry_east") in device.identifiers
+    )
+    assert special_device.name == "Café, Laundry {East}"
+    assert special_entry.device_id == special_device.id
+    special_state = hass.states.get(special_entity_id)
+    assert special_state is not None
+    assert special_state.attributes["friendly_name"] == (
+        "Café, Laundry {East} Activity summary"
+    )
+
+    customized_entity_id = "sensor.favorite_fridge_activity"
+    entity_registry.async_update_entity(
+        registry_entries["sensor"].entity_id,
+        new_entity_id=customized_entity_id,
+        name="Pinned Fridge Activity",
+    )
+    assert await hass.config_entries.async_reload(entry.entry_id) is True
+    await hass.async_block_till_done()
+
+    reloaded_entry = entity_registry.async_get(customized_entity_id)
+    assert reloaded_entry is not None
+    assert reloaded_entry.unique_id == "runtime-entry_fridge_activity_summary"
+    assert reloaded_entry.name == "Pinned Fridge Activity"
+    assert hass.states.get(customized_entity_id).attributes["friendly_name"] == (
+        "Pinned Fridge Activity"
+    )
 
 
 @pytest.mark.asyncio

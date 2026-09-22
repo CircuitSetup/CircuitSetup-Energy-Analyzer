@@ -1441,7 +1441,6 @@ class DiagnosticSensorDescription:
     """Description for one diagnostic sensor entity."""
 
     key: str
-    name_suffix: str
     value_fn: Callable[[Any, str], Any]
     device_class: str | None = None
     entity_category: Any | None = EntityCategory.DIAGNOSTIC
@@ -1525,131 +1524,117 @@ SENSOR_ICONS: Mapping[str, str] = {
     "always_on_limit_usage": "mdi:power-cycle",
 }
 
+_LEGACY_SENSOR_OBJECT_ID_SUFFIXES = {
+    "nilm_signature_count": "nilm_discovered_signatures",
+    "daily_energy_usage": "energy_usage_today",
+    "capacity_usage": "circuit_capacity_usage",
+    "capacity_status": "circuit_capacity_status",
+}
+
 
 SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     DiagnosticSensorDescription(
         key="anomaly_score",
-        name_suffix="Anomaly Score",
         value_fn=anomaly_score_value,
         state_class=SensorStateClass.MEASUREMENT,
     ),
     DiagnosticSensorDescription(
         key="health_summary",
-        name_suffix="Health Summary",
         value_fn=health_summary_value,
         attributes_fn=health_summary_attributes,
     ),
     DiagnosticSensorDescription(
         key="activity_summary",
-        name_suffix="Activity Summary",
         value_fn=activity_summary_value,
         attributes_fn=activity_summary_attributes,
     ),
     DiagnosticSensorDescription(
         key="energy_summary",
-        name_suffix="Energy Summary",
         value_fn=energy_summary_value,
         attributes_fn=energy_summary_attributes,
     ),
     DiagnosticSensorDescription(
         key="energy_dashboard_status",
-        name_suffix="Energy Dashboard Status",
         value_fn=energy_dashboard_status_value,
         attributes_fn=_mapping_attributes("energy_dashboard_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="recent_activity",
-        name_suffix="Recent Activity",
         value_fn=recent_activity_value,
         attributes_fn=_mapping_attributes("recent_activity_timeline_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="settings_suggestions",
-        name_suffix="Settings Suggestions",
         value_fn=settings_suggestions_value,
         attributes_fn=settings_suggestions_attributes,
     ),
     DiagnosticSensorDescription(
         key="circuit_mode",
-        name_suffix="Circuit Mode",
         value_fn=circuit_mode_value,
     ),
     DiagnosticSensorDescription(
         key="power_flow",
-        name_suffix="Power Flow",
         value_fn=power_flow_value,
     ),
     DiagnosticSensorDescription(
         key="power_quality_score",
-        name_suffix="Power Quality Score",
         value_fn=power_quality_score_value,
         state_class=SensorStateClass.MEASUREMENT,
     ),
     DiagnosticSensorDescription(
         key="reactive_power_drift",
-        name_suffix="Reactive Power Drift",
         value_fn=reactive_power_drift_value,
         state_class=SensorStateClass.MEASUREMENT,
     ),
     DiagnosticSensorDescription(
         key="apparent_power_drift",
-        name_suffix="Apparent Power Drift",
         value_fn=apparent_power_drift_value,
         state_class=SensorStateClass.MEASUREMENT,
     ),
     DiagnosticSensorDescription(
         key="power_factor_drift",
-        name_suffix="Power Factor Drift",
         value_fn=power_factor_drift_value,
         state_class=SensorStateClass.MEASUREMENT,
     ),
     DiagnosticSensorDescription(
         key="nilm_signature_count",
-        name_suffix="NILM Discovered Signatures",
         value_fn=nilm_signature_count_value,
         state_class=SensorStateClass.MEASUREMENT,
     ),
     DiagnosticSensorDescription(
         key="nilm_unknown_loads",
-        name_suffix="NILM Unknown Loads",
         value_fn=nilm_unknown_loads_value,
         state_class=SensorStateClass.MEASUREMENT,
         attributes_fn=nilm_unknown_loads_attributes,
     ),
     DiagnosticSensorDescription(
         key="nilm_unmatched_load_percentage",
-        name_suffix="NILM Unmatched Load Percentage",
         value_fn=nilm_unmatched_load_percentage_value,
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
     ),
     DiagnosticSensorDescription(
         key="nilm_topology_status",
-        name_suffix="NILM Topology Status",
         value_fn=nilm_topology_status_value,
         attributes_fn=_mapping_attributes("nilm_topology_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="weather_context",
-        name_suffix="Weather Context",
         value_fn=weather_context_value,
         attributes_fn=weather_context_attributes,
     ),
     DiagnosticSensorDescription(
         key="rain_pump_correlation",
-        name_suffix="Rain Pump Correlation",
         value_fn=rain_pump_correlation_value,
         attributes_fn=rain_pump_correlation_attributes,
     ),
     DiagnosticSensorDescription(
         key="water_flow_correlation",
-        name_suffix="Water Flow Correlation",
         value_fn=water_flow_correlation_value,
         attributes_fn=water_flow_correlation_attributes,
     ),
     DiagnosticSensorDescription(
         key="water_flow_mismatch_minutes",
-        name_suffix="Water Flow Mismatch Minutes",
         value_fn=water_flow_mismatch_minutes_value,
         native_unit_of_measurement="min",
         state_class=SensorStateClass.MEASUREMENT,
@@ -1657,7 +1642,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="daily_energy_usage",
-        name_suffix="Energy Usage Today",
         value_fn=daily_energy_usage_value,
         device_class=SensorDeviceClass.ENERGY,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
@@ -1666,27 +1650,23 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="cost_today",
-        name_suffix="Cost Today",
         value_fn=estimated_cost_today_value,
         device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.TOTAL,
     ),
     DiagnosticSensorDescription(
         key="average_cost_per_day",
-        name_suffix="Average Cost Per Day",
         value_fn=average_cost_per_day_value,
         device_class=SensorDeviceClass.MONETARY,
     ),
     DiagnosticSensorDescription(
         key="average_kwh_per_day",
-        name_suffix="Average kWh Per Day",
         value_fn=average_kwh_per_day_value,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         state_class=SensorStateClass.MEASUREMENT,
     ),
     DiagnosticSensorDescription(
         key="energy_usage_share",
-        name_suffix="Energy Usage Share",
         value_fn=energy_usage_share_value,
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
@@ -1694,13 +1674,11 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="energy_usage_status",
-        name_suffix="Energy Usage Status",
         value_fn=energy_usage_status_value,
         attributes_fn=_mapping_attributes("energy_usage_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="energy_goal_usage",
-        name_suffix="Energy Goal Usage",
         value_fn=energy_goal_usage_value,
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
@@ -1708,20 +1686,17 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="energy_goal_status",
-        name_suffix="Energy Goal Status",
         value_fn=energy_goal_status_value,
         attributes_fn=_mapping_attributes("energy_goal_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="run_cycle_count",
-        name_suffix="Run Cycle Count",
         value_fn=run_cycle_count_value,
         state_class=SensorStateClass.MEASUREMENT,
         attributes_fn=_mapping_attributes("run_cycle_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="run_cycle_runtime",
-        name_suffix="Run Cycle Runtime",
         value_fn=run_cycle_runtime_value,
         native_unit_of_measurement="s",
         state_class=SensorStateClass.MEASUREMENT,
@@ -1729,7 +1704,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="run_cycle_duty_cycle",
-        name_suffix="Run Cycle Duty Cycle",
         value_fn=run_cycle_duty_cycle_value,
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
@@ -1737,7 +1711,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="current_demand",
-        name_suffix="Current Demand",
         value_fn=current_demand_value,
         native_unit_of_measurement=UnitOfPower.WATT,
         state_class=SensorStateClass.MEASUREMENT,
@@ -1745,7 +1718,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="peak_demand",
-        name_suffix="Peak Demand",
         value_fn=peak_demand_value,
         native_unit_of_measurement=UnitOfPower.WATT,
         state_class=SensorStateClass.MEASUREMENT,
@@ -1753,7 +1725,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="demand_limit_usage",
-        name_suffix="Demand Limit Usage",
         value_fn=demand_limit_usage_value,
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
@@ -1761,26 +1732,22 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="demand_peak_rank",
-        name_suffix="Demand Peak Rank",
         value_fn=demand_peak_rank_value,
         state_class=SensorStateClass.MEASUREMENT,
         attributes_fn=_mapping_attributes("demand_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="demand_peak_status",
-        name_suffix="Demand Peak Status",
         value_fn=demand_peak_status_value,
         attributes_fn=_mapping_attributes("demand_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="demand_status",
-        name_suffix="Demand Status",
         value_fn=demand_status_value,
         attributes_fn=_mapping_attributes("demand_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="capacity_usage",
-        name_suffix="Circuit Capacity Usage",
         value_fn=capacity_usage_value,
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
@@ -1788,13 +1755,11 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="capacity_status",
-        name_suffix="Circuit Capacity Status",
         value_fn=capacity_status_value,
         attributes_fn=_mapping_attributes("capacity_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="leg_imbalance",
-        name_suffix="Leg Imbalance",
         value_fn=leg_imbalance_value,
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
@@ -1802,7 +1767,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="metric_consistency_score",
-        name_suffix="Metric Consistency Score",
         value_fn=metric_consistency_score_value,
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
@@ -1810,7 +1774,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="balance_power",
-        name_suffix="Balance Power",
         value_fn=balance_power_value,
         native_unit_of_measurement=UnitOfPower.WATT,
         state_class=SensorStateClass.MEASUREMENT,
@@ -1818,7 +1781,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="monitored_power",
-        name_suffix="Monitored Power",
         value_fn=monitored_power_value,
         native_unit_of_measurement=UnitOfPower.WATT,
         state_class=SensorStateClass.MEASUREMENT,
@@ -1826,7 +1788,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="monitored_coverage",
-        name_suffix="Monitored Coverage",
         value_fn=monitored_coverage_value,
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
@@ -1834,13 +1795,11 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="balance_status",
-        name_suffix="Balance Status",
         value_fn=balance_status_value,
         attributes_fn=_mapping_attributes("balance_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="solar_generation_power",
-        name_suffix="Solar Generation Power",
         value_fn=solar_generation_power_value,
         native_unit_of_measurement=UnitOfPower.WATT,
         state_class=SensorStateClass.MEASUREMENT,
@@ -1848,13 +1807,11 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="solar_flow_status",
-        name_suffix="Solar Flow Status",
         value_fn=solar_flow_status_value,
         attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="solar_surplus_power",
-        name_suffix="Solar Surplus Power",
         value_fn=solar_surplus_power_value,
         native_unit_of_measurement=UnitOfPower.WATT,
         state_class=SensorStateClass.MEASUREMENT,
@@ -1862,19 +1819,16 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="solar_surplus_status",
-        name_suffix="Solar Surplus Status",
         value_fn=solar_surplus_status_value,
         attributes_fn=_mapping_attributes("solar_flow_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="utility_comparison_status",
-        name_suffix="Utility Comparison Status",
         value_fn=utility_comparison_status_value,
         attributes_fn=_mapping_attributes("utility_comparison_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="billing_cycle_usage",
-        name_suffix="Billing Cycle Usage",
         value_fn=billing_cycle_usage_value,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         state_class=SensorStateClass.MEASUREMENT,
@@ -1882,7 +1836,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="billing_cycle_forecast",
-        name_suffix="Billing Cycle Forecast",
         value_fn=billing_cycle_forecast_value,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         state_class=SensorStateClass.MEASUREMENT,
@@ -1890,7 +1843,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="cost_cycle",
-        name_suffix="Cost Cycle",
         value_fn=cost_cycle_value,
         device_class=SensorDeviceClass.MONETARY,
         state_class=SensorStateClass.TOTAL,
@@ -1898,14 +1850,12 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="cost_cycle_forecast",
-        name_suffix="Cost Cycle Forecast",
         value_fn=cost_cycle_forecast_value,
         device_class=SensorDeviceClass.MONETARY,
         attributes_fn=_mapping_attributes("cost_evidence_by_circuit"),
     ),
     DiagnosticSensorDescription(
         key="always_on_power",
-        name_suffix="Always On Power",
         value_fn=always_on_power_value,
         native_unit_of_measurement=UnitOfPower.WATT,
         state_class=SensorStateClass.MEASUREMENT,
@@ -1913,7 +1863,6 @@ SENSOR_DESCRIPTIONS: tuple[DiagnosticSensorDescription, ...] = (
     ),
     DiagnosticSensorDescription(
         key="always_on_limit_usage",
-        name_suffix="Always On Limit Usage",
         value_fn=always_on_limit_usage_value,
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
@@ -2527,14 +2476,14 @@ setup_health_attributes = _entity_setup_health_attributes
 class SetupHealthSensor(CoordinatorEntity, SensorEntity):
     """Top-level setup health and next-step sensor for the integration."""
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
     _attr_entity_category = None
     _attr_entity_registry_visible_default = True
     _attr_icon = "mdi:clipboard-check-outline"
+    _attr_translation_key = "setup_health"
 
     def __init__(self, coordinator: Any, *, entry_id: str) -> None:
         super().__init__(coordinator)
-        self._attr_name = SETUP_HEALTH_ENTITY_NAME
         self._attr_unique_id = f"{entry_id}_{SETUP_HEALTH_ENTITY_KEY}"
         self._attr_suggested_object_id = SETUP_HEALTH_SUGGESTED_OBJECT_ID
 
@@ -2547,11 +2496,6 @@ class SetupHealthSensor(CoordinatorEntity, SensorEntity):
     def suggested_object_id(self) -> str:
         """Return the stable suggested object ID for fallback tests."""
         return self._attr_suggested_object_id
-
-    @property
-    def name(self) -> str:
-        """Return the visible entity name."""
-        return self._attr_name
 
     @property
     def icon(self) -> str | None:
@@ -2572,18 +2516,19 @@ class SetupHealthSensor(CoordinatorEntity, SensorEntity):
 class EffectiveElectricityRateSensor(CoordinatorEntity, SensorEntity):
     """Read-only electricity rate selected from Opower or the fallback setting."""
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
     _attr_entity_category = None
     _attr_icon = "mdi:currency-usd"
+    _attr_translation_key = "electricity_rate"
     _attr_native_unit_of_measurement = "$/kWh"
     _attr_state_class = SensorStateClass.MEASUREMENT
 
     def __init__(self, coordinator: Any, *, entry_id: str) -> None:
         super().__init__(coordinator)
         self._entry_id = entry_id
-        self._attr_name = "CircuitSetup Energy Analyzer Electricity Rate"
         self._attr_unique_id = f"{entry_id}_electricity_rate"
         self._attr_suggested_object_id = "circuitsetup_energy_analyzer_electricity_rate"
+        self.entity_id = "sensor.circuitsetup_energy_analyzer_electricity_rate"
 
     @property
     def unique_id(self) -> str:
@@ -2594,11 +2539,6 @@ class EffectiveElectricityRateSensor(CoordinatorEntity, SensorEntity):
     def suggested_object_id(self) -> str:
         """Return the stable suggested object ID for fallback tests."""
         return self._attr_suggested_object_id
-
-    @property
-    def name(self) -> str:
-        """Return the visible entity name."""
-        return self._attr_name
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -2644,9 +2584,12 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
             entry_id=entry_id,
             circuit=circuit,
             key=description.key,
-            name_suffix=description.name_suffix,
         )
         self.entity_description = description
+        self._attr_suggested_object_id = _LEGACY_SENSOR_OBJECT_ID_SUFFIXES.get(
+            description.key,
+            description.key,
+        )
         self._attr_entity_category = description.entity_category
         self._attr_entity_registry_enabled_default = entity_enabled_default_for_tier(
             description.entity_tier,
@@ -2749,7 +2692,6 @@ class NilmVirtualSensorDescription:
     """Description for one estimated NILM appliance sensor."""
 
     key: str
-    name_suffix: str
     value_fn: Callable[[NilmVirtualApplianceState], Any]
     device_class: str | None = None
     entity_category: Any | None = None
@@ -2774,13 +2716,11 @@ class NilmVirtualSensorDescription:
 NILM_VIRTUAL_SENSOR_DESCRIPTIONS: tuple[NilmVirtualSensorDescription, ...] = (
     NilmVirtualSensorDescription(
         key="health_summary",
-        name_suffix="Health Summary",
         value_fn=lambda state: "Estimated",
         icon="mdi:heart-pulse",
     ),
     NilmVirtualSensorDescription(
         key="activity_summary",
-        name_suffix="Activity Summary",
         value_fn=lambda state: (
             None
             if state.is_running is None
@@ -2792,13 +2732,11 @@ NILM_VIRTUAL_SENSOR_DESCRIPTIONS: tuple[NilmVirtualSensorDescription, ...] = (
     ),
     NilmVirtualSensorDescription(
         key="energy_summary",
-        name_suffix="Energy Summary",
         value_fn=lambda state: f"{state.estimated_energy_kwh_today:.3f} kWh today",
         icon="mdi:home-lightning-bolt-outline",
     ),
     NilmVirtualSensorDescription(
         key="estimated_power",
-        name_suffix="Estimated Power",
         value_fn=lambda state: state.estimated_power_w,
         native_unit_of_measurement=UnitOfPower.WATT,
         icon="mdi:flash-outline",
@@ -2806,7 +2744,6 @@ NILM_VIRTUAL_SENSOR_DESCRIPTIONS: tuple[NilmVirtualSensorDescription, ...] = (
     ),
     NilmVirtualSensorDescription(
         key="estimated_daily_energy",
-        name_suffix="Estimated Daily Energy",
         value_fn=lambda state: state.estimated_energy_kwh_today,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         icon="mdi:counter",
@@ -2822,7 +2759,7 @@ class NilmVirtualApplianceSensor(CoordinatorEntity, SensorEntity):
     _attr_entity_category = None
     _attr_entity_registry_enabled_default = True
     _attr_entity_registry_visible_default = True
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
     _attr_last_reset = None
     _attr_options = None
     _attr_suggested_display_precision = None
@@ -2841,7 +2778,7 @@ class NilmVirtualApplianceSensor(CoordinatorEntity, SensorEntity):
         self._nilm_state = state
         self._assignment_id = state.assignment_id
         self.entity_description = description
-        self._attr_name = f"{state.display_name} {description.name_suffix}"
+        self._attr_translation_key = description.key
         self._attr_unique_id = nilm_virtual_unique_id(
             entry_id,
             state,
@@ -2850,11 +2787,6 @@ class NilmVirtualApplianceSensor(CoordinatorEntity, SensorEntity):
         self._attr_icon = description.icon
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
         self._attr_state_class = description.state_class
-
-    @property
-    def name(self) -> str:
-        """Entity display name for fallback tests."""
-        return self._attr_name
 
     @property
     def unique_id(self) -> str:

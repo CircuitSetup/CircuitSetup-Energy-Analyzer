@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.select import SelectEntity
+from homeassistant.exceptions import ServiceValidationError
 
 from .const import (
     CONF_DASHBOARD_LAYOUT,
@@ -18,7 +19,6 @@ from .dashboard import normalize_dashboard_layout
 from .entity import (
     ENTITY_DETAIL_LEVELS,
     CircuitAnalyzerEntity,
-    HomeAssistantError,
     async_call_or_raise,
     circuit_info_from_config,
     circuits_for_entities,
@@ -44,7 +44,6 @@ DASHBOARD_LAYOUT_LABELS = {
 @dataclass(frozen=True, slots=True)
 class CircuitSelectDescription:
     key: str
-    name_suffix: str
     icon: str
     device_class: Any | None = None
     entity_category: Any | None = None
@@ -61,7 +60,6 @@ class CircuitSelectDescription:
 CIRCUIT_SELECT_DESCRIPTIONS: tuple[CircuitSelectDescription, ...] = (
     CircuitSelectDescription(
         key="alert_sensitivity",
-        name_suffix="Alert Sensitivity",
         icon="mdi:tune-variant",
     ),
 )
@@ -86,11 +84,11 @@ class CircuitAlertSensitivitySelect(CircuitAnalyzerEntity, SelectEntity):
             entry_id=entry_id,
             circuit=circuit,
             key=description.key,
-            name_suffix=description.name_suffix,
         )
         self.entity_description = description
         self._attr_icon = description.icon
         self._attr_suggested_object_id = f"{self.circuit_id}_{description.key}"
+        self.entity_id = f"select.{self.circuit_id}_{description.key}"
 
     @property
     def suggested_object_id(self) -> str:
@@ -145,13 +143,11 @@ class CircuitAlertSensitivitySelect(CircuitAnalyzerEntity, SelectEntity):
         """Persist a new sensitivity preset."""
         preset = _select_option_value(
             option,
-            action_label=self.entity_description.name_suffix,
             valid_options=SENSITIVITY_OPTIONS,
         )
         await async_call_or_raise(
             self.coordinator,
             "async_set_circuit_sensitivity",
-            f"set {self.entity_description.name_suffix}",
             self.circuit_id,
             preset,
         )
@@ -160,24 +156,20 @@ class CircuitAlertSensitivitySelect(CircuitAnalyzerEntity, SelectEntity):
 class EntityDetailLevelSelect(SelectEntity):
     """Select entity for the integration's default entity detail level."""
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
     _attr_entity_category = None
     _attr_options = list(ENTITY_DETAIL_LEVELS)
     _attr_icon = "mdi:format-list-bulleted-type"
+    _attr_translation_key = "entity_detail_level"
 
     def __init__(self, coordinator: Any, *, entry_id: str) -> None:
         self.coordinator = coordinator
         self._entry_id = entry_id
-        self._attr_name = "CircuitSetup Energy Analyzer Entity Detail Level"
         self._attr_unique_id = f"{entry_id}_entity_detail_level"
         self._attr_suggested_object_id = (
             "circuitsetup_energy_analyzer_entity_detail_level"
         )
-
-    @property
-    def name(self) -> str:
-        """Return the visible entity name for fallback tests."""
-        return self._attr_name
+        self.entity_id = "select.circuitsetup_energy_analyzer_entity_detail_level"
 
     @property
     def unique_id(self) -> str:
@@ -232,13 +224,11 @@ class EntityDetailLevelSelect(SelectEntity):
         """Persist and apply a new entity detail profile."""
         detail_level = _select_option_value(
             option,
-            action_label="entity detail level",
             valid_options=ENTITY_DETAIL_LEVELS,
         )
         await async_call_or_raise(
             self.coordinator,
             "async_set_entity_detail_level",
-            "set entity detail level",
             detail_level,
         )
 
@@ -246,22 +236,18 @@ class EntityDetailLevelSelect(SelectEntity):
 class DashboardLayoutSelect(SelectEntity):
     """Select entity for the recommended dashboard layout."""
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
     _attr_entity_category = None
     _attr_options = DASHBOARD_LAYOUT_OPTIONS
     _attr_icon = "mdi:view-dashboard-edit-outline"
+    _attr_translation_key = "dashboard_layout"
 
     def __init__(self, coordinator: Any, *, entry_id: str) -> None:
         self.coordinator = coordinator
         self._entry_id = entry_id
-        self._attr_name = "CircuitSetup Energy Analyzer Dashboard Layout"
         self._attr_unique_id = f"{entry_id}_dashboard_layout"
         self._attr_suggested_object_id = "circuitsetup_energy_analyzer_dashboard_layout"
-
-    @property
-    def name(self) -> str:
-        """Return the visible entity name for fallback tests."""
-        return self._attr_name
+        self.entity_id = "select.circuitsetup_energy_analyzer_dashboard_layout"
 
     @property
     def unique_id(self) -> str:
@@ -325,13 +311,11 @@ class DashboardLayoutSelect(SelectEntity):
         """Persist a new recommended-dashboard layout."""
         layout = _select_option_value(
             option,
-            action_label="dashboard layout",
             valid_options=DASHBOARD_LAYOUT_OPTIONS,
         )
         await async_call_or_raise(
             self.coordinator,
             "async_set_dashboard_layout",
-            "set dashboard layout",
             layout,
         )
 
@@ -415,14 +399,17 @@ def _action_unavailable_attributes() -> dict[str, str]:
 def _select_option_value(
     option: Any,
     *,
-    action_label: str,
     valid_options: list[str] | tuple[str, ...],
 ) -> str:
     normalized = str(option or "").strip().lower()
     if normalized in {value.lower() for value in valid_options}:
         return normalized
     choices = ", ".join(valid_options)
-    raise HomeAssistantError(
-        f"Cannot set {action_label.strip().lower()} to {option!r}. "
-        f"Choose one of: {choices}."
+    raise ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key="invalid_select_option",
+        translation_placeholders={
+            "option": str(option),
+            "choices": choices,
+        },
     )

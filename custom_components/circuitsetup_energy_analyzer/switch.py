@@ -24,7 +24,6 @@ from .tariff import global_cost_settings
 @dataclass(frozen=True, slots=True)
 class CircuitSwitchDescription:
     key: str
-    name_suffix: str
     icon: str
     device_class: Any | None = None
     entity_category: Any | None = None
@@ -40,7 +39,6 @@ class CircuitSwitchDescription:
 CIRCUIT_SWITCH_DESCRIPTIONS: tuple[CircuitSwitchDescription, ...] = (
     CircuitSwitchDescription(
         key="maintenance",
-        name_suffix="Pause alerts",
         icon="mdi:bell-pause-outline",
         has_entity_name=True,
         translation_key="maintenance",
@@ -76,10 +74,8 @@ class CircuitMaintenanceSwitch(CircuitAnalyzerEntity, SwitchEntity):
             entry_id=entry_id,
             circuit=circuit,
             key=description.key,
-            name_suffix=description.name_suffix,
         )
         self.entity_description = description
-        self._attr_name = description.name_suffix
         self._attr_has_entity_name = description.has_entity_name
         self._attr_icon = description.icon
         self._attr_suggested_object_id = f"{self.circuit_id}_{description.key}"
@@ -124,7 +120,6 @@ class CircuitMaintenanceSwitch(CircuitAnalyzerEntity, SwitchEntity):
         await async_call_or_raise(
             self.coordinator,
             "async_start_maintenance",
-            self.entity_description.name_suffix,
             self.circuit_id,
             "",
             None,
@@ -139,7 +134,6 @@ class CircuitMaintenanceSwitch(CircuitAnalyzerEntity, SwitchEntity):
         await async_call_or_raise(
             self.coordinator,
             "async_end_maintenance",
-            self.entity_description.name_suffix,
             self.circuit_id,
             False,
         )
@@ -148,20 +142,25 @@ class CircuitMaintenanceSwitch(CircuitAnalyzerEntity, SwitchEntity):
 class GlobalTimeOfUseWeekdaySwitch(SwitchEntity):
     """Switch entity for one analyzer-wide Time-of-Use weekday."""
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
     _attr_entity_category = None
     _attr_icon = "mdi:calendar-week"
+    _attr_translation_key = "tou_weekday"
 
     def __init__(self, coordinator: Any, *, entry_id: str, weekday: int) -> None:
         self.coordinator = coordinator
         self._entry_id = entry_id
         self._weekday = weekday
-        self._attr_name = (
-            f"CircuitSetup Energy Analyzer Time-Of-Use {_TOU_WEEKDAY_NAMES[weekday]}"
-        )
+        self._attr_translation_placeholders = {
+            "weekday": _TOU_WEEKDAY_NAMES[weekday],
+        }
         self._attr_unique_id = f"{entry_id}_tou_weekday_{weekday}"
         self._attr_suggested_object_id = (
             f"circuitsetup_energy_analyzer_tou_{_TOU_WEEKDAY_NAMES[weekday].lower()}"
+        )
+        self.entity_id = (
+            "switch.circuitsetup_energy_analyzer_tou_"
+            f"{_TOU_WEEKDAY_NAMES[weekday].lower()}"
         )
 
     @property
@@ -173,11 +172,6 @@ class GlobalTimeOfUseWeekdaySwitch(SwitchEntity):
     def suggested_object_id(self) -> str:
         """Return the stable object ID for fallback tests."""
         return self._attr_suggested_object_id
-
-    @property
-    def name(self) -> str:
-        """Return the visible entity name."""
-        return self._attr_name
 
     @property
     def is_on(self) -> bool:
@@ -206,7 +200,6 @@ class GlobalTimeOfUseWeekdaySwitch(SwitchEntity):
             await async_call_or_raise(
                 self.coordinator,
                 "async_set_global_tou_weekday",
-                "enable Time-of-Use weekday",
                 self._weekday,
                 True,
             )
@@ -218,7 +211,6 @@ class GlobalTimeOfUseWeekdaySwitch(SwitchEntity):
             await async_call_or_raise(
                 self.coordinator,
                 "async_set_global_tou_weekday",
-                "disable Time-of-Use weekday",
                 self._weekday,
                 False,
             )
