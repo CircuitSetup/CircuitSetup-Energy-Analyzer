@@ -454,8 +454,18 @@ class RunCycleProcessor:
     ) -> tuple[dict[str, BaselineStats], bool]:
         baselines: dict[str, BaselineStats] = {}
         store_dirty = False
+        learning_started_at = _learning_started_at(store_data, config.circuit_id, now)
+        learning_events = (
+            [
+                event
+                for event in store_data.events
+                if event.timestamp >= learning_started_at
+            ]
+            if learning_started_at is not None
+            else store_data.events
+        )
         values_by_feature = cycle_baseline_feature_values(
-            store_data.events,
+            learning_events,
             circuit_id=config.circuit_id,
             now=now,
             merge_gap_seconds=merge_gap_seconds,

@@ -4634,6 +4634,63 @@ def test_energy_goal_processor_uses_ha_local_usage_date() -> None:
     assert result.alerts
 
 
+def test_relearned_run_cycle_baseline_uses_only_new_events() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.cycles import (
+        RunCycleProcessor,
+    )
+
+    now = datetime(2026, 7, 20, 12, tzinfo=UTC)
+    marker = now - timedelta(hours=1)
+    old_events = [
+        event
+        for day in range(1, 10)
+        for event in (
+            CircuitEvent(now - timedelta(days=day, hours=2), "washer", EventType.START),
+            CircuitEvent(
+                now - timedelta(days=day, hours=2) + timedelta(minutes=10),
+                "washer",
+                EventType.STOP,
+            ),
+        )
+    ]
+    store = FeatureStoreData(events=old_events)
+    store.learning_started_at_by_circuit["washer"] = marker.isoformat()
+    config = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.WASHER,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    processor = RunCycleProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: None,
+        learning_mature=lambda _config, _now: False,
+    )
+
+    processor._cycle_baselines_for_config(store, config, now, merge_gap_seconds=0)
+    assert store.baselines == {}
+    assert len(store.events) == 18
+
+    later = now + timedelta(days=11)
+    store.events.extend(
+        event
+        for day in range(1, 10)
+        for event in (
+            CircuitEvent(
+                later - timedelta(days=day, hours=2), "washer", EventType.START
+            ),
+            CircuitEvent(
+                later - timedelta(days=day, hours=2) + timedelta(minutes=10),
+                "washer",
+                EventType.STOP,
+            ),
+        )
+    )
+    processor._cycle_baselines_for_config(store, config, later, merge_gap_seconds=0)
+
+    assert store.baselines["washer:run_cycle_duration_s"].sample_count == 9
+    assert len(store.events) == 36
+
+
 def test_cold_storage_signature_alerts_after_three_windows_during_shared_learning(
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer.alerting import (
