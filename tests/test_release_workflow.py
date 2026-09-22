@@ -1,12 +1,79 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+BASH = (
+    str(Path("C:/Program Files/Git/bin/bash.exe"))
+    if Path("C:/Program Files/Git/bin/bash.exe").exists()
+    else shutil.which("bash")
+)
+
+
+@pytest.mark.skipif(shutil.which("powershell") is None, reason="PowerShell unavailable")
+@pytest.mark.parametrize(
+    "failed_command", ["pytest", "ruff", "gh", "fetch", "batch"]
+)
+def test_release_helper_stops_when_local_check_fails(failed_command: str) -> None:
+    """A failed native check must determine the helper exit status."""
+    helper = str(ROOT / ".codex" / "scripts" / "verify-release.ps1").replace(
+        "'", "''"
+    )
+    script = (
+        f"$failedCommand = '{failed_command}'; "
+        "function git { if ($args[0] -eq 'rev-parse') { "
+        f"'{str(ROOT).replace("'", "''")}'"
+        " } elseif ($args[0] -eq 'fetch') { "
+        "Write-Output 'git:fetch'; "
+        "if ($failedCommand -eq 'fetch') { $global:LASTEXITCODE = 17 } "
+        "else { $global:LASTEXITCODE = 0 } "
+        "} else { throw 'Unexpected git call' } }; "
+        "function rtk { Write-Output \"rtk:$($args[0])\"; "
+        "if ($args[0] -eq $failedCommand) { "
+        "$global:LASTEXITCODE = 17 } else { $global:LASTEXITCODE = 0 } }; "
+        "function gh { Write-Output 'gh'; if ($failedCommand -eq 'gh') { "
+        "$global:LASTEXITCODE = 17 } else { $global:LASTEXITCODE = 0 } }; "
+        "function Test-Path { return $false }; "
+        "function python { Write-Output 'python:batch'; "
+        "if ($failedCommand -eq 'batch') { "
+        "$global:LASTEXITCODE = 17 } else { $global:LASTEXITCODE = 0 } }; "
+        f"& '{helper}'"
+        + (" -Tag v0.13.17" if failed_command in {"fetch", "batch"} else "")
+    )
+
+    result = subprocess.run(
+        [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0, result.stdout + result.stderr
+    commands = result.stdout.splitlines()
+    expected = {
+        "pytest": ["rtk:pytest"],
+        "ruff": ["rtk:pytest", "rtk:ruff"],
+        "gh": ["rtk:pytest", "rtk:ruff", "gh"],
+        "fetch": ["rtk:pytest", "rtk:ruff", "gh", "git:fetch"],
+        "batch": ["rtk:pytest", "rtk:ruff", "gh", "git:fetch", "python:batch"],
+    }
+    assert commands == expected[failed_command]
 
 
 def _load_release_workflow() -> dict[str, object]:
@@ -69,10 +136,53 @@ def test_release_workflow_resolves_dispatch_or_pushed_tag() -> None:
 
     assert (
         checkout_step["with"]["ref"]
-        == "${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}"
+        == "${{ steps.tag.outputs.tag }}"
     )
-    assert 'echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"' in tag_step["run"]
-    assert 'echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"' in tag_step["run"]
+    assert release_steps.index(tag_step) < release_steps.index(checkout_step)
+    assert tag_step["env"]["RELEASE_TAG"] == (
+        "${{ github.event_name == 'workflow_dispatch' && "
+        "inputs.tag || github.ref_name }}"
+    )
+    assert 'echo "tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"' in tag_step["run"]
+
+
+@pytest.mark.skipif(BASH is None, reason="Bash unavailable")
+def test_release_dispatch_rejects_shell_shaped_tag_before_writing_output(
+    tmp_path: Path,
+) -> None:
+    workflow = _load_release_workflow()
+    tag_step = next(
+        step
+        for step in workflow["jobs"]["release"]["steps"]
+        if step["name"] == "Resolve release tag"
+    )
+    output = tmp_path / "release-output"
+
+    def run(tag: str) -> subprocess.CompletedProcess[str]:
+        output.unlink(missing_ok=True)
+        rendered = tag_step["run"].replace(
+            "${{ github.event_name }}", "workflow_dispatch"
+        ).replace("${{ inputs.tag }}", tag)
+        return subprocess.run(
+            [str(BASH), "-c", rendered],
+            cwd=tmp_path,
+            env={
+                "PATH": os.environ["PATH"],
+                "GITHUB_OUTPUT": output.name,
+                "RELEASE_TAG": tag,
+            },
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    valid = run("v0.13.17")
+    assert valid.returncode == 0, valid.stdout + valid.stderr
+    assert output.read_text(encoding="utf-8").strip() == "tag=v0.13.17"
+
+    malicious = run("v0.13.17$(printf injected)")
+    assert malicious.returncode != 0, malicious.stdout + malicious.stderr
+    assert not output.exists()
 
 
 def test_release_workflow_verifies_release_pr_batch() -> None:
