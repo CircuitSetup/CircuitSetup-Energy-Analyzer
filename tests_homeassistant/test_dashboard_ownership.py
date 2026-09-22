@@ -12,7 +12,7 @@ from custom_components.circuitsetup_energy_analyzer.dashboard import DASHBOARD_U
 from tests_homeassistant.test_lifecycle_gate import _point_custom_components_at_worktree
 
 
-@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
 @pytest.mark.asyncio
 async def test_user_dashboard_at_reserved_path_is_preserved(
     hass: Any, monkeypatch: pytest.MonkeyPatch, unused_tcp_port: int
