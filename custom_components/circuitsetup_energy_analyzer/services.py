@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import Any
 
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 
 from . import notifications
@@ -209,7 +209,7 @@ def _circuit_schema(*optional: str) -> Callable:
     return _schema(optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID, *optional))
 
 
-def _boolean_value(value: Any) -> bool:
+def _boolean_value(value: Any, field: str = "value") -> bool:
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
@@ -220,7 +220,11 @@ def _boolean_value(value: Any) -> bool:
             return False
     if isinstance(value, (int, float)) and value in {0, 1}:
         return bool(value)
-    raise HomeAssistantError(f"Expected a boolean value, got {value!r}")
+    raise ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key="invalid_boolean",
+        translation_placeholders={"field": str(field)},
+    )
 
 
 CIRCUIT_SERVICE_SCHEMA = _circuit_schema()
@@ -928,8 +932,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             handled = handled or result is True
         if not handled:
             raise HomeAssistantError(
-                f"Recommendation '{recommendation_id}' could not be changed. "
-                "Refresh the evidence panel and try again."
+                translation_domain=DOMAIN,
+                translation_key="recommendation_not_changed",
+                translation_placeholders={"recommendation_id": str(recommendation_id)},
             )
         return
 
@@ -949,8 +954,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             handled = handled or result is True
         if not handled:
             raise HomeAssistantError(
-                f"Recommendation '{recommendation_id}' could not be changed. "
-                "Refresh the evidence panel and try again."
+                translation_domain=DOMAIN,
+                translation_key="recommendation_not_changed",
+                translation_placeholders={"recommendation_id": str(recommendation_id)},
             )
         return
 
@@ -1060,7 +1066,10 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
         start_dt = _service_datetime(data.get(ATTR_START), ATTR_START)
         end_dt = _service_datetime(data.get(ATTR_END), ATTR_END)
         if end_dt <= start_dt:
-            raise HomeAssistantError("NILM sensor label end must be after start")
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invalid_interval_range",
+            )
         ground_truth_entity_id = str(
             data.get(ATTR_GROUND_TRUTH_ENTITY_ID) or ""
         ).strip()
@@ -1104,9 +1113,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 ground_truth_entity_id or stored_state_entity_id or power_entity_id
             )
             if not state_entity_id:
-                raise HomeAssistantError(
-                    "A stored reference state entity or ground_truth_entity_id is "
-                    "required for reference import."
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="reference_state_required",
                 )
             settings = _nilm_reference_settings(
                 assignment,
@@ -1132,15 +1141,16 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             )
             if not extracted.intervals:
                 raise HomeAssistantError(
-                    "No active ground-truth sensor intervals were found."
+                    translation_domain=DOMAIN,
+                    translation_key="no_reference_intervals",
                 )
             power_samples: tuple[NilmPowerSample, ...] = ()
             if power_entity_id:
                 power_unit = _nilm_reference_power_unit(hass, power_entity_id)
                 if not power_unit:
-                    raise HomeAssistantError(
-                        "Reference power entity must unambiguously report real power "
-                        "in W, kW, mW, or MW."
+                    raise ServiceValidationError(
+                        translation_domain=DOMAIN,
+                        translation_key="invalid_reference_power_entity",
                     )
                 power_rows = history_cache.get(power_entity_id)
                 if power_rows is None:
@@ -1267,8 +1277,8 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
             )
             if controller is not None and not isinstance(result, Mapping):
                 raise HomeAssistantError(
-                    "The NILM session assignment was not applied. "
-                    "Refresh the evidence panel and try again."
+                    translation_domain=DOMAIN,
+                    translation_key="session_assignment_failed",
                 )
         return
 
@@ -1390,12 +1400,16 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                     True,
                 )
                 if ATTR_KEEP_ASSIGNMENT_FOR_MASKING not in data
-                else _boolean_value(data[ATTR_KEEP_ASSIGNMENT_FOR_MASKING]),
+                else _boolean_value(
+                    data[ATTR_KEEP_ASSIGNMENT_FOR_MASKING],
+                    ATTR_KEEP_ASSIGNMENT_FOR_MASKING,
+                ),
                 keep_published_estimate=_boolean_value(
                     data.get(
                         ATTR_KEEP_PUBLISHED_ESTIMATE,
                         False,
-                    )
+                    ),
+                    ATTR_KEEP_PUBLISHED_ESTIMATE,
                 ),
             )
         return
@@ -1404,8 +1418,9 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
         source_assignment_id = str(data.get(ATTR_SOURCE_ASSIGNMENT_ID) or "").strip()
         target_assignment_id = str(data.get(ATTR_TARGET_ASSIGNMENT_ID) or "").strip()
         if source_assignment_id == target_assignment_id:
-            raise HomeAssistantError(
-                "source_assignment_id and target_assignment_id must be different"
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="duplicate_assignment_ids",
             )
         circuit_id = _service_circuit_id(hass, data)
         for coordinator in _target_nilm_coordinators(
@@ -1617,7 +1632,6 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
                 circuit_id,
                 _service_sensitivity_preset(
                     data.get(ATTR_PRESET),
-                    setting_name="NILM detection sensitivity",
                 ),
             )
         elif service == SERVICE_SET_ENERGY_USAGE_SETTINGS:
@@ -1775,9 +1789,13 @@ def _service_circuit_id(
             normalized_circuit_id is not None
             and normalized_circuit_id != entity_circuit_id
         ):
-            raise HomeAssistantError(
-                f"circuit_id '{normalized_circuit_id}' does not match "
-                f"entity_id target circuit '{entity_circuit_id}'."
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="circuit_id_mismatch",
+                translation_placeholders={
+                    "circuit_id": str(normalized_circuit_id),
+                    "entity_circuit_id": str(entity_circuit_id),
+                },
             )
         return entity_circuit_id
 
@@ -1785,22 +1803,28 @@ def _service_circuit_id(
         return normalized_circuit_id
 
     if required:
-        raise HomeAssistantError("Missing circuit_id.")
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="missing_circuit_id",
+        )
     return None
 
 
 def _service_sensitivity_preset(
     value: Any,
-    *,
-    setting_name: str = "alert sensitivity",
 ) -> str:
     normalized = str(value or "").strip().lower()
     if normalized in SENSITIVITY_VALUES:
         return normalized
 
     choices = ", ".join(_SENSITIVITY_SERVICE_OPTIONS)
-    raise HomeAssistantError(
-        f"Cannot set {setting_name} to {value!r}. Choose one of: {choices}."
+    raise ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key="invalid_sensitivity",
+        translation_placeholders={
+            "value": str(value),
+            "choices": choices,
+        },
     )
 
 
@@ -1823,11 +1847,15 @@ def _circuit_id_from_service_entity_ids(hass: Any, entity_ids: Iterable[str]) ->
         return next(iter(resolved_circuit_ids))
     if resolved_circuit_ids:
         ordered = ", ".join(sorted(resolved_circuit_ids))
-        raise HomeAssistantError(
-            "entity_id target resolved to multiple circuits: "
-            f"{ordered}. Pass circuit_id explicitly."
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="multiple_target_circuits",
+            translation_placeholders={"circuit_ids": ordered},
         )
-    raise HomeAssistantError("Missing circuit_id.")
+    raise ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key="missing_circuit_id",
+    )
 
 
 def _circuit_id_from_analyzer_entity_id(hass: Any, entity_id: str) -> str:
@@ -1837,8 +1865,10 @@ def _circuit_id_from_analyzer_entity_id(hass: Any, entity_id: str) -> str:
 
     object_id = str(entity_id).strip().split(".", 1)[-1]
     if not object_id:
-        raise HomeAssistantError(
-            f"Could not derive circuit_id from entity_id '{entity_id}'."
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="entity_circuit_id_invalid",
+            translation_placeholders={"entity_id": str(entity_id)},
         )
 
     known_suffixes = _known_analyzer_entity_suffixes()
@@ -1856,8 +1886,10 @@ def _circuit_id_from_analyzer_entity_id(hass: Any, entity_id: str) -> str:
 
     if len(matches) == 1:
         return matches[0]
-    raise HomeAssistantError(
-        f"Could not derive circuit_id from entity_id '{entity_id}'."
+    raise ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key="entity_circuit_id_invalid",
+        translation_placeholders={"entity_id": str(entity_id)},
     )
 
 
@@ -1936,7 +1968,11 @@ def _target_coordinators(hass: Any, circuit_id: Any) -> list[Any]:
             matched.append(coordinator)
     if matched:
         return matched
-    raise HomeAssistantError(_unknown_circuit_message(circuit_id, coordinators))
+    raise ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key="circuit_not_found",
+        translation_placeholders={"circuit_id": str(circuit_id)},
+    )
 
 
 def _target_nilm_coordinators(
@@ -1956,7 +1992,11 @@ def _target_entry_circuit_coordinator(
     domain_data = getattr(hass, "data", {}).get(DOMAIN, {})
     coordinator = domain_data.get(entry_id) if isinstance(domain_data, dict) else None
     if coordinator is None or not hasattr(coordinator, "async_set_updated_data"):
-        raise HomeAssistantError(f"Unknown entry_id '{entry_id}'.")
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="entry_not_found",
+            translation_placeholders={"entry_id": str(entry_id)},
+        )
     known_circuit_ids = _known_circuit_ids(coordinator)
     has_circuit = getattr(coordinator, "has_circuit", None)
     if not (
@@ -1964,8 +2004,13 @@ def _target_entry_circuit_coordinator(
         or circuit_id in known_circuit_ids
         or (not callable(has_circuit) and not known_circuit_ids)
     ):
-        raise HomeAssistantError(
-            f"Unknown circuit_id '{circuit_id}' for entry_id '{entry_id}'."
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="entry_circuit_not_found",
+            translation_placeholders={
+                "circuit_id": str(circuit_id),
+                "entry_id": str(entry_id),
+            },
         )
     return [coordinator]
 
@@ -1998,8 +2043,14 @@ def _target_nilm_helper_link_coordinator(
         and helper_circuit_id in _known_circuit_ids(coordinator)
     ]
     if len(matched) != 1:
-        reason = "ambiguous" if len(matched) > 1 else "not found"
-        raise HomeAssistantError(f"NILM helper link target is {reason}.")
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key=(
+                "nilm_helper_link_target_ambiguous"
+                if len(matched) > 1
+                else "nilm_helper_link_target_not_found"
+            ),
+        )
     return matched[0]
 
 
@@ -2029,25 +2080,15 @@ def _target_nilm_assignment_coordinator(
         )
     ]
     if len(matched) != 1:
-        reason = "ambiguous" if len(matched) > 1 else "not found"
-        raise HomeAssistantError(f"NILM assignment target is {reason}.")
-    return matched[0]
-
-
-def _unknown_circuit_message(circuit_id: str, coordinators: list[Any]) -> str:
-    known_circuit_ids = sorted(
-        {
-            known_circuit_id
-            for coordinator in coordinators
-            for known_circuit_id in _known_circuit_ids(coordinator)
-        }
-    )
-    if known_circuit_ids:
-        return (
-            f"Unknown circuit_id '{circuit_id}'. Known circuit IDs: "
-            f"{', '.join(known_circuit_ids)}."
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key=(
+                "nilm_assignment_target_ambiguous"
+                if len(matched) > 1
+                else "nilm_assignment_target_not_found"
+            ),
         )
-    return f"Unknown circuit_id '{circuit_id}'."
+    return matched[0]
 
 
 def _known_circuit_ids(coordinator: Any) -> set[str]:
@@ -2126,9 +2167,10 @@ async def _dispatch_alert_id_action(
         handled = handled or result is True
 
     if not handled:
-        raise HomeAssistantError(
-            f"Unknown alert_id '{alert_id}'. Open a newer notification or "
-            "review the evidence panel for the current alert."
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="alert_not_found",
+            translation_placeholders={"alert_id": str(alert_id)},
         )
 
 
@@ -2146,13 +2188,14 @@ def _single_active_alert_id_for_circuit(
     if len(alert_ids) == 1:
         return alert_ids[0]
     if alert_ids:
-        raise HomeAssistantError(
-            f"entity_id target for circuit_id '{circuit_id}' has multiple "
-            f"active alerts: {', '.join(alert_ids)}. Pass alert_id explicitly."
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="multiple_active_alerts",
+            translation_placeholders={"alert_ids": ", ".join(alert_ids)},
         )
-    raise HomeAssistantError(
-        f"entity_id target for circuit_id '{circuit_id}' has no active alerts. "
-        "Pass alert_id explicitly."
+    raise ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key="no_active_alerts",
     )
 
 
@@ -2205,14 +2248,16 @@ def _service_recommendation_id(hass: Any, data: Mapping[str, Any]) -> str:
     if len(recommendation_ids) == 1:
         return recommendation_ids[0]
     if recommendation_ids:
-        raise HomeAssistantError(
-            f"entity_id target for circuit_id '{circuit_id}' has multiple "
-            "setting recommendations: "
-            f"{', '.join(recommendation_ids)}. Pass recommendation_id explicitly."
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="multiple_recommendations",
+            translation_placeholders={
+                "recommendation_ids": ", ".join(recommendation_ids),
+            },
         )
-    raise HomeAssistantError(
-        f"entity_id target for circuit_id '{circuit_id}' has no setting "
-        "recommendations. Pass recommendation_id explicitly."
+    raise ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key="no_recommendations",
     )
 
 
@@ -2225,16 +2270,27 @@ def _target_recommendation_coordinators(
     if not isinstance(domain_data, dict):
         return []
     if not isinstance(recommendation_id, str) or not recommendation_id:
-        raise HomeAssistantError("Missing recommendation_id.")
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="missing_recommendation_id",
+        )
 
     if isinstance(entry_id, str) and entry_id:
         coordinator = domain_data.get(entry_id)
         if coordinator is None or not hasattr(coordinator, "async_set_updated_data"):
-            raise HomeAssistantError(f"Unknown entry_id '{entry_id}'.")
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="entry_not_found",
+                translation_placeholders={"entry_id": str(entry_id)},
+            )
         if not _coordinator_has_recommendation(coordinator, recommendation_id):
-            raise HomeAssistantError(
-                f"Unknown recommendation_id '{recommendation_id}' "
-                f"for entry_id '{entry_id}'."
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="recommendation_not_found_for_entry",
+                translation_placeholders={
+                    "recommendation_id": str(recommendation_id),
+                    "entry_id": str(entry_id),
+                },
             )
         return [coordinator]
 
@@ -2246,11 +2302,16 @@ def _target_recommendation_coordinators(
     if len(matches) == 1:
         return matches
     if len(matches) > 1:
-        raise HomeAssistantError(
-            f"recommendation_id '{recommendation_id}' matched multiple loaded "
-            "analyzer entries; pass entry_id."
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="recommendation_multiple_entries",
+            translation_placeholders={"recommendation_id": str(recommendation_id)},
         )
-    raise HomeAssistantError(f"Unknown recommendation_id '{recommendation_id}'.")
+    raise ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key="recommendation_not_found",
+        translation_placeholders={"recommendation_id": str(recommendation_id)},
+    )
 
 
 def _target_nilm_signature_coordinators(
@@ -2260,7 +2321,10 @@ def _target_nilm_signature_coordinators(
     entry_id: Any = None,
 ) -> list[Any]:
     if not isinstance(circuit_id, str) or not circuit_id:
-        raise HomeAssistantError("Missing circuit_id.")
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="missing_circuit_id",
+        )
     target_coordinators = _target_nilm_coordinators(hass, circuit_id, entry_id)
     required_signature_ids = [
         signature_id
@@ -2268,12 +2332,16 @@ def _target_nilm_signature_coordinators(
         if isinstance(signature_id, str) and signature_id
     ]
     if not required_signature_ids:
-        raise HomeAssistantError("Missing signature_id.")
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="missing_signature_id",
+        )
     if len(required_signature_ids) > 1 and len(set(required_signature_ids)) != len(
         required_signature_ids
     ):
-        raise HomeAssistantError(
-            "source_signature_id and target_signature_id must be different."
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="duplicate_signature_ids",
         )
 
     matches = [
@@ -2298,12 +2366,31 @@ def _target_nilm_signature_coordinators(
         ),
         required_signature_ids[0],
     )
-    raise HomeAssistantError(
-        _unknown_nilm_signature_message(
-            circuit_id,
-            missing_signature_id,
-            target_coordinators,
-        )
+    known_signature_ids = sorted(
+        {
+            known_signature_id
+            for coordinator in target_coordinators
+            for known_signature_id in _known_nilm_signature_ids(
+                coordinator,
+                circuit_id,
+            )
+        }
+    )
+    translation_key = (
+        "signature_not_found"
+        if known_signature_ids
+        else "signature_not_found_no_known_ids"
+    )
+    placeholders = {
+        "circuit_id": str(circuit_id),
+        "signature_id": str(missing_signature_id),
+    }
+    if known_signature_ids:
+        placeholders["known_ids"] = ", ".join(known_signature_ids)
+    raise ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key=translation_key,
+        translation_placeholders=placeholders,
     )
 
 
@@ -2315,9 +2402,15 @@ def _target_nilm_interval_coordinators(
     entry_id: Any = None,
 ) -> list[Any]:
     if not isinstance(circuit_id, str) or not circuit_id:
-        raise HomeAssistantError("Missing circuit_id.")
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="missing_circuit_id",
+        )
     if not isinstance(interval_id, str) or not interval_id:
-        raise HomeAssistantError("Missing interval_id.")
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="missing_interval_id",
+        )
     target_coordinators = _target_nilm_coordinators(hass, circuit_id, entry_id)
     matches = [
         coordinator
@@ -2337,36 +2430,24 @@ def _target_nilm_interval_coordinators(
         }
     )
     if known_interval_ids:
-        raise HomeAssistantError(
-            f"Unknown interval_id '{interval_id}'. Known interval IDs for "
-            f"{circuit_id}: {', '.join(known_interval_ids)}."
-        )
-    raise HomeAssistantError(
-        f"Unknown interval_id '{interval_id}' for circuit_id '{circuit_id}'."
-    )
-
-
-def _unknown_nilm_signature_message(
-    circuit_id: str,
-    signature_id: str,
-    coordinators: list[Any],
-) -> str:
-    known_signature_ids = sorted(
-        {
-            known_signature_id
-            for coordinator in coordinators
-            for known_signature_id in _known_nilm_signature_ids(
-                coordinator,
-                circuit_id,
-            )
+        placeholders = {
+            "circuit_id": str(circuit_id),
+            "interval_id": str(interval_id),
+            "known_ids": ", ".join(known_interval_ids),
         }
-    )
-    if known_signature_ids:
-        return (
-            f"Unknown signature_id '{signature_id}'. Known signature IDs for "
-            f"{circuit_id}: {', '.join(known_signature_ids)}."
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="interval_not_found",
+            translation_placeholders=placeholders,
         )
-    return f"Unknown signature_id '{signature_id}' for circuit_id '{circuit_id}'."
+    raise ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key="interval_not_found_no_known_ids",
+        translation_placeholders={
+            "circuit_id": str(circuit_id),
+            "interval_id": str(interval_id),
+        },
+    )
 
 
 def _known_nilm_signature_ids(coordinator: Any, circuit_id: str) -> set[str]:
@@ -2612,7 +2693,11 @@ def _nilm_reference_assignment(
             and assignment.get("assignment_id") == assignment_id
         ):
             return assignment
-    raise HomeAssistantError("Unknown NILM assignment for reference import.")
+    raise ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key="assignment_not_found",
+        translation_placeholders={"assignment_id": str(assignment_id)},
+    )
 
 
 def _nilm_reference_settings(
@@ -2624,7 +2709,11 @@ def _nilm_reference_settings(
     assignment = assignment or {}
     legacy = _float_or_none(threshold_w)
     if threshold_w is not None and (isinstance(threshold_w, bool) or legacy is None):
-        raise HomeAssistantError("NILM reference threshold must be non-negative.")
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="invalid_reference_threshold",
+            translation_placeholders={"value": str(threshold_w)},
+        )
     legacy = (
         legacy
         if legacy is not None
@@ -2667,8 +2756,10 @@ def _nilm_reference_settings(
             ),
         )
     except (TypeError, ValueError) as err:
-        raise HomeAssistantError(
-            "NILM reference threshold must be non-negative."
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="invalid_reference_threshold",
+            translation_placeholders={"value": str(threshold_w)},
         ) from err
 
 
@@ -2910,7 +3001,10 @@ async def _async_manual_interval_evidence(
         for draft in drafts
     ]
     if any(end <= start for start, end in parsed):
-        raise HomeAssistantError("NILM label interval end must be after start")
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="invalid_interval_range",
+        )
     sources = _configured_manual_power_sources(hass, coordinator, circuit_id)
     if not parsed:
         return []
@@ -3127,7 +3221,11 @@ def _service_datetime(value: Any, field_name: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     except (TypeError, ValueError) as err:
-        raise HomeAssistantError(f"Invalid {field_name}") from err
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="invalid_datetime",
+            translation_placeholders={"field": str(field_name)},
+        ) from err
     return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 

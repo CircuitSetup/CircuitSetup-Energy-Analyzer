@@ -25,7 +25,6 @@ from .tariff import configured_electricity_rate, global_cost_settings
 @dataclass(frozen=True, slots=True)
 class CircuitNumberDescription:
     key: str
-    name_suffix: str
     icon: str
     native_min_value: float
     native_max_value: float
@@ -49,7 +48,6 @@ class CircuitNumberDescription:
 CIRCUIT_NUMBER_DESCRIPTIONS: tuple[CircuitNumberDescription, ...] = (
     CircuitNumberDescription(
         key="daily_energy_goal",
-        name_suffix="Daily Energy Goal",
         icon="mdi:target",
         native_min_value=0.0,
         native_max_value=100000.0,
@@ -77,7 +75,6 @@ class CircuitDailyEnergyGoalNumber(CircuitAnalyzerEntity, NumberEntity):
             entry_id=entry_id,
             circuit=circuit,
             key=description.key,
-            name_suffix=description.name_suffix,
         )
         self.entity_description = description
         self._attr_icon = description.icon
@@ -86,6 +83,7 @@ class CircuitDailyEnergyGoalNumber(CircuitAnalyzerEntity, NumberEntity):
         self._attr_native_step = description.native_step
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
         self._attr_suggested_object_id = f"{self.circuit_id}_{description.key}"
+        self.entity_id = f"number.{self.circuit_id}_{description.key}"
 
     @property
     def suggested_object_id(self) -> str:
@@ -127,7 +125,6 @@ class CircuitDailyEnergyGoalNumber(CircuitAnalyzerEntity, NumberEntity):
         await async_call_or_raise(
             self.coordinator,
             "async_set_energy_goal_settings",
-            self.entity_description.name_suffix,
             self.circuit_id,
             float(value),
             None,
@@ -137,25 +134,21 @@ class CircuitDailyEnergyGoalNumber(CircuitAnalyzerEntity, NumberEntity):
 class GlobalElectricityRateNumber(NumberEntity):
     """Number entity for the analyzer-wide electricity rate."""
 
-    _attr_has_entity_name = False
+    _attr_has_entity_name = True
     _attr_entity_category = None
     _attr_icon = "mdi:currency-usd"
     _attr_native_min_value = 0.0
     _attr_native_max_value = 100.0
     _attr_native_step = 0.001
     _attr_native_unit_of_measurement = "$/kWh"
+    _attr_translation_key = "electricity_rate"
 
     def __init__(self, coordinator: Any, *, entry_id: str) -> None:
         self.coordinator = coordinator
         self._entry_id = entry_id
-        self._attr_name = "CircuitSetup Energy Analyzer Fallback Electricity Rate"
         self._attr_unique_id = f"{entry_id}_electricity_rate"
         self._attr_suggested_object_id = "circuitsetup_energy_analyzer_electricity_rate"
-
-    @property
-    def name(self) -> str:
-        """Return the visible entity name for fallback tests."""
-        return self._attr_name
+        self.entity_id = "number.circuitsetup_energy_analyzer_electricity_rate"
 
     @property
     def unique_id(self) -> str:
@@ -199,7 +192,6 @@ class GlobalElectricityRateNumber(NumberEntity):
         await async_call_or_raise(
             self.coordinator,
             "async_set_global_cost_rate",
-            "set electricity rate",
             float(value),
         )
 
@@ -209,9 +201,10 @@ class GlobalTimeOfUseRateNumber(GlobalElectricityRateNumber):
 
     def __init__(self, coordinator: Any, *, entry_id: str) -> None:
         super().__init__(coordinator, entry_id=entry_id)
-        self._attr_name = "CircuitSetup Energy Analyzer Time-Of-Use Rate"
+        self._attr_translation_key = "tou_rate"
         self._attr_unique_id = f"{entry_id}_tou_rate"
         self._attr_suggested_object_id = "circuitsetup_energy_analyzer_tou_rate"
+        self.entity_id = "number.circuitsetup_energy_analyzer_tou_rate"
 
     @property
     def native_value(self) -> float:
@@ -235,7 +228,6 @@ class GlobalTimeOfUseRateNumber(GlobalElectricityRateNumber):
         await async_call_or_raise(
             self.coordinator,
             "async_set_global_tou_rate",
-            "set Time-of-Use rate",
             float(value),
         )
 

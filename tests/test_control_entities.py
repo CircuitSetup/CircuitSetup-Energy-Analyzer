@@ -426,13 +426,11 @@ async def test_switch_setup_entry_adds_maintenance_switch(
         if entity.unique_id == "entry-1_fridge_maintenance"
     )
     assert maintenance.unique_id == "entry-1_fridge_maintenance"
-    assert maintenance.name == "Pause alerts"
     assert maintenance.suggested_object_id == "fridge_maintenance"
     assert maintenance.icon == "mdi:bell-pause-outline"
-    assert maintenance.entity_description.name_suffix == "Pause alerts"
     assert maintenance.entity_description.has_entity_name is True
     assert maintenance.entity_description.translation_key == "maintenance"
-    assert maintenance._attr_name == "Pause alerts"
+    assert getattr(maintenance, "_attr_name", None) is None
     assert maintenance._attr_has_entity_name is True
     assert maintenance._attr_translation_key == "maintenance"
     assert maintenance.is_on is True
@@ -581,7 +579,8 @@ async def test_select_setup_entry_adds_sensitivity_and_detail_level_controls(
     }
 
     sensitivity = by_unique_id["entry-1_fridge_alert_sensitivity"]
-    assert sensitivity.name == "Kitchen Fridge Alert Sensitivity"
+    assert sensitivity._attr_has_entity_name is True
+    assert sensitivity._attr_translation_key == "alert_sensitivity"
     assert sensitivity.suggested_object_id == "fridge_alert_sensitivity"
     assert sensitivity.options == ["Quiet", "Balanced", "Sensitive"]
     assert sensitivity.current_option == "Quiet"
@@ -589,12 +588,14 @@ async def test_select_setup_entry_adds_sensitivity_and_detail_level_controls(
     assert sensitivity.entity_description.options is None
 
     detail_level = by_unique_id["entry-1_entity_detail_level"]
-    assert detail_level.name == "CircuitSetup Energy Analyzer Entity Detail Level"
+    assert detail_level._attr_has_entity_name is True
+    assert detail_level._attr_translation_key == "entity_detail_level"
     assert detail_level.options == ["simple", "standard", "expert"]
     assert detail_level.current_option == "standard"
 
     dashboard_layout = by_unique_id["entry-1_dashboard_layout"]
-    assert dashboard_layout.name == "CircuitSetup Energy Analyzer Dashboard Layout"
+    assert dashboard_layout._attr_has_entity_name is True
+    assert dashboard_layout._attr_translation_key == "dashboard_layout"
     assert dashboard_layout.options == ["Simple", "Standard", "Expert"]
     assert dashboard_layout.current_option == "Simple"
 
@@ -678,16 +679,34 @@ async def test_select_controls_reject_invalid_options_without_side_effects(
 
     by_unique_id = {entity.unique_id: entity for entity in added_entities}
 
-    with pytest.raises(select.HomeAssistantError, match="alert sensitivity"):
+    with pytest.raises(select.ServiceValidationError) as sensitivity_error:
         await by_unique_id["entry-1_fridge_alert_sensitivity"].async_select_option(
             "Noisy"
         )
-    with pytest.raises(select.HomeAssistantError, match="entity detail level"):
+    assert sensitivity_error.value.translation_domain == DOMAIN
+    assert sensitivity_error.value.translation_key == "invalid_select_option"
+    assert sensitivity_error.value.translation_placeholders == {
+        "option": "Noisy",
+        "choices": "Quiet, Balanced, Sensitive",
+    }
+    with pytest.raises(select.ServiceValidationError) as detail_error:
         await by_unique_id["entry-1_entity_detail_level"].async_select_option(
             "advanced"
         )
-    with pytest.raises(select.HomeAssistantError, match="dashboard layout"):
+    assert detail_error.value.translation_domain == DOMAIN
+    assert detail_error.value.translation_key == "invalid_select_option"
+    assert detail_error.value.translation_placeholders == {
+        "option": "advanced",
+        "choices": "simple, standard, expert",
+    }
+    with pytest.raises(select.ServiceValidationError) as layout_error:
         await by_unique_id["entry-1_dashboard_layout"].async_select_option("Huge")
+    assert layout_error.value.translation_domain == DOMAIN
+    assert layout_error.value.translation_key == "invalid_select_option"
+    assert layout_error.value.translation_placeholders == {
+        "option": "Huge",
+        "choices": "Simple, Standard, Expert",
+    }
 
     assert coordinator.calls == []
 
@@ -696,6 +715,8 @@ async def test_select_controls_reject_invalid_options_without_side_effects(
 async def test_unavailable_selects_explain_missing_actions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
     from custom_components.circuitsetup_energy_analyzer import select
 
     _disable_registry_pruning(monkeypatch, select)
@@ -729,10 +750,13 @@ async def test_unavailable_selects_explain_missing_actions(
             "next_step": "Reload the integration or check the system log.",
         }
 
-    with pytest.raises(select.HomeAssistantError, match="analyzer action"):
+    with pytest.raises(HomeAssistantError) as exc_info:
         await by_unique_id["entry-1_entity_detail_level"].async_select_option(
             "expert"
         )
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "action_unavailable"
+    assert exc_info.value.translation_placeholders is None
 
 
 @pytest.mark.asyncio
@@ -782,7 +806,8 @@ async def test_number_setup_entry_adds_daily_energy_goal_control(
     rate = by_unique_id["entry-1_electricity_rate"]
     tou_rate = by_unique_id["entry-1_tou_rate"]
     assert goal.unique_id == "entry-1_fridge_daily_energy_goal"
-    assert goal.name == "Kitchen Fridge Daily Energy Goal"
+    assert goal._attr_has_entity_name is True
+    assert goal._attr_translation_key == "daily_energy_goal"
     assert goal.suggested_object_id == "fridge_daily_energy_goal"
     assert goal.native_value == 4.5
     assert goal.native_min_value == 0.0
@@ -791,12 +816,14 @@ async def test_number_setup_entry_adds_daily_energy_goal_control(
     _assert_base_description_defaults(goal.entity_description)
     assert goal.entity_description.mode is None
 
-    assert rate.name == "CircuitSetup Energy Analyzer Fallback Electricity Rate"
+    assert rate._attr_has_entity_name is True
+    assert rate._attr_translation_key == "electricity_rate"
     assert rate.suggested_object_id == "circuitsetup_energy_analyzer_electricity_rate"
     assert rate.native_value == 0.19
     assert rate.native_unit_of_measurement == "$/kWh"
     assert rate.device_info["identifiers"] == {(DOMAIN, "entry-1")}
-    assert tou_rate.name == "CircuitSetup Energy Analyzer Time-Of-Use Rate"
+    assert tou_rate._attr_has_entity_name is True
+    assert tou_rate._attr_translation_key == "tou_rate"
     assert tou_rate.native_value == 0.31
 
     await goal.async_set_native_value(6.25)
@@ -861,7 +888,8 @@ def test_effective_electricity_rate_sensor_prefers_opower_then_fallback() -> Non
     coordinator = _FakeCoordinator()
     rate = EffectiveElectricityRateSensor(coordinator, entry_id="entry-1")
 
-    assert rate.name == "CircuitSetup Energy Analyzer Electricity Rate"
+    assert rate._attr_has_entity_name is True
+    assert rate._attr_translation_key == "electricity_rate"
     assert rate.suggested_object_id == "circuitsetup_energy_analyzer_electricity_rate"
     assert rate.native_unit_of_measurement == "$/kWh"
     assert rate.native_value == 0.19
@@ -1127,5 +1155,8 @@ async def test_button_press_raises_clear_error_when_coordinator_method_missing(
         if entity.unique_id == "entry-1_fridge_relearn_baseline"
     )
 
-    with pytest.raises(button.HomeAssistantError, match="relearn baseline"):
+    with pytest.raises(button.HomeAssistantError) as exc_info:
         await relearn.async_press()
+    assert exc_info.value.translation_domain == DOMAIN
+    assert exc_info.value.translation_key == "action_unavailable"
+    assert exc_info.value.translation_placeholders is None
