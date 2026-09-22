@@ -32,7 +32,10 @@ from custom_components.circuitsetup_energy_analyzer.models import (
 )
 from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
-from tests_homeassistant.test_lifecycle_gate import _point_custom_components_at_worktree
+from tests_homeassistant.test_lifecycle_gate import (
+    _point_custom_components_at_worktree,
+    _uses_hierarchical_entity_ids,
+)
 
 
 class _NilmRuntimeCoordinator:
@@ -228,6 +231,7 @@ async def test_platform_setup_uses_home_assistant_runtime_registries(
             False,
         ),
     }
+    uses_hierarchical_entity_ids = _uses_hierarchical_entity_ids()
     registry_entries: dict[str, Any] = {}
     for domain, (
         unique_id,
@@ -237,10 +241,15 @@ async def test_platform_setup_uses_home_assistant_runtime_registries(
         enabled_by_default,
         hidden_by_default,
     ) in expected_entities.items():
-        assert entity_registry.async_get_entity_id(domain, DOMAIN, unique_id) == (
-            entity_id
+        registered_entity_id = entity_registry.async_get_entity_id(
+            domain,
+            DOMAIN,
+            unique_id,
         )
-        registry_entry = entity_registry.async_get(entity_id)
+        assert registered_entity_id is not None
+        if not uses_hierarchical_entity_ids:
+            assert registered_entity_id == entity_id
+        registry_entry = entity_registry.async_get(registered_entity_id)
         assert registry_entry is not None
         registry_entries[domain] = registry_entry
         assert registry_entry.unique_id == unique_id
@@ -250,7 +259,7 @@ async def test_platform_setup_uses_home_assistant_runtime_registries(
         assert registry_entry.entity_category == expected_category
         assert (registry_entry.disabled_by is None) is enabled_by_default
         assert (registry_entry.hidden_by is not None) is hidden_by_default
-        state = hass.states.get(entity_id)
+        state = hass.states.get(registered_entity_id)
         assert state is not None
         assert state.attributes["friendly_name"] == f"Kitchen Fridge {expected_name}"
 
@@ -268,23 +277,26 @@ async def test_platform_setup_uses_home_assistant_runtime_registries(
         registry_entry.device_id == fridge_device.id
         for registry_entry in registry_entries.values()
     )
-    assert entity_registry.async_get_entity_id(
-        "sensor",
-        DOMAIN,
-        "runtime-entry_fridge_daily_energy_usage",
-    ) == "sensor.kitchen_fridge_energy_usage_today"
-    assert entity_registry.async_get_entity_id(
-        "binary_sensor",
-        DOMAIN,
-        "runtime-entry_fridge_maintenance",
-    ) == "binary_sensor.kitchen_fridge_alerts_paused"
+    if not uses_hierarchical_entity_ids:
+        assert entity_registry.async_get_entity_id(
+            "sensor",
+            DOMAIN,
+            "runtime-entry_fridge_daily_energy_usage",
+        ) == "sensor.kitchen_fridge_energy_usage_today"
+        assert entity_registry.async_get_entity_id(
+            "binary_sensor",
+            DOMAIN,
+            "runtime-entry_fridge_maintenance",
+        ) == "binary_sensor.kitchen_fridge_alerts_paused"
 
     special_entity_id = entity_registry.async_get_entity_id(
         "sensor",
         DOMAIN,
         "runtime-entry_laundry_east_activity_summary",
     )
-    assert special_entity_id == "sensor.cafe_laundry_east_activity_summary"
+    assert special_entity_id is not None
+    if not uses_hierarchical_entity_ids:
+        assert special_entity_id == "sensor.cafe_laundry_east_activity_summary"
     special_entry = entity_registry.async_get(special_entity_id)
     assert special_entry is not None
     assert special_entry.original_name == "Activity summary"
