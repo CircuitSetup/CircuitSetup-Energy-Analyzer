@@ -163,7 +163,7 @@ def test_record_energy_usage_excludes_prior_maintenance_date_before_baseline() -
 
     assert history["days"][0] == {
         "date": "2026-07-27",
-        "usage_kwh": 8.0,
+        "usage_kwh": 8.667,
         "complete": True,
         "baseline_eligible": False,
     }
@@ -347,4 +347,132 @@ def test_record_energy_usage_marks_only_bracketed_local_day_complete() -> None:
 
     assert history["days"] == [
         {"date": "2026-07-07", "usage_kwh": 8.0, "complete": True}
+    ]
+
+
+def test_cross_midnight_meter_delta_is_split_by_elapsed_time() -> None:
+    history: dict[str, object] = {}
+    settings = EnergyUsageSettings()
+    record_energy_usage(
+        history,
+        circuit_id="fridge",
+        timestamp=datetime(2026, 7, 15, 3, 30, tzinfo=UTC),
+        energy_kwh=100.0,
+        settings=settings,
+        time_zone="America/New_York",
+    )
+    result = record_energy_usage(
+        history,
+        circuit_id="fridge",
+        timestamp=datetime(2026, 7, 15, 4, 30, tzinfo=UTC),
+        energy_kwh=101.0,
+        settings=settings,
+        time_zone="America/New_York",
+    )
+
+    assert result.daily_usage_kwh == 0.5
+    assert history["days"] == [
+        {"date": "2026-07-14", "usage_kwh": 0.5},
+        {"date": "2026-07-15", "usage_kwh": 0.5},
+    ]
+
+
+def test_bracketed_midnight_includes_split_delta_in_completed_baseline() -> None:
+    history: dict[str, object] = {}
+    settings = EnergyUsageSettings(window_days=1)
+    for timestamp, energy in (
+        (datetime(2026, 7, 7, 0, 0, tzinfo=UTC), 100.0),
+        (datetime(2026, 7, 7, 23, 55, tzinfo=UTC), 123.916667),
+        (datetime(2026, 7, 8, 0, 5, tzinfo=UTC), 124.083334),
+    ):
+        result = record_energy_usage(
+            history,
+            circuit_id="fridge",
+            timestamp=timestamp,
+            energy_kwh=energy,
+            settings=settings,
+            time_zone="UTC",
+        )
+
+    assert result.baseline_total_kwh == 24.0
+    assert history["days"][0] == {
+        "date": "2026-07-07",
+        "usage_kwh": 24.0,
+        "complete": True,
+    }
+
+
+def test_cross_midnight_split_uses_actual_duration_through_dst_fallback() -> None:
+    history: dict[str, object] = {}
+    settings = EnergyUsageSettings()
+    record_energy_usage(
+        history,
+        circuit_id="fridge",
+        timestamp=datetime(2026, 11, 1, 3, 30, tzinfo=UTC),
+        energy_kwh=100.0,
+        settings=settings,
+        time_zone="America/New_York",
+    )
+    record_energy_usage(
+        history,
+        circuit_id="fridge",
+        timestamp=datetime(2026, 11, 1, 8, 30, tzinfo=UTC),
+        energy_kwh=105.0,
+        settings=settings,
+        time_zone="America/New_York",
+    )
+
+    assert [(day["date"], day["usage_kwh"]) for day in history["days"]] == [
+        ("2026-10-31", 0.5),
+        ("2026-11-01", 4.5),
+    ]
+    assert all(day["complete"] is False for day in history["days"])
+
+
+def test_cross_midnight_meter_reset_adds_no_usage() -> None:
+    history = {}
+    settings = EnergyUsageSettings()
+    record_energy_usage(
+        history,
+        circuit_id="fridge",
+        timestamp=datetime(2026, 7, 14, 23, 30, tzinfo=UTC),
+        energy_kwh=100.0,
+        settings=settings,
+        time_zone="UTC",
+    )
+    record_energy_usage(
+        history,
+        circuit_id="fridge",
+        timestamp=datetime(2026, 7, 15, 0, 30, tzinfo=UTC),
+        energy_kwh=1.0,
+        settings=settings,
+        time_zone="UTC",
+    )
+
+    assert history["days"] == []
+
+
+def test_wide_cross_midnight_gap_is_not_complete() -> None:
+    history: dict[str, object] = {}
+    settings = EnergyUsageSettings()
+    record_energy_usage(
+        history,
+        circuit_id="fridge",
+        timestamp=datetime(2026, 7, 14, 23, tzinfo=UTC),
+        energy_kwh=100.0,
+        settings=settings,
+        time_zone="UTC",
+    )
+    record_energy_usage(
+        history,
+        circuit_id="fridge",
+        timestamp=datetime(2026, 7, 15, 3, tzinfo=UTC),
+        energy_kwh=104.0,
+        settings=settings,
+        time_zone="UTC",
+    )
+
+    assert [(day["usage_kwh"], day["complete"]) for day in history["days"]] == [
+        (1.0, False),
+        (3.0, False),
     ]

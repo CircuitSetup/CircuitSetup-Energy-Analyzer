@@ -3697,7 +3697,7 @@ def test_energy_usage_processor_updates_state_and_returns_spike_alert() -> None:
         energy_usage_by_circuit={
             "fridge": {
                 "last_energy_kwh": 100.0,
-                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+                "last_sample_at": (now - timedelta(minutes=30)).isoformat(),
                 "days": [
                     {
                         "date": (now.date() - timedelta(days=offset)).isoformat(),
@@ -3844,13 +3844,13 @@ def test_energy_usage_processor_excludes_delta_spanning_completed_maintenance() 
     assert store_data.energy_usage_by_circuit["water_heater"]["days"] == [
         {
             "date": "2026-07-27",
-            "usage_kwh": 8.0,
+            "usage_kwh": 8.667,
             "complete": True,
             "baseline_eligible": False,
         },
         {
             "date": "2026-07-28",
-            "usage_kwh": 1.0,
+            "usage_kwh": 0.333,
             "baseline_eligible": False,
         },
     ]
@@ -3891,7 +3891,7 @@ def _energy_usage_projection_evidence(
         energy_usage_by_circuit={
             "fridge": {
                 "last_energy_kwh": 100.0,
-                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+                "last_sample_at": (now - timedelta(minutes=30)).isoformat(),
                 "days": days,
             }
         },
@@ -4126,7 +4126,7 @@ def test_energy_usage_processor_suppresses_spike_when_context_explains_usage() -
         energy_usage_by_circuit={
             "hvac": {
                 "last_energy_kwh": 100.0,
-                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+                "last_sample_at": (now - timedelta(minutes=30)).isoformat(),
                 "days": [
                     {
                         "date": (now.date() - timedelta(days=offset)).isoformat(),
@@ -4221,7 +4221,7 @@ def test_energy_usage_processor_keeps_rolling_alert_when_context_is_sparse() -> 
         energy_usage_by_circuit={
             "hvac": {
                 "last_energy_kwh": 100.0,
-                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+                "last_sample_at": (now - timedelta(minutes=30)).isoformat(),
                 "days": [
                     {
                         "date": (now.date() - timedelta(days=offset)).isoformat(),
@@ -4308,7 +4308,7 @@ def test_energy_usage_context_uses_local_progress_across_dst_fallback() -> None:
         energy_usage_by_circuit={
             "ev": {
                 "last_energy_kwh": 100.0,
-                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+                "last_sample_at": (now - timedelta(minutes=30)).isoformat(),
             }
         }
     )
@@ -4365,7 +4365,7 @@ def test_energy_usage_processor_skips_contextual_learning_during_maintenance() -
         energy_usage_by_circuit={
             "ev": {
                 "last_energy_kwh": 100.0,
-                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+                "last_sample_at": (now - timedelta(minutes=30)).isoformat(),
             }
         },
         maintenance_by_circuit={"ev": {"active": True}},
@@ -4436,7 +4436,7 @@ def test_energy_usage_alert_features_include_contextual_baseline_details() -> No
         energy_usage_by_circuit={
             "hvac": {
                 "last_energy_kwh": 100.0,
-                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+                "last_sample_at": (now - timedelta(minutes=30)).isoformat(),
                 "days": [
                     {
                         "date": (now.date() - timedelta(days=offset)).isoformat(),
