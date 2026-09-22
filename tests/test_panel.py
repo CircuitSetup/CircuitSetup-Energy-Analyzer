@@ -6,6 +6,7 @@ import json
 import sys
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
+from threading import get_ident
 from types import ModuleType, SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
@@ -5559,7 +5560,13 @@ async def test_nilm_workspace_view_forwards_requested_entry_id(
         name="Second Mains",
         entity_id="sensor.second_mains_power",
     )
-    hass = SimpleNamespace(data={DOMAIN: {"entry-1": first, "entry-2": second}})
+    async def run_in_executor(job):
+        return await asyncio.get_running_loop().run_in_executor(None, job)
+
+    hass = SimpleNamespace(
+        data={DOMAIN: {"entry-1": first, "entry-2": second}},
+        async_add_executor_job=run_in_executor,
+    )
     request = SimpleNamespace(
         app={panel.KEY_HASS: hass},
         query={"circuit_id": "mains", "entry_id": "entry-2"},
@@ -5569,6 +5576,79 @@ async def test_nilm_workspace_view_forwards_requested_entry_id(
     payload = await panel.NilmWorkspaceView().get(request)
 
     assert payload["circuit"]["name"] == "Second Mains"
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_view_builds_payload_off_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel, panel_nilm
+
+    async def run_in_executor(job):
+        return await asyncio.get_running_loop().run_in_executor(None, job)
+
+    hass = SimpleNamespace(
+        data={DOMAIN: {}},
+        async_add_executor_job=run_in_executor,
+    )
+    request = SimpleNamespace(app={panel.KEY_HASS: hass}, query={})
+    monkeypatch.setattr(
+        panel_nilm,
+        "nilm_workspace_payload",
+        lambda _coordinators, **_kwargs: {"builder_thread": get_ident()},
+    )
+    monkeypatch.setattr(panel.web, "json_response", lambda payload: payload)
+
+    payload = await panel.NilmWorkspaceView().get(request)
+
+    assert payload["builder_thread"] != get_ident()
+
+
+@pytest.mark.asyncio
+async def test_nilm_workspace_preparation_yields_between_large_collections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer import panel_nilm
+
+    loop = asyncio.get_running_loop()
+    callback_ran = asyncio.Event()
+    config = SimpleNamespace(circuit_id="mains")
+    coordinator = SimpleNamespace(
+        circuit_configs=(config,),
+        store_data=SimpleNamespace(
+            nilm_signatures={"mains": []},
+            nilm_session_history_by_circuit={"mains": []},
+            nilm_label_intervals_by_circuit={},
+            nilm_known_load_attributions_by_circuit={},
+            nilm_appliance_assignments_by_circuit={},
+        ),
+        state=SimpleNamespace(nilm_unknown_loads_by_circuit={}),
+        _nilm_unmatched_edges={},
+    )
+    calls = 0
+
+    def ensure(_mapping, _key):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            loop.call_later(0.001, callback_ran.set)
+        elif calls == 2:
+            assert callback_ran.is_set(), "callback waited for preparation"
+
+    monkeypatch.setattr(
+        panel_nilm,
+        "_nilm_workspace_target",
+        lambda *_args, **_kwargs: (coordinator, config, ()),
+    )
+    monkeypatch.setattr(panel_nilm, "ensure_nilm_tracked_collection", ensure)
+
+    result = panel_nilm._nilm_workspace_prepare_revision_sources(
+        (coordinator,), circuit_id="mains", entry_id=None
+    )
+    if asyncio.iscoroutine(result):
+        await result
+
+    assert calls >= 2
 
 
 @pytest.mark.asyncio
