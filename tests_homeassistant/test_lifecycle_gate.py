@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
 import re
 from datetime import UTC, datetime, timedelta
@@ -42,9 +41,10 @@ EXPECTED_PLATFORM_DOMAINS = frozenset(
 
 
 def _uses_hierarchical_entity_ids() -> bool:
-    return "object_id_base" in inspect.signature(
-        er.EntityRegistry.async_get_or_create
-    ).parameters
+    return (
+        "object_id_base"
+        in er.EntityRegistry.async_get_or_create.__code__.co_varnames
+    )
 
 
 EXPECTED_SOURCE_WORKFLOW_PLATFORM_DOMAINS = frozenset(
