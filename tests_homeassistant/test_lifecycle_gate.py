@@ -116,6 +116,37 @@ async def test_feature_store_migrates_previous_major_version(
     assert await Store(hass, STORAGE_VERSION, key).async_load() == previous_data
 
 
+@pytest.mark.parametrize("version_offset", [0, -1])
+@pytest.mark.usefixtures("enable_custom_integrations")
+@pytest.mark.asyncio
+async def test_feature_store_preserves_malformed_root_for_recovery(
+    hass: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    version_offset: int,
+) -> None:
+    from homeassistant.exceptions import ConfigEntryError
+    from homeassistant.helpers.storage import Store
+
+    _point_custom_components_at_worktree(monkeypatch)
+    from custom_components.circuitsetup_energy_analyzer.const import (
+        STORAGE_KEY,
+        STORAGE_VERSION,
+    )
+    from custom_components.circuitsetup_energy_analyzer.storage import FeatureStore
+
+    entry_id = f"invalid-root-{version_offset}"
+    key = f"{STORAGE_KEY}.{entry_id}"
+    raw_store = Store(hass, STORAGE_VERSION + version_offset, key)
+    await raw_store.async_save(["bad root"])
+
+    with pytest.raises(ConfigEntryError, match="storage payload must be an object"):
+        await FeatureStore(hass, entry_id).async_load()
+
+    assert await Store(hass, STORAGE_VERSION + version_offset, key).async_load() == [
+        "bad root"
+    ]
+
+
 @pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
 @pytest.mark.asyncio
 async def test_config_entry_setup_reload_unload_lifecycle(
