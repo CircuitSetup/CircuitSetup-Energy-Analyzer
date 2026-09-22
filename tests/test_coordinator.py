@@ -897,6 +897,59 @@ async def test_relearn_discards_in_flight_operating_cycle() -> None:
 
 
 @pytest.mark.asyncio
+async def test_relearn_waits_for_ordinary_processor_before_clearing_baseline() -> None:
+    import threading
+
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors import (
+        power_quality,
+    )
+
+    coordinator = EnergyAnalyzerCoordinator(
+        SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None), data={}),
+        entry_data={
+            CONF_CIRCUITS: [
+                {
+                    "circuit_id": "office",
+                    "name": "Office",
+                    "mode": "mixed",
+                    "appliance_profile": "mixed",
+                    "sensors": [],
+                }
+            ]
+        },
+    )
+    coordinator.notification_controller.async_dismiss_circuit_alert_notifications = (
+        AsyncMock()
+    )
+    coordinator._async_save_store = AsyncMock()
+    entered = threading.Event()
+    release = threading.Event()
+
+    def delayed_baseline(_sample, _config, context):
+        entered.set()
+        assert release.wait(5)
+        context.store_data.baselines["office:real_power"] = BaselineStats(
+            "real_power", 20, 100.0, 5.0, 90.0, 110.0, 1.0
+        )
+        return power_quality.PowerQualityResult(store_dirty=True)
+
+    coordinator._power_quality_processor.process = delayed_baseline
+    update = asyncio.create_task(coordinator.async_process_update())
+    assert await asyncio.to_thread(entered.wait, 5)
+    reset = asyncio.create_task(coordinator.async_relearn_baseline("office"))
+    await asyncio.sleep(0.01)
+    reset_waited = not reset.done()
+    release.set()
+    await asyncio.gather(update, reset)
+
+    assert reset_waited
+    assert "office:real_power" not in coordinator.store_data.baselines
+
+
+@pytest.mark.asyncio
 async def test_relearn_preserves_active_hvac_call_as_excluded_marker() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import (
         EnergyAnalyzerCoordinator,
