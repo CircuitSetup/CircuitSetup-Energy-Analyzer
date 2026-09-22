@@ -3,12 +3,16 @@
 from typing import Any
 
 import pytest
+from homeassistant.components.lovelace.dashboard import LovelaceStorage
 from homeassistant.helpers.storage import Store
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
 from custom_components.circuitsetup_energy_analyzer.dashboard import DASHBOARD_URL_PATH
+from custom_components.circuitsetup_energy_analyzer.managers import (
+    dashboard_controller as dashboard_storage,
+)
 from tests_homeassistant.test_lifecycle_gate import _point_custom_components_at_worktree
 
 
@@ -22,7 +26,16 @@ async def test_user_dashboard_at_reserved_path_is_preserved(
         hass, "http", {"http": {"server_port": unused_tcp_port}}
     )
     assert await async_setup_component(hass, "frontend", {})
-    collection = hass.data["lovelace"]["dashboards_collection"]
+    lovelace_data = hass.data["lovelace"]
+    collection = dashboard_storage._lovelace_dashboard_item_value(
+        lovelace_data, "dashboards_collection"
+    )
+    if collection is None:
+        collection = await dashboard_storage._async_load_lovelace_dashboards_collection(
+            hass, lovelace_data
+        )
+    dashboards = dashboard_storage._lovelace_dashboards(lovelace_data)
+    assert collection is not None and dashboards is not None
     assert not [
         item
         for item in collection.async_items()
@@ -37,13 +50,15 @@ async def test_user_dashboard_at_reserved_path_is_preserved(
             "show_in_sidebar": True,
         }
     )
+    if DASHBOARD_URL_PATH not in dashboards:
+        dashboards[DASHBOARD_URL_PATH] = LovelaceStorage(hass, user_item)
     await collection.store._async_callback_delayed_write()
     assert any(
         row["title"] == "My personal dashboard"
         for row in (await Store(hass, 1, "lovelace_dashboards").async_load())["items"]
         if row["id"] == user_item["id"]
     )
-    dashboard = hass.data["lovelace"]["dashboards"][DASHBOARD_URL_PATH]
+    dashboard = dashboards[DASHBOARD_URL_PATH]
     original_views = [
         {"title": "Personal", "cards": [{"type": "markdown", "content": "Keep me"}]}
     ]
@@ -87,9 +102,7 @@ async def test_user_dashboard_at_reserved_path_is_preserved(
     updated_item = next(
         item for item in collection.async_items() if item["id"] == user_item["id"]
     )
-    retained = await hass.data["lovelace"]["dashboards"][DASHBOARD_URL_PATH].async_load(
-        False
-    )
+    retained = await dashboards[DASHBOARD_URL_PATH].async_load(False)
     assert created["action"] == "unavailable"
     assert created["reason"] == "dashboard_not_owned"
     assert updated_item["title"] == "My personal dashboard"
@@ -113,7 +126,7 @@ async def test_user_dashboard_at_reserved_path_is_preserved(
         for item in collection.async_items()
         if item["url_path"] == DASHBOARD_URL_PATH
     ]
-    assert DASHBOARD_URL_PATH in hass.data["lovelace"]["dashboards"]
+    assert DASHBOARD_URL_PATH in dashboards
     assert (await Store(hass, 1, dashboard_storage_key).async_load())["config"][
         "views"
     ] == original_views
