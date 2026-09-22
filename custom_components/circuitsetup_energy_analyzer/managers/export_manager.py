@@ -208,6 +208,7 @@ class ExportManager:
     async def async_export_history_csv(self, circuit_id: str) -> None:
         """Store retained analyzer history for one circuit as CSV text."""
         coordinator = self._coordinator
+        coordinator.store_persistence.apply_retention(coordinator.current_time())
         coordinator.last_exported_history_csv = build_circuit_history_csv(
             coordinator.store_data,
             circuit_id,
