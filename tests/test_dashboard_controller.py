@@ -54,6 +54,9 @@ class _FakeLovelaceStorage:
     async def async_save(self, config: dict[str, object]) -> None:
         self.saved.append(config)
 
+    async def async_load(self, _force: bool) -> dict[str, object]:
+        return self.saved[-1] if self.saved else {}
+
     async def async_delete(self) -> None:
         self.deleted = True
 
@@ -254,6 +257,12 @@ async def test_dashboard_controller_creates_dashboard_and_fires_event() -> None:
     assert payload["layout"] == DASHBOARD_LAYOUT_STANDARD
     assert coordinator.collection.created
     assert coordinator.dashboard_stores[DASHBOARD_URL_PATH].saved
+    assert (
+        coordinator.dashboard_stores[DASHBOARD_URL_PATH].saved[0][
+            "circuitsetup_energy_analyzer_entry_id"
+        ]
+        == coordinator.entry_id
+    )
     assert coordinator.last_dashboard_create_request == payload
     assert coordinator.store_data.dashboard_status == payload
     assert coordinator.dirty_count == 1
@@ -290,6 +299,9 @@ async def test_dashboard_controller_reuses_runtime_dashboard_when_items_are_stal
             "title": "CircuitSetup Energy Analyzer",
         }
     )
+    coordinator.dashboard_stores[DASHBOARD_URL_PATH].saved.append(
+        {"circuitsetup_energy_analyzer_entry_id": coordinator.entry_id}
+    )
     coordinator.collection.async_items = lambda: []
     controller = dashboard_controller.DashboardController(coordinator)
 
@@ -321,11 +333,47 @@ async def test_dashboard_controller_owns_lovelace_create_and_remove() -> None:
     assert DASHBOARD_URL_PATH not in coordinator.dashboard_stores
 
 
+@pytest.mark.parametrize("owner", [None, "another-entry"])
+@pytest.mark.asyncio
+async def test_dashboard_controller_preserves_user_dashboard_at_reserved_path(
+    owner: str | None,
+) -> None:
+    coordinator = _StorageDashboardCoordinator()
+    user_dashboard = _FakeLovelaceStorage(
+        {"url_path": DASHBOARD_URL_PATH, "title": "My dashboard"}
+    )
+    user_dashboard.saved.append({"views": [{"title": "Keep me"}]})
+    if owner is not None:
+        user_dashboard.saved[0]["circuitsetup_energy_analyzer_entry_id"] = owner
+    coordinator.dashboard_stores[DASHBOARD_URL_PATH] = user_dashboard
+    controller = dashboard_controller.DashboardController(coordinator)
+
+    created = await controller.async_create_dashboard()
+    removed = await controller.async_remove_dashboard()
+
+    assert created["action"] == "unavailable"
+    assert created["reason"] == "dashboard_not_owned"
+    assert removed["action"] == "unavailable"
+    assert removed["reason"] == "dashboard_not_owned"
+    assert user_dashboard.saved == [
+        {
+            "views": [{"title": "Keep me"}],
+            **({"circuitsetup_energy_analyzer_entry_id": owner} if owner else {}),
+        }
+    ]
+    assert coordinator.collection.updated == []
+    assert coordinator.collection.deleted == []
+    assert coordinator.dashboard_stores[DASHBOARD_URL_PATH] is user_dashboard
+
+
 @pytest.mark.asyncio
 async def test_dashboard_controller_removes_dashboard_and_persists_layout() -> None:
     coordinator = _StorageDashboardCoordinator()
     coordinator.dashboard_stores[DASHBOARD_URL_PATH] = _FakeLovelaceStorage(
         {"url_path": DASHBOARD_URL_PATH}
+    )
+    coordinator.dashboard_stores[DASHBOARD_URL_PATH].saved.append(
+        {"circuitsetup_energy_analyzer_entry_id": coordinator.entry_id}
     )
     controller = dashboard_controller.DashboardController(coordinator)
 

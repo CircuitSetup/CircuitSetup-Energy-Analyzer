@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from dataclasses import dataclass, replace
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
-from .local_time import TimeZone, as_ha_local, local_date
+from .local_time import TimeZone, as_ha_local, local_date, local_day_time
 
 DEFAULT_USAGE_WINDOW_DAYS = 7
 DEFAULT_DAILY_USAGE_SPIKE_RATIO = 0.25
 _MAX_DERIVED_ENERGY_INTERVAL = timedelta(minutes=10)
+_MAX_RELIABLE_CROSS_DAY_INTERVAL = timedelta(hours=2)
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,15 +118,22 @@ def record_energy_usage(
             day["baseline_eligible"] = False
     if today in ineligible_date_keys:
         baseline_eligible = False
-    prior_days = _prior_days(days, today, window_days)
-    average_days = _prior_days(days, today, DEFAULT_USAGE_WINDOW_DAYS)
-
     last_energy = _float_or_none(history.get("last_energy_kwh"))
     last_sample_at = _datetime_or_none(history.get("last_sample_at"))
     initial_sample = last_energy is None or last_sample_at is None
     delta_kwh = 0.0 if initial_sample else max(float(energy_kwh) - last_energy, 0.0)
 
-    if delta_kwh > 0.0 or not baseline_eligible:
+    split = delta_kwh > 0.0 and last_sample_at is not None and _add_cross_day_usage(
+        days,
+        start=last_sample_at,
+        end=timestamp,
+        delta_kwh=delta_kwh,
+        baseline_eligible=baseline_eligible,
+        ineligible_date_keys=ineligible_date_keys,
+        retention_days=retention_days,
+        time_zone=time_zone,
+    )
+    if not split and (delta_kwh > 0.0 or not baseline_eligible):
         _add_daily_usage(
             days,
             today,
@@ -142,6 +150,8 @@ def record_energy_usage(
         time_zone=time_zone,
     )
 
+    prior_days = _prior_days(days, today, window_days)
+    average_days = _prior_days(days, today, DEFAULT_USAGE_WINDOW_DAYS)
     today_usage = _round_kwh(_usage_for_date(days, today))
     average_kwh_per_day = (
         _round_kwh(sum(day["usage_kwh"] for day in average_days) / len(average_days))
@@ -272,12 +282,15 @@ def _add_daily_usage(
     delta_kwh: float,
     *,
     baseline_eligible: bool,
+    complete: bool | None = None,
 ) -> None:
     for day in days:
         if day["date"] == date:
             day["usage_kwh"] = _round_kwh(float(day["usage_kwh"]) + delta_kwh)
             if not baseline_eligible:
                 day["baseline_eligible"] = False
+            if complete is False:
+                day["complete"] = False
             return
     day: dict[str, float | str | bool] = {
         "date": date,
@@ -285,7 +298,59 @@ def _add_daily_usage(
     }
     if not baseline_eligible:
         day["baseline_eligible"] = False
+    if complete is False:
+        day["complete"] = False
     days.append(day)
+
+
+def _add_cross_day_usage(
+    days: list[dict[str, float | str | bool]],
+    *,
+    start: datetime,
+    end: datetime,
+    delta_kwh: float,
+    baseline_eligible: bool,
+    ineligible_date_keys: set[str],
+    retention_days: int,
+    time_zone: TimeZone,
+) -> bool:
+    first_day = _calendar_date(start, time_zone)
+    last_day = _calendar_date(end, time_zone)
+    if first_day >= last_day:
+        return False
+    try:
+        elapsed = (end - start).total_seconds()
+    except TypeError:
+        return False
+    if elapsed <= 0:
+        return False
+
+    incomplete = elapsed > _MAX_RELIABLE_CROSS_DAY_INTERVAL.total_seconds()
+    day = max(first_day, last_day - timedelta(days=max(retention_days, 1)))
+    while day <= last_day:
+        if time_zone is None or end.tzinfo is None:
+            day_start = datetime.combine(day, time.min, tzinfo=end.tzinfo)
+            next_day_start = datetime.combine(
+                day + timedelta(days=1), time.min, tzinfo=end.tzinfo
+            )
+        else:
+            day_start = local_day_time(day, time.min, time_zone)
+            next_day_start = local_day_time(
+                day + timedelta(days=1), time.min, time_zone
+            )
+        seconds = (min(end, next_day_start) - max(start, day_start)).total_seconds()
+        if seconds > 0:
+            day_key = day.isoformat()
+            _add_daily_usage(
+                days,
+                day_key,
+                delta_kwh * seconds / elapsed,
+                baseline_eligible=baseline_eligible
+                and day_key not in ineligible_date_keys,
+                complete=False if incomplete else None,
+            )
+        day += timedelta(days=1)
+    return True
 
 
 def _usage_for_date(
@@ -345,7 +410,10 @@ def _update_day_coverage(
         )
         if bracketed:
             for day in days:
-                if day.get("date") == coverage_date:
+                if (
+                    day.get("date") == coverage_date
+                    and day.get("complete") is not False
+                ):
                     day["complete"] = True
                     break
 

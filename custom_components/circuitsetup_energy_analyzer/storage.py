@@ -44,6 +44,11 @@ else:
 _LOGGER = logging.getLogger(__name__)
 
 
+class InvalidFeatureStoreData(ValueError):
+    """Stored feature data has an invalid root shape."""
+
+
+
 RETENTION_WINDOWS: dict[RetentionMode, timedelta] = {
     RetentionMode.LIGHTWEIGHT: timedelta(days=18),
     RetentionMode.STANDARD: timedelta(days=45),
@@ -489,10 +494,12 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
     }
 
 
-def feature_store_data_from_dict(raw: dict[str, Any] | None) -> FeatureStoreData:
+def feature_store_data_from_dict(raw: Mapping[str, Any] | None) -> FeatureStoreData:
     """Deserialize the full feature store payload from Home Assistant storage."""
     if raw is None:
         return FeatureStoreData()
+    if not isinstance(raw, Mapping):
+        raise InvalidFeatureStoreData("storage payload must be an object")
     nilm_session_history, nilm_session_history_ingress = (
         _nilm_session_history_from_raw(
             raw.get("nilm_session_history_by_circuit", {})
@@ -900,6 +907,8 @@ class FeatureStore:
                 old_minor_version: int,
                 old_data: dict[str, Any],
             ) -> dict[str, Any]:
+                if not isinstance(old_data, Mapping):
+                    raise InvalidFeatureStoreData("storage payload must be an object")
                 if old_major_version == STORAGE_VERSION - 1:
                     _LOGGER.info(
                         "Migrating %s storage schema %s.%s to schema %s",
@@ -929,7 +938,15 @@ class FeatureStore:
 
     async def async_load(self: Self) -> FeatureStoreData:
         """Load stored data and return the in-memory payload."""
-        self.data = feature_store_data_from_dict(await self._store.async_load())
+        try:
+            self.data = feature_store_data_from_dict(await self._store.async_load())
+        except InvalidFeatureStoreData as err:
+            from homeassistant.exceptions import ConfigEntryError
+
+            raise ConfigEntryError(
+                f"Invalid {self._store.key}: {err}. Restore this storage file "
+                "from a backup; the original was left unchanged."
+            ) from err
         return self.data
 
     async def async_save(self: Self) -> None:

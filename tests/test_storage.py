@@ -33,6 +33,12 @@ from custom_components.circuitsetup_energy_analyzer.storage import (
 )
 
 
+@pytest.mark.parametrize("raw", [[], "broken", 7])
+def test_feature_store_rejects_non_object_root(raw: object) -> None:
+    with pytest.raises(ValueError, match="storage payload must be an object"):
+        feature_store_data_from_dict(raw)
+
+
 def test_feature_store_round_trips_nilm_helper_candidates() -> None:
     candidate = {
         "helper_circuit_id": "hvac-2",

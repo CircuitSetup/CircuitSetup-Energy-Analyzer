@@ -1894,6 +1894,7 @@ class SettingsController:
         if (
             recommendation is None
             or recommendation.status is not RecommendationStatus.PENDING
+            or recommendation.expires_at <= coordinator.current_time()
         ):
             return
 
@@ -2444,6 +2445,7 @@ class SettingsController:
         if (
             recommendation is None
             or recommendation.status is not RecommendationStatus.PENDING
+            or recommendation.expires_at <= coordinator.current_time()
         ):
             return
 

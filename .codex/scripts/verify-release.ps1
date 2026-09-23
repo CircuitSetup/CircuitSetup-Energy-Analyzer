@@ -12,12 +12,16 @@ if (-not $repoRoot) {
 Set-Location -LiteralPath $repoRoot
 
 rtk pytest tests/test_release_version.py tests/test_release_workflow.py -q
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 rtk ruff check .
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 gh auth status
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if ($Tag) {
     git fetch --tags origin
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $pythonExe = Join-Path $repoRoot ".venv\Scripts\python.exe"
     if (-not (Test-Path -LiteralPath $pythonExe)) {
         $pythonExe = "python"
@@ -26,6 +30,7 @@ if ($Tag) {
         --tag $Tag `
         --minimum-prs 2 `
         --repository CircuitSetup/CircuitSetup-Energy-Analyzer
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 else {
     Write-Host "Pass -Tag vX.Y.Z to verify the release PR batch for a local tag."

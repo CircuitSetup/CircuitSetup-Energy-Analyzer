@@ -5,6 +5,8 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime
 from typing import Any
 
+from .local_time import local_date
+
 DEFAULT_BILLING_CYCLE_START_DAY = 1
 DEFAULT_BUDGET_ALERT_RATIO = 1.0
 DEFAULT_BUDGET_MIN_ELAPSED_DAYS = 3
@@ -65,13 +67,15 @@ def record_billing_cycle_usage(
     timestamp: datetime,
     energy_kwh: float | None,
     settings: BillingCycleSettings,
+    time_zone: str | None = None,
 ) -> BillingCycleResult | None:
     """Fold a cumulative kWh sample into current billing-cycle usage."""
     if energy_kwh is None:
         return None
 
     start_day = _cycle_start_day(settings.cycle_start_day)
-    cycle_start = _cycle_start_for_date(timestamp.date(), start_day)
+    current_date = local_date(timestamp, time_zone) if time_zone else timestamp.date()
+    cycle_start = _cycle_start_for_date(current_date, start_day)
     cycle_end = _next_cycle_start(cycle_start, start_day)
     cycle_usage = _existing_cycle_usage(history, cycle_start)
 
@@ -80,7 +84,12 @@ def record_billing_cycle_usage(
     if (
         last_energy is not None
         and last_sample_at is not None
-        and last_sample_at.date() >= cycle_start
+        and (
+            local_date(last_sample_at, time_zone)
+            if time_zone and last_sample_at.tzinfo is not None
+            else last_sample_at.date()
+        )
+        >= cycle_start
     ):
         cycle_usage += max(float(energy_kwh) - last_energy, 0.0)
 
@@ -91,7 +100,7 @@ def record_billing_cycle_usage(
     history["last_energy_kwh"] = float(energy_kwh)
     history["last_sample_at"] = timestamp.isoformat()
 
-    elapsed_days = max((timestamp.date() - cycle_start).days + 1, 1)
+    elapsed_days = max((current_date - cycle_start).days + 1, 1)
     cycle_days = max((cycle_end - cycle_start).days, 1)
     projected_cycle = _round_kwh(cycle_usage * cycle_days / elapsed_days)
     budget_kwh = _positive_float_or_none(settings.budget_kwh)

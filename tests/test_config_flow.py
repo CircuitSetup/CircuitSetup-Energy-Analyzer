@@ -2356,6 +2356,60 @@ async def test_options_advanced_step_saves_existing_setting_families() -> None:
 
 
 @pytest.mark.asyncio
+async def test_advanced_settings_rejects_stale_tab_save() -> None:
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={CONF_CIRCUITS: [{"circuit_id": "fridge", "name": "Fridge"}]},
+        options={CONF_ADVANCED_SETTINGS: {"fridge": {"daily_spike_ratio": 0.25}}},
+    )
+    first = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    second = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    await first.async_step_select_advanced_circuit({"circuit_id": "fridge"})
+    await second.async_step_select_advanced_circuit({"circuit_id": "fridge"})
+
+    saved = await first.async_step_advanced_settings({"daily_spike_ratio": 0.4})
+    entry.options = saved["data"]
+    stale = await second.async_step_advanced_settings({"daily_spike_ratio": 0.25})
+
+    assert stale["type"] == "form"
+    assert stale["errors"] == {"base": "advanced_settings_stale"}
+    assert entry.options[CONF_ADVANCED_SETTINGS]["fridge"]["daily_spike_ratio"] == 0.4
+
+
+@pytest.mark.asyncio
+async def test_advanced_settings_rejects_removed_circuit_at_selection_and_save() -> (
+    None
+):
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+
+    entry = SimpleNamespace(
+        data={CONF_CIRCUITS: [{"circuit_id": "fridge", "name": "Fridge"}]},
+        options={},
+    )
+    picker = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    await picker.async_step_advanced()
+    form = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    await form.async_step_select_advanced_circuit({"circuit_id": "fridge"})
+    entry.options = {CONF_CIRCUITS: []}
+
+    stale_picker = await picker.async_step_select_advanced_circuit(
+        {"circuit_id": "fridge"}
+    )
+    stale_form = await form.async_step_advanced_settings({"daily_spike_ratio": 0.4})
+
+    assert stale_picker["step_id"] == "select_advanced_circuit"
+    assert stale_picker["errors"] == {"circuit_id": "advanced_circuit_removed"}
+    assert stale_form["step_id"] == "select_advanced_circuit"
+    assert stale_form["errors"] == {"base": "advanced_circuit_removed"}
+    assert CONF_ADVANCED_SETTINGS not in entry.options
+
+
+@pytest.mark.asyncio
 async def test_options_advanced_step_saves_operating_detection_overrides() -> None:
     from custom_components.circuitsetup_energy_analyzer.config_flow import (
         CircuitSetupEnergyAnalyzerOptionsFlow,
@@ -2560,6 +2614,39 @@ async def test_options_sources_step_auto_routes_new_mains_sources() -> None:
         "sensor.main_l1_power",
         "sensor.main_l2_power",
     ]
+
+
+@pytest.mark.asyncio
+async def test_options_sources_step_can_clear_water_flow_selection() -> None:
+    from types import SimpleNamespace
+
+    from custom_components.circuitsetup_energy_analyzer.config_flow import (
+        CircuitSetupEnergyAnalyzerOptionsFlow,
+    )
+    from custom_components.circuitsetup_energy_analyzer.context_sources import (
+        configured_context_entities,
+    )
+
+    entry = SimpleNamespace(
+        data={CONF_WATER_FLOW_SENSOR_ENTITIES: ["sensor.legacy_flow"]},
+        options={CONF_WATER_FLOW_SENSOR_ENTITIES: ["sensor.old_flow"]},
+    )
+    flow = CircuitSetupEnergyAnalyzerOptionsFlow(entry)
+    sources = {CONF_EXTRA_SOURCE_ENTITIES: ["sensor.fridge_power"]}
+
+    omitted = await flow.async_step_sources(sources)
+    cleared = await flow.async_step_sources(
+        {**sources, CONF_WATER_FLOW_SENSOR_ENTITIES: []}
+    )
+
+    assert omitted["data"][CONF_WATER_FLOW_SENSOR_ENTITIES] == ["sensor.old_flow"]
+    assert cleared["data"][CONF_WATER_FLOW_SENSOR_ENTITIES] == []
+    assert (
+        configured_context_entities(
+            entry.data, cleared["data"], CONF_WATER_FLOW_SENSOR_ENTITIES
+        )
+        == ()
+    )
 
 
 @pytest.mark.asyncio

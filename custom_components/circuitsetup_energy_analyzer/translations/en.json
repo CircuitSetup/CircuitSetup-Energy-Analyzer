@@ -2070,6 +2070,8 @@
       "invalid_recommendation": "Choose one of the pending suggested settings.",
       "invalid_circuit_composition": "Choose Several loads with no primary when Appliance Type is Mixed.",
       "invalid_advanced_settings": "Review the advanced circuit settings and enter a valid combination.",
+      "advanced_settings_stale": "These circuit settings changed in another tab. Review the updated values and save again.",
+      "advanced_circuit_removed": "This circuit is no longer configured. Select a current circuit.",
       "invalid_thermostat_temperature_sensor_entity": "Choose one of the configured indoor temperature sensors, or leave the field blank.",
       "dashboard_layout_requires_higher_entity_detail": "The selected dashboard layout needs a higher Entity Detail Level. Choose a simpler layout, or check Match Entity Detail Level To Layout.",
       "dashboard_creation_unavailable": "Home Assistant did not make the dashboard collection available. Reload Home Assistant or open Lovelace once, then try again.",

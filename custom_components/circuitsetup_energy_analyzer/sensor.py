@@ -2841,6 +2841,7 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         SetupHealthSensor(coordinator, entry_id=entry_id),
         EffectiveElectricityRateSensor(coordinator, entry_id=entry_id),
     ]
+    retained_unique_ids: set[str] = set()
 
     for raw_circuit in configured_circuits:
         circuit = circuit_info_from_config(raw_circuit)
@@ -2850,6 +2851,10 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             raw_circuit,
             coordinator,
             configured_circuits,
+        )
+        retained_unique_ids.update(
+            f"{entry_id}_{circuit.circuit_id}_{description.key}"
+            for description in descriptions
         )
         descriptions = compact_descriptions_for_setup(
             "sensor",
@@ -2881,7 +2886,8 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         hass,
         entry_id=entry_id,
         entity_domain="sensor",
-        desired_unique_ids={entity.unique_id for entity in entities},
+        desired_unique_ids={entity.unique_id for entity in entities}
+        | retained_unique_ids,
     )
     prune_stale_device_registry_entries(
         hass,

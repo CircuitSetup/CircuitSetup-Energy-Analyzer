@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import math
@@ -375,7 +376,7 @@ def _nilm_workspace_read_snapshot(
     )
 
 
-def _nilm_workspace_prepare_revision_sources(
+async def _nilm_workspace_prepare_revision_sources(
     coordinators: Iterable[Any],
     *,
     circuit_id: str | None,
@@ -396,11 +397,13 @@ def _nilm_workspace_prepare_revision_sources(
         "nilm_known_load_attributions_by_circuit",
     ):
         ensure_nilm_tracked_collection(getattr(store, name, None), selected_circuit_id)
+        await asyncio.sleep(0.002)
     assignments = getattr(store, "nilm_appliance_assignments_by_circuit", None)
     for item in getattr(coordinator, "circuit_configs", ()) or ():
         configured_id = str(getattr(item, "circuit_id", "") or "")
         if configured_id:
             ensure_nilm_tracked_collection(assignments, configured_id)
+            await asyncio.sleep(0.002)
     inventory = getattr(
         getattr(coordinator, "state", None), "nilm_unknown_loads_by_circuit", None
     )
@@ -409,9 +412,11 @@ def _nilm_workspace_prepare_revision_sources(
     )
     if isinstance(selected_inventory, Mapping):
         ensure_nilm_tracked_collection(selected_inventory, "unknown_loads")
+        await asyncio.sleep(0.002)
     ensure_nilm_tracked_collection(
         getattr(coordinator, "_nilm_unmatched_edges", None), selected_circuit_id
     )
+    await asyncio.sleep(0.002)
 
 
 def _nilm_workspace_read_identity(
@@ -524,7 +529,7 @@ async def _async_nilm_workspace_read(
         "entry_id": kwargs.get("entry_id"),
     }
     while True:
-        _nilm_workspace_prepare_revision_sources(
+        await _nilm_workspace_prepare_revision_sources(
             live_coordinators, **identity_kwargs
         )
         identity = _nilm_workspace_read_identity(
@@ -567,6 +572,18 @@ async def async_nilm_workspace_item_payload(
 
     return await _async_nilm_workspace_read(
         hass, coordinators, nilm_workspace_item_payload, kwargs
+    )
+
+
+async def async_nilm_workspace_payload(
+    hass: Any,
+    coordinators: Iterable[Any],
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Build the full workspace without blocking the event loop."""
+
+    return await _async_nilm_workspace_read(
+        hass, coordinators, nilm_workspace_payload, kwargs
     )
 
 

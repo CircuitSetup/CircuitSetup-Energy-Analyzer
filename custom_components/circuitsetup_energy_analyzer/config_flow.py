@@ -4,6 +4,7 @@ import math
 import re
 from collections.abc import Iterable, Mapping
 from contextlib import suppress
+from copy import deepcopy
 from typing import Any
 
 from homeassistant import config_entries
@@ -668,7 +669,7 @@ def validate_options_input(
     validated[CONF_THERMOSTAT_TEMPERATURE_SENSOR_ENTITIES] = (
         thermostat_temperature_sensor_entities
     )
-    if water_flow_sensor_entities:
+    if CONF_WATER_FLOW_SENSOR_ENTITIES in user_input:
         validated[CONF_WATER_FLOW_SENSOR_ENTITIES] = water_flow_sensor_entities
     source_entities = _strict_string_list(
         user_input.get(CONF_SOURCE_ENTITIES, []),
@@ -3937,6 +3938,7 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         self._config_entry = config_entry
         self._pending_config: dict[str, Any] | None = None
         self._advanced_circuit_id: str | None = None
+        self._advanced_settings_snapshot: dict[str, Any] | None = None
         self._pending_advanced_settings: dict[str, Any] | None = None
         self._thermostat_mapping_entities: list[str] = []
         self._thermostat_mapping_index = 0
@@ -4399,7 +4401,20 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         if user_input is None:
             return await self.async_step_advanced()
 
-        self._advanced_circuit_id = str(user_input.get(FIELD_CIRCUIT_ID) or "mains")
+        circuit_id = str(user_input.get(FIELD_CIRCUIT_ID) or "mains")
+        if circuit_id not in {
+            option["value"]
+            for option in _circuit_options_from_config(
+                _entry_config(self._config_entry), include_mains=True
+            )
+        }:
+            return self.async_show_form(
+                step_id="select_advanced_circuit",
+                data_schema=_advanced_circuit_schema(_entry_config(self._config_entry)),
+                errors={FIELD_CIRCUIT_ID: "advanced_circuit_removed"},
+            )
+        self._advanced_circuit_id = circuit_id
+        self._advanced_settings_snapshot = None
         return await self.async_step_advanced_settings()
 
     async def async_step_advanced_settings(
@@ -4546,10 +4561,32 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         circuit_id: str,
         settings: dict[str, Any],
     ) -> config_entries.ConfigFlowResult:
+        if circuit_id not in {
+            option["value"]
+            for option in _circuit_options_from_config(
+                _entry_config(self._config_entry), include_mains=True
+            )
+        }:
+            self._pending_advanced_settings = None
+            return self.async_show_form(
+                step_id="select_advanced_circuit",
+                data_schema=_advanced_circuit_schema(_entry_config(self._config_entry)),
+                errors={"base": "advanced_circuit_removed"},
+            )
         settings_by_circuit = _settings_map_for_entry(
             self._config_entry,
             CONF_ADVANCED_SETTINGS,
         )
+        if (
+            self._advanced_settings_snapshot is not None
+            and settings_by_circuit.get(circuit_id, {})
+            != self._advanced_settings_snapshot
+        ):
+            self._advanced_settings_snapshot = None
+            self._pending_advanced_settings = None
+            return await self._async_show_advanced_settings_form(
+                circuit_id, {"base": "advanced_settings_stale"}
+            )
         settings_by_circuit[circuit_id] = settings
         coordinator = _options_flow_coordinator(self)
         if coordinator is not None:
@@ -4914,6 +4951,8 @@ class CircuitSetupEnergyAnalyzerOptionsFlow(_OPTIONS_FLOW_BASE):
         config = _entry_config(self._config_entry)
         context = _advanced_circuit_context_from_config(config, circuit_id)
         settings = _settings_map_for_entry(self._config_entry, CONF_ADVANCED_SETTINGS)
+        if self._advanced_settings_snapshot is None:
+            self._advanced_settings_snapshot = deepcopy(settings.get(circuit_id, {}))
         resolved_operating_detection = _resolved_operating_detection_for_context(
             context,
             settings=settings.get(circuit_id, {}),

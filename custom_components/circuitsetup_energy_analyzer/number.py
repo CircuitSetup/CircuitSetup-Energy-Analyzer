@@ -237,6 +237,7 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
     entry_id = getattr(entry, "entry_id", "default")
     coordinator = hass.data[DOMAIN][entry_id]
     entities: list[NumberEntity] = []
+    retained_unique_ids: set[str] = set()
     circuit_device_identifiers: set[tuple[str, str]] = set()
 
     for raw_circuit in circuits_for_entities(entry, coordinator):
@@ -248,6 +249,10 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
             description
             for description in CIRCUIT_NUMBER_DESCRIPTIONS
             if number_description_applies(description, raw_circuit, coordinator)
+        )
+        retained_unique_ids.update(
+            f"{entry_id}_{circuit.circuit_id}_{description.key}"
+            for description in descriptions
         )
         descriptions = compact_descriptions_for_setup(
             "number",
@@ -276,7 +281,8 @@ async def async_setup_entry(hass: Any, entry: Any, async_add_entities: Any) -> N
         hass,
         entry_id=entry_id,
         entity_domain="number",
-        desired_unique_ids={entity.unique_id for entity in entities},
+        desired_unique_ids={entity.unique_id for entity in entities}
+        | retained_unique_ids,
     )
     prune_stale_device_registry_entries(
         hass,

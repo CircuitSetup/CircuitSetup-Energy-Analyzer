@@ -178,6 +178,9 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self._config_entry = config_entry
         self._store = store
         self.store_data = store_data or FeatureStoreData()
+        # ponytail: one lock serializes resets with ordinary processing;
+        # use per-circuit locks only if update throughput needs it.
+        self._processing_lock = asyncio.Lock()
         candidate_configs = _circuit_configs_from_entry_data(
             self.entry_data,
             self.options,
@@ -692,6 +695,17 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         changed_entities: Iterable[str] | None = None,
     ) -> AnalyzerState:
         """Process current HA source states through the analyzer pipeline."""
+        async with self._processing_lock:
+            return await self._async_process_update_locked(
+                changed_entities=changed_entities
+            )
+
+    async def _async_process_update_locked(
+        self: Self,
+        *,
+        changed_entities: Iterable[str] | None = None,
+    ) -> AnalyzerState:
+        """Process source states while holding the baseline reset lock."""
         now = self._now_fn()
         processing_configs = self._processing_configs_for_changed_entities(
             changed_entities
@@ -905,6 +919,11 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
 
     async def async_relearn_baseline(self: Self, circuit_id: str) -> None:
         """Clear learned baselines and alert state for one circuit."""
+        async with self._processing_lock:
+            await self._async_relearn_baseline_locked(circuit_id)
+
+    async def _async_relearn_baseline_locked(self: Self, circuit_id: str) -> None:
+        """Reset baseline state after in-flight processing finishes."""
         now = self._now_fn()
         hvac_prefix = f"{circuit_id}|"
         active_hvac_markers = {

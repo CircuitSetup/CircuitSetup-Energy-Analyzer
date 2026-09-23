@@ -267,6 +267,31 @@ class _SettingsCoordinator:
         return "UTC"
 
 
+@pytest.mark.parametrize(
+    "action",
+    ["async_apply_setting_recommendation", "async_dismiss_setting_recommendation"],
+)
+@pytest.mark.asyncio
+async def test_expired_recommendation_cannot_be_applied_or_dismissed(
+    action: str,
+) -> None:
+    recommendation = _recommendation()
+    coordinator = _SettingsCoordinator(recommendation)
+    coordinator.now = recommendation.expires_at
+    controller = settings_controller.SettingsController(coordinator)
+    original_options = dict(coordinator.options)
+
+    await getattr(controller, action)(recommendation.recommendation_id)
+
+    assert coordinator.options == original_options
+    assert coordinator.store_data.settings_recommendations[
+        recommendation.recommendation_id
+    ] == recommendation
+    assert coordinator.store_data.settings_recommendation_decisions == {}
+    assert coordinator.persist_count == 0
+    assert coordinator.dirty_count == 0
+
+
 @pytest.mark.asyncio
 async def test_settings_controller_applies_undoes_and_resets_recommendation() -> None:
     recommendation = _recommendation(

@@ -3697,7 +3697,7 @@ def test_energy_usage_processor_updates_state_and_returns_spike_alert() -> None:
         energy_usage_by_circuit={
             "fridge": {
                 "last_energy_kwh": 100.0,
-                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+                "last_sample_at": (now - timedelta(minutes=30)).isoformat(),
                 "days": [
                     {
                         "date": (now.date() - timedelta(days=offset)).isoformat(),
@@ -3844,13 +3844,13 @@ def test_energy_usage_processor_excludes_delta_spanning_completed_maintenance() 
     assert store_data.energy_usage_by_circuit["water_heater"]["days"] == [
         {
             "date": "2026-07-27",
-            "usage_kwh": 8.0,
+            "usage_kwh": 8.667,
             "complete": True,
             "baseline_eligible": False,
         },
         {
             "date": "2026-07-28",
-            "usage_kwh": 1.0,
+            "usage_kwh": 0.333,
             "baseline_eligible": False,
         },
     ]
@@ -3891,7 +3891,7 @@ def _energy_usage_projection_evidence(
         energy_usage_by_circuit={
             "fridge": {
                 "last_energy_kwh": 100.0,
-                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+                "last_sample_at": (now - timedelta(minutes=30)).isoformat(),
                 "days": days,
             }
         },
@@ -4126,7 +4126,7 @@ def test_energy_usage_processor_suppresses_spike_when_context_explains_usage() -
         energy_usage_by_circuit={
             "hvac": {
                 "last_energy_kwh": 100.0,
-                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+                "last_sample_at": (now - timedelta(minutes=30)).isoformat(),
                 "days": [
                     {
                         "date": (now.date() - timedelta(days=offset)).isoformat(),
@@ -4221,7 +4221,7 @@ def test_energy_usage_processor_keeps_rolling_alert_when_context_is_sparse() -> 
         energy_usage_by_circuit={
             "hvac": {
                 "last_energy_kwh": 100.0,
-                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+                "last_sample_at": (now - timedelta(minutes=30)).isoformat(),
                 "days": [
                     {
                         "date": (now.date() - timedelta(days=offset)).isoformat(),
@@ -4308,7 +4308,7 @@ def test_energy_usage_context_uses_local_progress_across_dst_fallback() -> None:
         energy_usage_by_circuit={
             "ev": {
                 "last_energy_kwh": 100.0,
-                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+                "last_sample_at": (now - timedelta(minutes=30)).isoformat(),
             }
         }
     )
@@ -4365,7 +4365,7 @@ def test_energy_usage_processor_skips_contextual_learning_during_maintenance() -
         energy_usage_by_circuit={
             "ev": {
                 "last_energy_kwh": 100.0,
-                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+                "last_sample_at": (now - timedelta(minutes=30)).isoformat(),
             }
         },
         maintenance_by_circuit={"ev": {"active": True}},
@@ -4436,7 +4436,7 @@ def test_energy_usage_alert_features_include_contextual_baseline_details() -> No
         energy_usage_by_circuit={
             "hvac": {
                 "last_energy_kwh": 100.0,
-                "last_sample_at": (now - timedelta(days=1)).isoformat(),
+                "last_sample_at": (now - timedelta(minutes=30)).isoformat(),
                 "days": [
                     {
                         "date": (now.date() - timedelta(days=offset)).isoformat(),
@@ -4632,6 +4632,63 @@ def test_energy_goal_processor_uses_ha_local_usage_date() -> None:
     updates = {update.path: update.value for update in result.state_updates}
     assert updates[("energy_goal_status_by_circuit", "fridge")] == "over_goal"
     assert result.alerts
+
+
+def test_relearned_run_cycle_baseline_uses_only_new_events() -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.cycles import (
+        RunCycleProcessor,
+    )
+
+    now = datetime(2026, 7, 20, 12, tzinfo=UTC)
+    marker = now - timedelta(hours=1)
+    old_events = [
+        event
+        for day in range(1, 10)
+        for event in (
+            CircuitEvent(now - timedelta(days=day, hours=2), "washer", EventType.START),
+            CircuitEvent(
+                now - timedelta(days=day, hours=2) + timedelta(minutes=10),
+                "washer",
+                EventType.STOP,
+            ),
+        )
+    ]
+    store = FeatureStoreData(events=old_events)
+    store.learning_started_at_by_circuit["washer"] = marker.isoformat()
+    config = CircuitConfig(
+        circuit_id="washer",
+        name="Washer",
+        appliance_profile=ApplianceProfile.WASHER,
+        mode=CircuitMode.SINGLE_PHASE,
+    )
+    processor = RunCycleProcessor(
+        alert_policy_for_circuit=lambda _circuit_id: None,
+        learning_mature=lambda _config, _now: False,
+    )
+
+    processor._cycle_baselines_for_config(store, config, now, merge_gap_seconds=0)
+    assert store.baselines == {}
+    assert len(store.events) == 18
+
+    later = now + timedelta(days=11)
+    store.events.extend(
+        event
+        for day in range(1, 10)
+        for event in (
+            CircuitEvent(
+                later - timedelta(days=day, hours=2), "washer", EventType.START
+            ),
+            CircuitEvent(
+                later - timedelta(days=day, hours=2) + timedelta(minutes=10),
+                "washer",
+                EventType.STOP,
+            ),
+        )
+    )
+    processor._cycle_baselines_for_config(store, config, later, merge_gap_seconds=0)
+
+    assert store.baselines["washer:run_cycle_duration_s"].sample_count == 9
+    assert len(store.events) == 36
 
 
 def test_cold_storage_signature_alerts_after_three_windows_during_shared_learning(

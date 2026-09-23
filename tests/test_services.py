@@ -5721,6 +5721,7 @@ async def test_service_handlers_mutate_loaded_coordinator_state(
         entry_id="entry-1",
         entry_data={},
         store_data=store_data,
+        now_fn=lambda: datetime(2026, 6, 2, 12, 0, tzinfo=UTC),
     )
     coordinator.state.active_alerts_by_circuit["fridge"] = [alert]
     coordinator.state.anomaly_score_by_circuit["fridge"] = 2.0
