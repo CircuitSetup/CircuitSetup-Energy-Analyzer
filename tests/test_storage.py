@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from threading import get_ident
 from types import MappingProxyType
 
 import pytest
@@ -37,6 +38,59 @@ from custom_components.circuitsetup_energy_analyzer.storage import (
 def test_feature_store_rejects_non_object_root(raw: object) -> None:
     with pytest.raises(ValueError, match="storage payload must be an object"):
         feature_store_data_from_dict(raw)
+
+
+@pytest.mark.asyncio
+async def test_feature_store_encodes_json_outside_event_loop(tmp_path, monkeypatch):
+    from homeassistant.core import HomeAssistant
+    from homeassistant.helpers.storage import json_helper
+
+    prepare_json = getattr(json_helper, "prepare_save_json", None)
+    if prepare_json is None:
+        pytest.skip("Home Assistant before 2025.11 always encodes in the executor")
+    encoding_threads: list[int] = []
+
+    def record_encoding(*args, **kwargs):
+        encoding_threads.append(get_ident())
+        return prepare_json(*args, **kwargs)
+
+    monkeypatch.setattr(json_helper, "prepare_save_json", record_encoding)
+    loop_thread = get_ident()
+    hass = HomeAssistant(str(tmp_path))
+    try:
+        store = FeatureStore(hass, "executor-test")
+        await store.async_save()
+        assert encoding_threads
+        assert all(thread != loop_thread for thread in encoding_threads)
+    finally:
+        await hass.async_stop(force=True)
+
+
+def test_serialized_feature_store_is_isolated_from_live_history() -> None:
+    standby_sample = {"power": 20.0, "sample_count": 1}
+    capacity_sample = {"current": 2.0, "sample_count": 1}
+    candidate = {"confidence": 0.8}
+    data = FeatureStoreData(
+        standby_by_circuit={"fridge": {"samples": [standby_sample]}},
+        demand_by_circuit={"fridge": {"capacity_current_samples": [capacity_sample]}},
+        nilm_signatures={"mains": [{"helper_candidates": [candidate]}]},
+    )
+
+    payload = feature_store_data_to_dict(data)
+    standby_sample.update(power=30.0, sample_count=2)
+    capacity_sample.update(current=3.0, sample_count=2)
+    candidate["confidence"] = 0.9
+    data.standby_by_circuit["fridge"]["samples"].append({"power": 40.0})
+
+    assert payload["standby_by_circuit"]["fridge"]["samples"] == [
+        {"power": 20.0, "sample_count": 1}
+    ]
+    assert payload["demand_by_circuit"]["fridge"]["capacity_current_samples"] == [
+        {"current": 2.0, "sample_count": 1}
+    ]
+    assert payload["nilm_signatures"]["mains"][0]["helper_candidates"] == [
+        {"confidence": 0.8}
+    ]
 
 
 def test_feature_store_round_trips_nilm_helper_candidates() -> None:

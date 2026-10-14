@@ -171,7 +171,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         config_entry: Any | None = None,
         now_fn: Any | None = None,
     ) -> None:
-        super().__init__(hass, _LOGGER, name=DOMAIN)
+        super().__init__(hass, _LOGGER, name=DOMAIN, config_entry=config_entry)
         self.entry_id = entry_id
         self.entry_data = canonicalize_sensitivity_config(entry_data or {})
         self.options = canonicalize_sensitivity_config(options or {})

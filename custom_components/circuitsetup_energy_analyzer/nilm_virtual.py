@@ -13,6 +13,7 @@ from .discovery import (
     sensor_metadata_role_conflict,
     sensor_role_from_metadata,
 )
+from .entity import registry_device_for_identifier
 from .models import AlertEvidence, SensorRole, Severity
 from .nilm import (
     NilmEdge,
@@ -149,8 +150,10 @@ def nilm_virtual_device_info(
         "model": "NILM Estimated Appliance",
     }
     via_device = (DOMAIN, f"{entry_id}_{state.mains_circuit_id}")
-    if hass is None or _device_identifier_exists(hass, via_device):
+    if hass is None:
         device_info["via_device"] = via_device
+    else:
+        device_info.update(_via_device_info(hass, via_device, entry_id))
     suggested_area = suggested_area_for_profile(
         state.appliance_profile,
         existing_area_names_for_hass(hass),
@@ -160,14 +163,21 @@ def nilm_virtual_device_info(
     return device_info
 
 
-def _device_identifier_exists(hass: Any, identifier: tuple[str, str]) -> bool:
+def _via_device_info(
+    hass: Any, identifier: tuple[str, str], entry_id: str
+) -> dict[str, Any]:
     try:
         from homeassistant.helpers import device_registry as dr
 
         registry = dr.async_get(hass)
     except (AttributeError, ImportError, KeyError, TypeError):
-        return True
-    return registry.async_get_device(identifiers={identifier}) is not None
+        return {"via_device": identifier}
+    device = registry_device_for_identifier(registry, identifier, entry_id)
+    if device is None:
+        return {}
+    if hasattr(device, "config_entry_id"):
+        return {"via_device_id": device.id}
+    return {"via_device": identifier}
 
 
 def nilm_virtual_appliance_alerts(

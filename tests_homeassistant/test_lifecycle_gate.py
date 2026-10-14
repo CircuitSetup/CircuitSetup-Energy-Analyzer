@@ -722,6 +722,7 @@ async def test_config_entry_setup_builds_mains_nilm_from_mains_sources(
 async def test_config_entry_setup_registers_published_nilm_device(
     hass: Any,
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Restore published NILM assignments as real HA entities and a device."""
 
@@ -820,10 +821,14 @@ async def test_config_entry_setup_registers_published_nilm_device(
     assert state.state == "unavailable"
     device_registry = dr.async_get(hass)
     device_identifier = (DOMAIN, f"{entry_id}_nilm_assignment-washer")
-    assert any(
-        device_identifier in item.identifiers
-        for item in dr.async_entries_for_config_entry(device_registry, entry_id)
+    devices = dr.async_entries_for_config_entry(device_registry, entry_id)
+    published_device = next(
+        item for item in devices if device_identifier in item.identifiers
     )
+    mains_device = next(
+        item for item in devices if (DOMAIN, f"{entry_id}_mains") in item.identifiers
+    )
+    assert published_device.via_device_id == mains_device.id
 
     coordinator = hass.data[DOMAIN][entry_id]
     expected_unique_ids = {
@@ -894,6 +899,14 @@ async def test_config_entry_setup_registers_published_nilm_device(
         device_identifier in item.identifiers
         for item in dr.async_entries_for_config_entry(device_registry, entry_id)
     )
+
+    assert not [
+        record.message
+        for record in caplog.records
+        if record.name == "homeassistant.helpers.frame"
+        and DOMAIN in record.message
+        and "deprecated" in record.message
+    ]
 
 
 @pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")

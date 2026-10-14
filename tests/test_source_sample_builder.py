@@ -3,6 +3,9 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import pytest
+from homeassistant.core import State
+
 from custom_components.circuitsetup_energy_analyzer.managers.source_samples import (
     SourceSampleBuilder,
 )
@@ -13,6 +16,38 @@ from custom_components.circuitsetup_energy_analyzer.models import (
     SensorRef,
     SensorRole,
 )
+
+
+@pytest.mark.parametrize(
+    ("report_age_minutes", "expected_voltage", "expected_issues"),
+    [(0, 230.0, ()), (30, None, ("sensor.voltage stale",))],
+)
+def test_unchanged_sensor_freshness_uses_last_report(
+    report_age_minutes: int,
+    expected_voltage: float | None,
+    expected_issues: tuple[str, ...],
+) -> None:
+    now = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
+    state = State(
+        "sensor.voltage",
+        "230",
+        {"unit_of_measurement": "V"},
+        last_updated=now - timedelta(minutes=30),
+        last_reported=now - timedelta(minutes=report_age_minutes),
+    )
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.REFRIGERATOR,
+        mode=CircuitMode.SINGLE_PHASE,
+        sensors=(SensorRef("sensor.voltage", SensorRole.VOLTAGE),),
+    )
+    builder = SourceSampleBuilder(SimpleNamespace(states={"sensor.voltage": state}))
+
+    sample = builder.sample_for_config(config, now)
+
+    assert sample.voltage == expected_voltage
+    assert sample.quality_issues == expected_issues
 
 
 def test_dual_phase_stale_current_uses_combined_power_threshold() -> None:

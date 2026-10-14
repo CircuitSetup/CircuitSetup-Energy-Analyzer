@@ -301,6 +301,16 @@ def sync_entity_registry_categories(
             break
 
 
+def registry_device_for_identifier(
+    registry: Any, identifier: tuple[str, str], entry_id: str
+) -> Any | None:
+    """Look up an owned device across supported Home Assistant registry APIs."""
+    get_device = getattr(registry, "async_get_device_by_identifier", None)
+    if callable(get_device):
+        return get_device(identifier, entry_id)
+    return registry.async_get_device(identifiers={identifier})
+
+
 def stale_device_registry_device_ids(
     entries: Iterable[Any],
     *,
@@ -311,8 +321,11 @@ def stale_device_registry_device_ids(
     identifier_prefix = f"{entry_id}_"
     stale_device_ids: list[str] = []
     for entry in entries:
-        config_entries = set(getattr(entry, "config_entries", ()) or ())
-        if entry_id not in config_entries:
+        if hasattr(entry, "config_entry_id"):
+            owned_by_entry = entry.config_entry_id == entry_id
+        else:
+            owned_by_entry = entry_id in (getattr(entry, "config_entries", ()) or ())
+        if not owned_by_entry:
             continue
         identifiers = {
             (str(identifier[0]), str(identifier[1]))
@@ -343,8 +356,13 @@ def prune_stale_device_registry_entries(
     registry = _device_registry_for_hass(hass)
     if registry is None:
         return
-    devices = getattr(registry, "devices", {})
-    values = devices.values() if hasattr(devices, "values") else devices
+    try:
+        from homeassistant.helpers.device_registry import async_entries_for_config_entry
+
+        values = async_entries_for_config_entry(registry, entry_id)
+    except (ImportError, AttributeError):
+        devices = getattr(registry, "devices", {})
+        values = devices.values() if hasattr(devices, "values") else devices
     update_device = getattr(registry, "async_update_device", None)
     if not callable(update_device):
         return
@@ -369,7 +387,12 @@ def prune_stale_device_registry_entries(
     ):
         if device_id in active_device_ids:
             continue
-        update_device(device_id, remove_config_entry_id=entry_id)
+        get_device = getattr(registry, "async_get", None)
+        device = get_device(device_id) if callable(get_device) else None
+        if hasattr(device, "config_entry_id"):
+            registry.async_remove_device(device_id)
+        else:
+            update_device(device_id, remove_config_entry_id=entry_id)
 
 
 def device_identifiers_for_entities(entities: Iterable[Any]) -> set[tuple[str, str]]:

@@ -117,6 +117,32 @@ def test_stale_device_registry_device_ids_returns_removed_circuit_devices() -> N
     ) == ["old-circuit"]
 
 
+@pytest.mark.parametrize(
+    ("config_entry_id", "expected"),
+    [("entry-1", ["old-circuit"]), ("entry-2", []), (None, [])],
+)
+def test_stale_devices_use_current_config_entry_ownership(
+    config_entry_id: str | None, expected: list[str]
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.entity import (
+        stale_device_registry_device_ids,
+    )
+
+    class Device(SimpleNamespace):
+        @property
+        def config_entries(self) -> set[str]:
+            raise AssertionError("Deprecated device ownership must not be read")
+
+    device = Device(
+        id="old-circuit",
+        config_entry_id=config_entry_id,
+        identifiers={(DOMAIN, "entry-1_old_circuit")},
+    )
+    assert stale_device_registry_device_ids(
+        [device], entry_id="entry-1", desired_identifiers=set()
+    ) == expected
+
+
 def test_circuit_device_info_uses_only_device_registry_fields() -> None:
     from custom_components.circuitsetup_energy_analyzer.entity import (
         CircuitAnalyzerEntity,
@@ -217,6 +243,69 @@ def test_prune_stale_device_registry_entries_detaches_config_entry(monkeypatch) 
     )
 
     assert fake_registry.updated == [("old-circuit", "entry-1")]
+
+
+def test_prune_devices_uses_current_registry_api_and_preserves_active_devices(
+    monkeypatch,
+) -> None:
+    import sys
+    from types import ModuleType
+
+    from custom_components.circuitsetup_energy_analyzer import entity
+
+    class Registry:
+        def __init__(self):
+            self.entries = {
+                name: SimpleNamespace(
+                    id=name,
+                    config_entry_id="entry-1",
+                    identifiers={(DOMAIN, f"entry-1_{name}")},
+                )
+                for name in ("old", "current", "active")
+            }
+
+        @property
+        def devices(self):
+            raise AssertionError("The whole device registry must not be scanned")
+
+        def async_get(self, device_id):
+            return self.entries.get(device_id)
+
+        def async_remove_device(self, device_id):
+            del self.entries[device_id]
+
+        def async_update_device(self, *args, **kwargs):
+            raise AssertionError("Deprecated config-entry removal must not be used")
+
+    registry = Registry()
+    helpers = ModuleType("homeassistant.helpers")
+    devices = ModuleType("homeassistant.helpers.device_registry")
+    devices.async_get = lambda hass: registry
+    devices.async_entries_for_config_entry = lambda registry, entry_id: [
+        device
+        for device in registry.entries.values()
+        if device.config_entry_id == entry_id
+    ]
+    helpers.device_registry = devices
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers", helpers)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers.device_registry", devices)
+    hass = SimpleNamespace(
+        entity_registry=SimpleNamespace(
+            entities={
+                "sensor.active": SimpleNamespace(
+                    config_entry_id="entry-1", platform=DOMAIN, device_id="active"
+                )
+            }
+        )
+    )
+
+    entity.prune_stale_device_registry_entries(
+        hass,
+        entry_id="entry-1",
+        desired_identifiers={(DOMAIN, "entry-1_current")},
+    )
+
+    assert set(registry.entries) == {"current", "active"}
 
 
 def test_hide_entity_registry_entries_marks_existing_detail_entities_hidden(

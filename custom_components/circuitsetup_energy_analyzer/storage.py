@@ -4,6 +4,7 @@ import logging
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from inspect import signature
 from math import isfinite
 from typing import TYPE_CHECKING, Any, Self
 
@@ -333,7 +334,7 @@ def alert_from_dict(raw: dict[str, Any]) -> AlertEvidence:
 
 def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
     """Serialize the full feature store payload for Home Assistant storage."""
-    return {
+    payload = {
         "schema_version": STORAGE_VERSION,
         "events": [event_to_dict(event) for event in data.events],
         "baselines": {
@@ -492,6 +493,7 @@ def feature_store_data_to_dict(data: FeatureStoreData) -> dict[str, Any]:
         ),
         "dashboard_status": _dict_of_jsonable_values(data.dashboard_status),
     }
+    return _copy_payload(payload)
 
 
 def feature_store_data_from_dict(raw: Mapping[str, Any] | None) -> FeatureStoreData:
@@ -929,10 +931,14 @@ class FeatureStore:
                 return {}
 
         self._hass = hass
+        store_options = {}
+        if "serialize_in_event_loop" in signature(HAStore).parameters:
+            store_options["serialize_in_event_loop"] = False
         self._store: Store[dict[str, Any]] = _CurrentOnlyStore(
             hass,
             STORAGE_VERSION,
             f"{STORAGE_KEY}.{entry_id}",
+            **store_options,
         )
         self.data = FeatureStoreData()
 
