@@ -400,7 +400,7 @@ def device_identifiers_for_entities(entities: Iterable[Any]) -> set[tuple[str, s
     identifiers: set[tuple[str, str]] = set()
     for entity in entities:
         device_info = getattr(entity, "device_info", None)
-        if not isinstance(device_info, dict):
+        if device_info is None:
             continue
         for identifier in device_info.get("identifiers", ()) or ():
             if isinstance(identifier, (list, tuple)) and len(identifier) == 2:

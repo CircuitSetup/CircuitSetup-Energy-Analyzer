@@ -143,6 +143,31 @@ def test_stale_devices_use_current_config_entry_ownership(
     ) == expected
 
 
+def test_device_identifiers_accepts_non_dict_device_info() -> None:
+    from homeassistant.helpers.device_registry import DeviceInfo
+
+    from custom_components.circuitsetup_energy_analyzer.entity import (
+        device_identifiers_for_entities,
+    )
+
+    device_info = SimpleNamespace(
+        get={"identifiers": {(DOMAIN, "entry-1_fridge")}}.get
+    )
+    entities = [
+        SimpleNamespace(device_info=device_info),
+        SimpleNamespace(
+            device_info=DeviceInfo(identifiers={(DOMAIN, "entry-1_mains")})
+        ),
+        SimpleNamespace(device_info=None),
+        SimpleNamespace(),
+    ]
+
+    assert device_identifiers_for_entities(entities) == {
+        (DOMAIN, "entry-1_fridge"),
+        (DOMAIN, "entry-1_mains"),
+    }
+
+
 def test_circuit_device_info_uses_only_device_registry_fields() -> None:
     from custom_components.circuitsetup_energy_analyzer.entity import (
         CircuitAnalyzerEntity,
