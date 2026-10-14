@@ -19,11 +19,11 @@ from custom_components.circuitsetup_energy_analyzer.models import (
 
 
 @pytest.mark.parametrize(
-    ("report_age_minutes", "expected_voltage", "expected_issues"),
+    ("update_age_minutes", "expected_voltage", "expected_issues"),
     [(0, 230.0, ()), (30, None, ("sensor.voltage stale",))],
 )
-def test_unchanged_sensor_freshness_uses_last_report(
-    report_age_minutes: int,
+def test_source_report_does_not_override_update_freshness(
+    update_age_minutes: int,
     expected_voltage: float | None,
     expected_issues: tuple[str, ...],
 ) -> None:
@@ -32,8 +32,8 @@ def test_unchanged_sensor_freshness_uses_last_report(
         "sensor.voltage",
         "230",
         {"unit_of_measurement": "V"},
-        last_updated=now - timedelta(minutes=30),
-        last_reported=now - timedelta(minutes=report_age_minutes),
+        last_updated=now - timedelta(minutes=update_age_minutes),
+        last_reported=now,
     )
     config = CircuitConfig(
         circuit_id="mains",
@@ -48,6 +48,33 @@ def test_unchanged_sensor_freshness_uses_last_report(
 
     assert sample.voltage == expected_voltage
     assert sample.quality_issues == expected_issues
+
+
+def test_source_report_preserves_timestamp_for_electrical_alignment() -> None:
+    now = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
+    updated_at = now - timedelta(seconds=30)
+    state = State(
+        "sensor.mains_power",
+        "230",
+        {"unit_of_measurement": "W"},
+        last_updated=updated_at,
+        last_reported=now,
+    )
+    config = CircuitConfig(
+        circuit_id="mains",
+        name="Mains",
+        appliance_profile=ApplianceProfile.MAINS_NILM,
+        mode=CircuitMode.MAINS_NILM,
+        sensors=(SensorRef("sensor.mains_power", SensorRole.REAL_POWER),),
+    )
+    builder = SourceSampleBuilder(
+        SimpleNamespace(states={"sensor.mains_power": state})
+    )
+
+    sample = builder.sample_for_config(config, now)
+
+    assert sample.real_power == 230.0
+    assert dict(sample.source_updated_at_by_role)[SensorRole.REAL_POWER] == updated_at
 
 
 def test_dual_phase_stale_current_uses_combined_power_threshold() -> None:
