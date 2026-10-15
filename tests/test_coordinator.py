@@ -73,6 +73,7 @@ from custom_components.circuitsetup_energy_analyzer.operating_detection import (
     OPERATING_RUNNING_SAMPLE_COUNT,
 )
 from custom_components.circuitsetup_energy_analyzer.storage import FeatureStoreData
+from tests.helpers import FakeConfigEntry as _ConfigEntry
 
 
 @pytest.mark.asyncio
@@ -5648,7 +5649,7 @@ async def test_setup_entry_stores_and_unload_stops_coordinator_without_ha() -> N
             return True
 
     hass = SimpleNamespace(data={}, config_entries=FakeConfigEntries())
-    entry = SimpleNamespace(
+    entry = _ConfigEntry(
         entry_id="entry-1",
         data={CONF_SOURCE_ENTITIES: ["sensor.fridge_power"]},
     )
@@ -5677,7 +5678,7 @@ async def test_setup_entry_rolls_back_forwarding_failure() -> None:
             raise RuntimeError("forward failed")
 
     hass = SimpleNamespace(data={}, config_entries=FakeConfigEntries())
-    entry = SimpleNamespace(
+    entry = _ConfigEntry(
         entry_id="entry-1",
         data={CONF_SOURCE_ENTITIES: ["sensor.fridge_power"]},
     )
@@ -5700,7 +5701,7 @@ async def test_setup_entry_listens_to_synthetic_mains_source_entities() -> None:
             return True
 
     hass = SimpleNamespace(data={}, config_entries=FakeConfigEntries())
-    entry = SimpleNamespace(
+    entry = _ConfigEntry(
         entry_id="entry-1",
         data={CONF_ENABLE_EXPERIMENTAL_NILM: True},
         options={
@@ -5728,7 +5729,7 @@ async def test_setup_entry_listens_to_outdoor_temperature_entity() -> None:
             return True
 
     hass = SimpleNamespace(data={}, config_entries=FakeConfigEntries())
-    entry = SimpleNamespace(
+    entry = _ConfigEntry(
         entry_id="entry-1",
         data={
             CONF_SOURCE_ENTITIES: ["sensor.hvac_power"],
@@ -6756,7 +6757,7 @@ async def test_setup_entry_loads_feature_store_and_runtime_saves(monkeypatch) ->
         states=FakeStates(),
         config_entries=FakeConfigEntries(),
     )
-    entry = SimpleNamespace(
+    entry = _ConfigEntry(
         entry_id="entry-1",
         data={
             CONF_SOURCE_ENTITIES: ["sensor.fridge_power"],
@@ -11605,7 +11606,7 @@ async def test_nilm_assignment_publish_unpublish_and_retire_lifecycle() -> None:
         async def async_reload(self, entry_id: str) -> None:
             self.reloaded.append(entry_id)
 
-    entry = SimpleNamespace(entry_id="entry-1", data={}, options={})
+    entry = _ConfigEntry(entry_id="entry-1", data={}, options={})
     hass = SimpleNamespace(data={}, config_entries=FakeConfigEntries())
     coordinator = EnergyAnalyzerCoordinator(
         hass,
@@ -11701,7 +11702,7 @@ async def test_nilm_publish_waits_for_entities_added_after_reload() -> None:
         config_entries=FakeConfigEntries(),
         states=SimpleNamespace(async_all=async_all),
     )
-    entry = SimpleNamespace(entry_id="entry-1", data={}, options={})
+    entry = _ConfigEntry(entry_id="entry-1", data={}, options={})
     coordinator = EnergyAnalyzerCoordinator(
         hass,
         entry_id=entry.entry_id,
@@ -11755,7 +11756,7 @@ async def test_nilm_publish_rolls_back_without_home_assistant_entities() -> None
         config_entries=FakeConfigEntries(),
         states=SimpleNamespace(async_all=lambda: []),
     )
-    entry = SimpleNamespace(entry_id="entry-1", data={}, options={})
+    entry = _ConfigEntry(entry_id="entry-1", data={}, options={})
     coordinator = EnergyAnalyzerCoordinator(
         hass,
         entry_id=entry.entry_id,
@@ -18164,7 +18165,7 @@ async def test_set_entity_detail_level_persists_options_and_reloads_entry() -> N
         async def async_reload(self, entry_id: str) -> None:
             self.reloaded.append(entry_id)
 
-    entry = SimpleNamespace(entry_id="entry-1", data={}, options=MappingProxyType({}))
+    entry = _ConfigEntry(entry_id="entry-1", data={}, options=MappingProxyType({}))
     hass = SimpleNamespace(
         states=SimpleNamespace(get=lambda entity_id: None),
         data={},
@@ -18204,7 +18205,7 @@ async def test_apply_setting_recommendation_persists_config_entry_options() -> N
             return True
 
     recommendation = _settings_recommendation(settings_advisor)
-    entry = SimpleNamespace(
+    entry = _ConfigEntry(
         entry_id="entry-1",
         data={
             CONF_CIRCUITS: [

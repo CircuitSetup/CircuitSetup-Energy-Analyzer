@@ -133,6 +133,7 @@ class SourceSampleBuilder:
             if raw_state is None:
                 continue
             attributes = getattr(raw_state, "attributes", {}) or {}
+            # Reports can repeat cached values and must not advance electrical evidence.
             last_updated = getattr(raw_state, "last_updated", now) or now
             states[sensor.entity_id] = SourceState(
                 entity_id=sensor.entity_id,

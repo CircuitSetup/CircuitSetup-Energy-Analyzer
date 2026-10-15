@@ -5802,7 +5802,9 @@ async def test_setup_entry_rolls_back_services_when_platform_forwarding_fails() 
         bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
         config_entries=FakeConfigEntries(),
     )
-    entry = SimpleNamespace(
+    from tests.helpers import FakeConfigEntry
+
+    entry = FakeConfigEntry(
         entry_id="entry-1",
         data={CONF_SOURCE_ENTITIES: ["sensor.fridge_power"]},
     )
@@ -5857,7 +5859,9 @@ async def test_setup_entry_rolls_back_services_when_coordinator_start_fails(
         bus=SimpleNamespace(async_fire=lambda event_type, event_data=None: None),
         config_entries=FakeConfigEntries(),
     )
-    entry = SimpleNamespace(
+    from tests.helpers import FakeConfigEntry
+
+    entry = FakeConfigEntry(
         entry_id="entry-1",
         data={CONF_SOURCE_ENTITIES: ["sensor.fridge_power"]},
     )

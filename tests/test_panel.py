@@ -8712,7 +8712,9 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
             async_remove=lambda *args, **kwargs: None,
         ),
     )
-    entry = SimpleNamespace(entry_id="entry-1", data={})
+    from tests.helpers import FakeConfigEntry
+
+    entry = FakeConfigEntry(entry_id="entry-1", data={})
 
     assert await async_setup_entry(hass, entry) is True
 
@@ -8797,8 +8799,10 @@ async def test_active_reload_preserves_surfaces_during_other_entry_unload() -> N
             async_remove=lambda *args, **kwargs: None,
         ),
     )
-    first = SimpleNamespace(entry_id="entry-1", data={})
-    second = SimpleNamespace(entry_id="entry-2", data={})
+    from tests.helpers import FakeConfigEntry
+
+    first = FakeConfigEntry(entry_id="entry-1", data={})
+    second = FakeConfigEntry(entry_id="entry-2", data={})
 
     async def _unload_after_counter_change(initial: int, current: int) -> None:
         if initial:

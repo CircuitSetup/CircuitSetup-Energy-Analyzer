@@ -88,9 +88,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - ha-channel: stable
+          - ha-channel: minimum
             experimental: false
             python-version: "3.12"
+          - ha-channel: stable
+            experimental: false
+            python-version: "3.14"
           - ha-channel: dev
             experimental: true
             python-version: "3.14"
@@ -104,27 +107,48 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
 
-      - name: Install Home Assistant test dependencies (stable)
-        if: matrix.ha-channel == 'stable'
+      - name: Install Home Assistant test dependencies (minimum)
+        if: matrix.ha-channel == 'minimum'
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[test]"
 
-      - name: Install Home Assistant test dependencies (dev)
-        if: matrix.ha-channel == 'dev'
+      - name: Install Home Assistant test dependencies (current)
+        if: matrix.ha-channel != 'minimum'
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .
-          python -m pip install --upgrade --no-cache-dir pytest pytest-asyncio pytest-homeassistant-custom-component
+          python -m pip install --upgrade --no-cache-dir pytest-homeassistant-custom-component==0.13.372
+
+      - name: Install development Home Assistant
+        if: matrix.ha-channel == 'dev'
+        run: |
           python -m pip install --upgrade --no-cache-dir git+https://github.com/home-assistant/core.git@dev
-          python -m pip install --upgrade --no-cache-dir home-assistant-frontend==20250109.2
+
+      - name: Install matching Home Assistant frontend
+        if: matrix.ha-channel != 'minimum'
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import subprocess
+          import sys
+          import homeassistant
+
+          manifest = Path(homeassistant.__file__).parent / "components/frontend/manifest.json"
+          requirements = json.loads(manifest.read_text())["requirements"]
+          subprocess.run([sys.executable, "-m", "pip", "install", *requirements], check=True)
+          PY
 
       - name: Show Home Assistant version
         run: |
           python -c "from homeassistant.const import __version__; print(f'Home Assistant version: {__version__}')"
 
       - name: Run Home Assistant contract tests
-        run: python -m pytest tests/test_control_entities.py tests/test_config_flow.py tests_homeassistant --ignore=tests_homeassistant/test_browser_e2e.py -q
+        # Initialize HA's HTTP client aliases before pytest plugins import clients.
+        run: >-
+          python -c "import homeassistant; import pytest; raise SystemExit(pytest.main())"
+          tests tests_homeassistant --ignore=tests_homeassistant/test_browser_e2e.py -q
 
   home-assistant-control-entity-contract:
     name: Home Assistant control entity contract

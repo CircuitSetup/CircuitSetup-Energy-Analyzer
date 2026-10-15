@@ -331,8 +331,13 @@ async def test_platform_setup_uses_home_assistant_runtime_registries(
     assert reloaded_entry is not None
     assert reloaded_entry.unique_id == "runtime-entry_fridge_activity_summary"
     assert reloaded_entry.name == "Pinned Fridge Activity"
-    assert hass.states.get(customized_entity_id).attributes["friendly_name"] == (
-        "Pinned Fridge Activity"
+    expected_friendly_name = "Pinned Fridge Activity"
+    # Core 2026.11 separates compatibility names from device-prefixed display names.
+    if hasattr(reloaded_entry, "compat_name"):
+        expected_friendly_name = f"Kitchen Fridge {expected_friendly_name}"
+    assert (
+        hass.states.get(customized_entity_id).attributes["friendly_name"]
+        == expected_friendly_name
     )
 
 

@@ -13,6 +13,7 @@ from typing import Any
 
 from ..const import DOMAIN
 from ..discovery import sensor_metadata_role_conflict, sensor_role_from_metadata
+from ..entity import registry_device_for_identifier
 from ..models import (
     AlertEvidence,
     ApplianceProfile,
@@ -4660,8 +4661,10 @@ class NilmController:
             else:
                 entity_present = bool(registered_unique_ids)
             device_present = (
-                device_registry.async_get_device(
-                    identifiers={(DOMAIN, f"{entry_id}_nilm_{assignment_id}")},
+                registry_device_for_identifier(
+                    device_registry,
+                    (DOMAIN, f"{entry_id}_nilm_{assignment_id}"),
+                    entry_id,
                 )
                 is not None
             )
