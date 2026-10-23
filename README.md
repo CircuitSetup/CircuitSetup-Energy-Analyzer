@@ -923,6 +923,15 @@ For example, to separate a condensate pump from the blower on HVAC 2, using AC2 
 
 The NILM workspace can also pair compatible on/off edges from an aggregate source. It plots measured real power in watts, including both L1 and L2 watts for mains NILM, confirms closely spaced transitions across consecutive samples, and assigns each compatible pair to at most one signature. The graph starts without raw detection annotations; selecting a detection or component in any lifecycle lane focuses its newest complete occurrence, marks its start and stop with dashed lines, and can move through earlier or later occurrences. Raw sessions remain graph evidence only; after three similar ON transitions, the existing W+VAR clusterer promotes each recurring load group into a Needs Review component. Assigning a promoted session removes it from the raw assignment queue while its appliance keeps accumulating matched sessions; the assigned W+VAR signature can provide provisional on/off state when one bounded component combination fits uniquely. Placeholder and OFF-only sessions cannot own an appliance or create runtime, energy, alerts, or history. Components already assigned, published, expected, or hidden stay out of Needs Review. For a primary-plus-mixed source, **Confirm primary appliance** on a reviewed detection merges its signatures, sessions, and manually labeled intervals into the configured primary instead of leaving a duplicate estimated assignment. Graph interval selections can be turned directly into appliance assignments for review.
 
+Transition confirmation follows the observed source cadence, including feeds that
+update about every 30 seconds. Consecutive changes that settle at a new level are
+confirmed together, so a shutdown spread across samples can match its start.
+Stop selection compares against the detected start rather than favoring a later
+stop closer to the fingerprint's typical watts. Saved confirmations and rejections
+follow the same start when its session closes or is re-paired for the same
+unambiguous assignment; this does not improve the underlying energy evidence or
+bypass publication checks.
+
 On generated Standard and Expert dashboards, use **Review NILM Assignments** in the **Mains & NILM** card on the Insights view to open the mains NILM workspace. The dashboard shows the household balance and review entry point without repeating the lane inventory; the wider NILM mains graph is on the Energy & Costs view. Start with the graph, move between lane tabs, select a review card, and make the decision in the focused inspector. Assignment edits enable **Save** only after the name or type changes, while **Merge** remains a separate action. Successful interval, assignment, and session actions refresh beside the graph without moving you away from the current graph window or resulting review lane.
 
 ![NILM workspace showing needs-review signatures, review lanes, and load labeling actions](docs/images/readme/experimental-nilm.png)

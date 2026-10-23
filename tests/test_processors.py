@@ -8992,6 +8992,76 @@ def test_legacy_assignment_v2_alias_retains_model_drift() -> None:
     assert "revision=2|pump" in assignment["model_drift_edges_by_fingerprint"]
 
 
+@pytest.mark.parametrize("old_end", [None, "2026-07-31T17:00:00+00:00"])
+@pytest.mark.parametrize("correct", [True, False])
+def test_nilm_history_replacement_keeps_feedback_on_same_start(
+    old_end: str | None, correct: bool,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.nilm_confidence import (
+        apply_nilm_feedback_evidence,
+    )
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+    )
+
+    old = {
+        "session_id": "old-session", "on_edge_id": "same-start",
+        "assignment_id": "central-ac", "end": old_end, "ambiguous": False,
+    }
+    update = {
+        **old, "session_id": "closed-session", "off_edge_id": "correct-stop",
+        "end": "2026-07-31T12:05:00+00:00",
+    }
+    feedback_key = "confirmed_session_ids" if correct else "rejected_session_ids"
+    assignment = {
+        "assignment_id": "central-ac",
+        "session_ids": ["old-session"], feedback_key: ["old-session"],
+        "adjusted_session_ids": ["old-session"],
+    }
+    apply_nilm_feedback_evidence(
+        assignment, feedback_id="session:old-session", correct=correct,
+        timestamp="2026-07-31T12:01:00+00:00",
+    )
+
+    merged = _merge_nilm_session_history([old], [update], assignments=[assignment])
+
+    assert [row["session_id"] for row in merged] == ["closed-session"]
+    assert assignment["session_ids"] == ["closed-session"]
+    assert assignment[feedback_key] == ["closed-session"]
+    assert assignment["adjusted_session_ids"] == ["closed-session"]
+    assert not apply_nilm_feedback_evidence(
+        assignment, feedback_id="session:closed-session", correct=correct,
+        timestamp="2026-07-31T12:06:00+00:00",
+    )
+    assert len(assignment["feedback_evidence_events"]) == 1
+
+
+@pytest.mark.parametrize("owner,ambiguous", [("other", False), (None, True)])
+def test_nilm_history_replacement_does_not_transfer_feedback_to_another_owner(
+    owner: str | None, ambiguous: bool,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+    )
+
+    old = {
+        "session_id": "old-session", "on_edge_id": "same-start",
+        "assignment_id": "central-ac", "end": None, "ambiguous": False,
+    }
+    assignment = {
+        "assignment_id": "central-ac", "confirmed_session_ids": ["old-session"],
+    }
+    update = {
+        **old, "session_id": "new-session", "assignment_id": owner,
+        "end": "2026-07-31T12:05:00+00:00", "ambiguous": ambiguous,
+    }
+
+    merged = _merge_nilm_session_history([old], [update], assignments=[assignment])
+
+    assert merged[0]["assignment_id"] == owner
+    assert assignment["confirmed_session_ids"] == ["old-session"]
+
+
 def test_nilm_session_history_closes_open_session_when_pair_becomes_ambiguous() -> None:
     from custom_components.circuitsetup_energy_analyzer.nilm import NilmEdge
     from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
@@ -11999,13 +12069,15 @@ def test_nilm_sample_processor_caps_runtime_unmatched_edges() -> None:
             energy=None,
         )
 
-    for index, watts in enumerate((100, 260, 100, 260, 100, 260), start=1):
+    for index, watts in enumerate(
+        (100, 100, 260, 260, 100, 100, 260, 260, 100, 100, 260, 260), start=1,
+    ):
         processor.process(sample(index, watts), config, context, events=())
 
     retained_edges = processor.unmatched_edges_by_circuit["mains"]
     assert len(retained_edges) == 3
     assert [edge.timestamp for edge in retained_edges] == [
-        now + timedelta(seconds=index * 30) for index in (4, 5, 6)
+        now + timedelta(seconds=index * 30) for index in (7, 9, 11)
     ]
 
 
