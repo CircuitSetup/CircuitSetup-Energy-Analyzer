@@ -30,7 +30,19 @@ samples:
       sensor.mains_energy: 100.0
       sensor.mains_current: 0.8
       sensor.mains_voltage: 120.0
+  - t: 30
+    states:
+      sensor.mains_power: 100
+      sensor.mains_energy: 100.0
+      sensor.mains_current: 0.8
+      sensor.mains_voltage: 120.0
   - t: 60
+    states:
+      sensor.mains_power: 900
+      sensor.mains_energy: 100.0
+      sensor.mains_current: 7.5
+      sensor.mains_voltage: 119.9
+  - t: 90
     states:
       sensor.mains_power: 900
       sensor.mains_energy: 100.0
@@ -42,7 +54,19 @@ samples:
       sensor.mains_energy: 100.02
       sensor.mains_current: 11.3
       sensor.mains_voltage: 120.0
+  - t: 150
+    states:
+      sensor.mains_power: 1350
+      sensor.mains_energy: 100.02
+      sensor.mains_current: 11.3
+      sensor.mains_voltage: 120.0
   - t: 300
+    states:
+      sensor.mains_power: 550
+      sensor.mains_energy: 100.07
+      sensor.mains_current: 4.6
+      sensor.mains_voltage: 120.1
+  - t: 330
     states:
       sensor.mains_power: 550
       sensor.mains_energy: 100.07
@@ -54,7 +78,19 @@ samples:
       sensor.mains_energy: 100.08
       sensor.mains_current: 0.8
       sensor.mains_voltage: 120.0
+  - t: 390
+    states:
+      sensor.mains_power: 100
+      sensor.mains_energy: 100.08
+      sensor.mains_current: 0.8
+      sensor.mains_voltage: 120.0
   - t: 720
+    states:
+      sensor.mains_power: 900
+      sensor.mains_energy: 100.09
+      sensor.mains_current: 7.5
+      sensor.mains_voltage: 119.9
+  - t: 750
     states:
       sensor.mains_power: 900
       sensor.mains_energy: 100.09
@@ -66,7 +102,19 @@ samples:
       sensor.mains_energy: 100.11
       sensor.mains_current: 11.3
       sensor.mains_voltage: 120.0
+  - t: 810
+    states:
+      sensor.mains_power: 1350
+      sensor.mains_energy: 100.11
+      sensor.mains_current: 11.3
+      sensor.mains_voltage: 120.0
   - t: 960
+    states:
+      sensor.mains_power: 550
+      sensor.mains_energy: 100.16
+      sensor.mains_current: 4.6
+      sensor.mains_voltage: 120.1
+  - t: 990
     states:
       sensor.mains_power: 550
       sensor.mains_energy: 100.16
@@ -78,7 +126,19 @@ samples:
       sensor.mains_energy: 100.17
       sensor.mains_current: 0.8
       sensor.mains_voltage: 120.0
+  - t: 1050
+    states:
+      sensor.mains_power: 100
+      sensor.mains_energy: 100.17
+      sensor.mains_current: 0.8
+      sensor.mains_voltage: 120.0
   - t: 1380
+    states:
+      sensor.mains_power: 900
+      sensor.mains_energy: 100.18
+      sensor.mains_current: 7.5
+      sensor.mains_voltage: 119.9
+  - t: 1410
     states:
       sensor.mains_power: 900
       sensor.mains_energy: 100.18
@@ -90,7 +150,19 @@ samples:
       sensor.mains_energy: 100.2
       sensor.mains_current: 11.3
       sensor.mains_voltage: 120.0
+  - t: 1470
+    states:
+      sensor.mains_power: 1350
+      sensor.mains_energy: 100.2
+      sensor.mains_current: 11.3
+      sensor.mains_voltage: 120.0
   - t: 1620
+    states:
+      sensor.mains_power: 550
+      sensor.mains_energy: 100.25
+      sensor.mains_current: 4.6
+      sensor.mains_voltage: 120.1
+  - t: 1650
     states:
       sensor.mains_power: 550
       sensor.mains_energy: 100.25
@@ -103,6 +175,12 @@ samples:
       sensor.mains_current: 0.8
       sensor.mains_voltage: 120.0
 
+  - t: 1710
+    states:
+      sensor.mains_power: 100
+      sensor.mains_energy: 100.26
+      sensor.mains_current: 0.8
+      sensor.mains_voltage: 120.0
 segments:
   - pattern: daily_energy_deltas
     start_t: 86400

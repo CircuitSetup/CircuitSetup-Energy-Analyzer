@@ -3347,6 +3347,90 @@ def test_edge_detector_adapts_confirmation_window_to_observed_cadence() -> None:
     assert detector.effective_confirmation_max_interval == timedelta(seconds=90)
 
 
+def test_slow_feed_pairs_split_hvac_steps_within_each_cycle() -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=100.0,
+        confirmation_samples=2,
+        confirmation_max_interval=timedelta(seconds=15),
+    )
+    readings = [sample(index * 32, 400.0) for index in range(3)]
+    for cycle, watts in enumerate((4300.0, 4700.0, 3700.0)):
+        start = 96 + cycle * 960
+        readings.extend(
+            sample(start + index * 32, power)
+            for index, power in enumerate(
+                [400.0 + watts / 2, *([400.0 + watts] * 9),
+                 400.0 + watts / 2, *([400.0] * 19)]
+            )
+        )
+    edges = detector.process_many(readings)
+    sessions = pair_nilm_sessions_for_signatures(
+        [*edges, edge(4 * 3600, -4300.0)],
+        mains_circuit_id="mains",
+        signature_specs=[{
+            "signature_fingerprint": "central-ac",
+            "assignment_id": "central-ac",
+            "typical_watts": 4300.0,
+        }],
+    )
+
+    assert [(transition.direction, transition.delta_w) for transition in edges] == [
+        ("on", 4300.0), ("off", -4300.0),
+        ("on", 4700.0), ("off", -4700.0),
+        ("on", 3700.0), ("off", -3700.0),
+    ]
+    assert len(sessions) == 3
+    assert [session.duration_seconds for session in sessions] == [320.0] * 3
+    assert all(session.estimated_energy_kwh < 0.5 for session in sessions)
+    assert all(session.assignment_id == "central-ac" for session in sessions)
+
+
+def test_slow_feed_rejects_one_sample_excursion() -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=100.0,
+        confirmation_samples=2,
+        confirmation_max_interval=timedelta(seconds=15),
+    )
+
+    edges = detector.process_many([
+        sample(0, 400.0), sample(32, 400.0), sample(64, 400.0),
+        sample(96, 4700.0), sample(128, 400.0), sample(160, 400.0),
+    ])
+
+    assert edges == []
+
+
+def test_slow_feed_does_not_merge_steps_across_outage() -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=100.0,
+        confirmation_samples=2,
+        confirmation_max_interval=timedelta(seconds=15),
+    )
+
+    edges = detector.process_many([
+        *(sample(index * 32, 400.0) for index in range(8)),
+        sample(256, 2400.0), sample(900, 4700.0), sample(932, 4700.0),
+    ])
+
+    assert not any(transition.delta_w == 4300.0 for transition in edges)
+
+
+def test_slow_feed_does_not_accumulate_ramp_across_outage() -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=100.0,
+        confirmation_samples=2,
+        confirmation_max_interval=timedelta(seconds=15),
+    )
+
+    edges = detector.process_many([
+        *(sample(index * 32, 400.0) for index in range(5)),
+        sample(160, 440.0), sample(900, 470.0),
+        sample(932, 510.0), sample(964, 510.0),
+    ])
+
+    assert edges == []
+
+
 def test_edge_detector_merges_confirmed_monotonic_ramp_fragments() -> None:
     detector = NilmEdgeDetector(min_delta_w=100.0, confirmation_samples=2)
 
@@ -3688,14 +3772,15 @@ def test_edge_detector_keeps_original_timestamp_for_confirmed_level() -> None:
     assert edges[0].delta_w == 980.0
 
 
-def test_edge_detector_does_not_debounce_sparse_samples() -> None:
+def test_edge_detector_confirms_sparse_samples_at_observed_cadence() -> None:
     detector = NilmEdgeDetector(
         min_delta_w=100.0,
         confirmation_samples=2,
         confirmation_max_interval=timedelta(seconds=15),
     )
 
-    edges = detector.process_many([sample(0, 0.0), sample(30, 1_000.0)])
+    assert detector.process_many([sample(0, 0.0), sample(30, 1_000.0)]) == []
+    edges = detector.process(sample(60, 1_000.0))
 
     assert len(edges) == 1
     assert edges[0].timestamp == BASE_TIME + timedelta(seconds=30)

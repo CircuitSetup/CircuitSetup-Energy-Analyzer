@@ -8124,7 +8124,9 @@ async def test_runtime_experimental_nilm_updates_signature_diagnostics(
         notifications_module, "async_create_alert_notification", AsyncMock()
     )
 
-    for index, watts in enumerate((100, 420, 110, 430, 115, 425), start=1):
+    for index, watts in enumerate(
+        (100, 100, 420, 420, 110, 110, 430, 430, 115, 115, 425, 425), start=1,
+    ):
         holder["watts"] = float(watts)
         holder["var"] = 10.0 if watts < 200 else 150.0
         holder["time"] = now + timedelta(seconds=index * 30)
@@ -14431,10 +14433,16 @@ async def test_runtime_synthetic_mains_keeps_split_phase_nilm_evidence() -> None
 
     readings = [
         (100.0, 95.0),
+        (100.0, 95.0),
+        (400.0, 395.0),
         (400.0, 395.0),
         (105.0, 100.0),
+        (105.0, 100.0),
+        (405.0, 400.0),
         (405.0, 400.0),
         (110.0, 105.0),
+        (110.0, 105.0),
+        (410.0, 405.0),
         (410.0, 405.0),
     ]
     for index, (l1_w, l2_w) in enumerate(readings, start=1):
@@ -14487,10 +14495,16 @@ async def test_runtime_mains_requires_leg_hints_for_split_phase_nilm() -> None:
 
     readings = [
         (100.0, 95.0),
+        (100.0, 95.0),
+        (400.0, 395.0),
         (400.0, 395.0),
         (105.0, 100.0),
+        (105.0, 100.0),
+        (405.0, 400.0),
         (405.0, 400.0),
         (110.0, 105.0),
+        (110.0, 105.0),
+        (410.0, 405.0),
         (410.0, 405.0),
     ]
     for index, (first_w, second_w) in enumerate(readings, start=1):

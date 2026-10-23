@@ -4680,15 +4680,27 @@ def _merge_nilm_session_history(
                 ),
                 None,
             )
-        if existing_session is not None and payload.get("end") is None:
-            preserved_close = existing_session.get("_duration_bound_close")
+        if existing_session is not None:
+            preserved_close = (
+                existing_session.get("_duration_bound_close")
+                if payload.get("end") is None else None
+            )
             if isinstance(preserved_close, Mapping):
                 payload["_duration_bound_close"] = dict(preserved_close)
-                assignment_id = str(
-                    payload.get("assignment_id")
-                    or existing_session.get("assignment_id")
-                    or ""
+            assignment_id = str(
+                payload.get("assignment_id")
+                or existing_session.get("assignment_id")
+                or ""
+            ).strip()
+            if isinstance(preserved_close, Mapping) or (
+                assignment_id
+                and assignment_id == str(
+                    existing_session.get("assignment_id") or ""
                 ).strip()
+                and assignment_id == str(payload.get("assignment_id") or "").strip()
+                and not existing_session.get("ambiguous")
+                and not payload.get("ambiguous")
+            ):
                 _replace_nilm_assignment_session_id(
                     assignments_by_id.get(assignment_id),
                     old_session_id=(
@@ -5298,9 +5310,13 @@ def _replace_nilm_assignment_session_id(
         not isinstance(assignment, MutableMapping)
         or not old_session_id
         or not new_session_id
+        or old_session_id == new_session_id
     ):
         return
-    for key in ("session_ids", "confirmed_session_ids", "rejected_session_ids"):
+    for key in (
+        "session_ids", "confirmed_session_ids", "rejected_session_ids",
+        "adjusted_session_ids",
+    ):
         session_ids = [
             str(value or "").strip()
             for value in _list_items(assignment.get(key))
@@ -5314,6 +5330,15 @@ def _replace_nilm_assignment_session_id(
                 for session_id in session_ids
             )
         )
+    events = assignment.get("feedback_evidence_events")
+    if isinstance(events, list):
+        assignment["feedback_evidence_events"] = [
+            {**event, "feedback_id": f"session:{new_session_id}"}
+            if isinstance(event, Mapping)
+            and event.get("feedback_id") == f"session:{old_session_id}"
+            else event
+            for event in events
+        ]
 
 
 def _optional_float(*values: Any) -> float | None:

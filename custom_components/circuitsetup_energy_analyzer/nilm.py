@@ -4311,20 +4311,12 @@ class NilmEdgeDetector:
         pending = self._pending
         effective_window = self.effective_confirmation_max_interval
         if (
-            self.confirmation_max_interval is not None
-            and self._sample_intervals_seconds
-            and median(self._sample_intervals_seconds) > (
-                self.confirmation_max_interval.total_seconds()
-            )
-        ):
-            # A source that is consistently slower than the configured window
-            # cannot supply a second confirmation sample before the next edge.
-            effective_window = self.confirmation_max_interval
-        if (
             effective_window is not None
             and sample.timestamp - previous.timestamp > effective_window
         ):
             self._pending = None
+            self._ramp_baseline = None
+            self._ramp_direction = 0
             if pending is not None:
                 baseline, candidate, _count, transition_kind = pending
                 if self._same_level(sample, candidate, baseline):
@@ -7328,6 +7320,7 @@ def pair_nilm_sessions_for_signatures(
         else:
             existing_profile[4].append(spec_index)
 
+    # The ON identifies the load; rank OFF edges against that observed transition.
     on_signature_scores = [
         [_nilm_signature_edge_score(edge, spec) for spec in specs]
         for edge in on_edges
@@ -7366,8 +7359,7 @@ def pair_nilm_sessions_for_signatures(
                     off_signature_score = off_signature_scores[off_index][spec_index]
                     if on_signature_score is None or off_signature_score is None:
                         continue
-                    signature_score = (on_signature_score + off_signature_score) / 2.0
-                    score = _clamp((pair_score + (2.0 * signature_score)) / 3.0)
+                    score = _clamp((pair_score + (2.0 * on_signature_score)) / 3.0)
                     pair_has_candidate = True
                     pair = (on_index, off_index)
                     best_pair_scores[pair] = max(
@@ -7453,8 +7445,7 @@ def pair_nilm_sessions_for_signatures(
                 off_signature_score = off_signature_scores[off_index][spec_index]
                 if on_signature_score is None or off_signature_score is None:
                     continue
-                signature_score = (on_signature_score + off_signature_score) / 2.0
-                score = _clamp((pair_score + (2.0 * signature_score)) / 3.0)
+                score = _clamp((pair_score + (2.0 * on_signature_score)) / 3.0)
                 if score <= min_confidence:
                     continue
                 spec = specs[spec_index]
