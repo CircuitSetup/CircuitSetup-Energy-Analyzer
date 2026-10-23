@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 from datetime import UTC, datetime, timedelta
+from inspect import unwrap
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -41,10 +42,8 @@ EXPECTED_PLATFORM_DOMAINS = frozenset(
 
 
 def _uses_hierarchical_entity_ids() -> bool:
-    return (
-        "object_id_base"
-        in er.EntityRegistry.async_get_or_create.__code__.co_varnames
-    )
+    method = unwrap(er.EntityRegistry.async_get_or_create)
+    return "object_id_base" in method.__code__.co_varnames
 
 
 EXPECTED_SOURCE_WORKFLOW_PLATFORM_DOMAINS = frozenset(
