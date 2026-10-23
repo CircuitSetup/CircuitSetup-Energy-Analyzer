@@ -5315,7 +5315,8 @@ def _replace_nilm_assignment_session_id(
         return
     for key in (
         "session_ids", "confirmed_session_ids", "rejected_session_ids",
-        "adjusted_session_ids",
+        "adjusted_session_ids", "history_validation_session_ids",
+        "history_validation_manual_session_ids",
     ):
         session_ids = [
             str(value or "").strip()

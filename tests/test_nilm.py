@@ -3415,6 +3415,23 @@ def test_slow_feed_does_not_merge_steps_across_outage() -> None:
     assert not any(transition.delta_w == 4300.0 for transition in edges)
 
 
+def test_slow_feed_startup_gap_cannot_enlarge_its_own_confirmation_window() -> None:
+    detector = NilmEdgeDetector(
+        min_delta_w=100.0,
+        confirmation_samples=2,
+        confirmation_max_interval=timedelta(seconds=15),
+    )
+
+    edges = detector.process_many([
+        sample(0, 400.0), sample(32, 2400.0),
+        sample(900, 4700.0), sample(932, 4700.0),
+    ])
+
+    assert [(edge.timestamp, edge.delta_w) for edge in edges] == [
+        (BASE_TIME + timedelta(seconds=900), 2300.0),
+    ]
+
+
 def test_slow_feed_does_not_accumulate_ramp_across_outage() -> None:
     detector = NilmEdgeDetector(
         min_delta_w=100.0,

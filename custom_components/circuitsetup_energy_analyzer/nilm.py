@@ -4291,17 +4291,19 @@ class NilmEdgeDetector:
         sample_interval_seconds = (
             sample.timestamp - previous.timestamp
         ).total_seconds()
-        if isfinite(sample_interval_seconds) and sample_interval_seconds > 0.0:
-            self._sample_intervals_seconds.append(sample_interval_seconds)
         change_w = float(sample.real_power) - float(previous.real_power)
         if abs(change_w) < self.effective_min_delta_w:
             self._stable_changes_w.append(change_w)
 
         if self.confirmation_samples > 1:
-            return self._process_confirmed(previous, sample)
-
-        edge = self._edge_between(previous, sample)
-        return [edge] if edge is not None else []
+            edges = self._process_confirmed(previous, sample)
+        else:
+            edge = self._edge_between(previous, sample)
+            edges = [edge] if edge is not None else []
+        # A gap cannot enlarge the allowance used to validate that same gap.
+        if isfinite(sample_interval_seconds) and sample_interval_seconds > 0.0:
+            self._sample_intervals_seconds.append(sample_interval_seconds)
+        return edges
 
     def _process_confirmed(
         self,
@@ -4312,6 +4314,7 @@ class NilmEdgeDetector:
         effective_window = self.effective_confirmation_max_interval
         if (
             effective_window is not None
+            and self._sample_intervals_seconds
             and sample.timestamp - previous.timestamp > effective_window
         ):
             self._pending = None

@@ -4648,6 +4648,68 @@ def _validation_feedback_controller(
     return _nilm_controller(coordinator), stored_assignment
 
 
+@pytest.mark.parametrize("manual_confirmation", [False, True])
+@pytest.mark.asyncio
+async def test_repaired_session_keeps_history_and_manual_decisions_distinct(
+    manual_confirmation: bool,
+) -> None:
+    from custom_components.circuitsetup_energy_analyzer.processors.nilm_sample import (
+        _merge_nilm_session_history,
+    )
+
+    base = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+    old = {
+        "session_id": "old", "assignment_id": "assignment-pump",
+        "on_edge_id": "same-on", "off_edge_id": "first-off",
+        "start": base.isoformat(),
+        "end": (base + timedelta(seconds=300)).isoformat(),
+        "on_delta_w": 100.0, "off_delta_w": -100.0,
+        "median_power_w": 100.0, "confidence": 1.0, "ambiguous": False,
+    }
+    assignment = {
+        "assignment_id": "assignment-pump", "session_ids": ["old"],
+        "confirmed_session_ids": ["old"] if manual_confirmation else [],
+    }
+    controller, assignment = _validation_feedback_controller(
+        [old], now_values=[base + timedelta(days=1)] * 2, assignment=assignment,
+    )
+    store = controller._coordinator.store_data
+    truth = {
+        "interval_id": "truth", "assignment_id": "assignment-pump",
+        "ground_truth_entity_id": "binary_sensor.pump",
+        "start": base.isoformat(), "end": old["end"],
+        "validation_start": base.isoformat(),
+        "validation_end": (base + timedelta(hours=1)).isoformat(),
+        "median_power_w": 100.0,
+    }
+    store.nilm_label_intervals_by_circuit["mixed"] = [truth]
+    await controller.async_validate_nilm_assignment_history("mixed", "assignment-pump")
+    assert assignment["history_validation_manual_session_ids"] == (
+        ["old"] if manual_confirmation else []
+    )
+
+    repaired = {
+        **old, "session_id": "new", "off_edge_id": "repaired-off",
+        "end": (base + timedelta(seconds=330)).isoformat(),
+    }
+    store.nilm_session_history_by_circuit["mixed"] = _merge_nilm_session_history(
+        [old], [repaired], assignments=[assignment],
+    )
+    truth["end"] = (base + timedelta(seconds=60)).isoformat()
+    await controller.async_validate_nilm_assignment_history("mixed", "assignment-pump")
+
+    assert assignment["false_positive_rate"] == 1.0
+    assert assignment["confirmed_session_ids"] == (
+        ["new"] if manual_confirmation else []
+    )
+    assert assignment["rejected_session_ids"] == (
+        [] if manual_confirmation else ["new"]
+    )
+    assert assignment["history_validation_manual_session_ids"] == (
+        ["new"] if manual_confirmation else []
+    )
+
+
 @pytest.mark.asyncio
 async def test_history_validation_does_not_score_model_training_examples(
 ) -> None:
