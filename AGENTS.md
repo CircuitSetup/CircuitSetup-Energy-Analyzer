@@ -82,6 +82,7 @@ Based on [official OpenAI prompting guidance](https://developers.openai.com/api/
 - Use the GitHub connector when it gives cleaner structured PR metadata, PR creation from a pushed branch, comments, or Codex app workflow context.
 - Do not prefix PR titles with `[codex]`.
 - When the user asks to create a PR and the branch is verified and committed, push the branch and open a draft PR without asking again unless scope is ambiguous.
+- Never manually request a Codex review or post bot commands such as `@codex review`. Wait for automatic reviews and perform local code review when asked.
 - For PR comments from `chatgpt-codex-connector`, inspect review-thread state, not just flat PR comments.
 - Treat actionable connector suggestions as part of the merge gate. Implement accepted suggestions on the same PR branch, add or update regression tests when behavior changes, rerun verification, and push the follow-up commit.
 - Do not merge while unresolved actionable connector suggestions remain.

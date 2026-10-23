@@ -8,7 +8,6 @@
 - [ ] `pytest -q`
 - [ ] Home Assistant contract tests, when entity/platform behavior changes
 - [ ] HACS and hassfest checks are passing
-- [ ] ChatGPT Codex connector suggestions reviewed and addressed or explained
 
 ## Release Impact
 

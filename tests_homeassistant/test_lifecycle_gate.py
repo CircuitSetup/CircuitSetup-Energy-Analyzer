@@ -42,10 +42,8 @@ EXPECTED_PLATFORM_DOMAINS = frozenset(
 
 
 def _uses_hierarchical_entity_ids() -> bool:
-    return (
-        "object_id_base"
-        in unwrap(er.EntityRegistry.async_get_or_create).__code__.co_varnames
-    )
+    method = unwrap(er.EntityRegistry.async_get_or_create)
+    return "object_id_base" in method.__code__.co_varnames
 
 
 EXPECTED_SOURCE_WORKFLOW_PLATFORM_DOMAINS = frozenset(
