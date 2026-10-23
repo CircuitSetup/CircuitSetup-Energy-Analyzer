@@ -261,16 +261,11 @@ def extract_reference_intervals(
             confirmed_this_row
             and confirmed_state is ReferenceActivityState.INACTIVE
             and active
-            and state is ReferenceActivityState.INACTIVE
         ):
             raw.append(
                 (
                     interval_start or start,
-                    (
-                        confirmed_at
-                        if confirmed_state is ReferenceActivityState.INACTIVE
-                        else sample.timestamp
-                    ),
+                    confirmed_at,
                     left_censored,
                     False,
                     unknown_total,
@@ -280,7 +275,7 @@ def extract_reference_intervals(
                 )
             )
             active, interval_start, unknown_total = False, None, 0.0
-            continue
+            state = _resolved_reference_state(sample, active, settings)
         if state is (
             ReferenceActivityState.ACTIVE if active else ReferenceActivityState.INACTIVE
         ):
@@ -372,6 +367,8 @@ def extract_reference_intervals(
     ] = []
     merged_count = 0
     for item in raw:
+        if item[1] <= item[0]:
+            continue
         if (
             merged
             and (item[0] - merged[-1][1]).total_seconds() <= settings.merge_gap_seconds

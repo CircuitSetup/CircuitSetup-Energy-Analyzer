@@ -1160,6 +1160,14 @@ The service actions below are optional. They are useful when you want to call an
 
 When calling actions manually or from an automation, set `circuit_id` to the configured circuit ID, such as `refrigerator`, `hvac`, `car_charger`, or `mains`.
 
+Successful actions emit `circuitsetup_energy_analyzer_<action>` with the action data.
+Two actions use shorter completion event names to fit Home Assistant's 64-character recorder limit:
+
+| Action | Completion event |
+|---|---|
+| `generate_nilm_sensor_label_intervals` | `circuitsetup_energy_analyzer_generate_nilm_label_intervals` |
+| `convert_nilm_appliance_to_direct_meter` | `circuitsetup_energy_analyzer_convert_nilm_to_direct_meter` |
+
 ## Common setup states
 
 | State | Meaning |

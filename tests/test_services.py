@@ -2078,6 +2078,37 @@ def test_setting_recommendation_service_schemas_validate_fields() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("service", "event_suffix"),
+    (
+        ("generate_nilm_sensor_label_intervals", "generate_nilm_label_intervals"),
+        ("convert_nilm_appliance_to_direct_meter", "convert_nilm_to_direct_meter"),
+        ("relearn_baseline", "relearn_baseline"),
+    ),
+)
+async def test_service_completion_events_fit_recorder_limit(
+    monkeypatch: pytest.MonkeyPatch, service: str, event_suffix: str
+) -> None:
+    from homeassistant.const import MAX_LENGTH_EVENT_EVENT_TYPE
+
+    from custom_components.circuitsetup_energy_analyzer import services
+
+    monkeypatch.setattr(services, "_dispatch_service", AsyncMock())
+    events = []
+    hass = SimpleNamespace(
+        bus=SimpleNamespace(
+            async_fire=lambda event_type, data: events.append((event_type, data))
+        )
+    )
+    await services._service_handler(hass, service)(
+        SimpleNamespace(data={"circuit_id": "mains"})
+    )
+
+    assert len(events[0][0]) <= MAX_LENGTH_EVENT_EVENT_TYPE
+    assert events == [(f"{DOMAIN}_{event_suffix}", {"circuit_id": "mains"})]
+
+
+@pytest.mark.asyncio
 async def test_setup_and_unload_services_with_fake_hass() -> None:
     from custom_components.circuitsetup_energy_analyzer.services import (
         MARK_CIRCUIT_MIXED_SERVICE_SCHEMA,

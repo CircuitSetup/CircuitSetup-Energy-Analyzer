@@ -145,9 +145,9 @@ jobs:
           python -c "from homeassistant.const import __version__; print(f'Home Assistant version: {__version__}')"
 
       - name: Run Home Assistant contract tests
-        # Initialize HA's HTTP client aliases before pytest plugins import clients.
+        # Initialize HA aliases and logger cleanup before pytest plugins import them.
         run: >-
-          python -c "import homeassistant; import pytest; raise SystemExit(pytest.main())"
+          python -c "import homeassistant; import tests_homeassistant.homeassistant_logger_compat; import pytest; raise SystemExit(pytest.main())"
           tests tests_homeassistant --ignore=tests_homeassistant/test_browser_e2e.py -q
 
   home-assistant-control-entity-contract:
