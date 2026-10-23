@@ -221,6 +221,53 @@ def test_binary_state_persists_between_rows_and_prestart_is_censored() -> None:
     assert prestart.intervals[0].left_censored is True
 
 
+@pytest.mark.parametrize("dwell_seconds", (0, 60))
+def test_alternating_binary_history_keeps_each_active_run(dwell_seconds: int) -> None:
+    result = extract_reference_intervals(
+        rows(
+            (0, "off"),
+            (600, "on"),
+            (900, "off"),
+            (1500, "on"),
+            (1800, "off"),
+            (2400, "on"),
+            (2700, "off"),
+        ),
+        start=BASE,
+        end=BASE + timedelta(hours=1),
+        settings=NilmReferenceExtractionSettings(
+            on_threshold=None,
+            off_threshold=None,
+            on_dwell_seconds=dwell_seconds,
+            off_dwell_seconds=dwell_seconds,
+        ),
+    )
+
+    assert [(item.start, item.end) for item in result.intervals] == [
+        (BASE + timedelta(minutes=10), BASE + timedelta(minutes=15)),
+        (BASE + timedelta(minutes=25), BASE + timedelta(minutes=30)),
+        (BASE + timedelta(minutes=40), BASE + timedelta(minutes=45)),
+    ]
+    assert result.diagnostics.candidate_interval_count == 3
+    assert result.diagnostics.imported_interval_count == 3
+    assert result.diagnostics.merged_inactive_gap_count == 0
+
+
+def test_on_at_request_end_does_not_create_an_empty_interval() -> None:
+    result = extract_reference_intervals(
+        rows((0, "off"), (10, "on"), (20, "off"), (30, "on")),
+        start=BASE,
+        end=BASE + timedelta(seconds=30),
+        settings=NilmReferenceExtractionSettings(on_threshold=None, off_threshold=None),
+    )
+
+    assert [(item.start, item.end) for item in result.intervals] == [
+        (BASE + timedelta(seconds=10), BASE + timedelta(seconds=20))
+    ]
+    assert result.diagnostics.candidate_interval_count == 1
+    assert result.diagnostics.imported_interval_count == 1
+
+
 def power_sample(
     seconds: int, value: float | None, unit: str = "W", quality: str = "valid"
 ) -> NilmPowerSample:
@@ -422,6 +469,37 @@ def test_on_confirmation_hands_current_off_to_its_own_dwell() -> None:
     assert short.intervals[0].right_censored is True
     assert held.intervals[0].end == BASE + timedelta(seconds=40)
     assert held.intervals[0].right_censored is False
+
+
+@pytest.mark.parametrize("end_seconds", (80, 90))
+def test_off_confirmation_hands_current_on_to_its_own_dwell(end_seconds: int) -> None:
+    result = extract_reference_intervals(
+        rows((10, "on"), (40, "off"), (70, "on")),
+        start=BASE,
+        end=BASE + timedelta(seconds=end_seconds),
+        settings=SETTINGS,
+    )
+    expected = [(BASE + timedelta(seconds=10), BASE + timedelta(seconds=40), False)]
+    if end_seconds == 90:
+        expected.append(
+            (BASE + timedelta(seconds=70), BASE + timedelta(seconds=90), True)
+        )
+    assert [
+        (item.start, item.end, item.right_censored) for item in result.intervals
+    ] == expected
+
+
+def test_off_confirmation_resolves_numeric_hysteresis_as_inactive() -> None:
+    result = extract_reference_intervals(
+        rows((0, 20), (30, 0), (60, 7), (90, 7)),
+        start=BASE,
+        end=BASE + timedelta(seconds=120),
+        settings=SETTINGS,
+    )
+
+    assert [(item.start, item.end) for item in result.intervals] == [
+        (BASE, BASE + timedelta(seconds=22.5))
+    ]
 
 
 def test_resume_after_long_unknown_is_left_uncertain() -> None:

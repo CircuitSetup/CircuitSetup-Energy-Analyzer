@@ -793,6 +793,12 @@ async def async_unload_services(hass: Any) -> None:
 
 
 def _service_handler(hass: Any, service: str) -> Callable[[Any], Any]:
+    # Recorder event types are limited to 64 characters.
+    event_suffix = {
+        SERVICE_GENERATE_NILM_SENSOR_LABEL_INTERVALS: "generate_nilm_label_intervals",
+        SERVICE_CONVERT_NILM_APPLIANCE_TO_DIRECT_METER: "convert_nilm_to_direct_meter",
+    }.get(service, service)
+
     async def handler(call: Any) -> None:
         data = dict(getattr(call, "data", {}) or {})
         await _dispatch_service(hass, service, data)
@@ -800,7 +806,7 @@ def _service_handler(hass: Any, service: str) -> Callable[[Any], Any]:
         fire = getattr(bus, "async_fire", None)
         if fire is None:
             return
-        fire(f"{DOMAIN}_{service}", data)
+        fire(f"{DOMAIN}_{event_suffix}", data)
 
     return handler
 
