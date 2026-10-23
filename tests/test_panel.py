@@ -5783,6 +5783,86 @@ async def test_nilm_workspace_collection_async_read_uses_detached_snapshot() -> 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("reader_name", "kwargs", "result_key"),
+    [
+        ("async_nilm_workspace_payload", {}, "assignments"),
+        (
+            "async_nilm_workspace_collection_payload",
+            {"collection": "assignments"},
+            "items",
+        ),
+        (
+            "async_nilm_workspace_item_payload",
+            {"kind": "assignment", "item_id": "pump"},
+            "item",
+        ),
+    ],
+)
+async def test_nilm_workspace_async_reads_accept_json_cached_reference_states(
+    reader_name: str,
+    kwargs: dict,
+    result_key: str,
+) -> None:
+    from homeassistant.core import State
+    from homeassistant.helpers.json import json_bytes
+
+    from custom_components.circuitsetup_energy_analyzer import panel_nilm
+
+    coordinator = _nilm_workspace_coordinator(
+        entry_id="entry-1",
+        name="Mains",
+        entity_id="sensor.mains_power",
+    )
+    coordinator.store_data.nilm_appliance_assignments_by_circuit = {
+        "mains": [
+            {
+                "assignment_id": "pump",
+                "display_name": "Pump",
+                "mains_circuit_id": "mains",
+                "lifecycle_state": "assigned",
+                "reference_state_entity_id": "binary_sensor.pump",
+                "reference_power_entity_id": "sensor.pump_power",
+            }
+        ]
+    }
+    rows = {
+        "binary_sensor.pump": State("binary_sensor.pump", "off"),
+        "sensor.pump_power": State(
+            "sensor.pump_power",
+            "0.084",
+            {"device_class": "power", "unit_of_measurement": "kW"},
+        ),
+    }
+    for row in rows.values():
+        json_bytes(row)
+    coordinator.hass = SimpleNamespace(
+        states=SimpleNamespace(get=rows.get, async_all=lambda: list(rows.values())),
+        entity_registry=SimpleNamespace(entities={}),
+        async_add_executor_job=asyncio.to_thread,
+    )
+
+    payload = await getattr(panel_nilm, reader_name)(
+        coordinator.hass,
+        [coordinator],
+        circuit_id="mains",
+        entry_id="entry-1",
+        **kwargs,
+    )
+
+    assert payload["status"] == "ok"
+    assignment = payload[result_key]
+    if result_key != "item":
+        assert len(assignment) == 1
+        assignment = assignment[0]
+    assert assignment["assignment_id"] == "pump"
+    assert assignment["reference"]["available"] is True
+    assert assignment["reference"]["is_running"] is False
+    assert assignment["reference"]["measured_power_w"] == 84.0
+    assert assignment["reference"]["fallback_to_nilm"] is False
+
+
+@pytest.mark.asyncio
 async def test_nilm_workspace_async_read_retries_stale_snapshot() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel_nilm import (
         async_nilm_workspace_collection_payload,

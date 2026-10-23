@@ -78,3 +78,22 @@ def test_logger_compat_leaves_older_ha_without_cleanup(monkeypatch) -> None:
     ensure_logger_patch_target(module)
 
     assert not hasattr(module, "_clear_logger_overwrites")
+
+
+def test_hierarchical_entity_id_detection_follows_registry_wrapper(monkeypatch) -> None:
+    from functools import wraps
+
+    from homeassistant.helpers import entity_registry as er
+
+    from tests_homeassistant.test_lifecycle_gate import _uses_hierarchical_entity_ids
+
+    def registry_api(*, object_id_base=None):
+        return object_id_base
+
+    @wraps(registry_api)
+    def wrapped(*args, **kwargs):
+        return registry_api(*args, **kwargs)
+
+    monkeypatch.setattr(er.EntityRegistry, "async_get_or_create", wrapped)
+
+    assert _uses_hierarchical_entity_ids() is True

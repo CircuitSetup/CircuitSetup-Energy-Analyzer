@@ -324,7 +324,8 @@ def _nilm_workspace_read_snapshot(
     if callable(get_state):
         for entity_id in reference_ids:
             if (row := get_state(entity_id)) is not None:
-                state_rows[entity_id] = deepcopy(row)
+                # HA replaces States on changes; their cached JSON cannot be copied.
+                state_rows[entity_id] = row
     snapshot_states = SimpleNamespace(
         get=lambda entity_id, rows=state_rows: rows.get(entity_id)
     )
