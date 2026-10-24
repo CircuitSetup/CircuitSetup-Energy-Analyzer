@@ -2247,14 +2247,19 @@ def _normalize_unknown_load_sessions(
     return tuple(normalized), tuple(rejected)
 
 
-def _session_owner_candidates(
-    session_identities: frozenset[str],
+def _session_owner_index(
     components: Iterable[_UnknownLoadComponent],
     existing_state: Mapping[str, Any],
-) -> tuple[str, ...]:
-    """Resolve only explicit component/signature identities; never by watts."""
+) -> dict[str, set[str]]:
+    """Index current and stored identities once for this inventory rebuild."""
 
-    candidates: list[str] = []
+    loads = existing_state.get("unknown_loads")
+    stored_loads = (
+        [load for load in loads if isinstance(load, Mapping)]
+        if isinstance(loads, list)
+        else []
+    )
+    owners: dict[str, set[str]] = {}
     for component in components:
         component_identities = {
             component.component_id,
@@ -2263,16 +2268,8 @@ def _session_owner_candidates(
             nilm_signature_fingerprint(component.on_signature),
             nilm_signature_fingerprint_v1(component.on_signature),
         }
-        if session_identities & component_identities:
-            candidates.append(component.component_id)
-            continue
-        loads = existing_state.get("unknown_loads")
-        if not isinstance(loads, list):
-            continue
-        for load in loads:
-            if not isinstance(load, Mapping) or not _load_identifies_component(
-                load, component
-            ):
+        for load in stored_loads:
+            if not _load_identifies_component(load, component):
                 continue
             legacy_identities = {
                 str(load.get(key) or "").strip()
@@ -2286,10 +2283,27 @@ def _session_owner_candidates(
                     "fingerprint",
                 )
             }
-            if session_identities & (legacy_identities - {""}):
-                candidates.append(component.component_id)
-                break
-    return tuple(sorted(set(candidates)))
+            component_identities.update(legacy_identities - {""})
+        for identity in component_identities:
+            owners.setdefault(identity, set()).add(component.component_id)
+    return owners
+
+
+def _session_owner_candidates(
+    session_identities: frozenset[str],
+    owner_index: Mapping[str, set[str]],
+) -> tuple[str, ...]:
+    """Resolve only explicit component/signature identities; never by watts."""
+
+    return tuple(
+        sorted(
+            {
+                owner
+                for identity in session_identities
+                for owner in owner_index.get(identity, ())
+            }
+        )
+    )
 
 
 def _deduplicate_owned_sessions(
@@ -2535,6 +2549,11 @@ def _session_inventory_evidence(
     component_list = tuple(components)
     normalized, rejected = _normalize_unknown_load_sessions(sessions, now)
     rejected = _deduplicate_rejected_sessions(rejected)
+    owner_index = (
+        _session_owner_index(component_list, existing_state)
+        if normalized or rejected
+        else {}
+    )
     owned: list[_OwnedUnknownLoadSession] = []
     excluded: dict[str, list[_ExcludedUnknownLoadSession]] = {
         component.component_id: [] for component in component_list
@@ -2544,9 +2563,7 @@ def _session_inventory_evidence(
     }
     unowned_evidence: set[tuple[Any, ...]] = set()
     for item in rejected:
-        candidates = _session_owner_candidates(
-            item.identities, component_list, existing_state
-        )
+        candidates = _session_owner_candidates(item.identities, owner_index)
         if not candidates:
             unowned_evidence.add(("rejected", *_rejected_session_identity(item)))
             continue
@@ -2561,9 +2578,7 @@ def _session_inventory_evidence(
                 _excluded_session(component_id, item, reason="ambiguous")
             )
     for session in normalized:
-        candidates = _session_owner_candidates(
-            session.identities, component_list, existing_state
-        )
+        candidates = _session_owner_candidates(session.identities, owner_index)
         if len(candidates) != 1:
             if not candidates:
                 unowned_evidence.add(("session", session.session_id))

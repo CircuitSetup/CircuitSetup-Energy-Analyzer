@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from custom_components.circuitsetup_energy_analyzer import unknown_loads
 from custom_components.circuitsetup_energy_analyzer.nilm import (
     NilmEdge,
@@ -943,6 +945,102 @@ def test_nested_closed_session_counts_outer_interval_once() -> None:
     load = inventory["unknown_loads"][0]
     assert load["runtime_today_minutes"] == 180.0
     assert load["estimated_energy_today_kwh"] == 1.8
+
+
+@pytest.mark.parametrize("rejected", [False, True])
+def test_session_ownership_load_reads_do_not_grow_with_history(rejected: bool) -> None:
+    """Both accepted and rejected histories resolve aliases without repeated scans."""
+
+    class CountedLoad(dict):
+        reads = 0
+
+        def get(self, key, default=None):
+            self.reads += 1
+            return super().get(key, default)
+
+    components = unknown_loads._unknown_load_components(
+        [signature("sig-current", 500.0, 100.0, 510.0)]
+    )
+    load = CountedLoad(component_id="sig-current", fingerprint="legacy-fingerprint")
+    reads = []
+    for count in (1, 2000):
+        load.reads = 0
+        evidence = unknown_loads._session_inventory_evidence(
+            [
+                {
+                    "session_id": f"session-{index}",
+                    "signature_fingerprint": "legacy-fingerprint",
+                    "start": BASE_TIME + timedelta(minutes=index),
+                    "end": BASE_TIME + timedelta(minutes=index, seconds=30),
+                    "known_load_masked": rejected,
+                }
+                for index in range(count)
+            ],
+            components=components,
+            now=BASE_TIME + timedelta(minutes=2001),
+            existing_state={"unknown_loads": [load]},
+        )
+        assert len(evidence.sessions_by_component["sig-current"]) == (
+            0 if rejected else count
+        )
+        assert len(evidence.excluded_sessions_by_component["sig-current"]) == (
+            count if rejected else 0
+        )
+        assert evidence.unowned_count == 0
+        reads.append(load.reads)
+
+    assert reads[1] <= reads[0]
+
+
+@pytest.mark.parametrize(
+    "identity_key",
+    [
+        "component_id",
+        "component_fingerprint",
+        "signature_id",
+        "on_signature_id",
+        "on_signature_fingerprint",
+        "signature_fingerprint",
+        "fingerprint",
+    ],
+)
+def test_session_ownership_preserves_stored_alias_collisions(identity_key: str) -> None:
+    """A direct owner must not hide another owner's padded stored alias."""
+
+    signatures = [
+        signature("sig-first", 500.0, 100.0, 510.0),
+        signature("sig-second", 1500.0, 300.0, 1530.0),
+    ]
+    components = unknown_loads._unknown_load_components(signatures)
+    second_identity = (
+        nilm_signature_fingerprint(signatures[1])
+        if "fingerprint" in identity_key
+        else "sig-second"
+    )
+    alias_key = "fingerprint" if identity_key == "component_id" else "component_id"
+    load = {identity_key: f" {second_identity} ", alias_key: " sig-first "}
+    state = {"unknown_loads": [None, "invalid", {}, load]}
+    session = {
+        "session_id": "aliased-session",
+        "signature_fingerprint": "sig-first",
+        "start": BASE_TIME,
+        "end": BASE_TIME + timedelta(minutes=30),
+    }
+    for ambiguous in (True, False):
+        evidence = unknown_loads._session_inventory_evidence(
+            [session],
+            components=components,
+            now=BASE_TIME + timedelta(hours=1),
+            existing_state=state,
+        )
+        assert len(evidence.sessions_by_component["sig-first"]) == int(not ambiguous)
+        assert not evidence.sessions_by_component["sig-second"]
+        for component_id in ("sig-first", "sig-second"):
+            assert len(evidence.ambiguous_sessions_by_component[component_id]) == int(
+                ambiguous
+            )
+        # The next rebuild must see edits to the stored aliases.
+        load[alias_key] = ""
 
 
 def test_session_ownership_accepts_a_matching_legacy_fingerprint() -> None:
