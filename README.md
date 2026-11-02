@@ -1,1088 +1,280 @@
 # CircuitSetup Energy Analyzer
 
-CircuitSetup Energy Analyzer is a Home Assistant custom integration that turns circuit-level energy-meter data into useful appliance and circuit diagnostics.
+A Home Assistant integration for understanding circuit and appliance behavior: what is running, where energy goes, and what has changed from normal.
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=CircuitSetup&repository=CircuitSetup-Energy-Analyzer&category=Integration)
+Built for the [CircuitSetup Expandable 6 Channel ESP32 Energy Meter](https://circuitsetup.us/index.php/product/expandable-6-channel-esp32-energy-meter/) with [ESPHome ATM90E32 sensors](https://esphome.io/components/sensor/atm90e32/). Other compatible meters work when their Home Assistant entities expose usable electrical measurements.
 
-It is designed for the [CircuitSetup Expandable 6 Channel ESP32 Energy Meter Main Board](https://circuitsetup.us/index.php/product/expandable-6-channel-esp32-energy-meter/) exposed through [ESPHome ATM90E32](https://esphome.io/components/sensor/atm90e32/) sensors, but it can also work with other meters when they expose compatible Home Assistant sensor entities for:
+- Track appliance activity, cycles, energy, cost, and standby consumption.
+- Review changes against learned baselines, with weather and water-use context.
+- Check circuit loading, phase balance, measurement consistency, and unmonitored mains power.
+- Review alerts with graphs and feedback, or explore experimental load separation (NILM).
 
-- Power
-- Current
-- Voltage
-- Energy
-- Frequency
-- Reactive power
-- Apparent power
-- Power factor
+Use Home Assistant's Energy Dashboard for long-term energy accounting and this integration for appliance behavior and circuit diagnostics. Findings are inspection prompts, not fault diagnoses or electrical safety checks.
 
-**CircuitSetup-first, not CircuitSetup-only:** the integration is optimized for the CircuitSetup meter layout, but other compatible meters can be used when they expose power, current, voltage, energy, frequency, reactive power, apparent power, or power factor entities with usable Home Assistant metadata.
+![Energy Analyzer dashboard showing a complete day of mains power, amps, and appliance power](docs/images/readme/demo-dashboard.png)
 
-The integration does **not** replace Home Assistant's Energy Dashboard. Use the Energy Dashboard for long-term energy history, tariffs, costs, device hierarchies, and normal energy cards. Use CircuitSetup Energy Analyzer when you want to understand what your circuits and appliances are doing, whether their behavior has changed, and whether your meter data looks trustworthy.
-
-## What you can use it for
-
-Use this integration when you want answers like:
-
-- Is this appliance running, idle, on standby, or not showing recent activity?
-- Is today's energy use unusually high for this circuit?
-- Is my refrigerator, washer, dryer, pump, HVAC, water heater, or EV charger behaving differently from its learned baseline?
-- Is a 240 V appliance balanced across both legs?
-- Are watts, amps, volts, VA, and power factor internally consistent?
-- Is a circuit approaching a configured breaker or capacity limit?
-- Which monitored circuits explain my mains power, and how much power is still unmonitored?
-- Is solar being exported, self-consumed, or available for flexible loads?
-- Do my measured kWh totals roughly agree with utility or Opower data?
-- Are there recurring unknown whole-home load signatures worth investigating?
-
-The analyzer is intentionally conservative. It learns before alerting, requires repeated evidence, and reports a **possible issue** or **behavior change** instead of claiming to diagnose a failed appliance part.
-
-## What this integration is not
-
-CircuitSetup Energy Analyzer is not:
-
-- A replacement for Home Assistant's Energy Dashboard.
-- A substitute for an electrician, appliance technician, or code-compliance review.
-- A guarantee that a breaker, wire, CT, panel, or appliance is safe.
-- A definitive appliance-failure diagnosis tool.
-- A full NILM system that can always identify every unknown load automatically.
-
-Treat alerts as evidence to review. Check the source entities, CT orientation, phase mapping, units, and appliance assignment before assuming the appliance is the problem.
-
-## Requirements
-
-You need:
-
-- Home Assistant `2025.1.0` or newer.
-- HACS, if installing through the recommended method.
-- One or more energy-meter sensors already available in Home Assistant.
-- For CircuitSetup meters, ESPHome entities from an ATM90E32-based meter are the expected source (uncomment [power quality](https://github.com/CircuitSetup/Expandable-6-Channel-ESP32-Energy-Meter/blob/63c6f8935700eeee3c033c74a1d3ebdd15e706b3/Software/ESPHome/6chan_energy_meter_main_board.yaml#L80) in your config)
-- Active-power sensors are enough for the analyzer to derive daily energy, goals, billing-cycle usage, and cost. Home Assistant Energy Dashboard readiness still requires a native cumulative kWh sensor.
-- Current sensors, or power plus shared mains voltage, if you want capacity/amp checks.
-- Mains or aggregate sensors if you want mains balance, experimental Mains NILM, solar-flow, or utility comparison features.
-- An outdoor temperature sensor or weather entity if you want HVAC weather
-  context. If it exposes outdoor humidity, sump-pump context also uses that
-  when air-conditioner condensate may drain into the sump.
-- One or more Home Assistant climate entities if you want thermostat-response
-  efficiency for HVAC, Heat Pump, Mini-Split, blower, or electric-heat
-  circuits. Ecobee, Nest, and other integrations work through standard climate
-  state attributes. Optional indoor temperature sensors can replace a climate
-  entity's current-temperature attribute for a mapped zone.
-- A binary rain sensor or weather entity if you want sump, well, or water-pump
-  activity compared with rainfall and HVAC condensate context.
-- A binary water-flow sensor or numeric flow-rate sensor if you want water movement compared with washer, water-heater, well-pump, or water-pump activity. Numeric flow sensors are treated as off at `0` and active when greater than `0`.
-
-These context sources are opt-in. Leaving one unconfigured disables its related correlation instead of treating the missing source as negative evidence or a setup problem.
-
-The integration works best when each important appliance or circuit has a clean group of related source sensors.
+[Installation](#installation) · [Setup](#setup) · [Dashboard](#dashboard) · [Features](#features) · [Load separation](#experimental-load-separation-nilm) · [Alerts](#alerts-and-feedback) · [Troubleshooting](#troubleshooting)
 
 ## Installation
 
-This repository is structured as a HACS integration. The integration files live under:
+**Requirements:** Home Assistant **2025.1.0+** and meter entities already available in Home Assistant. Real power in W or kW is enough for activity and derived energy tracking. Native cumulative kWh, current, voltage, power factor, reactive power, and apparent power add evidence for the checks that use them.
 
-```text
-custom_components/circuitsetup_energy_analyzer
-```
+[![Open CircuitSetup Energy Analyzer in Marketplace or HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=CircuitSetup&repository=CircuitSetup-Energy-Analyzer&category=integration)
 
-![CircuitSetup Energy Analyzer integration overview in Home Assistant Devices and services](docs/images/readme/integration-overview.png)
-
-### Install with HACS
-
-1. Open **HACS**.
-2. Search for **CircuitSetup Energy Analyzer**.
-3. If it is not listed, add this repository as a custom repository with category **Integration**.
-4. Install **CircuitSetup Energy Analyzer**.
-5. Restart Home Assistant.
-6. Go to **Settings > Devices & services**.
-7. Add **CircuitSetup Energy Analyzer**.
-
-## Setup overview
-
-The setup flow is designed so you do not need to hand-write JSON or edit YAML for normal configuration.
-
-![CircuitSetup Energy Analyzer options menu with setup actions](docs/images/readme/options-menu.png)
-
-During setup, you choose:
-
-| Setup item | What it is for |
+| Home Assistant version | Install through |
 |---|---|
-| **Source Devices** | ESPHome meter devices, such as a CircuitSetup ATM90E32 meter. The integration expands selected devices into matching electrical sensors. |
-| **Extra Source Entities** | Individual sensors that are not attached to a selected source device, or sensors you want to add manually. |
-| **Mains Source Entities** | Optional whole-panel or aggregate sensors that create a separate mains analysis entity for mains balance, solar-flow, and utility comparison. Experimental NILM can be enabled separately. |
-| **Outdoor Temperature or Weather Entity** | Optional outdoor temperature source used for HVAC context. An available humidity attribute also provides condensate context for sump pumps. |
-| **Rain or Weather Entity** | Optional binary rain sensor or Home Assistant weather entity used to explain expected sump, well-pump, or water-pump activity. |
-| **Rain Intensity Sensor** | Optional numeric precipitation-rate sensor. If available, heavier rain can raise expected pump activity more than light rain. |
-| **Water Flow Sensors** | Optional binary or numeric water-flow sensors used to compare water movement with washer, water-heater, well-pump, or water-pump activity. Binary sensors are active when on; numeric flow-rate sensors are active when greater than `0`. |
-| **Thermostats** | Optional climate entities used to learn how quickly mapped HVAC appliances move each zone toward its active setpoint. Multiple thermostats remain separate. |
-| **Indoor Temperature Sensors** | Optional zone temperature sources used only when a mapped thermostat does not provide a usable current temperature or another sensor is preferred. |
-| **Circuit Assignments** | The review step where you confirm which sensors belong together and how each circuit should be analyzed. |
-| **Advanced Circuit Settings** | The screen used to tune thresholds, goals, billing, demand, capacity, standby, solar, and other per-circuit options after setup. |
+| **2026.11+** | **Settings > Marketplace**. Search for CircuitSetup Energy Analyzer, or use **Add from link** with this repository's URL. Install and follow setup; complete any restart repair first. |
+| **2025.1–2026.10** | **HACS**. Add this repository as an **Integration** custom repository if needed, install, and restart Home Assistant. |
 
-After adding or renaming sensors on a selected source device, use **Refresh Source Sensors** in the integration options to rescan that device while preserving manual extra sources and the rest of the configuration. If previous device sensors are no longer found, the flow reviews renamed mains sensors and every affected **Appliance Circuit Assignment** before reloading.
+Repository URL: `https://github.com/CircuitSetup/CircuitSetup-Energy-Analyzer`
 
-![Source selection panel showing Source Devices and Extra Source Entities](docs/images/readme/source-selection.png)
+If setup does not open automatically, go to **Settings > Devices & services > Add integration > CircuitSetup Energy Analyzer**.
 
-![Circuit assignment editor showing automatic classification, included sensors, and retention controls](docs/images/readme/assignment-editor.png)
+Upgrading to Home Assistant 2026.11 migrates existing HACS installations to Marketplace automatically. You do not need to reinstall the analyzer. See the [Marketplace migration guidance](https://www.home-assistant.io/integrations/marketplace/#coming-from-hacs).
 
-## Using The Integration
+For manual installation, copy `custom_components/circuitsetup_energy_analyzer` into your Home Assistant `config/custom_components/` directory, restart, and add the integration.
 
-Use the integration in this order:
+![CircuitSetup Energy Analyzer in Home Assistant Devices and services](docs/images/readme/integration-overview.png)
 
-- **First-time setup checklist**: add the integration from **Settings > Devices & services**, select source devices/entities, then use **Appliance Circuit Assignments**.
-- **Check setup health first**: `sensor.circuitsetup_energy_analyzer_setup_health` gives one next step, such as fixing stale sensors, adding rain/water-flow context, reviewing utility comparison setup, checking CT direction, or letting the analyzer learn.
-- **Classify circuits deliberately**: choose the appliance type and source sensors, then review the automatically derived circuit mode and power-flow mode before trusting appliance evidence.
-- **Use it day to day**: start with Health Summary, Activity Summary, Energy Summary, and Energy Usage Today.
-- **Configure the optional features you actually need**: open **Advanced Circuit Settings** for the appliance. The form only shows settings that apply to the selected appliance or circuit.
-- **Practical examples**: Washer or dryer running automation, Refrigerator monitoring, HVAC or 240 V appliance review, EV charger or high-current circuit tracking, and Utility or Opower comparison.
-- **When an alert appears**: read the notification, open the evidence view, compare observed and expected values, and verify source data before treating it as an appliance problem.
-- **Common setup states**: learning, waiting for energy change, missing metrics, not dual phase, missing mains, and unconfigured optional checks usually mean the analyzer needs more data or a better assignment.
+## Setup
 
-You do not need to enable every diagnostic entity. For behavior alerts, let the analyzer learn for at least 7 days or enough appliance cycles before tuning thresholds.
+Normal setup and tuning use the Home Assistant UI; no YAML or JSON editing is required.
 
-## Appliance-centered views
+1. Select your meter under **Source Devices**. Use **Extra Source Entities** for individual sensors outside that device selection.
+2. Add **Mains Source Entities** only for whole-panel measurements. Mains enable balance, solar, utility comparison, and optional mains NILM.
+3. Add any environmental sources you want to use; the table below explains each one.
+4. Review **Appliance Circuit Assignments**: confirm each name, appliance type, and matching source sensors. The analyzer suggests a type from entity IDs and friendly names, then derives circuit mode and power-flow mode.
+5. Save, check **Setup Health**, and let the analyzer learn. Configure optional checks later under **Advanced Circuit Settings**.
 
-The generated dashboard and evidence panel are organized around appliance
-questions instead of raw diagnostic entity lists:
+![Source selection with meter devices, extra entities, and optional context sources](docs/images/readme/source-selection.png)
 
-- **Appliance Detail** opens with the applicable alert and evidence banner,
-  then its W+A (watts and amps) history graph, Today vs Normal comparison
-  table, and the merged behavior/health evidence for one appliance or circuit.
-  The graph offers 24 hours, 7 days, and 30 days, point-inspection tooltips,
-  explicit zoom/pan controls, and a History arrow. VA and VAR are omitted from Appliance Detail graphs. HVAC efficiency is kept in its own organized card
-  when that evidence is available. Eligible direct-circuit pages also show
-  **Water Flow Context** when retained water-flow correlation evidence exists,
-  including flow state, appliance and mapped-appliance runtime, mismatch
-  duration, confidence, learning progress, and configured flow sources. Sump
-  pump pages add a 30-day **Pump Drivers Over Time** chart that aligns completed
-  pump cycles with rain, compressor-only humidity changes, and supporting blower
-  activity.
-- **Appliance Status** keeps activity, health, energy state, and
-  daily usage together for each appliance without duplicate watchlist cards.
-- **Today vs Normal** keeps partial-day observations separate from completed
-  days. Energy, runtime, run count, cost, and demand peak use the same local-day
-  progress when history supports it; projected end-of-day values and completed-
-  day normal ranges are labeled separately. Running power uses running history,
-  idle power uses standby history, and mixed circuits avoid appliance-specific
-  power claims. Cost uses Home Assistant's configured currency and becomes
-  unavailable rather than applying the current tariff to an unknown interval.
-- **Direct meter vs Estimated by NILM** labels show whether a value is directly
-  measured or inferred from mains power. NILM appliances show confidence and
-  validation state; low-confidence NILM asks for review instead of implying a
-  confirmed appliance fault. Each estimate has a stable
-  `nilm:<assignment_id>` appliance identity, assignment-only session history,
-  runtime and run-count summaries, and alerts that open that appliance's detail
-  while keeping the source mains visible. Today vs Normal stays hidden until
-  enough sessions across multiple days are confirmed with acceptable
-  confidence and false-positive rate.
-- **Setup Health checklist** adds onboarding checklist attributes for source
-  data, assignments, CT direction, energy tracking, appliance profiles,
-  dashboard creation, notifications, NILM, and learning progress. Its compact
-  **Needs Attention** view shows only actionable setup/data problems, direct
-  appliance findings, and NILM validation work. Findings are ranked, limited
-  to three per appliance, and semantically deduplicated so repeated energy
-  wording does not crowd out electrical or data-quality issues. Setup actions
-  open the integration options page because Home Assistant does not provide a
-  stable URL for an individual options-flow setting.
-- **Advanced setting suggestions** show current value, default value, suggested
-  value with units, what the setting controls, why the suggestion exists,
-  expected effect, and reset/apply/dismiss actions. **Review Evidence** opens a
-  focused view with related history followed by those actions. Supported
-  threshold suggestions include
-  an inline historical-impact summary only when enough retained history exists;
-  it is a bounded, non-mutating preview of the alerts or operating-state changes
-  the candidate would have produced from up to 14 days and 500 samples. The
-  preview is historical guidance, not a prediction of future behavior.
-- **Weekly Appliance Digest** is opt-in from Setup Health. It ranks changes from
-  each appliance's own normal separately from top energy users, reports
-  unresolved alerts separately from alerts merely observed during the week,
-  and can stay in the panel or use a persistent/mobile notification target.
-  Week-over-week change rankings require two full seven-day weeks of complete,
-  maintenance-free data; weather-, season-, rain-, or water-flow-explained
-  behavior remains contextual rather than being promoted as degradation.
-- **Appliance Insights** is the evidence panel's integration-level appliance
-  index. It lists direct-meter and NILM appliances together, defaults to
-  needs-attention and running appliances first, and supports running,
-  attention, NILM, learning, and data-problem filters plus energy/change
-  sorting. Appliance and source links open Appliance Detail, integration
-  options, or the matching NILM assignment without losing the stable appliance
-  identity.
-- **Why Energy Changed** conservatively separates same-time energy change into
-  runtime, running-power, and cycle-count contributions when those baselines
-  are available. Contributions stay bounded to the observed change; missing
-  history and low-confidence NILM remain explicitly unexplained. Source
-  quality, learning readiness, and NILM evidence confidence stay separate
-  rather than being collapsed into one score.
-- **Alert Evidence** starts with a visual comparison, then keeps graph-first
-  evidence beside the plain-language explanation and moves technical details
-  into a disclosure for deeper review.
+### Assign circuits correctly
 
-![Appliance detail panel showing refrigerator health, activity, energy, and recent evidence](docs/images/readme/appliance-detail.png)
+Group both legs of a 240 V appliance into one assignment. Each source sensor can belong to only one appliance; unassigned sensors remain available for later use. **Remove From Analysis** returns an appliance's sources to the picker.
 
-![Alert Evidence panel showing the observed, expected, and threshold comparison above the evidence graph](docs/images/readme/alert-evidence.png)
-
-## First-time setup checklist
-
-1. Install the integration, restart Home Assistant, and add it from **Settings > Devices & services**.
-2. In **Source Devices**, select the ESPHome meter device or other meter device that owns your CT/channel sensors.
-3. Use **Extra Source Entities** only for sensors that are not already included through a selected source device.
-4. Leave **Mains Source Entities** empty unless you have whole-panel or aggregate measurements.
-5. Add mains sources if you want Mains NILM, mains balance, solar-flow, or utility/Opower comparison.
-6. Add an outdoor temperature entity if you want HVAC activity compared with outdoor conditions.
-7. Add thermostat climate entities, plus optional candidate indoor temperature
-   sensors, if you want HVAC setpoint-response efficiency.
-8. Add a rain sensor or weather entity if you want sump, well, or water-pump
-   activity adjusted for rainfall. A configured outdoor source with humidity
-   also improves sump-pump condensate context.
-9. Add water-flow sensors if you want leak-style mismatch checks against water-using appliances.
-10. Open **Appliance Circuit Assignments**.
-11. For each detected group, confirm:
-   - Whether to analyze the appliance.
-   - The circuit name.
-   - The appliance type.
-   - The selected source sensors.
-   - **This circuit also powers unrelated loads** when the selected appliance
-     is the primary load on a shared circuit.
-   - The automatically derived circuit mode and power-flow mode shown in the review text.
-
-Each source sensor can belong to only one appliance. Removing a sensor or an
-appliance returns its source sensors to the assignment picker so they can be
-assigned again. Existing appliances use the explicit **Remove From Analysis**
-action instead of a second include/exclude control.
-12. Save the configuration.
-13. Let the analyzer learn before acting on behavior alerts. Most behavior checks need at least 7 days or enough appliance cycles.
-14. Use **Advanced Circuit Settings** later if you need to tune thresholds, goals, billing, demand, capacity, standby, solar-flow, water context, HVAC thermostat mapping, or other feature settings.
-
-![Setup Health checklist showing recommended setup actions for configured circuits](docs/images/readme/setup-health.png)
-
-## Classify circuits carefully
-
-Correct circuit classification is the most important part of setup.
-
-In **Appliance Circuit Assignments**, the integration suggests an appliance type
-from each source entity ID, then uses its Home Assistant friendly name as a
-fallback. You confirm the appliance type and source sensors before the integration
-derives circuit mode and power-flow mode from that selection.
-
-The assignment editor offers every eligible selected source sensor, so a newly
-discovered or previously removed sensor can be added to an existing appliance or
-grouped with other sensors. The assignment picker can also remove several
-appliances together. Unassigned sources remain available for later assignment but
-do not create analyzer appliances on their own.
-
-| Mode | Use for | Notes |
-|---|---|---|
-| **Single Phase** | One CT/channel tracking one main 120 V load, such as a refrigerator, washer, sump pump, microwave, or water pump. | Best for dedicated appliance circuits. |
-| **Dual Phase** | Two CT/channels that are the two legs of one 240 V appliance, such as HVAC, electric heat, water heater, dryer, oven, pool pump, EV charger, or solar inverter. | Enables leg-balance and combined-appliance analysis. |
-| **Mixed** | A branch circuit where the selected appliance is the primary context but unrelated loads share the measurement. | Choose **This circuit also powers unrelated loads** during setup or later **Appliance Circuit Assignments** editing. Mixed dual-phase circuits are not supported by the current model. |
-| **Mains NILM** | Whole-home mains or feed circuits. | Required for experimental whole-home load-signature discovery. |
-
-Mixed mode does not turn the aggregate signal into an isolated appliance
-measurement. Energy, billing, cost, demand, capacity, health, and data-quality
-analysis continue for the full circuit, while direct appliance alerts,
-baselines, and recommendations are suppressed. Appliance-specific evidence
-requires a reviewed Experimental NILM assignment; NILM remains opt-in and does
-not automatically detect or reclassify the primary appliance.
-
-## Review the derived power-flow mode
-
-Power-flow mode tells the analyzer how to interpret signed watts. It is selected
-automatically during guided assignment.
-
-| Power flow | Use for | How negative watts are treated |
-|---|---|---|
-| **Load** | Normal consuming circuits. | Sustained negative watts usually mean CT orientation or configuration should be checked. |
-| **Generation / Solar Export** | Solar inverter or generation circuits. | Negative power can be expected export/generation behavior. |
-| **Mains / Net** | Signed whole-home mains measurements. | Import and export direction are preserved. |
-
-If a normal load circuit shows sustained negative watts, check CT orientation before using that data as appliance evidence.
-
-## Supported appliance profiles
-
-Supported profile values include:
-
-| Profile | Default phase/topology | Default power flow |
-|---|---|---|
-| `refrigerator` | Single phase | Load |
-| `freezer` | Single phase | Load |
-| `hvac` | Dual phase when both legs are selected; otherwise single phase | Load |
-| `hvac_compressor` | Dual phase when both legs are selected; otherwise single phase | Load |
-| `heat_pump` | Dual phase when both legs are selected; otherwise single phase | Load |
-| `mini_split` | Dual phase when both legs are selected; otherwise single phase | Load |
-| `hvac_blower` | Single phase | Load |
-| `electric_heat` | Dual phase when both legs are selected; otherwise single phase | Load |
-| `water_heater` | Dual phase when both legs are selected; otherwise single phase | Load |
-| `oven` | Dual phase when both legs are selected; otherwise single phase | Load |
-| `microwave` | Single phase | Load |
-| `dishwasher` | Single phase | Load |
-| `3d_printer` | Single phase | Load |
-| `washer` | Single phase | Load |
-| `dryer` | Dual phase when both legs are selected; otherwise single phase | Load |
-| `pool_pump` | Dual phase when both legs are selected; otherwise single phase | Load |
-| `water_pump` | Dual phase when both legs are selected; otherwise single phase | Load |
-| `well_pump` | Dual phase when both legs are selected; otherwise single phase | Load |
-| `sump_pump` | Dual phase when both legs are selected; otherwise single phase | Load |
-| `ev_charger` | Dual phase when both legs are selected; otherwise single phase | Load |
-| `solar_inverter` | Dual phase | Generation |
-| `mains_nilm` | Mains NILM | Mains/net |
-| `motor_load` | Single phase | Load |
-| `resistive_load` | Single phase | Load |
-| `mixed` | Mixed | Load |
-
-Choose the closest profile. The profile controls which checks are useful, which sensors are recommended, and how learning works. Use `heat_pump` for equipment that drives both refrigerant heating and cooling, `hvac_compressor` for a separately metered compressor, and `hvac_blower` for the air handler. The legacy `hvac` profile means a combined or otherwise unspecified HVAC system; it is retained for compatibility rather than duplicating those explicit component profiles. `3d_printer` targets consumer FDM printers. Automatic source parsing treats explicit `gas_dryer` names as single phase and explicit `electric_dryer` names as dual phase. `mains_nilm` is for whole-home mains/NILM sources, not a normal appliance circuit.
-
-## Summary-First Diagnostics
-
-Most users should build dashboards from the summary entities first. Detailed diagnostic entities are still available, but advanced troubleshooting entities are disabled by default so Home Assistant does not record unnecessary state history unless you opt in.
-
-The integration has an **Entity Detail Level** option under **Settings > Devices & services > CircuitSetup Energy Analyzer > Configure**:
-
-- **Simple**: default for most homes. Enables the main summary entities and Energy Usage Today when usable.
-- **Standard**: also enables configured feature-status entities, such as energy goals, billing/cost, weather context, water-flow context, and other features you turned on.
-- **Expert**: creates only the diagnostic or graph groups you select under **Expert Entity Groups**, useful for troubleshooting and custom diagnostic dashboards.
-
-Changing **Entity Detail Level** reloads the integration so the entity set matches the selected profile. Expert creates only the diagnostic or graph groups you select, such as Developer Diagnostics, Energy Detail, Demand and Capacity, Mains and Solar Detail, NILM Detail, Cycle Metrics, Electrical Scores, Power Quality Drift, Billing Forecasts, Standby, Weather, and Water. Existing manual entity-registry customizations are respected.
-
-![Entity Detail Level options showing Simple, Standard, and Expert entity profiles](docs/images/readme/entity-detail-level.png)
-
-For a configured circuit ID such as `refrigerator`, `hvac`, or `car_charger`, the main entities follow this pattern:
-
-| Entity | Example | What it tells you |
-|---|---|---|
-| **Setup Health / Next Step** | `sensor.circuitsetup_energy_analyzer_setup_health` | The highest-priority setup action across the integration, with attributes for the reason, affected circuit, blocking issue count, and configuration path. |
-| **Health Summary** | `sensor.<circuit>_health_summary` | Whether the circuit is ready, learning, missing data, paused, or showing a possible issue. Attributes include the electrical-health, power-quality, metric-consistency, and leg-balance evidence when available. |
-| **Activity Summary** | `sensor.<circuit>_activity_summary` | What the appliance appears to be doing now: running, idle, standby, on, off, or no recent activity. Attributes include `is_running` for automations plus run-cycle and standby detail. |
-| **Energy Summary** | `sensor.<circuit>_energy_summary` | Combined daily usage, goal, billing, cost, and high-usage evidence. |
-| **Energy Usage Today** | `sensor.<circuit>_daily_energy_usage` | Today's derived kWh; compatible with **Individual devices** on Home Assistant's Energy Dashboard. |
-| **Settings Suggestions** | `sensor.<circuit>_settings_suggestions` | Count of pending advanced-setting recommendations. Available from the Expert Developer Diagnostics group or by enabling the entity. |
-
-Use summary sensors for dashboards and automations. When a summary changes, open the entity attributes or the alert evidence page from the notification. The evidence page leads with a visual observed-versus-expected comparison and graph-first evidence, then explains what happened, why it matters, sample count, first/last seen times, and what to check first. Power-quality comparisons name the measured metric and show W, VAR, VA, power factor, or a percentage as appropriate. Use advanced detail entities only when you are investigating deeper setup or data-quality evidence.
-
-For power-meter interpretation:
-
-- **Watts**: what the circuit is doing right now. Real-power changes are evaluated by activity, cycle, standby, and demand checks; watts alone do not create power-quality alerts.
-- **kWh**: how much energy it used over time.
-- **Amps**: how hard the circuit is loaded.
-- **Power factor, reactive power, and apparent power**: electrical evidence used for health and consistency checks.
-
-## Build a useful dashboard
-
-The fastest path is to let the integration create a starter dashboard:
-
-**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Create Or Update Dashboard**
-
-Choose one layout:
-
-1. **Simple**: Home and Energy & Costs views with live visual summaries.
-2. **Standard**: Simple plus one Insights view for mains, NILM, and contextual evidence when matching data exists.
-3. **Expert**: Standard plus diagnostic navigation inside the Insights view.
-
-The dashboard form has three setup paths:
-
-1. Create or update the recommended dashboard with the selected **Dashboard Layout**.
-2. Check **Match Entity Detail Level To Layout** when the selected layout needs more analyzer entities than your current Entity Detail Level creates.
-3. Check **Remove Existing Dashboard** when you want to delete the stored recommended dashboard instead of updating it.
-
-You can also choose the preferred layout from `select.circuitsetup_energy_analyzer_dashboard_layout`, but the dashboard action still runs from Configure > Create Or Update Dashboard; there is no dashboard action button entity.
-
-The generated dashboard uses Home Assistant's current entity registry IDs, so renamed analyzer entities are respected. It keeps Home Assistant's stock header and icon tabs; the first path remains `overview`, and it uses at most three views: Home, Energy & Costs, and Insights. Every view uses one shared Home Assistant-style date range control with previous, next, now, compare, and CSV download actions. Home starts with the total-power/amps and all-appliance graphs, followed by a half-width row with Home energy summary on the left and Appliances on the right. The all-appliance graph is built by combining both phases of a dual-phase appliance into one line. Home Summary keeps daily averages on a second line without percentage comparisons. It prefers primary-mains power, current, energy, and cost; derives mains power from complete amps, volts, and power-factor sources when direct power is unavailable; and falls back only to complete monitored-appliance totals. Live current is labeled **Amps Now**, while completed ranges show time-weighted **Average Amps**. A conditional **Line voltage** meter follows when configured, using native Home Assistant gauges with ranges adapted to the current voltage values. The retained Energy and costs card follows for multi-day ranges. There is no House Power Flow visualization. Energy & Costs keeps graphs half-width on the left: HVAC overlays outdoor temperature on a second axis, while Water flow context overlays correlated appliance power and deduplicated flow sensors. Insights keeps non-graph mains status, contextual summaries, billing-cycle totals, and Expert-only diagnostics. Empty optional views and empty NILM graph placeholders are omitted.
-
-Home live-sorts appliance tiles by attention state, Running state, current power, and name without repeating a separate Active Now list. Appliance rankings exclude mains, show the top five plus Other, and follow the floating date/calendar chooser in the footer. On older Home Assistant versions, the same floating date control falls back to the supported native control. On a single selected day, a Learning tile also shows its Health status and remaining learning days. Energy integrates recorder real-power history, and cost follows recorded cost changes across daily resets. The appliance grid keeps the All, Running, and Needs attention filters alongside search and detail navigation. Its selected timeline is built from each appliance's Activity Summary history and shows segmented Running intervals against the selected range. Live state refresh pauses while a search or selector has focus.
-
-Energy & Costs uses two equal-width columns for every available graph, including HVAC, water context, and defined NILM appliance power. When HVAC thermostat associations are configured, its **HVAC & Thermostats** card shows separate heating and cooling gauges, a weather-normalized learned baseline at `100%`, expected and recent daily runtime, and links to appliance detail. The appliance contribution ranking appears only on Home, not a second time on this graph tab. Dashboard charts inherit the active Home Assistant theme and installation font, including headings, cards, tooltips, SVG labels, tables, and controls. They support tooltips, pointer-centered double-click zoom, and History arrows; there are no visible chart-level zoom, pan, or reset controls. Changing the shared date range resets every graph. The floating date/calendar chooser remains mounted during live refreshes when the selected range includes today. The arrow in each graph opens Home Assistant History with the visible date range and available source entities selected, where data can be added or removed. Compare overlays the immediately preceding equal-length range with matching dashed series. HVAC and appliance displays use real power in watts and exclude apparent and reactive power (`VA` and `var`) sources. The Billing Cycle card lives on the final Insights tab and owns usage, current cost, and forecast entities. The Home Energy and costs chart combines retained completed days with live today totals. When mains today totals are unavailable, the Home summary and chart use the monitored appliance totals instead. Historical rows preserve the analyzer's recorded, estimated, or unavailable cost status without calculating a new tariff estimate in the browser or displaying unavailable cost as zero. Expert Detail links open appliance detail pages directly. Monetary sensors and cards use Home Assistant's configured currency.
-
-When a mains circuit exists, the first configured mains circuit is the primary whole-house source. Appliance breakdowns never add that total to its component circuits. Additional mains channels are identified separately in the Mains & NILM card inside Insights. Without mains, the dashboard labels current power as known monitored load and avoids inventing a whole-house daily total; completed-day history starts with a selected appliance instead. HVAC graphs include every applicable circuit. Water context appears only when correlation evidence names a flow sensor, pairs applicable appliance watts with that sensor on a dual-axis graph, and shows a shared flow sensor only once.
-
-The custom cards are first-party integration resources and require no third-party Lovelace dependency. Existing Appliance Detail, NILM workspace, evidence URLs, and dashboard storage matching remain unchanged. When the entity registry is available, missing or disabled analyzer entities are omitted instead of guessed. Live daily energy and cost entities remain wired when temporarily unavailable so later state updates can populate the saved dashboard; run **Configure > Create Or Update Dashboard** once after upgrading an older generated dashboard.
-
-For manual dashboards, start with the same summary contract:
-
-1. Health Summary
-2. Activity Summary
-3. Energy Summary
-4. Energy Usage Today
-
-Add Cost Today and average daily energy or cost where useful. Use Activity Summary state or its `is_running` attribute for timelines and automations such as washer finished, dryer finished, pump running, or microwave activity.
-
-For YAML reference, an example dashboard is still included:
-
-```text
-docs/dashboard-example.yaml
-```
-
-![Generated Energy Analyzer Home view with live household KPIs, power balance, appliance state, and daily contribution](docs/images/readme/demo-dashboard.png)
-
-A good dashboard order is:
-
-1. **Home**: current household power, Running and issue counts, power balance, live appliance contribution, compact appliance tiles, and selected Running history.
-2. **Energy & Costs**: half-width graph rows for NILM mains power, today versus normal, energy and cost history, HVAC activity, and water context.
-3. **Insights**: load coverage, NILM assignment review, contextual HVAC or water status, Billing Cycle, and Expert-only diagnostic routes.
-
-### Appliance Drilldown Pattern
-
-When a single appliance needs review, use this pattern:
-
-1. **Appliance status card**: Health Summary, Activity Summary, Energy Summary, and Energy Usage Today.
-2. **Appliance history**: Appliance Detail starts with the configured source history for the past 24 hours (30 days for sump pumps). Choose 24 hours, 7 days, or 30 days, hover the graph for its Home Assistant-style value and timestamp tooltip, use the explicit zoom and pan controls, or open the visible range with its History arrow. Sump-pump cycle markers distinguish rain, HVAC-plus-humidity, combined, unexplained, and unclassified activity.
-3. **Appliance automations**: Activity Summary state or `is_running` attribute for washer, dryer, pump, microwave, or appliance-complete automations.
-4. **Energy tracking**: Energy Usage Today, Energy Usage Status, goals, billing, and cost where those features are enabled.
-5. **Electrical review**: power-quality, metric-consistency, leg-imbalance, and capacity entities only when the summary points there.
-6. **Setup and data quality**: advanced diagnostic entities, Repairs, source entity attributes, and `status_explanation`.
-
-## Let the analyzer learn
-
-During the first week, expect many entities to say `Learning`, `Needs data`, or `Waiting For Energy Change`.
-
-The analyzer learns conservative baselines before sending behavior alerts. Depending on the feature, it needs:
-
-- At least 7 days of retained history.
-- Enough run cycles.
-- Enough daily kWh samples.
-- Enough steady samples for standby, demand, or power-quality checks.
-
-If something looks confusing, open the entity details and review attributes such as:
-
-- `status_explanation`
-- `observed_evidence`
-- `source_entities`
-- `threshold`
-- `sample_count`
-- `first_seen`
-- `last_seen`
-
-Do this before changing thresholds or assuming an appliance has failed.
-
-## Retained analyzer data
-
-CircuitSetup Energy Analyzer keeps compact diagnostic evidence for its own
-analysis. It does not try to replace Home Assistant's recorder, statistics, or
-Energy Dashboard history.
-
-Retention modes control time-based circuit evidence:
-
-| Retention mode | Time window |
-|---|---:|
-| Lightweight | 18 days |
-| Standard | 45 days |
-| Diagnostic | 180 days |
-
-Additional persisted structures have hard caps so storage cannot grow without
-bound:
-
-| Stored structure | Cap |
-|---|---:|
-| Alert history | 500 items or 180 days |
-| Alert feedback | 500 items or 365 days; expected alert feedback expires after about 90 days, not-helpful feedback after about 45 days |
-| Weather context history | 1,008 samples per circuit plus the retention window |
-| Rain/water-flow context history | 1,008 samples per circuit plus the retention window |
-| NILM signatures | 64 signatures per mains circuit |
-| NILM unknown-load inventory | 32 unknown loads per mains circuit |
-| Settings suggestions | 200 recommendations or 180 days, pending suggestions kept first |
-| Settings suggestion decisions | 500 decisions or 365 days |
-| Settings suggestion notification history | 100 notification episode keys |
-| HVAC thermostat response history | One compact record per completed core day and comparable equipment context: 17 in Lightweight or 55 in Standard/Diagnostic, plus the open local day |
-
-## Optional features
-
-Enable and tune optional features from the integration options screen. Manual YAML editing is not required.
-
-Go to:
-
-**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
-
-![Advanced circuit settings panel showing circuit-specific sensitivity and applicable tuning sections](docs/images/readme/advanced-settings.png)
-
-Use **Advanced Circuit Settings** to configure circuit-specific options such as:
-
-- Energy-usage spike thresholds
-- Daily energy goals
-- Billing-cycle settings
-- Demand settings
-- Circuit capacity limits
-- Dual-phase leg-imbalance settings
-- Metric-consistency tolerances
-- Mains-balance settings
-- Solar-flow thresholds
-- Standby and Always On settings
-- Activity-alert sensitivity
-- Rain, pump, and water-flow context
-- HVAC thermostat links, temperature-source mappings, gas-heat blower role,
-  and response-change threshold
-
-Alert sensitivity uses the same names everywhere: **Quiet**, **Balanced**, and **Sensitive**.
-
-Most users should configure these options from the Home Assistant UI. Developer Tools actions are available for automations, scripts, dashboards, backups, and advanced workflows, but they are not required for normal setup.
-
-Daily actions are exposed as Home Assistant entities so you do not need to copy IDs into service calls. Use the circuit buttons and controls for normal actions. If you do call a circuit service from an automation, you can target a renamed analyzer entity instead of typing the circuit ID.
-
-- `button.<circuit>_relearn_baseline`
-- `select.<circuit>_alert_sensitivity`
-- `number.<circuit>_daily_energy_goal`
-- `switch.<circuit>_maintenance`
-
-Integration-level controls are grouped on the CircuitSetup Energy Analyzer device:
-
-- `button.circuitsetup_energy_analyzer_run_mapping_checks`
-- `button.circuitsetup_energy_analyzer_recalculate_suggestions`
-- `select.circuitsetup_energy_analyzer_entity_detail_level`
-- `select.circuitsetup_energy_analyzer_dashboard_layout`
-
-Dashboard create, update, and remove actions are available from **Configure > Create Or Update Dashboard**, not from a button entity.
-
-## Normal User Paths
-
-The integration exposes service actions for scripts, blueprints, dashboards, backups, and Developer Tools. Actions use identifiers such as `circuit_id`, `alert_id`, `signature_id`, and `recommendation_id` to select their target.
-
-For day-to-day use, prefer these paths instead:
-
-| User intent | Normal path |
+| Circuit mode | Use for |
 |---|---|
-| Circuit action | Circuit action -> button/select/number entity |
-| Alert action | Alert action -> evidence panel button |
-| NILM signature action | NILM signature action -> NILM/evidence panel button |
-| Recommendation action | Recommendation action -> Suggested Settings UI button |
-| Setup/data-quality fix | Setup/data-quality fix -> Repairs flow |
+| **Single Phase** | One appliance on one measured leg. |
+| **Dual Phase** | Both measured legs of one 240 V appliance. |
+| **Mixed** | Several loads on one measured circuit. Select **This circuit also powers unrelated loads** when there is a primary appliance. Mixed dual-phase circuits are not supported. |
+| **Mains NILM** | Whole-home mains or feed measurements. Detection remains opt-in. |
 
-This keeps IDs inside the integration wherever possible. You should not need to copy `circuit_id`, `alert_id`, `signature_id`, or `recommendation_id` from attributes into Developer Tools for ordinary setup, tuning, alert review, or appliance maintenance.
+Mixed circuits report whole-circuit usage and electrical evidence. They suppress direct appliance-specific alerts, baselines, and recommendations; use reviewed NILM assignments for separated appliance estimates.
 
-### Feedback teaches the analyzer
+Power-flow mode is also derived during assignment: **Load** for consumption, **Generation / Solar Export** for solar, and **Mains / Net** for signed whole-home power. Persistent negative watts on a normal load warrant checking CT orientation and mapping.
 
-When you mark an alert as expected, the analyzer remembers that evidence pattern by a stable local fingerprint. Future matching evidence under similar conditions is retained for review, but it is shown as an expected pattern instead of repeatedly creating a new active possible-issue alert or notification. Expected alert feedback expires after about 90 days unless refreshed.
+![Appliance assignment with source sensors, appliance type, and circuit settings](docs/images/readme/assignment-editor.png)
 
-When you confirm an alert as a real issue, the analyzer keeps that feedback with the evidence. For HVAC efficiency alerts, the affected abnormal response episodes are excluded from future learned baselines so a confirmed problem does not teach the analyzer that slower performance is normal.
+**Available profiles:** refrigerator, freezer, HVAC, HVAC compressor, heat pump, mini-split, HVAC blower, electric heat, water heater, oven, microwave, dishwasher, 3D printer, washer, dryer, pool pump, water pump, well pump, sump pump, EV charger, solar inverter, motor load, resistive load, mixed, and mains NILM.
 
-When you mark an alert as not helpful, the analyzer records that pattern separately from acknowledgement. Future matching evidence must repeat more times before it can become a new alert, and the evidence panel shows the adjusted repeated-evidence requirement when it applies. If the same daily energy spike pattern is repeatedly marked not helpful, the analyzer can suggest a safer daily spike ratio change for you to approve, undo, or reset to the built-in default. Not-helpful feedback expires after about 45 days unless refreshed. Acknowledgement only clears the current alert episode; it does not permanently suppress future alerts after conditions clear and recur.
+Use separate compressor and blower profiles when separately metered; use heat pump for equipment that heats and cools with refrigerant. Generic HVAC remains available for combined systems. Explicit `gas_dryer` names default to single phase; `electric_dryer` names default to dual phase.
 
-When you label, ignore, mark expected, or merge an experimental NILM signature, the analyzer preserves that review decision in local storage and reflects it in the evidence panel and unknown-load inventory. Review decisions follow a stable electrical fingerprint across future reclustering when the direction, value buckets, and split-phase topology still match; substantially different signatures are treated as new review items.
+### Optional context sources
 
-Suggested settings remember apply, deny, and dismiss decisions. Applying or dismissing a suggestion suppresses that circuit and setting for 30 days; denying one suppresses it for 90 days. Candidate drift cannot bypass an active cooldown, and completed-cycle suggestions need new qualified cycle evidence after the decision.
+| Source | Enables |
+|---|---|
+| Outdoor temperature sensor or weather entity | Weather-adjusted HVAC runtime. Humidity, when available, also supports sump-pump condensate context. |
+| Thermostat climate entities | Heating/cooling response trends. Link each served zone in the appliance's advanced settings; optional indoor-temperature mappings override the thermostat reading. |
+| Binary rain sensor or weather entity | Rain/pump correlation; an optional precipitation-rate sensor adds rain intensity. |
+| Binary water-flow or numeric flow-rate sensors | Water-use correlation for washers, dishwashers, water heaters, well pumps, and water pumps. Numeric flow is active above zero. |
+| Utility/Opower energy and cost entities | Comparison with measured mains energy and an optional derived electricity rate. |
 
-| Feature | What it does | Needs |
+Unconfigured context is disabled, not treated as evidence that no rain or water use occurred. Global flow sources are shared across compatible appliances; explicitly linked flow sources stay scoped to their appliance.
+
+After adding or renaming meter sensors, use **Configure > Refresh Source Sensors**. It preserves other settings and asks you to review affected assignments when old sources are missing.
+
+![Integration options for sources, assignments, dashboard, and tuning](docs/images/readme/options-menu.png)
+
+## Dashboard
+
+Open **Configure > Create Or Update Dashboard** and choose a layout:
+
+| Layout | Views |
+|---|---|
+| **Simple** | Home and Energy & Costs. |
+| **Standard** | Simple plus Insights for available mains, NILM, and context features. |
+| **Expert** | Standard plus diagnostic navigation in Insights. |
+
+Select **Match Entity Detail Level To Layout** if the chosen layout needs additional entities. **Remove Existing Dashboard** removes the generated dashboard. Run the create/update action again after an upgrade to refresh an older layout.
+
+The dashboard uses the current entity registry, so renamed entities are respected. Its cards ship with the integration and require no third-party Lovelace dependencies.
+
+- **Home:** mains watts/amps, combined appliance power, household energy, searchable appliance tiles, energy/cost rankings, and Running history. Both legs of a dual-phase appliance appear as one power series. Without mains, totals are labeled as monitored load.
+- **Energy & Costs:** available context graphs, HVAC & Thermostats, and published NILM appliance power.
+- **Insights:** mains coverage, NILM review, contextual summaries, billing-cycle totals, and selected Expert diagnostics. Empty optional views are omitted.
+
+Use the shared date control to move between periods, compare the preceding equal-length range, or download CSV. Graphs have tooltips, double-click zoom, and a History arrow that opens the displayed range in Home Assistant History.
+
+For a custom dashboard, see the [example YAML](docs/dashboard-example.yaml).
+
+### Summary entities
+
+Start with these entities; `<circuit>` is your configured circuit ID. Availability depends on sources and settings.
+
+| Friendly name | Entity pattern | Purpose |
 |---|---|---|
-| **Energy usage spikes** | Compares today's kWh with a learned rolling window and reports repeated high-usage evidence. | Cumulative energy sensor. |
-| **Daily energy goals** | Lets you set a per-circuit daily kWh goal and receive repeated goal notices. | Cumulative energy sensor. |
-| **Run-cycle diagnostics** | Tracks start count, runtime, duty cycle, and running state for appliance-style circuits. | Real-power data and enough cycles. |
-| **Predictive appliance health** | Compares sustained efficiency and cycle changes with comparable learned appliance behavior. | Direct-meter energy/runtime evidence or completed run cycles. |
-| **HVAC weather context** | Compares HVAC runtime with similar outdoor temperatures before treating runtime as unusual. | HVAC-like circuit plus outdoor temperature sensor. |
-| **Rain and pump correlation** | Compares pump runtime with rain, optional precipitation intensity, HVAC compressor activity, and outdoor humidity for sump-pump condensate context before flagging unusual behavior. | Sump pump, water pump, or well pump plus a rain sensor or weather entity; outdoor humidity is optional. |
-| **Water-flow correlation** | Compares binary or numeric water-flow sensors with water-using appliance activity to find unexplained flow or missing expected flow. | Water-flow sensor plus washer, water heater, water pump, or well pump. |
-| **Recent activity timeline** | Keeps recent start/stop/steady-window events and recent possible-issue evidence. | Configured circuit with retained evidence. |
-| **Billing-cycle forecasts** | Tracks current-cycle kWh and projected end-of-cycle usage. | Cumulative energy sensor. |
-| **Cost and Time-of-Use estimates** | Estimates current-cycle and projected cost from configured rates. | Cumulative energy sensor and configured rates. |
-| **History CSV export** | Exports retained analyzer history for one circuit. | Retained analyzer history. |
-| **Peak demand tracking** | Tracks rolling demand and today's peak demand. | Real-power data. |
-| **Circuit capacity tracking** | Compares amps with a configured breaker/circuit rating. | Current sensor, or power plus voltage. |
-| **Dual-phase leg imbalance** | Checks whether both legs of a 240 V appliance are behaving as expected. | Dual-phase circuit with leg A/B power. |
-| **Power metric consistency** | Checks whether W, VA, V, A, and PF relationships make sense. | Voltage/current/apparent power/power factor where available. |
-| **Mains balance** | Compares mains power with the sum of monitored load circuits. | Mains or aggregate source. |
-| **Solar flow** | Shows solar generation, grid import/export, site consumption, surplus, and flexible-load hints. | Signed mains/net source plus solar generation circuit. |
-| **Utility / Opower comparison** | Compares utility-reported kWh with measured kWh for the same period. | Utility/Opower entity or statistic plus measured energy. |
-| **Always On and standby** | Estimates the low-power always-on load and current standby/on/off state. | Real-power data. |
-| **Experimental NILM** | Looks for recurring unknown load signatures in mains and mixed aggregate circuits, pairs likely on/off sessions, and lets you review or publish user-confirmed estimated appliances. | Mains or mixed aggregate source; optional known-load circuits improve results. |
+| Setup Health / Next Step | `sensor.circuitsetup_energy_analyzer_setup_health` | The next setup or data-quality action. |
+| Health Summary | `sensor.<circuit>_health_summary` | Ready, learning, missing data, maintenance, or possible issue. |
+| Activity Summary | `sensor.<circuit>_activity_summary` | Running, idle, standby, or off; includes `is_running` for automations. |
+| Energy Summary | `sensor.<circuit>_energy_summary` | Usage, goals, billing, cost, and high-usage evidence. |
+| Energy Usage Today | `sensor.<circuit>_daily_energy_usage` | Today's kWh from native energy or the automatic watt-to-kWh helper. |
+| Cost Today | `sensor.<circuit>_cost_today` | Recorded or estimated daily cost, when available. |
+| Average kWh per Day | `sensor.<circuit>_average_kwh_per_day` | Average across up to seven completed days. |
+| Average Cost per Day | `sensor.<circuit>_average_cost_per_day` | Completed-day cost average, when available. |
 
-## Feature notes
+**Entity Detail Level** controls the entity set: **Simple** exposes summaries and daily controls; **Standard** adds configured feature entities; **Expert** adds only the diagnostic groups you select under **Expert Entity Groups**. Existing manual entity-registry choices are respected. See the [compact entity model](docs/entity-model.md).
 
-### Energy usage spikes
+![Entity detail settings for Simple, Standard, and selected Expert groups](docs/images/readme/entity-detail-level.png)
 
-The analyzer derives daily usage from positive cumulative-kWh deltas when an energy sensor is available. For power-only circuits, it automatically maintains an internal cumulative-kWh helper from consecutive watt samples. By default, it compares today's usage with a learned rolling window and treats a large repeated increase as possible issue evidence.
+## Appliance detail
 
-Use this for appliances where daily usage should usually stay within a predictable range, such as refrigerators, freezers, water heaters, HVAC, pumps, or EV charging circuits.
+Open an appliance tile or **Appliance Insights** to inspect a circuit. Insights lists direct-meter and NILM appliances together, with running, attention, learning, NILM, and data-problem filters.
 
-Configure this from:
+![Appliance Insights with activity, energy comparisons, source quality, and readiness](docs/images/readme/appliance-insights.png)
 
-**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
+**Appliance Detail** brings together:
 
-Use the energy-usage settings to adjust the comparison window and spike threshold without editing YAML.
+- Alert evidence and source watts/amps history, with 24-hour, 7-day, and 30-day ranges.
+- **Today vs Normal**, comparing energy, runtime, run count, cost, and demand at the same point in the local day. Projections and completed-day normal ranges are labeled separately.
+- **Why Energy Changed**, showing supported runtime, running-power, and cycle-count contributions; unsupported differences remain unexplained.
+- Applicable health, cycle, standby, HVAC, and water-context evidence.
 
-### Seasonal and contextual baselines
+Direct measurements and **Estimated by NILM** values are labeled separately. Low-confidence NILM asks for review; it does not establish an appliance fault.
 
-Some appliances behave differently depending on weather, season, time of day, rain, water use, and solar production. The analyzer keeps compact contextual samples and compares a circuit with the most relevant learned baseline when enough similar history exists. If there is not enough matching context yet, it falls back to the existing broader rolling baseline.
+![Refrigerator detail with 24 hours of measured watts and amps](docs/images/readme/appliance-detail.png)
 
-This helps avoid noisy alerts when context explains the usage, such as HVAC energy on very hot summer afternoons, while still preserving conservative possible-issue evidence when behavior is unusual for the current context.
+## Features
 
-### Daily energy goals
+Enable and tune features under **Configure > Advanced Circuit Settings**. The form only shows settings that apply to the selected circuit. Sensitivity presets are **Quiet**, **Balanced**, and **Sensitive**.
 
-Daily goals add a notification layer around a kWh target. Use Home Assistant's Energy Dashboard for normal energy charts; use this feature when you want per-circuit goal evidence.
+![Advanced settings for the selected appliance](docs/images/readme/advanced-settings.png)
 
-Configure this from:
+### Energy, goals, and cost
 
-**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
+| Feature | What it does |
+|---|---|
+| Usage spikes | Compares daily kWh with learned history and requires repeated high-usage evidence. |
+| Daily goals | Tracks a per-circuit kWh target; set the goal to `0` to clear it. |
+| Billing cycle | Tracks current-cycle usage and forecasts against a configured budget. |
+| Cost and Time-of-Use | Records cost using shared rates and peak periods, in Home Assistant's configured currency. |
+| Utility / Opower comparison | Compares utility kWh with measured mains kWh over the same period. |
 
-Set a daily kWh goal for the circuit. Set the goal back to `0` to clear it.
-The daily goal control is created when the circuit has either cumulative energy
-or real-power data. Power-only circuits use the analyzer's automatic kWh helper.
+Power-only circuits derive kWh from consecutive real-power samples. A native cumulative kWh source is still needed for the setup's Energy Dashboard readiness check.
 
-### Run-cycle diagnostics
+Set shared base and Time-of-Use rates, peak times, weekdays, and label on the **CircuitSetup Energy Analyzer** device. Set appliance budgets and cycle start days in advanced settings. Configure utility sources under **Configure > Utility / Opower Comparison**; use a Recorder Statistic ID only when no matching entity exists.
 
-For appliance-style circuits, the analyzer tracks today's:
+The **Electricity Rate** sensor prefers the current valid Opower-derived rate, then the last known valid rate, then the configured base rate. Recorded costs are used when complete. With Time-of-Use and insufficient interval coverage, ambiguous whole-day estimates remain unavailable. Estimates omit taxes, fixed fees, and other utility billing rules; delayed utility data can temporarily disagree with meter data.
 
-- Run-cycle count
-- Runtime
-- Duty cycle
-- Current running state
+![Daily appliance energy and cost history with current and average daily values](docs/images/readme/daily-cost-energy.png)
 
-This is useful for refrigerators, freezers, pumps, HVAC, washers, dryers, and other loads where cycling behavior matters.
+### Appliance behavior and health
 
-For directly metered `refrigerator` and `freezer` circuits that provide real
-power, current, and power factor, the analyzer also learns the appliance's
-repeating correlated compressor signature. After 96 valid 30-minute windows
-(about 48 hours), three consecutive windows with the learned PF pulse missing
-while median watts and amps remain elevated can raise an **Unusual Runtime**
-inspection prompt. This can identify continuous or changed compressor operation
-even when fixed on/off thresholds do not produce useful cycles. It suggests
-checking doors, seals, vents, and temperature; it does not diagnose an open door
-or failed component.
+Cycle tracking measures starts, runtime, duty cycle, and current activity. Standby analysis estimates the low-power **Always On** load and classifies off/standby/on states.
 
-### Predictive appliance health
+Predictive health looks for sustained changes in energy per runtime hour or completed cycle, cycle duration, and starts per runtime hour. Its daily comparison needs fourteen comparable reference days plus three recent days. Short-cycle checks also require learned completed sessions. Maintenance-affected evidence is excluded; missing comparable context keeps the result in **Learning**.
 
-For directly metered appliance circuits, the analyzer can flag a sustained rise
-in energy per runtime hour, energy per completed cycle, average cycle duration,
-or starts per runtime hour. It compares three recent complete eligible days
-with up to fourteen prior comparable days, so the first efficiency comparison
-needs at least seventeen days. It can also flag three repeatedly short recent
-sessions after at least nine learned completed sessions.
+Direct-meter refrigerators and freezers with watts, amps, and power factor can also learn a repeating compressor signature and flag persistently changed operation. These findings suggest inspection, not a particular failed part.
 
-Maintenance-affected evidence is excluded. HVAC and heating comparisons require
-matching available season, weather mode, and temperature-bin context. Sump-pump
-comparisons use available rain, outdoor-temperature, outdoor-humidity, and HVAC
-compressor context instead of domestic water-flow sensors; other water-using
-appliances preserve water-flow context when it is
-available. If comparable context is missing, the health result remains
-**Learning** instead of substituting unrelated history.
+![Today vs Normal comparing appliance energy, runtime, cycles, power, cost, and demand](docs/images/readme/appliance-comparison.png)
 
-Health findings use the normal feedback, cooldown, delivery, and per-appliance
-notification preferences under `appliance_health_issue`. Notifications include
-recent and reference values, confidence, and an evidence link. They are
-inspection prompts, not component diagnoses or safety controls.
+### HVAC, rain, and water
 
-### HVAC weather context
+- **HVAC weather context** compares runtime with similar outdoor conditions, learning from at least three distinct prior local dates. Mini-split operation can remain below default running thresholds; adjust these for your equipment when needed.
+- **Thermostat response** learns heating and cooling separately from completed eligible days. Link served thermostats in advanced settings; with several thermostats, map zones explicitly. The response score is `100 × expected runtime / recent runtime`: 100 matches normal, lower is slower. Standard/Diagnostic learning needs 50 reference core days plus five recent core days before notifications; Lightweight uses 12 plus five. Coverage and comparable weather/equipment requirements also apply. This is a field-performance trend, not a COP or efficiency rating. A blower represents gas-furnace heating only when explicitly configured; cooling belongs to the compressor or combined system.
+- **Rain and pump correlation** accounts for rainfall and, for sump pumps, compressor/humidity condensate context. It needs ten dry, compressor-free context samples. It does not create a missing-pump alert simply because the pump has not run during rain. **Pump Drivers Over Time** aligns completed sump-pump cycles with rain and HVAC history; timing correlations do not establish causes.
+- **Water-flow correlation** looks for unexplained flow or appliance activity without expected flow. It needs ten retained context samples. Shared sources can be explained by another mapped appliance; water heaters can use recent flow because heating may follow a draw. No configured flow source means **Unconfigured**, not a mismatch.
 
-HVAC runtime depends strongly on outdoor temperature. A compressor running longer on a very hot afternoon may be normal, while the same runtime on a mild day may deserve review.
+![Full-day HVAC power with temperature context and water-using appliance power with flow rate](docs/images/readme/hvac-water-context.png)
 
-Add an outdoor temperature sensor or Home Assistant weather entity during setup
-or later from **Configure**. Use a real outdoor sensor, weather station, or
-reliable outdoor helper. Indoor thermostat temperature is usually not a good
-source for this feature.
+### Electrical, mains, and solar
 
-This context applies only to HVAC, HVAC compressor, HVAC blower, Mini-Split, and electric heat profiles. The integration normalizes Celsius and Fahrenheit sources, records current-day runtime and duty cycle, and learns from at least three distinct prior local dates. It first prefers similar temperatures in the same season, then uses broader temperature, seasonal, or circuit history when necessary. **Weather Correlated** means the observed activity fits that learned context; it does not control the equipment or diagnose a fault.
-
-Mini-Split inverter operation can remain at low power; tune the default `100 W` on and `40 W` off thresholds in Advanced Circuit Settings when equipment or metering differs.
-
-### Weather-normalized HVAC response
-
-HVAC response learning uses completed thermostat calls to build local-day
-heating and cooling records. It compares daily active runtime with thermal
-demand derived from the time-weighted indoor and outdoor temperatures. This is
-a field-performance trend, not an AHRI SEER2, HSPF2, capacity, or COP rating.
-It supports combined HVAC systems, compressors, Heat Pumps, Mini-Splits,
-electric heat, and gas-furnace blowers. Cooling is attributed to the compressor
-or combined refrigerant system; a blower is supporting air handling and is
-never scored as the independent cooling driver. Electric heat is measured
-directly. A blower can represent heating only when **Blower Represents
-Gas-Furnace Operation** is enabled and no metered electric heating driver
-participates.
-
-Choose climate entities under the integration's source settings, then link the
-thermostat zones served by each HVAC appliance in **Advanced Circuit
-Settings**. One globally configured thermostat is used automatically when no
-per-circuit link is set. With multiple thermostats, link each applicable zone
-explicitly; every thermostat, circuit, and heating/cooling mode learns
-separately. Standard climate attributes are used when available, so integrations
-such as Ecobee and Nest can expose different capability sets without
-brand-specific handling. A configured indoor temperature mapping overrides the
-climate entity's current-temperature attribute for that zone.
-
-An eligible core day has at least 30 minutes of one HVAC mode, complete outdoor
-temperature coverage, and a consistent thermostat, temperature source, and
-equipment-participant signature. Days containing both heating and cooling are
-excluded. Individual sub-1°F thermostat calls remain useful diagnostics but do
-not independently mature or alert. The Standard/Diagnostic model becomes
-provisional after 30 core days. Notifications wait for 50 reference core days
-spanning at least six weeks
-and three 5°F outdoor-temperature bins, plus five recent core days.
-Lightweight retention instead uses 12 reference core days spanning at least 11
-days plus five recent core days, so the complete model fits its 18-day window.
-Completed calls are compacted when the local day closes; the current partial day
-is never evaluated.
-
-The standard-library regression predicts runtime from thermal demand and uses
-the learned prediction interval as an additional noise guard. The default
-slower-response threshold is `25%` and can be set from `5%` to `100%`. A warning
-requires at least three abnormal days in the recent five. Faster performance is
-shown only as information. An active warning clears after three consecutive
-normal core days. Missing weather or incomparable data remains **Learning**.
-
-Observed response can appear while the feature is **Learning**, but its score
-waits for a mature weather-normalized baseline. Appliance Detail shows heating
-and cooling separately, including each thermostat, expected and recent daily
-runtime, outdoor context, core-day counts, and attribution. The response score
-is `100 × expected runtime / recent runtime`, capped from
-`0` to `200`: `100` matches the learned baseline, below `100` is slower, and
-above `100` is faster. After upgrading, run **Configure > Create Or Update
-Dashboard** to add the HVAC & Thermostats card to an existing generated dashboard.
-
-Suggested Settings can recommend thermostat links, indoor-temperature
-mappings, and the gas-heat blower role. The response threshold remains a manual
-advanced setting. Call/overlap correlation is learned before a
-per-circuit thermostat link exists so the link itself can be suggested.
-Applied suggestions use the normal undo and reset paths. Confirmed problem
-feedback excludes the affected recent episodes;
-expected, corrected, or improved feedback starts a new baseline era so repaired
-behavior does not get mixed with the old system.
-
-The update path reads only Home Assistant's current in-memory state snapshot.
-It does not query Recorder, call a network service, write files, or save
-synchronously on the Home Assistant event loop. Completed response histories
-retain 17 compact core days in Lightweight or 55 in Standard/Diagnostic, plus
-the open local day. Pre-link correlation is capped at 256 calls per circuit, and
-persistence uses the integration's existing deferred dirty-save path.
-
-### Rain and pump correlation
-
-Rain and pump correlation applies to `sump_pump`, `water_pump`, and `well_pump`
-circuits. It compares the current day's pump runtime with the learned
-dry-weather baseline, current rain state or the configured response window
-after rain stops, optional rain intensity, and the current day's HVAC
-compressor runtime. The rain source can be a binary rain sensor or a Home
-Assistant weather entity; an available current-precipitation attribute is used
-as intensity evidence.
-
-This matters because a sump pump may run more during rain, and it may also run
-more when an AC compressor is removing humidity and sending condensate to a
-drain or sump. If the configured outdoor temperature or weather entity exposes
-humidity, humid conditions strengthen that sump-only condensate context and are
-retained as a predictive-health comparison dimension. When rain and AC activity
-are present, higher pump activity can be expected instead of automatically
-becoming a possible issue. Rain evidence still carries more weight than
-compressor-only context.
-
-On a sump pump's Appliance Detail page, **Pump Drivers Over Time** performs a
-display-time join against Recorder history. Numeric rain rate is integrated as
-accumulation; otherwise binary rain history is shown without an accumulation
-claim. Humidity is considered only during compressor operation and compared
-with the learned 90th-percentile humidity baseline from at least 15 completed,
-rain-free compressor cycles. Blower operation appears only as supporting
-evidence. Completed pump cycles are grouped as rain, HVAC plus elevated
-humidity, combined, unexplained, or unclassified; unclassified cycles are
-excluded from percentages. These groups describe timing relationships, not
-proven causes.
-
-Configure the global rain source during setup or later from **Configure**. Tune the per-circuit rain response window and activity threshold from:
-
-**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
-
-The dry-weather baseline requires at least ten dry, compressor-free context samples. Wet, conflicting, or current-day samples do not count toward it, so a wetter-than-usual learning period can remain **Learning** until enough dry history exists. The response window begins only after a confirmed dry reading; unavailable or conflicting rain data does not extend it.
-
-The analyzer can report weather-explained pump activity, possible excess pump activity, or possible missing pump activity. It does not create a rain-specific missing-pump alert simply because a pump has not run during active rain or the confirmed post-rain response window. Treat all of these as prompts to inspect the pump, sensor mapping, discharge path, and local weather conditions, not as diagnoses or safety controls.
-
-### Water-flow correlation
-
-Water-flow correlation applies to `water_pump`, `well_pump`, `water_heater`, `washer`, and `dishwasher` circuits when at least one global or circuit-linked binary water-flow sensor or numeric flow-rate sensor is configured. Numeric flow-rate sensors are treated as off at `0` and active when greater than `0`.
-
-The analyzer compares how long the water-flow sensor has been active with recent mapped appliance runtime. It can report:
-
-- Flow without a matching water-using appliance, which can point to an unmapped load, leak, running faucet, irrigation, or sensor mapping problem.
-- Appliance activity without expected flow, which can point to a stuck sensor, closed valve, dry-running pump, or assignment problem.
-- A likely sensor problem when both mismatch directions repeat.
-
-It needs at least ten retained context samples before issuing flow-mismatch evidence. Global flow sources are shared: an active compatible appliance using the same global source explains that flow. When a source is linked in **Advanced Circuit Settings**, that linked source stays scoped to that appliance. Water-heater activity can also use recent flow because heating can begin after a draw has ended. When no applicable flow source is configured, the correlation is marked Unconfigured instead of creating a flow mismatch alert.
-
-Configure global flow sensors during setup or later from **Configure**. Use **Advanced Circuit Settings** to link specific flow sensors to a specific appliance, turn off flow expectations for an appliance, or adjust the mismatch-minute threshold.
-
-### Billing, cost, and Time-of-Use
-
-Billing and cost features estimate usage and cost from analyzer-retained data. The read-only global **Electricity Rate** sensor shows the effective main-analyzer rate: the current valid Opower-derived rate, then the last known valid Opower-derived rate, then the configured default/base rate. Whole-day appliance estimates use the fallback only when Time-of-Use is not configured. With Time-of-Use, exact analyzer-recorded costs are used for today and completed days when interval coverage is complete; otherwise ambiguous whole-day cost estimates stay unavailable because daily energy totals do not preserve a tariff-period breakdown. These estimates do not include every possible utility billing rule, such as taxes, fixed fees, tiered rates, or demand charges.
-
-Configure per-circuit billing settings from:
-
-**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
-
-Configure the shared fallback rate and Time-of-Use rate, start/end times, seven weekday switches, and label from the **CircuitSetup Energy Analyzer** device entities. These controls are global and do not appear in an appliance's Advanced Circuit Settings.
-
-Configure matching Opower/utility usage and cost sensors from **Configure > Utility / Opower Comparison**. Prefer **Utility Energy Entity** for normal setup. **Recorder Statistic ID (advanced)** is only for utility kWh that exists in Home Assistant recorder statistics without a corresponding entity. Use these estimates for household awareness and alerts, not for exact utility-bill reproduction.
-
-Time-of-use settings use time controls for the peak start/end times and one switch for each weekday, so normal setup does not require typing comma-separated weekday numbers.
-
-### Demand and capacity
-
-Demand tracking uses rolling average watts. Capacity tracking compares amps with a configured breaker or circuit rating.
-
-Configure this from:
-
-**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
-
-Use the demand and capacity settings to set the breaker or circuit rating, warning threshold, and demand-window behavior.
+| Check | Inputs and interpretation |
+|---|---|
+| Demand | Rolling average watts and today's peak; configure a window and optional limit. |
+| Capacity | Current, or watts plus voltage, compared with a configured circuit rating. |
+| Dual-phase leg balance | Both legs' real power while a 240 V appliance is drawing meaningful power. |
+| Metric consistency and power-quality drift | Available W, A, V, VA, VAR, and power factor; helps identify mapping, calibration, stale-source, or behavior changes. |
+| Mains balance | Mains minus monitored loads. Positive residual is often unmonitored load; a large negative residual warrants checking direction, pairing, solar, and double counting. |
+| Solar flow | Signed mains/net power plus solar generation: import/export, consumption, self-consumption, surplus, and flexible-load hints. Read-only; control loads through your own automations. |
 
 Capacity diagnostics are operational evidence only. They do not verify breaker, wire, plug, appliance, or code suitability.
 
-### Dual-phase leg imbalance
+Voltage and frequency provide shared mains context. Do not treat apparent power (VA), reactive power (VAR), or harmonic active power as ordinary appliance watts. Automatic assignment leaves harmonic and `total` sensors unassigned for review.
 
-For 240 V loads, the analyzer can compare leg A and leg B while the appliance is drawing meaningful power. Repeated imbalance can point to:
+![Demand window, watt limit, breaker rating, and capacity-warning settings](docs/images/readme/electrical-settings.png)
 
-- CT pairing mistakes
-- CT orientation problems
-- Phase mapping problems
-- Appliance behavior changes
+## Experimental load separation (NILM)
 
-Configure leg-imbalance settings from:
+NILM estimates individual loads from aggregate real power. Enable it only for the sources you want to review:
 
-**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
+- Whole-home mains.
+- A mixed circuit with **Several loads with no primary**.
+- **A primary appliance plus other loads**.
 
-A leg imbalance alert means "review the evidence," not "replace the appliance."
+Open **Load Separation**, or **Review NILM Assignments** from the dashboard's **Mains and NILM** card.
 
-### Power metric consistency
+1. Review recurring detections in **Needs Review**. Select a card to focus its completed occurrence on the graph.
+2. Assign a signature/session, or drag across the graph and choose **Label appliance interval**. For primary-plus-mixed sources, **Confirm primary appliance** preserves the configured appliance identity.
+3. Validate completed sessions or link **Reference sensors**. Review confidence, false-positive/false-negative rates, and power/energy errors when available.
+4. Publish only trustworthy assignments to create estimated Home Assistant appliances. Use **Remove HA Device** to stop publication; removed assignments can be restored for review.
 
-When voltage, current, watts, VA, and power factor are available, the analyzer checks whether the reported values agree with expected AC power relationships.
+![Load Separation with measured mains history and the interval-labeling control](docs/images/readme/experimental-nilm.png)
 
-A mismatch can point to:
+![NILM review lanes with recurring detections and a focused load inspector](docs/images/readme/nilm-review.png)
 
-- Source-entity mixups
-- CT/channel pairing mistakes
-- Incorrect units
-- Stale sensors
-- Calibration problems
+The graph shows measured source watts; separated power and energy are estimates. Open sessions are provisional, overlapping loads may remain ambiguous, and unexplained energy stays unassigned. Supporting VA, VAR, current, and power factor improve matching without being counted as watts. Known-load masking and overlays apply only to mains; helper circuits are corroborating evidence, not subtraction meters or component owners.
 
-Configure metric-consistency tolerances from:
+A linked `switch`, `binary_sensor`, or `input_boolean` can provide authoritative on/off state while available. A linked real-power sensor supplies validation evidence without replacing NILM energy. **Link and Import History** and **Refresh Reference History** import recorder-backed intervals without duplicating them.
 
-**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
+Interval edits remain unsaved until **Save** or **Save Changes**; **Cancel** discards the draft. **Expected** keeps a reviewed load in the model without publishing it. After restart, component state waits for fresh source evidence. NILM estimates are not safety or control evidence.
 
-This is especially useful with CircuitSetup/ATM90E32 data because multiple electrical measurements are available per channel.
+## Alerts and feedback
 
-### Mains balance
-
-Mains balance compares whole-home mains power with the sum of directly monitored load circuits.
-
-A positive balance often represents ordinary unmonitored loads, such as lights or plug loads. A strongly negative balance can suggest CT direction, phase pairing, solar configuration, multiplier, or double-counting problems.
-
-Configure mains-balance settings from:
-
-**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
-
-### Solar flow
-
-For homes with a signed mains/net source and solar generation circuits, the analyzer can estimate:
-
-- Solar generation
-- Site consumption
-- Grid import
-- Grid export
-- Solar self-consumption
-- Solar-powered share
-- Solar surplus
-- Flexible-load solar support
-
-Configure solar-flow thresholds from:
-
-**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
-
-This feature is read-only. Use ordinary Home Assistant automations if you want to turn on an EV charger, water heater, pool pump, or other flexible load when solar surplus is available.
-
-### Utility / Opower comparison
-
-Utility comparison checks whether utility-reported kWh roughly agrees with measured kWh over the same period.
-
-Configure it on a mains or aggregate circuit. Use a utility/Opower energy entity when one is available. Enter a Recorder Statistic ID only for utility kWh that has no entity; the analyzer does not preselect a discovered statistic because its identity may be ambiguous.
-
-Utility comparison settings are available from:
-
-**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Utility / Opower Comparison**
-
-Before acting on a mismatch, verify that the utility and measured sources cover the same time period. Utility integrations can update late.
-
-### Always On and standby
-
-For load circuits with real-power data, the analyzer estimates an Always On load from the lowest retained power level in the standby window. It can also classify the current state as off, standby, or on.
-
-Configure this from:
-
-**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
-
-Use the standby and Always On settings to set standby thresholds, Always On alert limits, and related sensitivity options.
-
-### Experimental NILM
-
-Experimental NILM is opt-in. **Load Separation** supports three source compositions: a mains aggregate; a pure mixed circuit configured as **Several loads with no primary**; or a configured primary appliance plus mixed loads, configured as **A primary appliance plus other loads**. The aggregate source is directly measured. Separated component power and energy are estimates unless a component is linked to its own direct measurement. For a primary-plus-mixed source, **Configured primary: _name_** preserves the configured appliance's identity instead of treating it as a newly discovered load; **Confirm primary appliance** approves that configured identity while detection evidence continues to model its usage.
-
-Detection and energy accounting require real power in `W` (or a compatible scaled unit such as `kW`). Reactive power (`var`), apparent power (`VA`), power factor, current, voltage, and leg measurements can improve signature matching when available, but they are supporting evidence and are never relabeled or counted as watts. The workspace separates **Needs Review**, **Assigned**, **Published**, **Expected**, and **Removed** loads. Expected loads remain in the model without being published; removed loads do not appear in the general setup-attention or Estimated Appliances lists and can be restored for review and later publication. When an estimated appliance name matches a configured circuit name, user-facing surfaces append **(estimated)** to keep the two identities clear.
-
-In Load Separation, review recurring loads, assign or identify them, validate completed sessions or link reference sensors, and publish only when the estimate is trustworthy. The graph shows measured source power; separated appliance power and energy are estimates. Open sessions are provisional, and uncertain or unexplained power remains unassigned.
-
-Known-load masking is applied only to mains sources, as are Known Load Overlays. Pure mixed and primary appliance plus mixed loads sources do not process known loads. Their explicitly linked helper circuits and reference sensors remain evidence: they can validate timing or measured watts, but they do not become component owners or subtraction meters. An explicitly linked state sensor may still be authoritative for on/off state; measured power remains validation evidence.
-
-Adjust Interval loads the saved interval into the graph. Editing either time or dragging or keyboard-moving a graph boundary updates the same unsaved interval; Save is the only action that persists it. Selecting an estimated appliance focuses its newest trustworthy completed session, then falls back to its newest saved labeled interval.
-
-Choose **Sensitive** when the displayed effective minimum edge would otherwise be above a real smaller transition; use **Balanced** or **Quiet** to reject more small changes and noise. NILM keeps residual power and energy unexplained, leaves ambiguous edges unknown, and rejects reconciliation when allocated components would exceed measured source energy. After a restart, live component state is unknown or unavailable until source evidence re-establishes it. A compound edge can be separated into as many as four learned component transitions only when one bounded combination fits uniquely; otherwise it remains a compound unknown. Load Separation is estimation and review evidence, never safety or control evidence.
-
-For example, to separate a condensate pump from the blower on HVAC 2, using AC2 as corroborating evidence:
-
-1. Configure **HVAC 2** as **A primary appliance plus other loads** with appliance type **HVAC blower**.
-2. Open **Load Separation** for HVAC 2.
-3. Choose **Sensitive** if the effective minimum edge is above the condensate-pump transition.
-4. Assign the large signature to **Configured primary: HVAC 2**.
-5. Assign the smaller signature to a new condensate-pump appliance.
-6. Link **AC2** as **Runs with this load (evidence only)**.
-7. Validate the sessions and reconciliation evidence before publishing either estimate.
-
-The NILM workspace can also pair compatible on/off edges from an aggregate source. It plots measured real power in watts, including both L1 and L2 watts for mains NILM, confirms closely spaced transitions across consecutive samples, and assigns each compatible pair to at most one signature. The graph starts without raw detection annotations; selecting a detection or component in any lifecycle lane focuses its newest complete occurrence, marks its start and stop with dashed lines, and can move through earlier or later occurrences. Raw sessions remain graph evidence only; after three similar ON transitions, the existing W+VAR clusterer promotes each recurring load group into a Needs Review component. Assigning a promoted session removes it from the raw assignment queue while its appliance keeps accumulating matched sessions; the assigned W+VAR signature can provide provisional on/off state when one bounded component combination fits uniquely. Placeholder and OFF-only sessions cannot own an appliance or create runtime, energy, alerts, or history. Components already assigned, published, expected, or hidden stay out of Needs Review. For a primary-plus-mixed source, **Confirm primary appliance** on a reviewed detection merges its signatures, sessions, and manually labeled intervals into the configured primary instead of leaving a duplicate estimated assignment. Graph interval selections can be turned directly into appliance assignments for review.
-
-Transition confirmation follows the observed source cadence, including feeds that
-update about every 30 seconds. Consecutive changes that settle at a new level are
-confirmed together, so a shutdown spread across samples can match its start.
-Stop selection compares against the detected start rather than favoring a later
-stop closer to the fingerprint's typical watts. Saved confirmations and rejections
-follow the same start when its session closes or is re-paired for the same
-unambiguous assignment; this does not improve the underlying energy evidence or
-bypass publication checks.
-
-On generated Standard and Expert dashboards, use **Review NILM Assignments** in the **Mains & NILM** card on the Insights view to open the mains NILM workspace. The dashboard shows the household balance and review entry point without repeating the lane inventory; the wider NILM mains graph is on the Energy & Costs view. Start with the graph, move between lane tabs, select a review card, and make the decision in the focused inspector. Assignment edits enable **Save** only after the name or type changes, while **Merge** remains a separate action. Successful interval, assignment, and session actions refresh beside the graph without moving you away from the current graph window or resulting review lane.
-
-![NILM workspace showing needs-review signatures, review lanes, and load labeling actions](docs/images/readme/experimental-nilm.png)
-
-Unknown load estimates may include:
-
-- Likely load type
-- 120 V versus 240 V hint
-- Dominant leg
-- Typical W/VAR/VA
-- Power factor
-- Confidence
-- First seen / last seen
-- Running state
-- Estimated runtime and kWh
-
-These are clues, not confirmed appliance names. If multiple loads overlap, the analyzer should keep the evidence ambiguous instead of forcing a guess.
-
-Open the separate NILM workspace route from the evidence panel to label signatures, drag across the graph to select one or more appliance intervals, merge duplicate signatures, and create an estimated Home Assistant device for a confirmed assignment. **Label appliance interval** collects the appliance name and type, highlights the active graph selection and matching time fields, and derives load watts from the selected real-power transition. One representative interval is enough to save; additional representative runs improve median-transition and model validation. **Remove Interval** stages both new and saved removals locally, **Cancel** restores the original draft, and **Save Changes** commits every remaining interval and removal together; it sends the saved evidence directly to Needs Review. Needs Review also includes assignable sessions, while manually labeled assignments can be accepted directly; only Removed assignments offer permanent deletion. Assignment cards show confirmed/rejected sessions, false-positive and false-negative rates, and power/energy error when matching data is available. The workspace groups work into four lanes: Needs Review, Assigned, Published, and Removed. Lane tabs keep the queue scannable while the selected review card's focused inspector owns its choices and single **Apply** decision. The dynamic dashboard NILM card can show the same lane counts when it is available. Published NILM appliances are marked as estimated and can expose estimated running, power, daily energy, runtime, run count, health, activity, and energy summaries. Their detail graph uses estimated real power in watts and does not repeat settings inherited from the aggregate source circuit. Direct-meter circuits remain helper evidence rather than assignment targets; component ownership stays with the configured primary and NILM-derived assignments. Keep assignments unpublished until the workspace evidence looks trustworthy; use **Remove HA Device** or **Remove Assignment** when an estimate should stop creating entities. NILM estimates are inferred from aggregate power and are not safety evidence.
-
-For appliances on smart switches or other devices with reliable telemetry, open **Reference sensors** in the selected assignment inspector. A linked `switch`, `binary_sensor`, or `input_boolean` becomes authoritative for that estimated appliance's on/off state when available. A separate real-power sensor from the same device can supply measured watts and recorder-backed validation intervals; it never replaces or gets added to the NILM energy estimate. **Link and Import History** imports the selected recorder range before saving the link, **Refresh Reference History** updates the same stable intervals without duplicates, and **Remove Link** stops using the sensors while retaining prior validation evidence. If the authoritative state entity is unavailable, the appliance falls back to its existing NILM state. Removed assignments retain their saved link but do not use it until restored.
-
-## Suggested settings
-
-After enough history, the analyzer can suggest advanced settings based on observed evidence. These are tuning recommendations for thresholds and windows, not appliance diagnoses.
-
-Operating and standby thresholds use qualified completed appliance cycles, not
-unclassified raw power readings. The analyzer waits for the appliance profile's
-minimum cycle count across at least seven distinct local days, learns separate
-stable-idle and stable-running boundaries, and only offers a watt change when it
-is more than both 5 W and 10% of the current setting.
-
-For HVAC circuits, suggestions can also propose one thermostat zone at a time,
-an indoor-temperature override, the gas-heat role for a blower, or a learned
-response-change threshold. Thermostat/source suggestions require at least nine
-consistent calls with 80% agreement; threshold suggestions require at least 20
-complete, comparable, non-alerted episodes.
-
-Review them from:
-
-**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Review Suggested Settings**
-
-![Suggested settings review panel showing evidence-backed advanced-setting recommendations](docs/images/readme/suggested-settings.png)
-
-For each suggestion, you can:
-
-| Action | Meaning |
-|---|---|
-| **Apply Suggestion** | Update the circuit's advanced setting and suppress that setting for 30 days. |
-| **Deny Suggestion** | Suppress that setting for 90 days. |
-| **Dismiss For Now** | Suppress that setting for 30 days. |
-
-You can also expose `sensor.<circuit>_settings_suggestions` if you want a dashboard-visible count of pending recommendations.
-
-## Alerts and evidence
-
-The analyzer uses two different Home Assistant surfaces:
-
-| Surface | Used for |
-|---|---|
-| **Persistent notifications** | Important repeated evidence about appliance or circuit behavior. |
-| **Repairs** | Setup, source-data, configuration, stale-sensor, CT orientation, or data-quality problems. |
-
-Routine alert evidence, alert notifications, blueprint follow-up actions,
-suggested settings, and stale-source repair issues normally wait until that
-appliance or mains circuit finishes both its shared baseline and any active
-rolling energy-use baseline. A refrigerator/freezer compressor-signature alert
-may appear earlier only after its own 96-window PF/power/current baseline is
-ready. Configuration and missing-source repairs remain immediate.
-
-Daily summaries describe alert evidence observed on the completed local day,
-even when it has since cleared. Weekly digests label currently active evidence
-as unresolved and keep it separate from those historical observations.
-Week-over-week rankings appear only after both comparison weeks contain seven
-complete eligible local days.
-
-Per-appliance lifecycle updates can report learning completion, maintenance
-completion, relearning, and natural recovery. They are retained as informational
-evidence but are off by default; enable the `lifecycle_update` notification
-preference only for appliances where those updates are useful. Acknowledging or
-classifying an alert is a user action and does not create a recovery update.
-
-An unchanged optional current source is not reported as stale while a fresh
-real-power source remains at or below that circuit's configured turn-off
-threshold. The warning returns when the load becomes active.
+**Activity Summary** describes current operation. An observation records unusual evidence; **Possible issue** means repeated evidence crossed an alert threshold. Learning, source quality, and NILM confidence remain separate.
 
 When an alert appears:
 
-1. Read the notification and related summary entity first.
-2. Open the entity details.
-3. Review `status_explanation`, observed values, thresholds, sample counts, source entities, and timestamps.
-4. Use the **Open evidence** link to review the visual comparison, evidence graph, explanation, and response choices.
-5. Check easy setup causes before appliance causes:
-   - CT direction
-   - Phase pairing
-   - Stale sensors
-   - Wrong units
-   - Missing voltage/current/PF/VA sensors
-   - Wrong appliance type
-   - Wrong circuit mode
-   - Wrong power-flow mode
-6. Use Repairs for configuration and data-quality problems.
-7. If work is planned on an appliance or circuit, use maintenance or pause-alert actions before service begins.
+1. Select **Open evidence** in the notification. **Alert Evidence** shows the observed/expected comparison, history graph, explanation, and technical details.
+2. Check source availability, units, CT direction, phase pairing, and appliance assignment before investigating the appliance.
+3. Choose a response in the evidence panel and select **Apply**.
 
-Persistent notifications include one final Markdown link to **Open evidence** when the analyzer has enough context. The link uses the `evidence_path` attribute and opens the dynamic Alert Evidence panel at `/circuitsetup-energy-analyzer-evidence`. The analyzer removes the notification when that alert evidence is no longer current.
+| Response | Effect |
+|---|---|
+| Acknowledge | Clears the current episode; a later recurrence can alert again. |
+| Expected | Remembers the matching pattern for about 90 days. |
+| Confirmed issue | Retains your assessment; affected HVAC response episodes are excluded from learning. |
+| Not helpful | Requires more repeated matching evidence for about 45 days. |
 
-The dynamic Alert Evidence panel reads the alert payload, including `graph_entities`, and dynamically selects graph entities for appliance, mains, nilm, weather-context, and energy-overview cards. It presents a visual comparison before graph-first evidence and the explanation, then keeps the three response choices together behind one **Apply** action. Companion App notifications can use the same target through `clickAction`.
+Native persistent notifications clear when their evidence is no longer current. Per-appliance preferences control delivery and categories; lifecycle updates such as learning or recovery are off by default. Companion App notifications can open the same view using the alert's `evidence_path` for `data.url` and Android `data.clickAction`.
 
-The analyzer can also notify when suggested Advanced Circuit Settings are ready for review. Those notifications link directly to **Review Suggested Settings** in the evidence panel.
+![Alert evidence comparing observed and expected values with investigation context](docs/images/readme/alert-evidence.png)
 
-For a dashboard-first view of the same concepts, see `docs/dashboard-example.yaml`.
+**Weekly Appliance Digest** is opt-in from Setup Health. It separates top energy users, changes from each appliance's normal, unresolved alerts, and historical observations. Week-over-week rankings require two full eligible seven-day weeks. Delivery can stay in the panel or use persistent/mobile notifications.
 
-![Home Assistant notification drawer showing an appliance-first Energy Analyzer alert with one final evidence link](docs/images/readme/notifications-panel.png)
+### Suggested settings
 
-![Dynamic Energy Analyzer alert evidence opened from a notification link](docs/images/readme/alert-evidence.png)
+Open **Configure > Review Suggested Settings**. Suggestions show the current/default/proposed values, units, reasons, and evidence; supported thresholds can preview historical impact. Changes are applied only when you approve them.
 
-![Alert evidence panel showing observed and expected metrics with investigation context](docs/images/readme/notifications-repairs.png)
+**Apply Suggestion** and **Dismiss For Now** suppress that setting for 30 days; **Deny Suggestion** suppresses it for 90 days. Applied changes have undo/reset paths. The optional `sensor.<circuit>_settings_suggestions` exposes a bounded preview of up to five pending suggestions.
 
-## Alert automation blueprint
+![Suggested settings with proposed values and review actions](docs/images/readme/suggested-settings.png)
 
-The repository includes a Home Assistant automation blueprint:
+## Controls and automations
 
-```text
-blueprints/automation/circuitsetup_energy_analyzer/energy_alert_notification.yaml
-```
+Use circuit controls for everyday changes:
 
-Use it for custom Companion App notifications, lights, scripts, or other
-follow-up actions when selected analyzer entities report confirmed alert
-evidence after learning finishes. The automation also stays quiet during
-maintenance.
+| Control | Entity |
+|---|---|
+| Relearn baseline | `button.<circuit>_relearn_baseline` |
+| Alert sensitivity | `select.<circuit>_alert_sensitivity` |
+| Daily kWh goal | `number.<circuit>_daily_energy_goal` |
+| Pause alerts / maintenance | `switch.<circuit>_maintenance` |
 
-The blueprint uses the selected summary sensor's explanation and circuit-specific `evidence_path` when available.
+Maintenance keeps telemetry and totals visible while pausing appliance notifications and excluding affected evidence from learning. Relearn after appliance replacement or CT remapping; it starts fresh learning while retaining history.
 
-The integration already creates and clears native persistent notifications, so
-the blueprint's persistent-notification input defaults off. Normally leave it
-off and put mobile notifications or other custom behavior in `alert_actions`.
-Turn it on only when you explicitly want a second persistent notification.
-Blueprint actions are user-authored automations; the integration's native
-cooldown, quiet-hour, category, and delivery preferences do not govern them.
+![Appliance controls for sensitivity, daily energy goal, pausing alerts, and relearning](docs/images/readme/appliance-controls.png)
 
-Companion App mobile notifications can use the `evidence_path` template variable for `data.url` and Android `data.clickAction`, so tapping the notification opens the same Home Assistant evidence view.
-
-## Practical automations
-
-Automations can be created from the Home Assistant automation editor. Manual YAML editing is not required for normal setup or advanced circuit settings.
-
-The examples below show the underlying automation/action structure for users who prefer YAML or want to copy service calls into scripts, blueprints, or Developer Tools.
-
-### Washer finished notification
-
-Use the Activity Summary `is_running` attribute for simple appliance-finished notifications.
+For a washer-finished automation, use Activity Summary's `is_running` attribute. Replace the example entity and notification target with your own:
 
 ```yaml
 alias: Washer finished
@@ -1099,385 +291,49 @@ action:
       message: Washer cycle appears finished.
 ```
 
-### Pause alerts during service
+For custom alert notifications or follow-up actions, import the [alert automation blueprint](blueprints/automation/circuitsetup_energy_analyzer/energy_alert_notification.yaml). It uses summary evidence, waits until learning finishes, and stays quiet during maintenance. Its additional persistent notification defaults off to avoid duplicates. User-authored blueprint actions run independently of the integration's native delivery preferences.
 
-Use the circuit Pause alerts switch before servicing an appliance, replacing equipment, moving CTs, or making wiring changes that could make analyzer evidence temporarily misleading.
+Advanced actions are available in **Developer Tools > Actions** under `circuitsetup_energy_analyzer`; see the [action definitions](custom_components/circuitsetup_energy_analyzer/services.yaml) for fields. Use an analyzer entity target where supported, or the configured `circuit_id`. Actions include maintenance, relearning, alert feedback, settings, NILM review, mapping checks, diagnostic export, and retained-history CSV export.
 
-Maintenance keeps current telemetry and totals visible, pauses appliance
-notifications, and excludes maintenance-affected days, cycles, and electrical
-samples from learned baselines. If Relearn On End is enabled, manual and timed
-maintenance completion both reset the circuit baseline.
-
-```yaml
-action: circuitsetup_energy_analyzer.start_maintenance
-data:
-  circuit_id: refrigerator
-  note: Cleaned coils
-  duration: "02:00:00"
-  relearn_on_end: false
-```
-
-Resume alerts and optionally relearn:
-
-```yaml
-action: circuitsetup_energy_analyzer.end_maintenance
-data:
-  circuit_id: refrigerator
-  relearn: true
-```
-
-### Relearn a circuit baseline
-
-Use this after maintenance, appliance replacement, CT remapping, or any other change that makes the old learned baseline no longer useful. Relearning starts a fresh learning period for that circuit while leaving its retained history intact.
-
-```yaml
-action: circuitsetup_energy_analyzer.relearn_baseline
-data:
-  circuit_id: refrigerator
-```
-
-## Optional Developer Tools actions
-
-Most users should configure the analyzer from the Home Assistant UI:
-
-**Settings > Devices & services > CircuitSetup Energy Analyzer > Configure > Advanced Circuit Settings**
-
-The service actions below are optional. They are useful when you want to call analyzer functions from Home Assistant automations, scripts, dashboards, blueprints, or Developer Tools.
-
-| Purpose | Actions |
-|---|---|
-| Usage and goals | `set_energy_usage_settings`, `set_energy_goal_settings` |
-| Billing, cost, utility comparison | `set_billing_cycle_settings`, `set_cost_settings`, `set_utility_comparison_settings` |
-| Demand and capacity | `set_demand_settings`, `set_capacity_settings` |
-| Dual-phase and electrical checks | `set_leg_imbalance_settings`, `set_metric_consistency_settings` |
-| Mains and solar | `set_mains_balance_settings`, `set_solar_flow_settings` |
-| Appliance behavior | `set_activity_alert_settings`, `set_standby_settings` |
-| Alert handling | `pause_alerts`, `acknowledge_alert`, `mark_alert_expected`, `mark_alert_confirmed`, `mark_alert_unhelpful` |
-| Maintenance | `start_maintenance`, `end_maintenance`, `relearn_baseline` |
-| Experimental NILM | `label_nilm_signature`, `ignore_nilm_signature`, `mark_nilm_signature_expected`, `merge_nilm_signatures`, `label_nilm_interval`, `save_nilm_interval_changes`, `delete_nilm_label_interval`, `generate_nilm_sensor_label_intervals`, `assign_signature_to_appliance`, `assign_session_to_appliance`, `assign_interval_to_appliance`, `validate_nilm_session`, `reject_nilm_session`, `validate_nilm_assignment_history`, `rename_nilm_appliance`, `change_nilm_appliance_profile`, `convert_nilm_appliance_to_direct_meter`, `merge_nilm_assignments`, `set_nilm_helper_link`, `remove_nilm_helper_link`, `set_nilm_reference_link`, `remove_nilm_reference_link`, `publish_nilm_appliance_assignment`, `unpublish_nilm_appliance_assignment`, `retire_nilm_appliance_assignment`, `delete_nilm_appliance_assignment`, `restore_nilm_item` |
-| Suggested settings | `recalculate_setting_recommendations`, `apply_setting_recommendation`, `deny_setting_recommendation`, `dismiss_setting_recommendation` |
-| Export and diagnostics | `export_diagnostics`, `export_history_csv`, `run_mapping_checks` |
-
-When calling actions manually or from an automation, set `circuit_id` to the configured circuit ID, such as `refrigerator`, `hvac`, `car_charger`, or `mains`.
-
-Successful actions emit `circuitsetup_energy_analyzer_<action>` with the action data.
-Two actions use shorter completion event names to fit Home Assistant's 64-character recorder limit:
+Successful actions emit `circuitsetup_energy_analyzer_<action>`, with two shortened completion events:
 
 | Action | Completion event |
 |---|---|
 | `generate_nilm_sensor_label_intervals` | `circuitsetup_energy_analyzer_generate_nilm_label_intervals` |
 | `convert_nilm_appliance_to_direct_meter` | `circuitsetup_energy_analyzer_convert_nilm_to_direct_meter` |
 
-## Common setup states
+## Learning and retained data
 
-| State | Meaning |
+Most behavior checks need at least seven days or enough completed cycles. Health and thermostat-response models need more comparable history; **Learning** can persist when weather, maintenance, or missing sources make days ineligible.
+
+The analyzer retains compact local evidence separately from Home Assistant Recorder:
+
+| Retention mode | Evidence window |
+|---|---:|
+| Lightweight | 18 days |
+| Standard | 45 days |
+| Diagnostic | 180 days |
+
+Additional caps bound alert history, feedback, suggestions, context samples, and NILM inventories. Recorder history still determines what is available to history graphs and reference imports. Retention does not replace Home Assistant backups or the Energy Dashboard.
+
+## Troubleshooting
+
+Start with **Setup Health** and Home Assistant **Repairs**. Read the relevant entity's `status_explanation`, source IDs, sample counts, and timestamps before changing thresholds.
+
+![Setup Health checklist with the next action for configured circuits](docs/images/readme/setup-health.png)
+
+| State or symptom | What to check |
 |---|---|
-| `Needs data` | Required source sensors are missing, stale, unavailable, or not producing usable samples. |
-| `Learning` | The analyzer has data but does not yet have enough retained samples or cycles. |
-| `Waiting For Energy Change` | The analyzer is waiting for a cumulative-energy increase or enough consecutive power samples to derive one. |
-| `Missing Metrics` | Optional electrical metrics needed for a check are not available. |
-| `Possible issue` | Repeated evidence crossed a configured or learned threshold. Review evidence before making a diagnosis. |
-| Negative watts on a load | Usually export power or reversed CT orientation. Check power-flow mode and CT direction. |
-
-Energy Usage Today can show `0 kWh` for two different reasons:
-
-1. The circuit truly has not used energy today.
-2. The analyzer is still waiting to observe the first positive cumulative-energy increase or to derive one from consecutive power samples.
-
-Use `sensor.<circuit>_energy_usage_status` and the `status_explanation` attribute to tell the difference.
-
-## Source measurement inputs
-
-These are the sensors you select during setup. The analyzer does not require every role for every appliance, but additional roles improve the evidence it can produce.
-
-| Source role | Used for |
-|---|---|
-| **Energy** | Optional native cumulative kWh for daily usage, billing-cycle usage, goals, utility comparison, and Energy Dashboard readiness. |
-| **Active Power / Watts** | Appliance state, automatically derived kWh, demand, cycles, NILM, balance, solar flow, and negative-power checks. |
-| **Current** | Capacity checks, dual-phase evidence, metric consistency. |
-| **Peak Current / Peak A** | Short current-spike evidence for configured breaker-capacity alerts. |
-| **Voltage** | Shared, leg-aware mains context for appliance capacity, metric-consistency, and voltage-sag calculations; it is not assigned as an appliance-circuit source or required for analysis. |
-| **Frequency** | Shared line-frequency context for mains analysis. |
-| **Power Factor** | Motor/load behavior and metric consistency evidence. |
-| **Reactive Power** | Motor, compressor, pump, and power-quality drift evidence. |
-| **Apparent Power** | VA relationship checks with watts and power factor. |
-
-ATM90E32 harmonic active power is not ordinary active power or a THD percentage.
-Automatic assignment leaves harmonic sensors and sensors with `total` in their name
-unassigned rather than treating them as standalone mixed circuits. A future dedicated
-role can use harmonic-to-active-power trends for nonlinear-load fingerprints or
-learned drift without corrupting watts-based appliance analysis.
-
-Example source entity names commonly look like this:
-
-| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
-|---|---|---|---|---|
-| Energy | `sensor.<appliance>_energy` | Optional native cumulative kWh used for daily usage, billing, goals, and utility comparison. | Source entity selected by the user. | Increasing kWh total |
-| Active Power | `sensor.<appliance>_active_power` or `sensor.<appliance>_watts` | Instantaneous real power used for automatic kWh derivation, activity, demand, NILM, balance, and run-cycle checks. | Source entity selected by the user. | Watts, including signed watts when the meter reports export |
-
-For single-phase appliances, use one matching set of source entities.
-
-For dual-phase appliances, use L1/L2 or leg A/B source entities where possible.
-
-For mains, use aggregate L1/L2 sources.
-
-For solar inverters, set circuit Power Flow to **Generation / Solar Export**.
-
-## Output entity groups
-
-Entity IDs use your configured circuit ID. For example, a circuit named `refrigerator` may expose entities such as:
-
-```text
-sensor.refrigerator_health_summary
-sensor.refrigerator_activity_summary
-sensor.refrigerator_energy_summary
-sensor.refrigerator_daily_energy_usage
-```
-
-Use **Entity Detail Level** for normal entity creation: Simple keeps the core summary set, Standard adds configured feature entities, and Expert creates only the selected diagnostic or graph groups. You can still use Home Assistant's entity registry for one-off manual entity changes.
-
-## Compact entity model
-
-The analyzer uses a compact entity model so Home Assistant gets appliance-focused
-entities instead of every intermediate calculation as a standalone entity.
-
-- **Simple** creates summary entities, Energy Usage Today when available,
-  and the small daily control set.
-- **Standard** adds canonical status and graph entities for features you configured.
-- **Expert** adds only the diagnostic or graph groups you explicitly select.
-
-See `docs/entity-model.md` for the full compact model.
-
-## Sensor reference
-
-The analyzer creates entities based on the circuit mode, appliance profile, source sensors, enabled feature settings, and the selected **Entity Detail Level**. Not every circuit will have every entity.
-
-In the **Visibility** column:
-
-- **Core/default visible** means created in Simple, Standard, and Expert when the circuit has the required source data.
-- **Standard feature entity** means created in Standard and Expert when the related feature, circuit type, and source data apply.
-- **Expert group** means created only when Entity Detail Level is Expert and that Expert Entity Group is selected.
-
-In the patterns below, `<circuit>` is the configured circuit ID, such as `refrigerator`, `hvac`, `car_charger`, `solar`, or `mains`.
-
-### Core Appliance Status Sensors
-
-Start with these on dashboards.
-
-| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
-|---|---|---|---|---|
-| Setup Health / Next Step | `sensor.circuitsetup_energy_analyzer_setup_health` | One integration-level next step for setup, source-data quality, utility comparison setup, and learning readiness. Attributes include `ready`, `issue_count`, `next_step`, `recommended_action`, `affected_circuits`, `stale_sources`, `stale_source_circuits`, grouped issue lists, `open_path`, `reason`, and the full issue list with `circuit_id`, `issue`, `fix`, and `source_entities`. | Core/default visible. | `Ready`, `Review circuit assignments`, `Fix stale source sensor`, `Check CT direction`, `Let analyzer learn`, `Configure breaker amps`, `Add mains source`, `Review utility comparison` |
-| Health Summary | `sensor.<circuit>_health_summary` | One short state for the circuit or appliance. It rolls learning, readiness, data quality, maintenance, and possible issue evidence into one dashboard-friendly value. Attributes include the electrical summary, power-quality evidence, metric consistency, and dual-phase leg balance. | Core/default visible for configured circuits. | `Ready`, `Learning`, `Needs data`, `Possible issue`, `Paused`, `Mixed observation`, `NILM review` |
-| Activity Summary | `sensor.<circuit>_activity_summary` | Human-readable activity state with `is_running`, run-cycle, and standby context in attributes. | Core/default visible for configured circuits. | `Running`, `Idle`, `Standby`, `On`, `Off`, `No Activity`, `Unavailable` |
-| Energy Summary | `sensor.<circuit>_energy_summary` | Combined daily usage, goals, billing, cost, and high-usage evidence. | Core/default visible for configured circuits. | `Normal`, `Learning`, `Needs Energy Data`, `Watch`, `High Usage` |
-| Energy Usage Today | `sensor.<circuit>_daily_energy_usage` | Today's kWh from a native cumulative source or the automatic watt-to-kWh helper. | Core/default visible when cumulative energy or real power is available. | `0.0 kWh` and higher daily totals |
-| Cost Today | `sensor.<circuit>_cost_today` | Today's analyzer-recorded cost when complete, otherwise an estimate at the effective main-analyzer rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
-| Average Cost per Day | `sensor.<circuit>_average_cost_per_day` | Average of up to seven completed recorded-cost days, otherwise the completed-day energy average at the effective rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
-| Average kWh per Day | `sensor.<circuit>_average_kwh_per_day` | Average daily kWh from up to seven completed days. | Core/default visible when energy data is available. | `kWh` |
-
-Energy Usage Today can show 0 kWh for two different reasons: true zero usage, or `Waiting For Energy Change` / `waiting_for_delta` while the analyzer waits for a native energy increase or another power sample.
-
-The appliance detail Daily Cost and Energy graph defaults to 30 completed days and can show the latest 7 days, with up to 30 completed days available. Each cost point uses the analyzer-recorded daily cost when complete, then the effective main-analyzer rate when a flat or Opower-derived rate can price that day's energy. With Time-of-Use and no valid Opower-derived rate, days without complete recorded costs remain unavailable because a daily energy total cannot reconstruct each tariff period.
-
-### Running Vs Observations Vs Alerts
-
-- Activity Summary is the current operating state; use its state or `is_running` attribute for automations.
-- Observation recorded means the analyzer noticed something unusual, but one observation alone is not an alert.
-- Possible issue means repeated evidence crossed the alert threshold.
-
-### Core diagnostic and evidence sensors
-
-These help explain why a summary changed. They are useful for troubleshooting, automations, and temporary diagnostic dashboards.
-
-| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
-|---|---|---|---|---|
-| **Anomaly Score** | `sensor.<circuit>_anomaly_score` | Numeric summary of current repeated anomaly evidence. | Expert Developer Diagnostics group. | `0.0` when quiet; higher values as evidence accumulates |
-| **Energy Dashboard Status** | `sensor.<circuit>_energy_dashboard_status` | Whether the configured energy or power source has metadata that Home Assistant's Energy Dashboard can use. | Expert Energy Detail group. | `ready`, `needs_energy_source`, or metadata issue states |
-| **Recent Activity** | `sensor.<circuit>_recent_activity` | Latest retained start, stop, steady-window, or possible-issue event. Attributes show a bounded preview of up to five recent items; use the evidence panel or diagnostics for the full retained timeline. | Expert Developer Diagnostics group. | `No recent activity`, `start`, `stop`, issue summary text |
-| **Settings Suggestions** | `sensor.<circuit>_settings_suggestions` | Count of pending advanced-setting recommendations. Attributes show a bounded preview of up to five suggestions with IDs, setting labels, current values, and suggested values. Open Review Suggested Settings or the evidence panel for full evidence and actions. | Expert Developer Diagnostics group. | `0`, `1`, or higher counts |
-
-### Appliance behavior and power-quality sensors
-
-These are most useful for dedicated appliance circuits such as refrigerators, freezers, HVAC, electric heat, water heaters, ovens, washers, dryers, pumps, EV chargers, motor loads, and resistive loads. Mixed circuits may expose fewer appliance-specific signals.
-
-| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
-|---|---|---|---|---|
-| **Power Quality Score** | `sensor.<circuit>_power_quality_score` | Numeric score for observed voltage, current, PF, VAR, or VA relationship changes. | Expert Electrical Scores group. | `0.0` when quiet; higher values when relationships drift |
-| **Reactive Power Drift** | `sensor.<circuit>_reactive_power_drift` | Ratio-style drift in VAR behavior compared with the learned baseline. | Expert Power Quality Drift group. | `0.0` or positive drift values |
-| **Apparent Power Drift** | `sensor.<circuit>_apparent_power_drift` | Ratio-style drift in VA behavior compared with the learned baseline. | Expert Power Quality Drift group. | `0.0` or positive drift values |
-| **Power Factor Drift** | `sensor.<circuit>_power_factor_drift` | Ratio-style drift in power factor compared with the learned baseline. | Expert Power Quality Drift group. | `0.0` or positive drift values |
-| **Run Cycle Count** | `sensor.<circuit>_run_cycle_count` | Today's retained start count for cyclic appliances. | Expert Cycle Metrics group. | Integer cycle counts |
-| **Run Cycle Runtime** | `sensor.<circuit>_run_cycle_runtime` | Today's total active runtime from retained start/stop evidence. | Expert Cycle Metrics group. | Seconds |
-| **Run Cycle Duty Cycle** | `sensor.<circuit>_run_cycle_duty_cycle` | Percent of today spent active. | Expert Cycle Metrics group. | `0` to `100%` |
-| **Weather Context** | `sensor.<circuit>_weather_context` | HVAC weather-adjusted activity state. Attributes can include outdoor temperature, temperature bin, observed runtime, duty cycle, expected range, and explanation. | Standard feature entity for HVAC-like circuits when outdoor temperature context is configured. | `No Temperature Source`, `Learning`, `Weather Correlated`, `Above Weather-Adjusted Range` |
-| **Rain Pump Correlation** | `sensor.<circuit>_rain_pump_correlation` | Pump runtime compared with rain, optional rain intensity, HVAC compressor context, and learned dry-weather runtime. Attributes include rain source, rain activity, compressor context, observed runtime, dry baseline, and explanation. | Standard feature entity for sump pump, water pump, and well pump circuits when a rain source is configured. | `Unconfigured`, `Learning`, `Normal`, `Rain Explained`, `Compressor Explained`, `Weather Explained`, `Possible Excess Pump Activity`, `Possible Missing Pump Activity` |
-| **Water Flow Correlation** | `sensor.<circuit>_water_flow_correlation` | Boolean water-flow activity compared with mapped water-using appliance runtime. Attributes include flow sources, active-flow minutes, appliance runtime, mismatch minutes, and explanation. | Standard feature entity for water pump, well pump, water heater, and washer circuits when a global or circuit-linked flow sensor is configured. | `Unconfigured`, `Learning`, `Normal`, `Possible Flow Without Load`, `Possible Load Without Flow`, `Possible Sensor Problem`, `Sensor Unavailable` |
-| **Water Flow Mismatch Minutes** | `sensor.<circuit>_water_flow_mismatch_minutes` | Current minutes of unexplained flow or water-using appliance activity. | Expert Water group. | Minutes |
-| **Metric Consistency Score** | `sensor.<circuit>_metric_consistency_score` | Largest W/VA/PF consistency mismatch. | Expert Electrical Scores group. | Percentage mismatch |
-
-### Energy usage, goals, billing, and cost sensors
-
-These require cumulative energy inputs. Use Home Assistant's Energy Dashboard for normal energy history; these entities exist for analyzer evidence, alerts, and per-circuit summaries.
-
-| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
-|---|---|---|---|---|
-| **Energy Usage Today** | `sensor.<circuit>_daily_energy_usage` | Today's kWh derived from positive cumulative-energy deltas. | Core/default visible when energy data exists. | `kWh` |
-| **Cost Today** | `sensor.<circuit>_cost_today` | Today's analyzer-recorded cost when complete, otherwise an estimate at the effective main-analyzer rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
-| **Average Cost per Day** | `sensor.<circuit>_average_cost_per_day` | Average of up to seven completed recorded-cost days, otherwise the completed-day energy average at the effective rate. | Core/default visible when energy data and a rate are available. | Numeric cost estimates |
-| **Average kWh per Day** | `sensor.<circuit>_average_kwh_per_day` | Average daily kWh from up to seven completed days. | Core/default visible when energy data exists. | `kWh` |
-| **Energy Usage Share** | `sensor.<circuit>_energy_usage_share` | Today's usage as a percent of the learned rolling energy window. | Expert Energy Detail group. | Percentage values |
-| **Energy Usage Status** | `sensor.<circuit>_energy_usage_status` | Daily kWh tracker state. Use this to tell true zero usage from "waiting for first kWh increase." | Expert Energy Detail group. | `waiting_for_delta`, `learning`, `tracking`, `over_threshold` |
-| **Energy Goal Usage** | `sensor.<circuit>_energy_goal_usage` | Today's usage as a percent of the configured daily goal. | Expert Energy Detail group. | Percentage values |
-| **Energy Goal Status** | `sensor.<circuit>_energy_goal_status` | Daily goal tracker state. | Expert Energy Detail group. | `unconfigured`, `tracking`, `near_goal`, `over_goal` |
-| **Billing Cycle Usage** | `sensor.<circuit>_billing_cycle_usage` | Current billing-cycle kWh for the circuit. | Standard feature entity when billing tracking exists. | `kWh` |
-| **Cost Cycle** | `sensor.<circuit>_cost_cycle` | Current cycle cost estimate. | Standard feature entity when cost tracking exists. | Numeric cost estimates |
-
-### Demand, capacity, and dual-phase sensors
-
-These are aimed at high-power circuits such as HVAC, electric heat, water heaters, ovens, dryers, pool pumps, water pumps, sump pumps, EV chargers, mains feeds, and similar loads.
-
-Capacity sensors require either current sensors or real power plus voltage, and a configured breaker or capacity value.
-
-| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
-|---|---|---|---|---|
-| **Current Demand** | `sensor.<circuit>_current_demand` | Current rolling average demand. | Expert Demand and Capacity group. | Watts |
-| **Peak Demand** | `sensor.<circuit>_peak_demand` | Highest rolling demand observed today. | Expert Demand and Capacity group. | Watts |
-| **Demand Limit Usage** | `sensor.<circuit>_demand_limit_usage` | Current demand as a percent of a configured demand limit. | Expert Demand and Capacity group. | Percentage values |
-| **Demand Peak Rank** | `sensor.<circuit>_demand_peak_rank` | Rank of the current rolling demand among retained monthly peak windows. | Expert Demand and Capacity group. | `0` when unavailable; integer ranks such as `1`, `2`, `3` |
-| **Demand Peak Status** | `sensor.<circuit>_demand_peak_status` | Whether current demand is notable for the month. | Expert Demand and Capacity group. | `unavailable`, `below_monthly_peak`, `near_monthly_peak`, `monthly_peak` |
-| **Demand Status** | `sensor.<circuit>_demand_status` | Demand tracker state. | Expert Demand and Capacity group. | `unconfigured`, `tracking`, over-limit evidence states |
-| **Circuit Capacity Usage** | `sensor.<circuit>_capacity_usage` | Current amps as a percent of configured circuit capacity. | Standard feature entity when capacity is configured. | Percentage values |
-| **Circuit Capacity Status** | `sensor.<circuit>_capacity_status` | Capacity tracker state. | Expert Demand and Capacity group. | `unconfigured`, `missing_current`, `tracking`, `over_limit` |
-| **Leg Imbalance** | `sensor.<circuit>_leg_imbalance` | Difference between dual-phase legs while the load is meaningful. | Created and enabled at Standard or Expert for dual-phase circuits; omitted at Simple. | Percentage imbalance |
-
-### Mains NILM, balance, solar, and utility comparison sensors
-
-These apply mainly to whole-home mains circuits, Mains NILM circuits, homes with solar generation, and homes using utility or Opower comparison data.
-
-| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
-|---|---|---|---|---|
-| **NILM Signature Count** | `sensor.<circuit>_nilm_signature_count` | Count of recurring aggregate NILM signatures. | Core/default visible for mains NILM circuits. | Integer counts |
-| **NILM Unknown Loads** | `sensor.<circuit>_nilm_unknown_loads` | Count of recurring unknown mains NILM virtual loads. Attributes show a bounded preview of up to five unknown loads with signature ID, display name, likely type, typical watts, confidence, and first seen time. Open the evidence panel for the full review inventory and actions. | Expert NILM Detail group. | `0`, `1`, or higher counts |
-| **NILM Unmatched Load Percentage** | `sensor.<circuit>_nilm_unmatched_load_percentage` | Share of current aggregate mains power not matched to known loads. | Expert NILM Detail group. | Percentage values |
-| **NILM Topology Status** | `sensor.<circuit>_nilm_topology_status` | Mains topology evidence for known-load matches. | Expert NILM Detail group. | `no_match`, `topology_match`, `topology_mismatch`, `leg_mismatch` |
-| **Balance Power** | `sensor.<circuit>_balance_power` | Mains real power minus summed monitored load power. Positive values usually mean unmonitored load; strongly negative values can suggest mapping or sign issues. | Expert Mains and Solar Detail group. | Watts |
-| **Monitored Power** | `sensor.<circuit>_monitored_power` | Sum of directly monitored non-generation load circuits. | Expert Mains and Solar Detail group. | Watts |
-| **Known Load Share** | `sensor.<circuit>_monitored_coverage` | Shows how much of current mains power is explained by selected monitored load circuits. Low values usually mean normal unmonitored loads; values over `100%` can indicate CT sign, double-counting, solar/export, or mapping issues. | Expert Mains and Solar Detail group. | Percentage values |
-| **Balance Status** | `sensor.<circuit>_balance_status` | Mains balance state. | Expert Mains and Solar Detail group. | `missing_mains`, `tracking`, `negative_balance` |
-| **Solar Generation Power** | `sensor.<circuit>_solar_generation_power` | Instantaneous solar generation. | Expert Mains and Solar Detail group. | Watts |
-| **Solar Flow Status** | `sensor.<circuit>_solar_flow_status` | Instantaneous solar-flow state. | Expert Mains and Solar Detail group. | `missing_mains`, `missing_generation`, `no_generation`, `importing`, `exporting`, `self_powered`, `inconsistent_export` |
-| **Solar Surplus Power** | `sensor.<circuit>_solar_surplus_power` | Exported solar available as surplus. | Expert Mains and Solar Detail group. | Watts |
-| **Solar Surplus Status** | `sensor.<circuit>_solar_surplus_status` | Solar surplus state. | Expert Mains and Solar Detail group. | `missing_mains`, `missing_generation`, `no_generation`, `no_surplus`, `surplus_available`, `high_surplus`, `inconsistent_export` |
-| **Utility Comparison Status** | `sensor.<circuit>_utility_comparison_status` | Utility comparison state. | Expert Mains and Solar Detail group. | `unconfigured`, `missing_utility`, `missing_measured`, `tracking`, `mismatch` |
-
-### Standby and Always On sensors
-
-These apply to non-mains load circuits with real-power data. They are useful for refrigerators, freezers, pumps, HVAC blower circuits, motor loads, electronics, and appliances with known standby behavior.
-
-| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
-|---|---|---|---|---|
-| **Always On Power** | `sensor.<circuit>_always_on_power` | Lowest retained power level in the standby window. | Standard feature entity for non-mains load circuits. | Watts |
-| **Always On Limit Usage** | `sensor.<circuit>_always_on_limit_usage` | Always-on estimate as a percent of the configured limit. | Expert Standby group. | Percentage values |
-
-Current standby state remains available in Activity Summary and its
-`standby_status` attribute.
-
-### Binary sensors
-
-Diagnostic binary sensors are created for configured circuits. Feature binary sensors appear only when the circuit has the required profile and source data.
-
-| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |
-|---|---|---|---|---|
-| **Learning** | `binary_sensor.<circuit>_learning` | On while the circuit is still learning baseline evidence. | Expert Developer Diagnostics group. | `on`, `off` |
-| **Data Quality Problem** | `binary_sensor.<circuit>_data_quality_problem` | On when the circuit has a current source-data quality issue. | Expert Developer Diagnostics group. | `on`, `off` |
-| **Water Flow Mismatch** | `binary_sensor.<circuit>_water_flow_mismatch` | On when water-flow correlation currently has possible flow/load mismatch evidence. | Standard feature entity for water pump, well pump, water heater, and washer circuits when a global or circuit-linked flow sensor is configured. | `on`, `off` |
-
-## Status Glossary
-
-Common status values include:
-
-| Display label | Raw status | Meaning |
-|---|---|---|
-| Active Grid Supported | `active_grid_supported` | A flexible load is running, but current solar surplus does not cover it. |
-| Active Solar Supported | `active_solar_supported` | A flexible load is running and appears to be covered by current solar surplus. |
-| Apparent Power Mismatch | `apparent_power_mismatch` | Reported VA does not match the relationship expected from voltage, current, and real power. |
-| Consistent | `consistent` | The available measurements are internally consistent. |
-| Exporting | `exporting` | Signed mains power currently indicates grid export. |
-| High Surplus | `high_surplus` | Solar export is above the configured high-surplus threshold. |
-| Idle | `idle` | The circuit is below the active-load threshold for this check. |
-| Imbalanced | `imbalanced` | Dual-phase leg difference is repeatedly above the warning threshold. |
-| Importing | `importing` | Signed mains power currently indicates grid import. |
-| Inconsistent Export | `inconsistent_export` | Grid export is larger than measured generation; check solar/mains mapping. |
-| Leg Mismatch | `leg_mismatch` | Mains NILM evidence repeatedly points to a different split-phase leg than the assignment. |
-| Metric Mismatch | `metric_mismatch` | One or more power relationships changed beyond tolerance. |
-| Missing Current | `missing_current` | The check needs a current sensor, or enough power and voltage data to estimate current. |
-| Missing Generation | `missing_generation` | Solar-flow checks need at least one generation circuit. |
-| Missing Mains | `missing_mains` | The check needs a mains, whole-home, or aggregate source. |
-| Missing Measured | `missing_measured` | Utility comparison needs a measured kWh source. |
-| Missing Metrics | `missing_metrics` | The check needs more matching voltage, current, real power, apparent power, or power factor sensors. |
-| Missing Utility | `missing_utility` | Utility comparison needs a utility or Opower source. |
-| Mismatch | `mismatch` | The measured value differs from the comparison source beyond tolerance. |
-| Monthly Peak | `monthly_peak` | The current rolling demand is the highest retained monthly demand window. |
-| Near Goal | `near_goal` | Daily energy usage is near the configured goal threshold. |
-| Near Monthly Peak | `near_monthly_peak` | The current rolling demand is near the highest retained monthly demand windows. |
-| Negative Balance | `negative_balance` | Monitored load power is higher than mains power beyond tolerance; check mapping, signs, solar, or CT orientation. |
-| No Activity | `no_activity` | No recent run-cycle activity has been observed. |
-| No Budget | `no_budget` | No billing-cycle budget is configured. |
-| No Generation | `no_generation` | No solar generation is currently being measured. |
-| No Match | `no_match` | No matching NILM event has been observed yet. |
-| No Monitored Circuits | `no_monitored_circuits` | Mains balance needs at least one monitored load circuit. |
-| No Surplus | `no_surplus` | No solar export surplus is currently available. |
-| Not Applicable | `not_applicable` | The check does not apply to the current circuit configuration. |
-| Not Dual Phase | `not_dual_phase` | The check only applies to dual-phase circuits. |
-| Off | `off` | Latest power is below the configured standby threshold. |
-| On | `on` | Latest power is above the standby range. |
-| Over Budget | `over_budget` | Billing-cycle usage is over the configured budget. |
-| Over Goal | `over_goal` | Daily energy usage is over the configured goal. |
-| Over Limit | `over_limit` | The measured value is above a configured limit. |
-| Over Threshold | `over_threshold` | The measured value is above a configured threshold. |
-| Possible Excess Pump Activity | `possible_excess_pump_activity` | Pump activity is above the weather-adjusted expected range. |
-| Possible Flow Without Load | `possible_flow_without_load` | Water flow has been active without matching mapped appliance activity. |
-| Possible Issue | `possible_issue` | Repeated evidence crossed an alert threshold. |
-| Possible Load Without Flow | `possible_load_without_flow` | A mapped water-using appliance appears active without matching water-flow sensor activity. |
-| Possible Missing Pump Activity | `possible_missing_pump_activity` | Rain or HVAC condensate context suggests pump activity may be expected but has not been observed. |
-| Possible Sensor Problem | `possible_sensor_problem` | Flow and appliance evidence conflict in both directions, so the flow sensor or mapping may need review. |
-| Power Factor Mismatch | `power_factor_mismatch` | Reported power factor does not match real power divided by apparent power. |
-| Projected Over Budget | `projected_over_budget` | Current usage projects above the billing-cycle budget. |
-| Ready | `ready` | The analyzer has enough data for this check. |
-| Running | `running` | The circuit is currently above the active-load threshold. |
-| Self Powered | `self_powered` | Solar generation is approximately covering current site load. |
-| Standby | `standby` | Latest power is within the configured standby range. |
-| Surplus Available | `surplus_available` | Solar export is above the configured surplus threshold. |
-| Surplus Candidate | `surplus_candidate` | An idle flexible load could be a candidate while solar surplus is available. |
-| Rain Explained | `rain_explained` | Pump activity is higher than dry baseline and rain context explains the increase. |
-| Compressor Explained | `compressor_explained` | Pump activity is higher than dry baseline and HVAC compressor condensate context explains the increase. |
-| Weather Explained | `weather_explained` | Pump activity is higher than dry baseline and combined rain/HVAC context explains the increase. |
-| Topology Match | `topology_match` | Mains NILM evidence matches the configured circuit mode. |
-| Topology Mismatch | `topology_mismatch` | Mains NILM evidence conflicts with the configured circuit mode. |
-| TOU Peak | `tou_peak` | Current time is inside the configured time-of-use peak period. |
-| Tracking | `tracking` | The analyzer has enough inputs and is tracking this check. |
-| Unavailable | `unavailable` | This check does not have enough retained data yet. |
-| Unconfigured | `unconfigured` | This optional check has not been configured. |
-| Waiting For Energy Change | `waiting_for_delta` | No positive native energy increase or derived watt-to-kWh change has been observed yet. |
-| Waiting For Surplus | `waiting_for_surplus` | No idle flexible load currently has enough solar surplus. |
-
-For automations and debugging, status sensors may expose:
-
-- `raw_status`
-- `status_label`
-- `status_explanation`
-
-Use `raw_status` for automations because it is more stable than the display label.
-
-## Recommended workflow
-
-1. Get your meter data into Home Assistant first.
-2. Install CircuitSetup Energy Analyzer.
-3. Select source devices and any extra source entities.
-4. Add mains and outdoor temperature only if you need those features.
-5. Review every circuit assignment before saving.
-6. Start with the four summary entities on dashboards.
-7. Let the analyzer learn.
-8. Use alerts as evidence, not diagnoses.
-9. Tune advanced settings from **Configure > Advanced Circuit Settings** when the evidence shows the defaults do not fit your system.
-10. Use Home Assistant's Energy Dashboard for long-term energy charts and this integration for behavior, data quality, and circuit diagnostics.
+| **Needs data** | Missing, stale, unavailable, or incorrectly mapped sources. |
+| **Learning** | Retained days/cycles and comparable context; do not enable every diagnostic entity to fix this. |
+| **Waiting For Energy Change** (`waiting_for_delta`) | The first positive native kWh delta or enough consecutive watts samples. A zero daily total can mean waiting, not true zero usage. |
+| **Missing Metrics** (`missing_metrics`) | Optional inputs required for that check. |
+| `not_dual_phase` / `missing_mains` | The check does not apply to the current topology or has no mains source. |
+| Negative load watts / `inconsistent_export` | CT direction, phase mapping, and derived power-flow mode. |
+| `no_match` | Utility data may cover a different period or arrive late. |
+| `projected_over_budget` | The current projection exceeds the configured billing budget. |
+| `active_solar_supported` | Available solar surplus can support the configured flexible load. |
+
+For status-based automations, prefer `raw_status` where exposed rather than a translated display label.
+
+Report problems through [GitHub issues](https://github.com/CircuitSetup/CircuitSetup-Energy-Analyzer/issues), with the integration/HA versions, affected circuit, and relevant diagnostics. Review exports for private information before sharing.

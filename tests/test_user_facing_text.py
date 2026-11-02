@@ -1155,34 +1155,207 @@ assert.match(html, /<ha-icon icon="mdi:bell-pause-outline"><\\/ha-icon>/);
     )
 
 
-def test_readme_documents_normal_user_action_paths() -> None:
-    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
-    normalized_text = " ".join(readme_text.split())
+@pytest.mark.parametrize(
+    ("section", "required"),
+    [
+        (
+            "## Installation",
+            ("2025.1.0+", "Marketplace", "HACS", "config/custom_components/"),
+        ),
+        (
+            "## Setup",
+            (
+                "Source Devices",
+                "Extra Source Entities",
+                "Mains Source Entities",
+                "Appliance Circuit Assignments",
+                "Setup Health",
+            ),
+        ),
+        (
+            "### Assign circuits correctly",
+            (
+                "Dual Phase",
+                "Mixed",
+                "Power-flow mode",
+                "gas_dryer",
+                "electric_dryer",
+                "Remove From Analysis",
+            ),
+        ),
+        (
+            "### Optional context sources",
+            (
+                "Thermostat",
+                "rain",
+                "water-flow",
+                "Global flow sources are shared",
+                "scoped to their appliance",
+            ),
+        ),
+        (
+            "## Dashboard",
+            (
+                "Simple",
+                "Standard",
+                "Expert",
+                "Create Or Update Dashboard",
+                "Match Entity Detail Level To Layout",
+                "Remove Existing Dashboard",
+                "no third-party Lovelace dependencies",
+                "CSV",
+            ),
+        ),
+        (
+            "### Summary entities",
+            (
+                "Health Summary",
+                "Activity Summary",
+                "Energy Summary",
+                "Energy Usage Today",
+                "is_running",
+                "Expert Entity Groups",
+            ),
+        ),
+        (
+            "## Appliance detail",
+            (
+                "Appliance Insights",
+                "Today vs Normal",
+                "Why Energy Changed",
+                "Estimated by NILM",
+            ),
+        ),
+        (
+            "### Energy, goals, and cost",
+            ("Time-of-Use", "shared", "Opower", "unavailable", "base rate"),
+        ),
+        (
+            "### Appliance behavior and health",
+            (
+                "fourteen comparable reference days plus three recent days",
+                "Maintenance-affected evidence is excluded",
+            ),
+        ),
+        (
+            "### HVAC, rain, and water",
+            (
+                "three distinct prior local dates",
+                "ten dry, compressor-free context samples",
+                "does not create a missing-pump alert",
+                "ten retained context samples",
+                "Unconfigured",
+            ),
+        ),
+        (
+            "### Electrical, mains, and solar",
+            ("Demand", "Capacity", "leg balance", "Mains balance", "Solar flow"),
+        ),
+        (
+            "## Experimental load separation (NILM)",
+            (
+                "Needs Review",
+                "Confirm primary appliance",
+                "Reference sensors",
+                "Publish only trustworthy",
+                "Remove HA Device",
+                "measured source watts",
+                "energy are estimates",
+                "not safety or control evidence",
+            ),
+        ),
+        (
+            "## Alerts and feedback",
+            (
+                "Open evidence",
+                "Possible issue",
+                "repeated evidence",
+                "Acknowledge",
+                "Expected",
+                "Confirmed issue",
+                "Not helpful",
+                "evidence_path",
+                "clickAction",
+                "Weekly Appliance Digest",
+            ),
+        ),
+        (
+            "### Suggested settings",
+            (
+                "Apply Suggestion",
+                "Dismiss For Now",
+                "Deny Suggestion",
+                "30 days",
+                "90 days",
+                "undo/reset",
+                "up to five",
+            ),
+        ),
+        (
+            "## Controls and automations",
+            (
+                "button.<circuit>_relearn_baseline",
+                "switch.<circuit>_maintenance",
+                "is_running",
+                "alert automation blueprint",
+                "evidence",
+                "Developer Tools > Actions",
+            ),
+        ),
+        (
+            "## Learning and retained data",
+            (
+                "Lightweight",
+                "18 days",
+                "Standard",
+                "45 days",
+                "Diagnostic",
+                "180 days",
+                "Recorder",
+            ),
+        ),
+        (
+            "## Troubleshooting",
+            (
+                "status_explanation",
+                "raw_status",
+                "waiting_for_delta",
+                "missing_metrics",
+                "not_dual_phase",
+                "missing_mains",
+                "inconsistent_export",
+                "no_match",
+                "projected_over_budget",
+                "active_solar_supported",
+            ),
+        ),
+    ],
+)
+def test_readme_covers_user_workflows(section: str, required: tuple[str, ...]) -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    # Stop at the next peer heading, retaining any subsections.
+    depth = len(section) - len(section.lstrip("#"))
+    match = re.search(rf"^{re.escape(section)}$", readme, re.MULTILINE)
+    assert match, f"Missing README section: {section}"
+    text = re.split(
+        rf"^#{{1,{depth}}} ", readme[match.end() :], maxsplit=1, flags=re.MULTILINE
+    )[0]
+    for phrase in required:
+        assert phrase in text, f"{section} does not document {phrase}"
 
-    assert "## Normal User Paths" in readme_text
-    for phrase in (
-        "Circuit action -> button/select/number entity",
-        "Alert action -> evidence panel button",
-        "NILM signature action -> NILM/evidence panel button",
-        "Recommendation action -> Suggested Settings UI button",
-        "Setup/data-quality fix -> Repairs flow",
-    ):
-        assert phrase in normalized_text
 
-
-def test_readme_explains_environmental_sensor_learning_and_scope() -> None:
-    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    for phrase in (
-        "HVAC, HVAC compressor, HVAC blower, Mini-Split, and electric heat",
-        "three distinct prior local dates",
-        "ten dry, compressor-free context samples",
-        "does not create a rain-specific missing-pump alert",
-        "Global flow sources are shared",
-        "linked source stays scoped to that appliance",
-        "marked Unconfigured instead of creating a flow mismatch alert",
-    ):
-        assert phrase in readme_text
+def test_readme_local_links_and_anchors_resolve() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    headings = re.findall(r"^#+ (.+)$", readme, re.MULTILINE)
+    anchors = {
+        re.sub(r"[^\w -]", "", heading.lower()).replace(" ", "-")
+        for heading in headings
+    }
+    for target in re.findall(r"\[[^\]]*\]\(([^)]+)\)", readme):
+        if target.startswith("#"):
+            assert target[1:] in anchors, f"Missing README anchor: {target}"
+        elif not target.startswith(("https://", "http://")):
+            assert (ROOT / target).is_file(), f"Missing README link: {target}"
 
 
 def test_sensitivity_vocabulary_is_quiet_balanced_sensitive() -> None:
@@ -1523,32 +1696,6 @@ def test_dashboard_example_wraps_optional_feature_cards_conditionally() -> None:
         )
 
 
-def test_readme_describes_summary_first_diagnostic_workflow() -> None:
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    assert "## Summary-First Diagnostics" in readme
-    assert "Health Summary" in readme
-    assert "Activity Summary" in readme
-    assert "Energy Summary" in readme
-    assert "advanced detail" in readme.lower()
-    assert "power-quality, metric-consistency, and leg-balance evidence" in readme
-    assert "Expert creates only the diagnostic or graph groups you select" in readme
-    assert "Expert Entity Groups" in readme
-
-
-def test_readme_explains_running_observation_and_alert_distinction() -> None:
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    assert (
-        "Activity Summary is the current operating state; use its state or "
-        "`is_running` attribute for automations."
-    ) in readme
-    assert "Observation recorded means the analyzer noticed something unusual" in readme
-    assert (
-        "Possible issue means repeated evidence crossed the alert threshold." in readme
-    )
-
-
 def test_alert_blueprint_is_user_friendly_and_actionable() -> None:
     blueprint_path = (
         ROOT
@@ -1573,15 +1720,6 @@ def test_alert_blueprint_is_user_friendly_and_actionable() -> None:
     assert "Open evidence graph" in blueprint_text
     assert "clickAction" in blueprint_text
     assert "url:" in blueprint_text
-
-
-def test_readme_describes_blueprint_summary_sensor_evidence() -> None:
-    readme = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    assert (
-        "The blueprint uses the selected summary sensor's explanation and "
-        "circuit-specific `evidence_path` when available." in readme
-    )
 
 
 def test_alert_blueprint_evidence_path_renders_clean_url() -> None:
@@ -9295,57 +9433,6 @@ def test_recommendation_action_services_document_entity_targets() -> None:
         )
 
 
-def test_readme_includes_status_glossary_for_machine_values() -> None:
-    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    assert "## Status Glossary" in readme_text
-    for raw_status in (
-        "missing_metrics",
-        "not_dual_phase",
-        "missing_mains",
-        "inconsistent_export",
-        "waiting_for_delta",
-        "no_match",
-        "projected_over_budget",
-        "active_solar_supported",
-    ):
-        assert raw_status in readme_text
-    assert "Missing Metrics" in readme_text
-    assert "raw_status" in readme_text
-    assert "status_explanation" in readme_text
-
-
-def test_readme_describes_appliance_drilldown_pattern() -> None:
-    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    assert "Appliance Drilldown Pattern" in readme_text
-    for phrase in (
-        "Appliance status card",
-        "Appliance automations",
-        "Energy tracking",
-        "Electrical review",
-        "Setup and data quality",
-        "advanced diagnostic entities",
-    ):
-        assert phrase in readme_text
-
-
-def test_readme_describes_native_dashboard_and_detail_ui() -> None:
-    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    for text in (
-        "Home Assistant's stock header and icon tabs",
-        "Home energy summary on the left and Appliances on the right",
-        "Line voltage",
-        "floating date",
-        "VA and VAR are omitted from Appliance Detail graphs",
-    ):
-        assert text in readme_text
-
-    assert "House power flow is shown" not in readme_text
-    assert "a restore icon resets an individual graph" not in readme_text
-
-
 def test_setup_health_repairs_descriptions_include_circuit_next_step() -> None:
     translations = _translations()
     issues = translations["issues"]
@@ -9374,198 +9461,6 @@ def test_stale_source_repair_description_names_the_source_entity() -> None:
     assert "{source_entities}" in description
 
 
-def test_readme_includes_practical_usage_guide() -> None:
-    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
-    normalized_text = " ".join(readme_text.split())
-
-    assert "## Using The Integration" in readme_text
-    for phrase in (
-        "First-time setup checklist",
-        "Classify circuits deliberately",
-        "Use it day to day",
-        "Configure the optional features you actually need",
-        "Practical examples",
-        "When an alert appears",
-        "Common setup states",
-    ):
-        assert phrase in readme_text
-    for phrase in (
-        "Washer or dryer running automation",
-        "Refrigerator monitoring",
-        "HVAC or 240 V appliance review",
-        "EV charger or high-current circuit",
-        "Utility or Opower comparison",
-    ):
-        assert phrase in readme_text
-    for phrase in (
-        "do not need to enable every diagnostic entity",
-        "let the analyzer learn for at least 7 days",
-        "Appliance Circuit Assignments",
-        "Advanced Circuit Settings",
-        "Settings > Devices & services",
-        "only shows settings that apply",
-        "Activity Summary state or its `is_running` attribute",
-        "status_explanation",
-    ):
-        assert phrase in normalized_text
-    assert "Most options are set from Home Assistant Developer Tools > Actions" not in (
-        readme_text
-    )
-
-
-def test_readme_documents_assignment_defaults() -> None:
-    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    assert "choose the appliance type, circuit mode, power-flow mode" not in readme_text
-    for expected in (
-        "integration suggests an appliance type",
-        "Home Assistant friendly name as a",
-        "fallback. You confirm the appliance type and source sensors",
-        "derives circuit mode and power-flow mode",
-        "| Profile | Default phase/topology | Default power flow |",
-        "| `refrigerator` | Single phase | Load |",
-        "| `dishwasher` | Single phase | Load |",
-        "| `3d_printer` | Single phase | Load |",
-        "| `hvac` | Dual phase when both legs are selected; "
-        "otherwise single phase | Load |",
-        "| `mini_split` | Dual phase when both legs are selected; "
-        "otherwise single phase | Load |",
-        "| `solar_inverter` | Dual phase | Generation |",
-        "| `mains_nilm` | Mains NILM | Mains/net |",
-        "| `mixed` | Mixed | Load |",
-    ):
-        assert expected in readme_text
-    normalized_readme = " ".join(readme_text.split())
-    assert (
-        "Water-flow correlation applies to `water_pump`, `well_pump`, "
-        "`water_heater`, `washer`, and `dishwasher` circuits" in normalized_readme
-    )
-    assert (
-        "Automatic source parsing treats explicit `gas_dryer` names as single "
-        "phase and explicit `electric_dryer` names as dual phase." in normalized_readme
-    )
-    assert (
-        "This context applies only to HVAC, HVAC compressor, HVAC blower, "
-        "Mini-Split, and electric heat profiles." in normalized_readme
-    )
-    assert (
-        "Mini-Split inverter operation can remain at low power; tune the "
-        "default `100 W` on and `40 W` off thresholds in Advanced Circuit "
-        "Settings when equipment or metering differs." in normalized_readme
-    )
-
-
-def test_readme_explains_notification_evidence_workflow() -> None:
-    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
-    normalized_text = " ".join(readme_text.split())
-
-    assert "**Open evidence**" in readme_text
-    assert "Alert Evidence" in readme_text
-    assert "evidence_path" in readme_text
-    assert "graph_entities" in readme_text
-    assert "dynamic Alert Evidence panel" in readme_text
-    assert "Companion App" in readme_text
-    assert "clickAction" in readme_text
-    assert "/circuitsetup-energy-analyzer-evidence" in readme_text
-    assert "appliance, mains, nilm, weather-context, and energy-overview cards" in (
-        normalized_text.lower()
-    )
-    assert "dynamically selects graph entities" in normalized_text
-    assert "docs/dashboard-example.yaml" in readme_text
-    assert "Persistent notifications include one final Markdown link" in normalized_text
-    assert (
-        "link directly to **Review Suggested Settings** in the evidence panel"
-        in readme_text
-    )
-    assert "visual comparison" in normalized_text
-    assert "graph-first evidence" in normalized_text
-    assert "focused inspector" in normalized_text
-    assert "single **Apply**" in normalized_text
-    assert (
-        "Alert evidence panel showing observed and expected metrics with "
-        "investigation context"
-    ) in readme_text
-    assert "source graph and investigation context" not in readme_text
-
-
-def test_readme_explains_core_dashboard_sensors_and_zero_kwh() -> None:
-    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    assert "Core Appliance Status Sensors" in readme_text
-    assert "Energy Usage Today" in readme_text
-    assert "Daily Energy Usage" not in readme_text
-    assert "sensor.<circuit>_daily_energy_usage" in readme_text
-    assert "Average kWh per Day" in readme_text
-    assert "Average Cost per Day" in readme_text
-    assert "effective main-analyzer rate" in readme_text
-    assert "configured default/base rate" in readme_text
-    assert "last known valid Opower-derived rate" in readme_text
-    assert "whole-day cost estimates stay unavailable" in readme_text
-    assert "up to seven completed days" in readme_text
-    assert "up to 30 completed days" in readme_text
-    assert "Energy Usage Today can show 0 kWh for two different reasons" in readme_text
-    assert "Waiting For Energy Change" in readme_text
-    assert "waiting_for_delta" in readme_text
-    assert "true zero usage" in readme_text
-    assert "automatic watt-to-kWh helper" in readme_text
-
-
-def test_readme_explains_generated_dashboard_controls() -> None:
-    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    assert "generated dashboard uses Home Assistant's current entity registry IDs" in (
-        readme_text
-    )
-    assert "renamed analyzer entities are respected" in readme_text
-    assert "Home, Energy & Costs, and Insights" in readme_text
-    assert "Expert-only diagnostics" in readme_text
-    assert "live-sorts appliance tiles" in readme_text
-    assert "built from each appliance's Activity Summary history" in readme_text
-    assert "keeps graphs half-width on the left" in readme_text
-    assert "HVAC overlays outdoor temperature on a second axis" in readme_text
-    assert "Water flow context overlays correlated appliance power" in readme_text
-    assert (
-        "daily averages on a second line without percentage comparisons" in readme_text
-    )
-    assert "shared Home Assistant-style date range control" in readme_text
-    assert (
-        "combining both phases of a dual-phase appliance into one line" in readme_text
-    )
-    assert "previous, next, now, compare, and CSV download actions" in readme_text
-    assert "without repeating a separate Active Now list" in readme_text
-    assert "segmented Running intervals against the selected range" in readme_text
-    assert "no visible chart-level zoom, pan, or reset controls" in readme_text
-    assert "Detail links open appliance detail pages directly" in readme_text
-    assert "Billing Cycle card lives on the final Insights tab" in readme_text
-    assert "recorded, estimated, or unavailable cost status" in readme_text
-    assert "first configured mains circuit is the primary whole-house source" in (
-        readme_text
-    )
-    assert "require no third-party Lovelace dependency" in readme_text
-    assert "Create Or Update Dashboard" in readme_text
-    assert "Match Entity Detail Level To Layout" in readme_text
-    assert "Remove Existing Dashboard" in readme_text
-    assert "dashboard action still runs from Configure" in readme_text
-    assert "**Standard**: Simple plus one Insights view" in readme_text
-    assert "**Expert**: Standard plus diagnostic navigation" in readme_text
-    assert "button.circuitsetup_energy_analyzer_create_dashboard" not in readme_text
-    assert "adds small action cards" not in readme_text
-
-
-def test_readme_documents_current_compact_entity_model() -> None:
-    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    assert "Compact entity model" in readme_text
-    assert "docs/entity-model.md" in readme_text
-    assert "`switch.<circuit>_maintenance`" in readme_text
-    assert "`button.<circuit>_start_maintenance`" not in readme_text
-    assert "`button.<circuit>_end_maintenance`" not in readme_text
-    assert "`button.<circuit>_pause_alerts`" not in readme_text
-    assert "`sensor.<circuit>_sensitivity`" not in readme_text
-    assert "`sensor.<circuit>_standby_threshold`" not in readme_text
-    assert "sensor.<circuit>_health_summary" in readme_text
-
-
 def test_entity_model_docs_keep_counts_without_inventory_scripts() -> None:
     entity_model = (ROOT / "docs" / "entity-model.md").read_text(encoding="utf-8")
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
@@ -9577,42 +9472,6 @@ def test_entity_model_docs_keep_counts_without_inventory_scripts() -> None:
     assert "generated development artifacts" not in normalized_readme
     assert "Simple creates 10 or fewer" in entity_model
     assert "`switch.<circuit>_maintenance`" in entity_model
-
-
-def test_readme_sensor_reference_is_table_with_friendly_names_first() -> None:
-    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    assert (
-        "| Friendly name | Entity pattern | Purpose | Visibility | Possible outputs |"
-        in readme_text
-    )
-    for row in (
-        "| Health Summary | `sensor.<circuit>_health_summary` |",
-        "| Setup Health / Next Step | "
-        "`sensor.circuitsetup_energy_analyzer_setup_health` |",
-        "| Energy | `sensor.<appliance>_energy` |",
-        "| Active Power | `sensor.<appliance>_active_power` "
-        "or `sensor.<appliance>_watts` |",
-        "| Activity Summary | `sensor.<circuit>_activity_summary` |",
-    ):
-        assert row in readme_text
-    assert "`binary_sensor.<circuit>_running`" not in readme_text
-    assert "`sensor.<circuit>_electrical_health`" not in readme_text
-    assert "- Energy (`sensor.<appliance>_energy`)" not in readme_text
-    assert "- Health Summary:" not in readme_text
-    assert "Known Load Share" in readme_text
-    assert "`sensor.<circuit>_nilm_signature_count`" in readme_text
-    assert "`sensor.<circuit>_nilm_discovered_signatures`" not in readme_text
-    assert "Expert Energy Detail group" in readme_text
-    assert "Expert Demand and Capacity group" in readme_text
-    assert "Expert Mains and Solar Detail group" in readme_text
-    assert "Expert NILM Detail group" in readme_text
-    assert "Expert Developer Diagnostics group" in readme_text
-    assert "how much of current mains power is explained" in readme_text
-    assert "Expert group" in readme_text
-    assert "Core/default visible" in readme_text
-    assert "Standard feature entity" in readme_text
-    assert "Advanced diagnostic, hidden by default." not in readme_text
 
 
 def test_nilm_helper_review_text_and_controls_are_user_facing() -> None:
@@ -9646,52 +9505,6 @@ def test_nilm_helper_review_text_and_controls_are_user_facing() -> None:
     assert "evidence.actions && evidence.actions.remove" in script
     assert "set_nilm_helper_link" not in script
     assert "remove_nilm_helper_link" not in script
-
-
-def test_readme_describes_current_nilm_workspace_flow() -> None:
-    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    for expected in (
-        "review recurring loads, assign or identify them",
-        "validate completed sessions or link reference sensors, and publish only "
-        "when the estimate is trustworthy",
-        "The graph shows measured source power; separated appliance power and "
-        "energy are estimates. Open sessions are provisional, and uncertain or "
-        "unexplained power remains unassigned.",
-        "Pure mixed and primary appliance plus mixed loads sources do not "
-        "process known loads.",
-        "Known-load masking is applied only to mains sources, as are Known Load Overlays.",
-        "they do not become component owners or subtraction meters.",
-        "Editing either time or dragging or keyboard-moving a graph boundary "
-        "updates the same unsaved interval; Save is the only action that persists it.",
-        "Adjust Interval loads the saved interval into the graph.",
-        "focuses its newest trustworthy completed session, then falls back to "
-        "its newest saved labeled interval.",
-        "An explicitly linked state sensor may still be authoritative for on/off "
-        "state; measured power remains validation evidence.",
-    ):
-        assert expected in readme_text
-
-    for expected in (
-        "NILM workspace can also pair compatible on/off edges",
-        "Review NILM Assignments",
-        "Mains & NILM",
-        "drag across the graph to select one or more appliance intervals",
-        "Label appliance interval",
-        "highlights the active graph selection and matching time fields",
-        "sends the saved evidence directly to Needs Review",
-        "false-positive and false-negative rates",
-        "The workspace groups work into four lanes",
-        "Needs Review, Assigned, Published, and Removed",
-        "dynamic dashboard NILM card can show the same lane counts "
-        "when it is available",
-        "Published NILM appliances are marked as estimated",
-        "Remove HA Device",
-        "NILM estimates are inferred from aggregate power and are not safety evidence",
-        "`assign_session_to_appliance`",
-        "`publish_nilm_appliance_assignment`",
-    ):
-        assert expected in readme_text
 
 
 def test_nilm_workspace_source_picker_renders_and_navigates_only_for_multiple_sources() -> (
@@ -9776,34 +9589,6 @@ if (navigated !== path) throw new Error(`Load Separation action did not navigate
     )
 
 
-def test_readme_describes_bounded_settings_suggestion_attributes() -> None:
-    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    assert (
-        "Attributes show a bounded preview of up to five suggestions with IDs, "
-        "setting labels, current values, and suggested values"
-    ) in readme_text
-    old_attribute_text = (
-        "Attributes include recommendation IDs, suggested values, and evidence"
-    )
-    assert old_attribute_text not in readme_text
-
-
-def test_readme_explains_compatible_meter_support_and_links_product() -> None:
-    readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
-
-    assert "CircuitSetup-first, not CircuitSetup-only" in readme_text
-    assert "other compatible meters" in readme_text
-    assert (
-        "power, current, voltage, energy, frequency, reactive power, "
-        "apparent power, or power factor" in readme_text
-    )
-    assert (
-        "https://circuitsetup.us/index.php/product/expandable-6-channel-esp32-energy-meter/"
-        in readme_text
-    )
-
-
 def test_readme_screenshot_references_exist_and_are_cropped() -> None:
     readme_text = (ROOT / "README.md").read_text(encoding="utf-8")
     refs = re.findall(
@@ -9816,16 +9601,23 @@ def test_readme_screenshot_references_exist_and_are_cropped() -> None:
         "docs/images/readme/options-menu.png",
         "docs/images/readme/assignment-editor.png",
         "docs/images/readme/advanced-settings.png",
-        "docs/images/readme/notifications-panel.png",
+        "docs/images/readme/appliance-controls.png",
+        "docs/images/readme/appliance-comparison.png",
+        "docs/images/readme/appliance-insights.png",
         "docs/images/readme/alert-evidence.png",
-        "docs/images/readme/notifications-repairs.png",
+        "docs/images/readme/appliance-detail.png",
+        "docs/images/readme/daily-cost-energy.png",
         "docs/images/readme/demo-dashboard.png",
+        "docs/images/readme/electrical-settings.png",
+        "docs/images/readme/experimental-nilm.png",
+        "docs/images/readme/hvac-water-context.png",
+        "docs/images/readme/nilm-review.png",
     }
 
     assert expected <= set(refs)
     assert "### Screenshots" not in readme_text
     focused_native_refs = {
-        "docs/images/readme/notifications-panel.png",
+        "docs/images/readme/appliance-controls.png",
     }
     for ref in sorted(set(refs)):
         path = ROOT / ref
