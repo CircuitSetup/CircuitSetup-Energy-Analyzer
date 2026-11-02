@@ -13,7 +13,13 @@ Use Home Assistant's Energy Dashboard for long-term energy accounting and this i
 
 ![Energy Analyzer dashboard showing a complete day of mains power, amps, and appliance power](docs/images/readme/demo-dashboard.png)
 
-[Installation](#installation) · [Setup](#setup) · [Dashboard](#dashboard) · [Features](#features) · [Load separation](#experimental-load-separation-nilm) · [Alerts](#alerts-and-feedback) · [Troubleshooting](#troubleshooting)
+- [Installation](#installation)
+- [Setup](#setup)
+- [Dashboard](#dashboard)
+- [Features](#features)
+- [Load separation](#experimental-load-separation-nilm)
+- [Alerts](#alerts-and-feedback)
+- [Troubleshooting](#troubleshooting)
 
 ## What you can use it for
 
