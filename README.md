@@ -15,6 +15,21 @@ Use Home Assistant's Energy Dashboard for long-term energy accounting and this i
 
 [Installation](#installation) · [Setup](#setup) · [Dashboard](#dashboard) · [Features](#features) · [Load separation](#experimental-load-separation-nilm) · [Alerts](#alerts-and-feedback) · [Troubleshooting](#troubleshooting)
 
+## What you can use it for
+
+Use this integration when you want answers like:
+
+- Is this appliance running, idle, on standby, or not showing recent activity?
+- Is today's energy use unusually high for this circuit?
+- Is my refrigerator, washer, dryer, pump, HVAC, water heater, or EV charger behaving differently from its learned baseline?
+- Is a 240 V appliance balanced across both legs?
+- Are watts, amps, volts, VA, and power factor internally consistent?
+- Is a circuit approaching a configured breaker or capacity limit?
+- Which monitored circuits explain my mains power, and how much power is still unmonitored?
+- Is solar being exported, self-consumed, or available for flexible loads?
+- Do my measured kWh totals roughly agree with utility or Opower data?
+- Are there recurring unknown whole-home load signatures worth investigating?
+
 ## Installation
 
 **Requirements:** Home Assistant **2025.1.0+** and meter entities already available in Home Assistant. Real power in W or kW is enough for activity and derived energy tracking. Native cumulative kWh, current, voltage, power factor, reactive power, and apparent power add evidence for the checks that use them.
