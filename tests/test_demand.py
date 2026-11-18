@@ -9,6 +9,34 @@ from custom_components.circuitsetup_energy_analyzer.demand import (
 )
 
 
+def test_demand_keeps_power_in_effect_at_window_start() -> None:
+    history = {}
+    for minute, power in [(0, 6000.0), (6, 0.0), (16, 0.0)]:
+        result = record_demand_sample(
+            history,
+            circuit_id="ev",
+            timestamp=datetime(2026, 6, 3, 12, minute, tzinfo=UTC),
+            real_power_w=power,
+            settings=DemandSettings(demand_limit_w=1500),
+        )
+    assert result.current_demand_w == 2000
+    assert result.limit_exceeded is not None
+
+
+def test_demand_counts_only_the_fresh_part_of_a_cutoff_sample() -> None:
+    history = {}
+    for minute, power in [(0, 6000.0), (14, 0.0), (16, 0.0)]:
+        result = record_demand_sample(
+            history,
+            circuit_id="ev",
+            timestamp=datetime(2026, 6, 3, 12, minute, tzinfo=UTC),
+            real_power_w=power,
+            settings=DemandSettings(),
+        )
+    # 9 minutes at 6 kW, a 4-minute reporting gap, then 2 minutes at zero.
+    assert result.current_demand_w == 4909.1
+
+
 def test_record_demand_sample_uses_time_weighted_window_and_tracks_peak() -> None:
     history = {
         "samples": [

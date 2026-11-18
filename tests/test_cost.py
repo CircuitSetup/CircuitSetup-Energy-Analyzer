@@ -314,11 +314,18 @@ def test_record_cost_sample_marks_tariff_boundary_gap_unavailable() -> None:
     assert result.cost_today_status == "unavailable"
 
 
-def test_record_cost_sample_detects_hidden_tariff_period_in_gap() -> None:
+@pytest.mark.parametrize(
+    "previous_reading",
+    ["2026-06-08T16:00:00+00:00", "2026-06-07T23:59:00+00:00"],
+    ids=["same-day", "previous-day"],
+)
+def test_record_cost_sample_detects_hidden_tariff_period_in_gap(
+    previous_reading: str,
+) -> None:
     result = record_cost_sample(
         {
             "last_energy_kwh": 100.0,
-            "last_sample_at": "2026-06-08T16:00:00+00:00",
+            "last_sample_at": previous_reading,
         },
         circuit_id="hvac",
         timestamp=datetime(2026, 6, 8, 22, 0, tzinfo=UTC),
@@ -337,28 +344,31 @@ def test_record_cost_sample_detects_hidden_tariff_period_in_gap() -> None:
 
 
 @pytest.mark.parametrize(
-    ("last_sample_at", "gap_sample_at", "later_sample_at", "time_zone"),
+    ("last_sample_at", "gap_sample_at", "later_sample_at", "time_zone", "cycle_status"),
     [
         (
             "2026-06-09T03:50:00+00:00",
             datetime(2026, 6, 9, 4, 10, tzinfo=UTC),
             datetime(2026, 6, 9, 4, 20, tzinfo=UTC),
             "America/New_York",
+            "actual",
         ),
         (
             "2026-06-08T16:50:00+00:00",
             datetime(2026, 6, 8, 17, 10, tzinfo=UTC),
             datetime(2026, 6, 8, 17, 20, tzinfo=UTC),
             "UTC",
+            "unavailable",
         ),
     ],
     ids=("local-midnight", "tariff-boundary"),
 )
-def test_boundary_gap_keeps_daily_and_cycle_cost_incomplete_for_rest_of_day(
+def test_boundary_gap_tracks_daily_and_cycle_cost_independently(
     last_sample_at: str,
     gap_sample_at: datetime,
     later_sample_at: datetime,
     time_zone: str,
+    cycle_status: str,
 ) -> None:
     history = {"last_energy_kwh": 100.0, "last_sample_at": last_sample_at}
     settings = CostSettings(
@@ -390,7 +400,9 @@ def test_boundary_gap_keeps_daily_and_cycle_cost_incomplete_for_rest_of_day(
         result.cost_today_status,
         result.cost_today,
         evidence.get("cycle_cost_status"),
-    ) == ("unavailable", None, "unavailable")
+    ) == ("unavailable", None, cycle_status)
+    if cycle_status == "actual":
+        assert result.cycle_cost == 0.20
 
 
 def test_record_cost_sample_retains_only_cleanly_bracketed_complete_day() -> None:

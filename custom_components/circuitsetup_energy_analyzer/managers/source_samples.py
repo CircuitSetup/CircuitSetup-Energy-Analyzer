@@ -4,12 +4,13 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
-from ..aggregation import aggregate_dual_phase
+from ..aggregation import aggregate_dual_phase, weighted_power_factor
 from ..models import CircuitConfig, CircuitMode, PowerFlowMode, SensorRef, SensorRole
 from ..normalize import (
     NormalizedCircuitSample,
     SourceState,
     build_circuit_sample,
+    normalized_leg,
     suppress_inactive_stale_current_issues,
 )
 
@@ -65,17 +66,25 @@ class SourceSampleBuilder:
             mode=CircuitMode.SINGLE_PHASE,
             sensors=right_sensors,
         )
-        left_sample = build_circuit_sample(
-            left_config,
-            self.source_states_for(left_config, now),
-            now,
-        )
-        right_sample = build_circuit_sample(
-            right_config,
-            self.source_states_for(right_config, now),
-            now,
-        )
+        states = self.source_states_for(config, now)
+        left_sample = build_circuit_sample(left_config, states, now)
+        right_sample = build_circuit_sample(right_config, states, now)
+        leg_samples = (left_sample, right_sample)
         aggregated = aggregate_dual_phase(config.circuit_id, left_sample, right_sample)
+        peak_current = _max_sample_value(leg_samples, "peak_current")
+        quality_issues = aggregated.quality_issues
+        untagged_peaks = tuple(
+            sensor
+            for sensor in config.sensors
+            if sensor.role is SensorRole.PEAK_CURRENT
+            and normalized_leg(sensor.leg) is None
+        )
+        if untagged_peaks:
+            extra = build_circuit_sample(
+                replace(config, sensors=untagged_peaks), states, now
+            )
+            peak_current = _max_sample_value((*leg_samples, extra), "peak_current")
+            quality_issues += extra.quality_issues
         raw_real_power = _sum_complete_sample_values(
             (left_sample, right_sample),
             "raw_real_power",
@@ -85,6 +94,8 @@ class SourceSampleBuilder:
             circuit_id=config.circuit_id,
             real_power=aggregated.combined_real_power,
             current=aggregated.combined_current,
+            peak_current=peak_current,
+            max_leg_current=_max_sample_value(leg_samples, "max_leg_current"),
             voltage=aggregated.average_voltage,
             reactive_power=aggregated.combined_reactive_power,
             apparent_power=aggregated.combined_apparent_power,
@@ -92,7 +103,7 @@ class SourceSampleBuilder:
             frequency=aggregated.frequency,
             energy=aggregated.energy,
             source_entity_ids=tuple(sensor.entity_id for sensor in config.sensors),
-            quality_issues=aggregated.quality_issues,
+            quality_issues=quality_issues,
             raw_real_power=raw_real_power,
             power_flow=config.power_flow,
             power_flow_direction=_power_flow_direction(
@@ -197,7 +208,8 @@ class SourceSampleBuilder:
                 "apparent_power",
                 SensorRole.APPARENT_POWER,
             ),
-            power_factor=_average_sample_values(samples, "power_factor"),
+            power_factor=_parallel_power_factor(sensor_samples),
+            peak_current=_max_sample_value(samples, "peak_current"),
             frequency=_average_sample_values(samples, "frequency"),
             energy=_sum_parallel_sensor_values(
                 sensor_samples,
@@ -237,6 +249,47 @@ class SourceSampleBuilder:
             sample,
             inactive_power_threshold_w,
         )
+
+
+def _max_sample_value(
+    samples: list[NormalizedCircuitSample] | tuple[NormalizedCircuitSample, ...],
+    attribute: str,
+) -> float | None:
+    return max(
+        (
+            value
+            for sample in samples
+            if (value := getattr(sample, attribute)) is not None
+        ),
+        default=None,
+    )
+
+
+def _parallel_power_factor(
+    sensor_samples: list[tuple[SensorRef, NormalizedCircuitSample]],
+) -> float | None:
+    by_leg: dict[str, dict[SensorRole, float | None]] = {}
+    for sensor, sample in sensor_samples:
+        for role in (SensorRole.POWER_FACTOR, SensorRole.APPARENT_POWER):
+            if not _sensor_sample_has_role(sensor, sample, role):
+                continue
+            leg = (
+                normalized_leg(sensor.leg) or entity_id_leg_hint(sensor.entity_id) or ""
+            )
+            values = by_leg.setdefault(leg, {})
+            values[role] = None if role in values else getattr(sample, role.value)
+    # An explicitly whole-meter PF needs no per-leg weights.
+    if SensorRole.POWER_FACTOR in by_leg.get("", {}):
+        return by_leg[""][SensorRole.POWER_FACTOR]
+    return weighted_power_factor(
+        tuple(
+            (
+                by_leg.get(leg, {}).get(SensorRole.POWER_FACTOR),
+                by_leg.get(leg, {}).get(SensorRole.APPARENT_POWER),
+            )
+            for leg in ("a", "b")
+        )
+    )
 
 
 def _parallel_leg_samples(
@@ -444,12 +497,3 @@ def _power_flow_direction(
             return "export"
         return "balanced"
     return "load"
-
-
-def normalized_leg(leg: str | None) -> str | None:
-    value = str(leg or "").strip().lower()
-    if value in {"a", "left", "l1", "leg1", "line1", "phase1", "1"}:
-        return "a"
-    if value in {"b", "right", "l2", "leg2", "line2", "phase2", "2"}:
-        return "b"
-    return None

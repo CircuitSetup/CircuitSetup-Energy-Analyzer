@@ -349,6 +349,34 @@ def test_hvac_associations_payload_detail_links_keep_entry_identity() -> None:
         assert query["appliance_detail"] == ["1"]
 
 
+@pytest.mark.parametrize("exact", [False, True])
+def test_evidence_and_actions_stay_with_requested_entry(exact: bool) -> None:
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert()
+    first, second = _coordinator(alert), _coordinator(alert)
+    first.entry_id, second.entry_id = "first", "second"
+    params = {
+        "circuit_id": "hvac",
+        "alert_id": notification_id_for_alert(alert) if exact else None,
+    }
+    payload = alert_evidence_payload([first, second], entry_id="second", **params)
+    actions = payload["actions"]
+    for key in ("relearn_baseline", "pause_alerts", "acknowledge"):
+        assert actions[key]["data"]["entry_id"] == "second"
+    for path in (
+        actions["open_appliance_detail"]["path"],
+        payload["alert"]["evidence_path"],
+    ):
+        assert parse_qs(urlparse(path).query)["entry_id"] == ["second"]
+    assert (
+        alert_evidence_payload([first, second], entry_id="missing", **params)["status"]
+        == "not_found"
+    )
+
+
 def test_alert_evidence_payload_matches_exact_alert_id() -> None:
     from custom_components.circuitsetup_energy_analyzer.panel import (
         alert_evidence_payload,
@@ -458,7 +486,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20260824-3"
+    assert PANEL_MODULE_VERSION == "20261117-1"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -1180,6 +1208,7 @@ def test_alert_evidence_payload_guides_recommendation_preview() -> None:
     assert recommendation["evidence_path"] == (
         "/circuitsetup-energy-analyzer-evidence"
         "?circuit_id=ev_charger&recommendation_id=ev_charger%3Awarning_ratio%3Av1"
+        "&entry_id=entry-1"
     )
     assert recommendation["actions"]["preview"] == {
         "path": recommendation["evidence_path"],
@@ -8821,6 +8850,69 @@ async def test_setup_entry_registers_and_unloads_panel_with_first_entry() -> Non
 
     assert frontend.removed == [PANEL_URL_PATH, PANEL_URL_PATH]
     assert "_services_setup" not in hass.data[DOMAIN]
+
+
+@pytest.mark.asyncio
+async def test_setup_during_last_unload_keeps_shared_surfaces(monkeypatch) -> None:
+    import custom_components.circuitsetup_energy_analyzer as integration
+    from tests.helpers import FakeConfigEntry
+
+    started = asyncio.Event()
+    resume = asyncio.Event()
+    surfaces = set()
+
+    async def setup_services(hass):
+        surfaces.add("services")
+
+    async def setup_panel(hass):
+        surfaces.add("panel")
+
+    async def unload_services(hass):
+        surfaces.discard("services")
+
+    async def unload_panel(hass):
+        surfaces.discard("panel")
+
+    original_start = integration.EnergyAnalyzerCoordinator.async_start
+
+    async def gated_start(coordinator, entities):
+        if coordinator.entry_id == "second":
+            started.set()
+            await resume.wait()
+        await original_start(coordinator, entities)
+
+    async def forward(entry, platforms):
+        pass
+
+    async def unload(entry, platforms):
+        return True
+
+    hass = SimpleNamespace(
+        data={},
+        config_entries=SimpleNamespace(
+            async_forward_entry_setups=forward, async_unload_platforms=unload
+        ),
+    )
+    first, second = [
+        FakeConfigEntry(entry_id=key, data={}) for key in ("first", "second")
+    ]
+    monkeypatch.setattr(integration, "async_setup_services", setup_services)
+    monkeypatch.setattr(integration, "async_setup_panel", setup_panel)
+    monkeypatch.setattr(integration, "async_unload_services", unload_services)
+    monkeypatch.setattr(integration, "async_unload_panel", unload_panel)
+    monkeypatch.setattr(
+        integration.EnergyAnalyzerCoordinator, "async_start", gated_start
+    )
+    assert await integration.async_setup_entry(hass, first)
+    setup = asyncio.create_task(integration.async_setup_entry(hass, second))
+    await started.wait()
+    unloading = asyncio.create_task(integration.async_unload_entry(hass, first))
+    await asyncio.sleep(0)
+    resume.set()
+    assert all(await asyncio.gather(setup, unloading))
+    assert surfaces == {"panel", "services"}
+    assert await integration.async_unload_entry(hass, second)
+    assert not surfaces
 
 
 @pytest.mark.asyncio

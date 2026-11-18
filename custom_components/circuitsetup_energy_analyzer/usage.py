@@ -79,10 +79,10 @@ def derive_cumulative_energy_from_power(
             average_power_w = (max(last_power_w, 0.0) + max(power_w, 0.0)) / 2
             energy_kwh += average_power_w * elapsed.total_seconds() / 3_600_000
 
-    history["derived_energy_kwh"] = round(energy_kwh, 6)
+    history["derived_energy_kwh"] = energy_kwh
     history["derived_energy_last_sample_at"] = timestamp.isoformat()
     history["derived_energy_last_power_w"] = float(power_w)
-    return float(history["derived_energy_kwh"])
+    return energy_kwh
 
 
 def record_energy_usage(
@@ -246,7 +246,7 @@ def _coerce_days(raw_days: Any) -> list[dict[str, float | str | bool]]:
             continue
         day: dict[str, float | str | bool] = {
             "date": date,
-            "usage_kwh": _round_kwh(max(usage, 0.0)),
+            "usage_kwh": max(usage, 0.0),
         }
         if isinstance(raw_day.get("complete"), bool):
             day["complete"] = raw_day["complete"]
@@ -286,7 +286,7 @@ def _add_daily_usage(
 ) -> None:
     for day in days:
         if day["date"] == date:
-            day["usage_kwh"] = _round_kwh(float(day["usage_kwh"]) + delta_kwh)
+            day["usage_kwh"] = float(day["usage_kwh"]) + delta_kwh
             if not baseline_eligible:
                 day["baseline_eligible"] = False
             if complete is False:
@@ -294,7 +294,7 @@ def _add_daily_usage(
             return
     day: dict[str, float | str | bool] = {
         "date": date,
-        "usage_kwh": _round_kwh(delta_kwh),
+        "usage_kwh": delta_kwh,
     }
     if not baseline_eligible:
         day["baseline_eligible"] = False

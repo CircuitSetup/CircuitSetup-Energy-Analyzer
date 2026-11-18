@@ -43,6 +43,15 @@ class SetupHealthAggregator:
     def __init__(self, coordinator: Any) -> None:
         self._coordinator = coordinator
         self.active_repair_issues: set[tuple[str, str]] = set()
+        self._legacy_checked: set[tuple[str, frozenset[str]]] = set()
+
+    def _retire_legacy_issues(self, circuit_id: str, problems: frozenset[str]) -> None:
+        key = (circuit_id, problems)
+        if key not in self._legacy_checked:
+            repairs.retire_legacy_circuit_issues(
+                self._coordinator.hass, self._coordinator.entry_id, circuit_id, problems
+            )
+            self._legacy_checked.add(key)
 
     async def async_run_mapping_checks(self) -> None:
         """Run lightweight source mapping checks and refresh setup UX state."""
@@ -98,6 +107,7 @@ class SetupHealthAggregator:
                 coordinator.hass,
                 circuit_id,
                 _DATA_QUALITY_REPAIR_PROBLEMS,
+                entry_id=coordinator.entry_id,
             )
         )
         for issue in current - desired:
@@ -105,6 +115,7 @@ class SetupHealthAggregator:
                 coordinator.hass,
                 issue[0],
                 issue[1],
+                entry_id=coordinator.entry_id,
             )
             self.active_repair_issues.discard(issue)
 
@@ -133,6 +144,7 @@ class SetupHealthAggregator:
                 coordinator.hass,
                 issue[0],
                 issue[1],
+                entry_id=coordinator.entry_id,
                 source_entities=source_entities,
                 data=self.data_quality_repair_data(
                     issue[0],
@@ -141,6 +153,7 @@ class SetupHealthAggregator:
                 ),
             )
             self.active_repair_issues.add(issue)
+        self._retire_legacy_issues(circuit_id, _DATA_QUALITY_REPAIR_PROBLEMS)
 
     async def async_sync_setup_health_repairs(self, circuit_id: str) -> None:
         """Create/delete setup-health repair issues for one circuit."""
@@ -203,6 +216,7 @@ class SetupHealthAggregator:
                 coordinator.hass,
                 circuit_id,
                 _SETUP_HEALTH_REPAIR_PROBLEMS,
+                entry_id=coordinator.entry_id,
             )
         )
         for issue in sorted(current - desired):
@@ -210,6 +224,7 @@ class SetupHealthAggregator:
                 coordinator.hass,
                 issue[0],
                 issue[1],
+                entry_id=coordinator.entry_id,
             )
             self.active_repair_issues.discard(issue)
 
@@ -218,9 +233,11 @@ class SetupHealthAggregator:
                 coordinator.hass,
                 issue[0],
                 issue[1],
+                entry_id=coordinator.entry_id,
                 data=self.repair_data(issue[0], issue[1]),
             )
             self.active_repair_issues.add(issue)
+        self._retire_legacy_issues(circuit_id, _SETUP_HEALTH_REPAIR_PROBLEMS)
 
     def data_quality_repair_data(
         self,

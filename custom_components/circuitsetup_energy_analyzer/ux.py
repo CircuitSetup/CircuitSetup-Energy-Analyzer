@@ -160,6 +160,7 @@ def alert_evidence_detail(
     *,
     config: CircuitConfig | None = None,
     dashboard_path: str = DEFAULT_ALERT_EVIDENCE_PATH,
+    entry_id: str | None = None,
 ) -> dict[str, Any]:
     """Return JSON-safe detail suitable for dashboard attributes."""
     first_seen = _isoformat_or_none(alert.first_seen)
@@ -214,7 +215,9 @@ def alert_evidence_detail(
         "contributing_metrics_count": contributing_metrics["count"],
         "contributing_metrics_has_more": contributing_metrics["has_more"],
         "contributing_metrics_omitted_count": contributing_metrics["omitted_count"],
-        "evidence_path": alert_evidence_path(alert, dashboard_path=dashboard_path),
+        "evidence_path": alert_evidence_path(
+            alert, dashboard_path=dashboard_path, entry_id=entry_id
+        ),
         "graph_entities": list(alert_graph_entities(alert, config)),
         "source_entities": source_entities["entities"],
         "source_entities_count": source_entities["count"],

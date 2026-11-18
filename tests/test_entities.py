@@ -2855,6 +2855,32 @@ def test_daily_energy_and_cost_sensor_descriptions() -> None:
     ).unique_id.endswith("_fridge_daily_energy_usage")
 
 
+def test_summary_sensor_evidence_paths_keep_entry_identity() -> None:
+    from urllib.parse import parse_qs, urlsplit
+
+    from custom_components.circuitsetup_energy_analyzer.sensor import (
+        SENSOR_DESCRIPTIONS,
+        CircuitAnalyzerSensor,
+    )
+
+    coordinator = SimpleNamespace(data=AnalyzerState())
+    circuit = SimpleNamespace(
+        circuit_id="fridge", name="Fridge", appliance_profile="refrigerator"
+    )
+    descriptions = {item.key: item for item in SENSOR_DESCRIPTIONS}
+    for key in ("health_summary", "energy_summary"):
+        attrs = CircuitAnalyzerSensor(
+            coordinator,
+            entry_id="entry-1",
+            circuit=circuit,
+            description=descriptions[key],
+        ).extra_state_attributes
+        assert parse_qs(urlsplit(attrs["evidence_path"]).query) == {
+            "entry_id": ["entry-1"],
+            "circuit_id": ["fridge"],
+        }
+
+
 def test_sensor_descriptions_classify_dashboard_vs_advanced_detail() -> None:
     from custom_components.circuitsetup_energy_analyzer.entity import (
         EntityCategory,

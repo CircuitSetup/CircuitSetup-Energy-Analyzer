@@ -451,6 +451,9 @@ async def test_alert_notification_uses_short_title_and_bold_appliance_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from custom_components.circuitsetup_energy_analyzer import notifications
+    from custom_components.circuitsetup_energy_analyzer.managers import (
+        notification_controller,
+    )
 
     calls: list[dict[str, object]] = []
 
@@ -469,7 +472,11 @@ async def test_alert_notification_uses_short_title_and_bold_appliance_name(
     persistent_notification = ModuleType(
         "homeassistant.components.persistent_notification",
     )
+    dismissals = []
     persistent_notification.async_create = fake_create
+    persistent_notification.async_dismiss = lambda hass, notification_id: (
+        dismissals.append(notification_id)
+    )
     components.persistent_notification = persistent_notification
     homeassistant.components = components
     monkeypatch.setitem(sys.modules, "homeassistant", homeassistant)
@@ -499,6 +506,7 @@ async def test_alert_notification_uses_short_title_and_bold_appliance_name(
         SimpleNamespace(),
         alert,
         config=config,
+        entry_id="second",
     )
 
     assert calls
@@ -509,6 +517,25 @@ async def test_alert_notification_uses_short_title_and_bold_appliance_name(
     )
     assert "Baseline value" not in message
     assert "Observed value (Demand monthly peak): 4100 W" in message
+    assert "entry_id=second)" in message
+    await notifications.async_create_alert_notification(
+        SimpleNamespace(), alert, config=config, entry_id="first"
+    )
+    assert calls[0]["notification_id"] != calls[1]["notification_id"]
+
+    controller = notification_controller.NotificationController(
+        SimpleNamespace(
+            hass=SimpleNamespace(),
+            entry_id="second",
+            store_data=SimpleNamespace(
+                settings_recommendation_notification_episode_key=()
+            ),
+        )
+    )
+    alert_id = notifications.notification_id_for_alert(alert)
+    assert f"alert_id={alert_id}" in message
+    await controller.async_dismiss_alert_notification(alert_id)
+    assert dismissals == [calls[0]["notification_id"]]
 
 
 @pytest.mark.asyncio
@@ -681,9 +708,11 @@ def test_repair_issue_id_for_circuit_problem_is_stable() -> None:
         issue_id_for_circuit_problem,
     )
 
-    issue_id = issue_id_for_circuit_problem("mains", "missing_source_entities")
-    assert issue_id.startswith(f"{DOMAIN}_mains_missing_source_entities_")
-    assert issue_id == issue_id_for_circuit_problem("mains", "missing_source_entities")
+    issue_id = issue_id_for_circuit_problem("entry", "mains", "missing_source_entities")
+    assert issue_id.startswith(f"{DOMAIN}_entry_mains_missing_source_entities_")
+    assert issue_id == issue_id_for_circuit_problem(
+        "entry", "mains", "missing_source_entities"
+    )
 
 
 def test_repair_issue_id_does_not_collide_on_underscores() -> None:
@@ -691,9 +720,9 @@ def test_repair_issue_id_does_not_collide_on_underscores() -> None:
         issue_id_for_circuit_problem,
     )
 
-    assert issue_id_for_circuit_problem("a_b", "c") != issue_id_for_circuit_problem(
-        "a", "b_c"
-    )
+    assert issue_id_for_circuit_problem(
+        "entry", "a_b", "c"
+    ) != issue_id_for_circuit_problem("entry", "a", "b_c")
 
 
 def test_repair_issue_severity_normalizes_unsupported_values_to_warning() -> None:
@@ -744,6 +773,7 @@ async def test_repair_issue_includes_actionable_guidance(monkeypatch) -> None:
         SimpleNamespace(),
         "fridge",
         "missing_energy_source",
+        entry_id="entry",
         source_entities=("sensor.fridge_power", "sensor.fridge_power"),
         data={
             "circuit_name": "Refrigerator",
@@ -2415,6 +2445,35 @@ async def test_circuit_services_fail_fast_for_unknown_circuit_id() -> None:
     assert exc_info.value.translation_placeholders == {"circuit_id": "freezer"}
 
     assert coordinator.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("service", "method", "target"),
+    [
+        ("relearn_baseline", "async_relearn_baseline", {"circuit_id": "mains"}),
+        ("start_maintenance", "async_start_maintenance", {"circuit_id": "mains"}),
+        ("end_maintenance", "async_end_maintenance", {"circuit_id": "mains"}),
+        ("acknowledge_alert", "async_acknowledge_alert", {"alert_id": "shared"}),
+    ],
+)
+async def test_panel_service_targets_requested_entry(service, method, target) -> None:
+    from custom_components.circuitsetup_energy_analyzer.services import (
+        _dispatch_service,
+    )
+
+    entries = {
+        entry_id: SimpleNamespace(
+            async_set_updated_data=lambda data: None,
+            has_circuit=lambda circuit_id: circuit_id == "mains",
+            **{method: AsyncMock(return_value=True)},
+        )
+        for entry_id in ("first", "second")
+    }
+    hass = SimpleNamespace(data={DOMAIN: entries})
+    await _dispatch_service(hass, service, {**target, "entry_id": "second"})
+    getattr(entries["first"], method).assert_not_awaited()
+    getattr(entries["second"], method).assert_awaited_once()
 
 
 @pytest.mark.asyncio

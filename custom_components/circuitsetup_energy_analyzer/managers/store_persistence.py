@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -17,6 +18,7 @@ from .recommendation_episodes import compact_settings_recommendation_episode_key
 
 STORE_RETENTION_SAVE_INTERVAL = timedelta(minutes=1)
 STORE_DIRTY_SAVE_INTERVAL = timedelta(minutes=2)
+_LOGGER = logging.getLogger(__name__)
 _NILM_CIRCUIT_STORE_FIELDS = (
     "nilm_signatures",
     "nilm_unknown_loads_by_circuit",
@@ -106,6 +108,7 @@ class StorePersistenceManager:
         self._last_dirty_save_at: datetime | None = None
         self._dirty_generation = 0
         self._save_lock = asyncio.Lock()
+        self._delayed_save: asyncio.Task[None] | None = None
         self.dirty = False
 
     def mark_dirty(self) -> None:
@@ -298,8 +301,14 @@ class StorePersistenceManager:
             store = getattr(self._coordinator, "_store", None)
             if store is None or not self.dirty:
                 return
-            if not force and not self._dirty_save_due(now):
-                return
+            if not force and self._last_dirty_save_at is not None:
+                remaining = STORE_DIRTY_SAVE_INTERVAL - (now - self._last_dirty_save_at)
+                if remaining > timedelta(0):
+                    if self._delayed_save is None:
+                        self._delayed_save = asyncio.create_task(
+                            self._async_delayed_save(remaining.total_seconds())
+                        )
+                    return
             if self._dirty_save_retention_due(now):
                 started_at = monotonic()
                 try:
@@ -320,11 +329,23 @@ class StorePersistenceManager:
                     continue
                 self._last_dirty_save_at = now
                 self.dirty = generation != self._dirty_generation
+            self.cancel_delayed_save()
 
-    def _dirty_save_due(self, now: datetime) -> bool:
-        if self._last_dirty_save_at is None:
-            return True
-        return now - self._last_dirty_save_at >= STORE_DIRTY_SAVE_INTERVAL
+    def cancel_delayed_save(self) -> None:
+        if self._delayed_save is not None:
+            if self._delayed_save is not asyncio.current_task():
+                self._delayed_save.cancel()
+            self._delayed_save = None
+
+    async def _async_delayed_save(self, delay: float) -> None:
+        while True:
+            await asyncio.sleep(delay)
+            try:
+                await self.async_save_if_dirty(self._coordinator.current_time())
+                return
+            except Exception:
+                _LOGGER.exception("Deferred feature store save failed, retrying")
+                delay = STORE_DIRTY_SAVE_INTERVAL.total_seconds()
 
     def _dirty_save_retention_due(self, now: datetime) -> bool:
         if self._last_dirty_save_retention_at is None:

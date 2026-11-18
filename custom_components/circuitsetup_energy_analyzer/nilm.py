@@ -1823,12 +1823,15 @@ def build_nilm_appliance_identity(
     )
 
 
-def nilm_appliance_detail_path(identity: NilmApplianceIdentity) -> str:
+def nilm_appliance_detail_path(
+    identity: NilmApplianceIdentity, *, entry_id: str | None = None
+) -> str:
     """Return the appliance-scoped detail route for a NILM identity."""
     return "/circuitsetup-energy-analyzer-evidence?" + urlencode(
         {
             "circuit_id": identity.mains_circuit_id,
             "assignment_id": identity.assignment_id,
+            **({"entry_id": entry_id} if entry_id else {}),
             "nilm_workspace": "1",
             "appliance_detail": "1",
         }
@@ -1838,6 +1841,7 @@ def nilm_appliance_detail_path(identity: NilmApplianceIdentity) -> str:
 def build_nilm_appliance_alert_payload(
     identity: NilmApplianceIdentity,
     *,
+    entry_id: str | None = None,
     session_id: str | None = None,
     signature_fingerprint: str | None = None,
 ) -> dict[str, Any]:
@@ -1853,7 +1857,9 @@ def build_nilm_appliance_alert_payload(
             "session_id": session_id,
             "signature_fingerprint": signature_fingerprint,
         },
-        "appliance_detail_path": nilm_appliance_detail_path(identity),
+        "appliance_detail_path": nilm_appliance_detail_path(
+            identity, entry_id=entry_id
+        ),
     }
 
 

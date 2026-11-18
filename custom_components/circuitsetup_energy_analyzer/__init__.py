@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
 from typing import Any
 
@@ -28,11 +29,21 @@ from .storage import FeatureStore, FeatureStoreData
 
 type CircuitSetupEnergyAnalyzerConfigEntry = Any
 
-_SERVICES_SETUP_KEY = "_services_setup"
+
+def _lifecycle_lock(hass: Any) -> asyncio.Lock:
+    return hass.data.setdefault(f"{DOMAIN}_lifecycle_lock", asyncio.Lock())
 
 
 def _has_config_entries(domain_data: dict[str, Any]) -> bool:
     return any(not str(key).startswith("_") for key in domain_data)
+
+
+async def _async_unload_unused_surfaces(hass: Any) -> None:
+    """Release shared surfaces while holding the lifecycle lock."""
+    domain_data = hass.data.get(DOMAIN, {})
+    if not _has_config_entries(domain_data) and not domain_data.get(DATA_RELOAD_COUNT):
+        await async_unload_panel(hass)
+        await async_unload_services(hass)
 
 
 async def async_setup_entry(
@@ -52,22 +63,24 @@ async def async_setup_entry(
         store_data=store_data,
         config_entry=entry,
     )
-    first_entry = not _has_config_entries(hass.data[DOMAIN])
-    try:
-        if first_entry:
-            await async_setup_services(hass)
-            await async_setup_panel(hass)
-            await coordinator.dashboard_controller.async_refresh_lovelace_resource()
-        await coordinator.async_start(_source_entities_for_entry(entry, coordinator))
-        hass.data[DOMAIN][entry_id] = coordinator
-        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    except Exception:
-        hass.data.get(DOMAIN, {}).pop(entry_id, None)
-        await coordinator.async_stop()
-        if first_entry and not _has_config_entries(hass.data.get(DOMAIN, {})):
-            await async_unload_panel(hass)
-            await async_unload_services(hass)
-        raise
+    async with _lifecycle_lock(hass):
+        try:
+            if not _has_config_entries(hass.data[DOMAIN]):
+                await async_setup_services(hass)
+                await async_setup_panel(hass)
+                await coordinator.dashboard_controller.async_refresh_lovelace_resource()
+            await coordinator.async_start(
+                _source_entities_for_entry(entry, coordinator)
+            )
+            hass.data[DOMAIN][entry_id] = coordinator
+            await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        except (Exception, asyncio.CancelledError):
+            hass.data[DOMAIN].pop(entry_id, None)
+            try:
+                await coordinator.async_stop()
+            finally:
+                await _async_unload_unused_surfaces(hass)
+            raise
     return True
 
 
@@ -80,14 +93,13 @@ async def async_unload_entry(
     entry_id = getattr(entry, "entry_id", "default")
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        coordinator = domain_data.pop(entry_id, None)
-        if coordinator is not None:
-            await coordinator.async_stop()
-        if not _has_config_entries(domain_data) and not domain_data.get(
-            DATA_RELOAD_COUNT, 0
-        ):
-            await async_unload_panel(hass)
-            await async_unload_services(hass)
+        async with _lifecycle_lock(hass):
+            coordinator = domain_data.pop(entry_id, None)
+            try:
+                if coordinator is not None:
+                    await coordinator.async_stop()
+            finally:
+                await _async_unload_unused_surfaces(hass)
     return unload_ok
 
 

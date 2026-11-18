@@ -52,11 +52,33 @@ def aggregate_dual_phase(
             right.apparent_power,
         ),
         average_voltage=_average_optional(left.voltage, right.voltage),
-        average_power_factor=_average_optional(left.power_factor, right.power_factor),
+        average_power_factor=weighted_power_factor(
+            (
+                (left.power_factor, left.apparent_power),
+                (right.power_factor, right.apparent_power),
+            )
+        ),
         voltage_difference=_difference_optional(left.voltage, right.voltage),
         leg_power_imbalance_ratio=_imbalance_ratio(left_watts, right_watts),
         quality_issues=tuple(issues),
     )
+
+
+def weighted_power_factor(
+    legs: tuple[tuple[float | None, float | None], ...],
+) -> float | None:
+    """Combine reported power factors using each leg's share of the apparent load."""
+    weighted_sum = total_va = 0.0
+    for power_factor, apparent_power in legs:
+        if apparent_power is None or apparent_power < 0:
+            return None
+        if apparent_power == 0:
+            continue
+        if power_factor is None:
+            return None
+        weighted_sum += power_factor * apparent_power
+        total_va += apparent_power
+    return weighted_sum / total_va if total_va else None
 
 
 def _leg_sample(leg: str, sample: CircuitSample) -> LegSample:

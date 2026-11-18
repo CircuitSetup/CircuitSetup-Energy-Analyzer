@@ -8,18 +8,13 @@ from typing import Any
 
 from ..alerting import Observation
 from ..capacity import CapacityResult, CapacitySettings, evaluate_circuit_capacity
-from ..models import AlertEvidence, CircuitConfig, CircuitMode, SensorRole
-from ..normalize import NormalizedCircuitSample, SourceState, normalize_sensor_value
+from ..models import AlertEvidence, CircuitConfig, CircuitMode
+from ..normalize import NormalizedCircuitSample
 from .base import AlertPolicy, FeatureResult, ProcessingContext, StateUpdate
 
 type CapacitySettingsProvider = Callable[[str], CapacitySettings]
 type CapacityAlertPolicyProvider = Callable[[str], AlertPolicy]
 type RetentionDaysProvider = Callable[[str], int]
-type SourceStatesProvider = Callable[
-    [CircuitConfig, datetime],
-    Mapping[str, SourceState],
-]
-
 _CAPACITY_BUCKET_MINUTES = 5
 _CAPACITY_SAMPLE_FORMAT = "5m-max-v1"
 
@@ -35,12 +30,10 @@ class CapacityProcessor:
         settings_for_config: CapacitySettingsProvider,
         alert_policy_for_circuit: CapacityAlertPolicyProvider,
         retention_days_for_circuit: RetentionDaysProvider,
-        source_states_for: SourceStatesProvider,
     ) -> None:
         self._settings_for_config = settings_for_config
         self._alert_policy_for_circuit = alert_policy_for_circuit
         self._retention_days_for_circuit = retention_days_for_circuit
-        self._source_states_for = source_states_for
 
     def process(
         self,
@@ -50,7 +43,7 @@ class CapacityProcessor:
     ) -> FeatureResult:
         """Record capacity state and return configured capacity alerts."""
         circuit_id = circuit_config.circuit_id
-        current_amps = self._capacity_current_a(circuit_config, sample, context)
+        current_amps = _capacity_current_a(circuit_config, sample)
         result = evaluate_circuit_capacity(
             circuit_id=circuit_id,
             current_amps=current_amps,
@@ -87,76 +80,6 @@ class CapacityProcessor:
                 feature_result.alerts.append(alert)
                 feature_result.notifications.append(alert)
         return feature_result
-
-    def _capacity_current_a(
-        self,
-        config: CircuitConfig,
-        sample: NormalizedCircuitSample,
-        context: ProcessingContext,
-    ) -> float | None:
-        peak_currents = self._sensor_currents(
-            config,
-            context.now,
-            SensorRole.PEAK_CURRENT,
-        )
-        if peak_currents:
-            return max(peak_currents)
-        if config.mode is CircuitMode.DUAL_PHASE:
-            leg_currents = self._dual_phase_leg_currents(config, context.now)
-            if leg_currents:
-                return max(leg_currents)
-        current = getattr(sample, "current", None)
-        if current is None:
-            return None
-        if config.mode is CircuitMode.DUAL_PHASE and current > 0.0:
-            return float(current) / 2.0
-        return float(current)
-
-    def _dual_phase_leg_currents(
-        self,
-        config: CircuitConfig,
-        now: datetime,
-    ) -> tuple[float, ...]:
-        return self._sensor_currents(
-            config,
-            now,
-            SensorRole.CURRENT,
-            require_leg=True,
-        )
-
-    def _sensor_currents(
-        self,
-        config: CircuitConfig,
-        now: datetime,
-        role: SensorRole,
-        *,
-        require_leg: bool = False,
-    ) -> tuple[float, ...]:
-        sensors = tuple(
-            sensor
-            for sensor in config.sensors
-            if sensor.role is role
-            and (not require_leg or _normalized_leg(sensor.leg) is not None)
-        )
-        if not sensors:
-            return ()
-        states = self._source_states_for(config, now)
-        currents: list[float] = []
-        for sensor in sensors:
-            source = states.get(sensor.entity_id)
-            if source is None:
-                continue
-            try:
-                value = normalize_sensor_value(
-                    float(source.state),
-                    role,
-                    source.unit,
-                )
-            except ValueError:
-                continue
-            if value != 0.0:
-                currents.append(abs(value))
-        return tuple(currents)
 
     def _capacity_alert(
         self,
@@ -242,6 +165,25 @@ def _record_capacity_current_sample(
     return True
 
 
+def _capacity_current_a(
+    config: CircuitConfig, sample: NormalizedCircuitSample
+) -> float | None:
+    if peak := getattr(sample, "peak_current", None):
+        return peak
+    if config.mode is CircuitMode.DUAL_PHASE:
+        if (max_leg := getattr(sample, "max_leg_current", None)) is not None:
+            return max_leg
+        currents = (
+            getattr(sample, "leg_a_current", None),
+            getattr(sample, "leg_b_current", None),
+        )
+        if any(current is not None for current in currents):
+            return max(abs(current) for current in currents if current is not None)
+        if sample.current is not None and sample.current > 0:
+            return sample.current / 2
+    return sample.current
+
+
 def _capacity_power_w(sample: NormalizedCircuitSample) -> float | None:
     power = getattr(sample, "real_power", None)
     if power is None:
@@ -323,17 +265,6 @@ def _datetime_or_none(value: Any) -> datetime | None:
         return datetime.fromisoformat(value)
     except ValueError:
         return None
-
-
-def _normalized_leg(leg: str | None) -> str | None:
-    if leg is None:
-        return None
-    value = leg.strip().lower()
-    if value in {"a", "left", "l1", "line1", "1"}:
-        return "a"
-    if value in {"b", "right", "l2", "line2", "2"}:
-        return "b"
-    return None
 
 
 def _format_percent(value: float) -> str:

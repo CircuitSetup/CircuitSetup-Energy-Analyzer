@@ -4,6 +4,7 @@ import inspect
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from .config_parsing import circuit_configs_from_entry_data
 from .const import DOMAIN
 from .ids import tuple_id as _tuple_id
 from .models import Severity
@@ -64,28 +65,63 @@ _REPAIR_FIXES: dict[str, str] = {
 }
 
 
-def issue_id_for_circuit_problem(circuit_id: str, problem: str) -> str:
+def issue_id_for_circuit_problem(entry_id: str, circuit_id: str, problem: str) -> str:
     """Return a stable Repairs issue id for a circuit setup/data-quality problem."""
-    return _tuple_id(DOMAIN, circuit_id, problem)
+    return _tuple_id(DOMAIN, entry_id, circuit_id, problem)
+
+
+def _issue_registry(hass: Any) -> Any:
+    from homeassistant.helpers import issue_registry as ir
+
+    get_registry = getattr(ir, "async_get", None)
+    if get_registry is None:
+        return None
+
+    try:
+        return get_registry(hass)
+    except (AttributeError, TypeError):
+        return None
+
+
+def retire_legacy_circuit_issues(
+    hass: Any, entry_id: str, circuit_id: str, problems: Iterable[str]
+) -> None:
+    """Retire unscoped issues once every possible owner has reconciled them."""
+    from homeassistant.helpers import issue_registry as ir
+
+    registry = _issue_registry(hass)
+    if registry is None:
+        return
+    legacy_ids = [_tuple_id(DOMAIN, circuit_id, problem) for problem in problems]
+    existing = [key for key in legacy_ids if registry.async_get_issue(DOMAIN, key)]
+    if not existing:
+        return
+
+    owners = {
+        entry.entry_id
+        for entry in hass.config_entries.async_entries(DOMAIN)
+        if any(
+            config.circuit_id == circuit_id
+            for config in circuit_configs_from_entry_data(entry.data, entry.options)
+        )
+    }
+    checked = hass.data.setdefault(f"{DOMAIN}_legacy_repair_checks", {})
+    for key in existing:
+        checked.setdefault(key, set()).add(entry_id)
+        if owners <= checked[key]:
+            ir.async_delete_issue(hass, DOMAIN, key)
+            del checked[key]
 
 
 def existing_circuit_problem_issues(
     hass: Any,
     circuit_id: str,
     problems: Iterable[str],
+    *,
+    entry_id: str,
 ) -> set[tuple[str, str]]:
     """Return known circuit problem issues currently present in HA Repairs."""
-    from homeassistant.helpers import issue_registry as ir
-
-    get_registry = getattr(ir, "async_get", None)
-    if get_registry is None:
-        return set()
-
-    try:
-        registry = get_registry(hass)
-    except (AttributeError, TypeError):
-        return set()
-    get_issue = getattr(registry, "async_get_issue", None)
+    get_issue = getattr(_issue_registry(hass), "async_get_issue", None)
     if get_issue is None:
         return set()
 
@@ -94,7 +130,9 @@ def existing_circuit_problem_issues(
         problem_text = str(problem or "").strip()
         if not problem_text:
             continue
-        if get_issue(DOMAIN, issue_id_for_circuit_problem(circuit_id, problem_text)):
+        if get_issue(
+            DOMAIN, issue_id_for_circuit_problem(entry_id, circuit_id, problem_text)
+        ):
             existing.add((circuit_id, problem_text))
     return existing
 
@@ -106,6 +144,8 @@ async def async_create_data_quality_issue(
     severity: Severity | str = Severity.WARNING,
     source_entities: Iterable[str] = (),
     data: Mapping[str, Any] | None = None,
+    *,
+    entry_id: str,
 ) -> None:
     """Create a Home Assistant Repairs issue for data quality/config problems."""
     await async_create_circuit_issue(
@@ -115,6 +155,7 @@ async def async_create_data_quality_issue(
         severity=severity,
         source_entities=source_entities,
         data=data,
+        entry_id=entry_id,
     )
 
 
@@ -125,6 +166,8 @@ async def async_create_circuit_issue(
     severity: Severity | str = Severity.WARNING,
     source_entities: Iterable[str] = (),
     data: Mapping[str, Any] | None = None,
+    *,
+    entry_id: str,
 ) -> None:
     """Create a Home Assistant Repairs issue for one circuit problem."""
     from homeassistant.helpers import issue_registry as ir
@@ -156,7 +199,7 @@ async def async_create_circuit_issue(
         create_issue,
         hass,
         DOMAIN,
-        issue_id_for_circuit_problem(circuit_id, problem),
+        issue_id_for_circuit_problem(entry_id, circuit_id, problem),
         **kwargs,
     )
 
@@ -165,15 +208,19 @@ async def async_delete_data_quality_issue(
     hass: Any,
     circuit_id: str,
     problem: str,
+    *,
+    entry_id: str,
 ) -> None:
     """Delete a Home Assistant Repairs issue for a resolved data-quality problem."""
-    await async_delete_circuit_issue(hass, circuit_id, problem)
+    await async_delete_circuit_issue(hass, circuit_id, problem, entry_id=entry_id)
 
 
 async def async_delete_circuit_issue(
     hass: Any,
     circuit_id: str,
     problem: str,
+    *,
+    entry_id: str,
 ) -> None:
     """Delete a Home Assistant Repairs issue for a resolved circuit problem."""
     from homeassistant.helpers import issue_registry as ir
@@ -186,7 +233,7 @@ async def async_delete_circuit_issue(
         delete_issue,
         hass,
         DOMAIN,
-        issue_id_for_circuit_problem(circuit_id, problem),
+        issue_id_for_circuit_problem(entry_id, circuit_id, problem),
     )
 
 

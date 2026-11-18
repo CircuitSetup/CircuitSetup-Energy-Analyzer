@@ -351,6 +351,7 @@ class StateReducer:
         alert: Any | None,
         *,
         config: Any | None,
+        entry_id: str | None = None,
     ) -> None:
         """Refresh the compact alert evidence payload for one circuit."""
         if alert is None:
@@ -358,6 +359,7 @@ class StateReducer:
             return
         state.alert_evidence_by_circuit[circuit_id] = alert_evidence_detail(
             alert,
+            entry_id=entry_id,
             config=config,
         )
 

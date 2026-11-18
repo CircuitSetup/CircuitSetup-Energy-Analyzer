@@ -402,6 +402,9 @@ def _dashboard_circuit(
         )
         if entity_id:
             entities[entity_key] = entity_id
+    detail_query = {"circuit_id": circuit_id, "appliance_detail": "1"}
+    if entry_id:
+        detail_query["entry_id"] = entry_id
     return DashboardCircuit(
         circuit_id=circuit_id,
         name=_circuit_name(circuit),
@@ -411,10 +414,7 @@ def _dashboard_circuit(
         is_mains=is_mains,
         is_hvac=_is_hvac_circuit(circuit),
         nilm_detection_enabled=nilm_detection_enabled(circuit),
-        detail_path=(
-            f"{DEFAULT_ALERT_EVIDENCE_PATH}?"
-            f"{urlencode({'circuit_id': circuit_id, 'appliance_detail': '1'})}"
-        ),
+        detail_path=f"{DEFAULT_ALERT_EVIDENCE_PATH}?{urlencode(detail_query)}",
         power_entities=power_entities,
         chart_power_entities=(
             _mains_chart_power_entities(power_entities, hass=hass)

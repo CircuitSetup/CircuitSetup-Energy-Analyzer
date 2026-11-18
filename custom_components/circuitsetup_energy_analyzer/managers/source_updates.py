@@ -3,7 +3,10 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Iterable, Mapping
 from contextlib import suppress
+from datetime import timedelta
 from typing import Any
+
+from ..normalize import STALE_AFTER
 
 LOOP_LAG_SAMPLE_SECONDS = 0.1
 
@@ -38,6 +41,7 @@ class SourceUpdateManager:
         self._batch_started_at: float | None = None
         self._latest_source_update_at: float | None = None
         self._unsub_state_change: Any = None
+        self._power_expiry_handle: asyncio.TimerHandle | None = None
         self._loop_lag_handle: asyncio.TimerHandle | None = None
 
     @property
@@ -92,6 +96,32 @@ class SourceUpdateManager:
                 with suppress(asyncio.CancelledError):
                     await pending_task
         self.cancel_pending_source_update()
+
+    def schedule_power_expiry(self) -> None:
+        """Refresh displayed watts when the oldest required source becomes stale."""
+        if self._power_expiry_handle is not None:
+            self._power_expiry_handle.cancel()
+            self._power_expiry_handle = None
+        if not self._coordinator.started:
+            return
+        observations = self._coordinator.state.latest_real_power_observation_by_circuit
+        oldest = min(
+            (
+                item.source_updated_at
+                for item in observations.values()
+                if item.available and item.source_updated_at is not None
+            ),
+            default=None,
+        )
+        if oldest is not None:
+            # Normalization accepts a source at exactly STALE_AFTER.
+            expires_at = oldest + STALE_AFTER + timedelta(microseconds=1)
+            delay = max(
+                0.0, (expires_at - self._coordinator.current_time()).total_seconds()
+            )
+            self._power_expiry_handle = asyncio.get_running_loop().call_later(
+                delay, self._coordinator.refresh_source_values
+            )
 
     def _cancel_loop_lag_sample(self) -> None:
         if self._loop_lag_handle is not None:
@@ -230,6 +260,9 @@ class SourceUpdateManager:
 
     def cancel_pending_source_update(self) -> None:
         """Cancel queued source-state processing during restart/unload."""
+        if self._power_expiry_handle is not None:
+            self._power_expiry_handle.cancel()
+            self._power_expiry_handle = None
         if self._source_update_task is not None and not self._source_update_task.done():
             self._source_update_task.cancel()
         if (

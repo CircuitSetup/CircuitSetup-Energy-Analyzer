@@ -24,7 +24,7 @@ from ..contextual_baseline import (
     upsert_contextual_sample,
 )
 from ..local_time import TimeZone, as_ha_local, local_date
-from ..models import CircuitConfig
+from ..models import CircuitConfig, SensorRole
 from ..normalize import NormalizedCircuitSample
 from ..usage import EnergyUsageSettings, EnergyUsageSpike, record_energy_usage
 from .base import AlertPolicy, FeatureResult, ProcessingContext, StateUpdate
@@ -193,6 +193,14 @@ class EnergyUsageProcessor:
         )
         alert_features = dict(spike.features)
         alert_features.update(_contextual_alert_features(contextual_comparison))
+        source_times = dict(getattr(sample, "source_updated_at_by_role", ()))
+        meter_time = source_times.get(SensorRole.ENERGY)
+        observation_key = f"{result.date}:{sample.energy}"
+        if meter_time is not None:
+            observation_key = (
+                meter_time.isoformat() if energy_source == "derived_from_power"
+                else f"{meter_time.isoformat()}:{sample.energy}"
+            )
         alert = self._alert_policy_for_circuit(circuit_id).observe(
             Observation(
                 circuit_id=circuit_id,
@@ -200,6 +208,7 @@ class EnergyUsageProcessor:
                 score=score,
                 baseline_confidence=baseline_confidence,
                 observed_at=context.now,
+                observation_key=observation_key,
                 observed_value=spike.daily_usage_kwh,
                 baseline_value=alert_baseline_value,
                 message=energy_usage_spike_message(circuit_config, spike),

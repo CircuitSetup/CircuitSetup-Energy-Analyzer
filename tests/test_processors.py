@@ -3844,13 +3844,13 @@ def test_energy_usage_processor_excludes_delta_spanning_completed_maintenance() 
     assert store_data.energy_usage_by_circuit["water_heater"]["days"] == [
         {
             "date": "2026-07-27",
-            "usage_kwh": 8.667,
+            "usage_kwh": pytest.approx(8 + 2 / 3),
             "complete": True,
             "baseline_eligible": False,
         },
         {
             "date": "2026-07-28",
-            "usage_kwh": 0.333,
+            "usage_kwh": pytest.approx(1 / 3),
             "baseline_eligible": False,
         },
     ]
@@ -7133,7 +7133,6 @@ def test_capacity_processor_records_current_and_returns_capacity_alert() -> None
         ),
         alert_policy_for_circuit=lambda _circuit_id: policy,
         retention_days_for_circuit=lambda _circuit_id: 45,
-        source_states_for=lambda _config, _now: {},
     )
 
     result = processor.process(sample, config, context)
@@ -7173,7 +7172,6 @@ def test_capacity_processor_records_current_and_returns_capacity_alert() -> None
 
 def test_capacity_processor_prefers_peak_current_for_spike_alerts() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
-    from custom_components.circuitsetup_energy_analyzer.normalize import SourceState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
         ProcessingContext,
     )
@@ -7202,12 +7200,6 @@ def test_capacity_processor_prefers_peak_current_for_spike_alerts() -> None:
             SensorRef("sensor.ev_peak_a", SensorRole.PEAK_CURRENT),
         ),
     )
-    peak_state = SourceState(
-        entity_id="sensor.ev_peak_a",
-        state="42000",
-        unit="mA",
-        last_updated=now,
-    )
     policy = _CaptureAlertPolicy()
     processor = CapacityProcessor(
         settings_for_config=lambda _circuit_id: CapacitySettings(
@@ -7216,15 +7208,13 @@ def test_capacity_processor_prefers_peak_current_for_spike_alerts() -> None:
         ),
         alert_policy_for_circuit=lambda _circuit_id: policy,
         retention_days_for_circuit=lambda _circuit_id: 45,
-        source_states_for=lambda _config, _now: {
-            peak_state.entity_id: peak_state,
-        },
     )
     sample = NormalizedCircuitSample(
         timestamp=now,
         circuit_id="ev",
         real_power=2880.0,
         current=12.0,
+        peak_current=42.0,
         voltage=240.0,
     )
 
@@ -7318,7 +7308,6 @@ def test_capacity_processor_without_current_does_not_create_storage_history() ->
         ),
         alert_policy_for_circuit=lambda _circuit_id: policy,
         retention_days_for_circuit=lambda _circuit_id: 45,
-        source_states_for=lambda _config, _now: {},
     )
     sample = CircuitSample(
         timestamp=now,
@@ -7345,7 +7334,6 @@ def test_capacity_processor_without_current_does_not_create_storage_history() ->
 
 def test_capacity_processor_uses_dual_phase_leg_currents_and_prunes_history() -> None:
     from custom_components.circuitsetup_energy_analyzer.coordinator import AnalyzerState
-    from custom_components.circuitsetup_energy_analyzer.normalize import SourceState
     from custom_components.circuitsetup_energy_analyzer.processors.base import (
         ProcessingContext,
     )
@@ -7399,24 +7387,12 @@ def test_capacity_processor_uses_dual_phase_leg_currents_and_prunes_history() ->
         ),
         alert_policy_for_circuit=lambda _circuit_id: policy,
         retention_days_for_circuit=lambda _circuit_id: 45,
-        source_states_for=lambda _config, _now: {
-            "sensor.hvac_l1_current": SourceState(
-                entity_id="sensor.hvac_l1_current",
-                state="31",
-                unit="A",
-                last_updated=now,
-            ),
-            "sensor.hvac_l2_current": SourceState(
-                entity_id="sensor.hvac_l2_current",
-                state="34",
-                unit="A",
-                last_updated=now,
-            ),
-        },
     )
-    sample = CircuitSample(
+    sample = NormalizedCircuitSample(
         timestamp=now,
         circuit_id="hvac",
+        leg_a_current=31.0,
+        leg_b_current=34.0,
         real_power=7200.0,
         current=66.0,
         voltage=120.0,

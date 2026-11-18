@@ -62,7 +62,7 @@ export function createNilmWorkspaceMethods({
     const nilm = this._payload && this._payload.nilm;
     const routeUrl = new URL(routeKey, window.location.origin);
     const circuit = this._payload && this._payload.circuit;
-    const circuitId = (circuit && circuit.circuit_id) || routeUrl.searchParams.get("circuit_id") || "";
+    const circuitId = routeUrl.searchParams.get("circuit_id") || circuit?.circuit_id || "";
     const entryId = routeUrl.searchParams.get("entry_id") || "";
     const params = new URLSearchParams();
     if (circuitId) {
@@ -72,6 +72,12 @@ export function createNilmWorkspaceMethods({
       params.set("entry_id", entryId);
     }
     const query = params.toString();
+    if (entryId && (nilm?.workspace_call_api_path || routeUrl.searchParams.get(NILM_WORKSPACE_QUERY_PARAM) === "1")) {
+      return {
+        apiPath: `${NILM_WORKSPACE_CALL_API_PATH}?${query}`,
+        fetchPath: `${NILM_WORKSPACE_API_PATH}?${query}`,
+      };
+    }
     const routeApiPath = routeUrl.searchParams.get(NILM_WORKSPACE_QUERY_PARAM) === "1" && query
       ? `${NILM_WORKSPACE_CALL_API_PATH}?${query}`
       : "";
@@ -115,8 +121,8 @@ export function createNilmWorkspaceMethods({
     const routeUrl = new URL(routeKey, window.location.origin);
     const workspaceCircuitId = this._nilmWorkspace?.circuit?.circuit_id;
     const payloadCircuitId = this._payload?.circuit?.circuit_id;
-    const circuitId = workspaceCircuitId || payloadCircuitId || routeUrl.searchParams.get("circuit_id") || "";
-    const entryId = routeUrl.searchParams.get("entry_id") || "";
+    const circuitId = routeUrl.searchParams.get("circuit_id") || workspaceCircuitId || payloadCircuitId || "";
+    const entryId = routeUrl.searchParams.get("entry_id") || this._nilmWorkspace?.source?.entry_id || "";
     const params = new URLSearchParams({ collection: String(collection || "") });
     if (circuitId) params.set("circuit_id", circuitId);
     if (entryId) params.set("entry_id", entryId);
@@ -4078,8 +4084,8 @@ export function createNilmWorkspaceMethods({
     const routeUrl = new URL(routeKey, window.location.origin);
     const workspaceCircuitId = this._nilmWorkspace?.circuit?.circuit_id;
     const payloadCircuitId = this._payload?.circuit?.circuit_id;
-    const circuitId = workspaceCircuitId || payloadCircuitId || routeUrl.searchParams.get("circuit_id") || "";
-    const entryId = routeUrl.searchParams.get("entry_id") || "";
+    const circuitId = routeUrl.searchParams.get("circuit_id") || workspaceCircuitId || payloadCircuitId || "";
+    const entryId = routeUrl.searchParams.get("entry_id") || this._nilmWorkspace?.source?.entry_id || "";
     const params = new URLSearchParams({ kind: target.kind, id: target.id });
     if (circuitId) params.set("circuit_id", circuitId);
     if (entryId) params.set("entry_id", entryId);

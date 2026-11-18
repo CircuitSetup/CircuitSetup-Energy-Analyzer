@@ -532,6 +532,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._evidenceRequestId = requestId;
     this._invalidateNilmFocusedHistoryRequests();
     if (routeChanged) {
+      this._pendingConfirmationAction = "";
+      this._pendingNilmWorkspaceAction = null;
       this._busyAction = "";
       this._historyLoading = false;
       this._nilmActiveLane = "needs_review";
@@ -675,7 +677,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   _requestNilmWorkspaceActionConfirmation(collectionKey, index, actionKey) {
-    this._pendingNilmWorkspaceAction = { collectionKey, index, actionKey };
+    const data = this._nilmWorkspace?.[collectionKey]?.[index]?.actions?.[actionKey]?.data;
+    if (!data?.entry_id || !data.circuit_id || !data.assignment_id) return;
+    this._pendingNilmWorkspaceAction = {
+      collectionKey, actionKey, routeKey: this._routeKey(),
+      entryId: data.entry_id, circuitId: data.circuit_id, assignmentId: data.assignment_id,
+    };
     this._requestActionConfirmation("nilm_delete_permanently");
   }
 
@@ -692,12 +699,16 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._pendingNilmWorkspaceAction = null;
     this._render();
     if (nilmWorkspaceAction) {
-      return this._callNilmWorkspaceItemAction(
-        nilmWorkspaceAction.collectionKey,
-        nilmWorkspaceAction.index,
-        nilmWorkspaceAction.actionKey,
-        { confirmed: true },
-      );
+      const {
+        collectionKey, actionKey, routeKey, entryId, circuitId, assignmentId,
+      } = nilmWorkspaceAction;
+      if (routeKey !== this._routeKey()) return;
+      const index = this._nilmWorkspace?.[collectionKey]?.findIndex((item) => {
+        const data = item.actions?.[actionKey]?.data;
+        return data?.assignment_id === assignmentId && data.circuit_id === circuitId && data.entry_id === entryId;
+      });
+      if (index >= 0) return this._callNilmWorkspaceItemAction(collectionKey, index, actionKey, { confirmed: true });
+      return;
     }
     if (actionKey) {
       return this._callAction(actionKey);
@@ -924,6 +935,10 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       || (this._payload && this._payload.requested_feature)
       || routeUrl.searchParams.get("feature");
     routeUrl.searchParams.delete("alert_id");
+    const entryId = this._payload?.actions?.[actionKey]?.data?.entry_id;
+    if (entryId && !routeUrl.searchParams.has("entry_id")) {
+      routeUrl.searchParams.set("entry_id", entryId);
+    }
     if (circuitId) {
       routeUrl.searchParams.set("circuit_id", circuitId);
     }

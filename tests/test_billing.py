@@ -6,6 +6,19 @@ from custom_components.circuitsetup_energy_analyzer.billing import (
 )
 
 
+def test_billing_cycle_retains_sub_wh_updates() -> None:
+    history = {}
+    for index in range(11):
+        result = record_billing_cycle_usage(
+            history,
+            circuit_id="fridge",
+            timestamp=datetime(2026, 6, 3, 12, index, tzinfo=UTC),
+            energy_kwh=100 + index * 0.0004,
+            settings=BillingCycleSettings(),
+        )
+    assert result.cycle_usage_kwh == 0.004
+
+
 def test_record_billing_cycle_usage_projects_current_cycle_budget() -> None:
     history = {
         "cycle_start": "2026-06-01",

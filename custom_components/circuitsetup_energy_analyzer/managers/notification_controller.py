@@ -114,6 +114,7 @@ class NotificationController:
         await notifications.async_create_alert_notification(
             self._coordinator.hass,
             alert,
+            entry_id=getattr(self._coordinator, "entry_id", None),
             config=self._coordinator.circuit_registry.config_for_circuit(
                 alert.circuit_id
             ),
@@ -370,6 +371,7 @@ class NotificationController:
         await notifications.async_create_alert_notification(
             self._coordinator.hass,
             alert,
+            entry_id=getattr(self._coordinator, "entry_id", None),
             config=self._coordinator.circuit_registry.config_for_circuit(
                 circuit_id
             ),
@@ -380,7 +382,9 @@ class NotificationController:
         """Dismiss one managed alert notification by its evidence id."""
         await notifications.async_dismiss_persistent_notification(
             self._coordinator.hass,
-            alert_id,
+            notifications.alert_persistent_notification_id(
+                alert_id, getattr(self._coordinator, "entry_id", None)
+            ),
         )
         self._managed_alert_notification_ids.discard(alert_id)
         self.notified_alert_ids.discard(alert_id)
@@ -481,6 +485,7 @@ class NotificationController:
             await notifications.async_create_alert_notification(
                 self._coordinator.hass,
                 alert,
+                entry_id=getattr(self._coordinator, "entry_id", None),
                 config=self._coordinator.circuit_registry.config_for_circuit(
                     alert.circuit_id
                 ),

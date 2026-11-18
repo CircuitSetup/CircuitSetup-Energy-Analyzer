@@ -6966,6 +6966,10 @@ def test_nilm_alert_payload_targets_appliance_and_keeps_source_evidence_context(
         "signature_fingerprint": "dishwasher|800w",
     }
     assert payload["appliance_detail_path"] == detail_path(identity)
+    scoped = build_alert_payload(identity, entry_id="second")
+    assert parse_qs(urlparse(scoped["appliance_detail_path"]).query)["entry_id"] == [
+        "second"
+    ]
 
 
 def test_nilm_appliance_detail_route_targets_assignment_instead_of_mains_detail() -> (

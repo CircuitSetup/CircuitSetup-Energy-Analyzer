@@ -180,7 +180,7 @@ Enable and tune features under **Configure > Advanced Circuit Settings**. The fo
 | Cost and Time-of-Use | Records cost using shared rates and peak periods, in Home Assistant's configured currency. |
 | Utility / Opower comparison | Compares utility kWh with measured mains kWh over the same period. |
 
-Power-only circuits derive kWh from consecutive real-power samples. A native cumulative kWh source is still needed for the setup's Energy Dashboard readiness check.
+Power-only circuits derive kWh from consecutive real-power samples. Dual-phase circuits use both leg counters when configured. With only one leg counter, the analyzer derives whole-circuit energy from the combined watts. A native cumulative kWh source is still needed for the setup's Energy Dashboard readiness check.
 
 Set shared base and Time-of-Use rates, peak times, weekdays, and label on the **CircuitSetup Energy Analyzer** device. Set appliance budgets and cycle start days in advanced settings. Configure utility sources under **Configure > Utility / Opower Comparison**; use a Recorder Statistic ID only when no matching entity exists.
 

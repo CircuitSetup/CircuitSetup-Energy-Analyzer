@@ -34,6 +34,53 @@ def _coordinator() -> EnergyAnalyzerCoordinator:
     )
 
 
+@pytest.mark.asyncio
+async def test_repairs_survive_other_entries_with_the_same_circuit(monkeypatch):
+    from homeassistant.helpers import issue_registry as ir
+
+    from custom_components.circuitsetup_energy_analyzer.ids import tuple_id
+
+    problem = "missing_required_sensor"
+    legacy = tuple_id(DOMAIN, "fridge", problem)
+    issues = {legacy: {"circuit_id": "fridge", "problem": problem}}
+    registry = SimpleNamespace(async_get_issue=lambda domain, key: issues.get(key))
+    monkeypatch.setattr(ir, "async_get", lambda hass: registry)
+    monkeypatch.setattr(
+        ir,
+        "async_create_issue",
+        lambda hass, domain, key, **kwargs: issues.update({key: kwargs["data"]}),
+    )
+    monkeypatch.setattr(
+        ir, "async_delete_issue", lambda hass, domain, key: issues.pop(key, None)
+    )
+    data = _coordinator().entry_data
+    entries = [
+        SimpleNamespace(entry_id=key, data=data, options={}) for key in ("a", "b")
+    ]
+    hass = SimpleNamespace(
+        data={}, config_entries=SimpleNamespace(async_entries=lambda domain: entries)
+    )
+    first, second = [
+        EnergyAnalyzerCoordinator(hass, entry_id=e.entry_id, entry_data=data)
+        for e in entries
+    ]
+    healthy = SimpleNamespace(quality_issues=())
+    await second.setup_health.async_sync_data_quality_repairs("fridge", healthy)
+    assert legacy in issues
+    await first.setup_health.async_sync_data_quality_repairs("fridge", problem)
+    assert legacy not in issues
+    assert len(issues) == 1
+    first_issue = next(iter(issues))
+
+    await second.setup_health.async_sync_data_quality_repairs("fridge", healthy)
+    assert first_issue in issues
+    await second.setup_health.async_sync_data_quality_repairs("fridge", problem)
+    assert len(issues) == 2
+    await first.setup_health.async_sync_data_quality_repairs("fridge", healthy)
+    assert len(issues) == 1
+    assert first_issue not in issues
+
+
 def test_setup_health_aggregator_builds_setup_repair_data() -> None:
     coordinator = _coordinator()
 
@@ -108,7 +155,7 @@ async def test_setup_health_creates_each_simultaneous_data_quality_repair(
     monkeypatch.setattr(
         repairs,
         "existing_circuit_problem_issues",
-        lambda hass, circuit_id, problems: set(),
+        lambda hass, circuit_id, problems, *, entry_id: set(),
     )
     monkeypatch.setattr(repairs, "async_create_data_quality_issue", fake_create)
     sample = SimpleNamespace(
@@ -170,7 +217,7 @@ async def test_setup_health_refreshes_invalid_source_repair_entities(
     monkeypatch.setattr(
         repairs,
         "existing_circuit_problem_issues",
-        lambda hass, circuit_id, problems: set(),
+        lambda hass, circuit_id, problems, *, entry_id: set(),
     )
     monkeypatch.setattr(repairs, "async_create_data_quality_issue", fake_create)
     coordinator = _coordinator()
@@ -204,7 +251,7 @@ async def test_setup_health_aggregator_runs_mapping_checks(monkeypatch) -> None:
     monkeypatch.setattr(
         repairs,
         "existing_circuit_problem_issues",
-        lambda hass, circuit_id, problems: set(),
+        lambda hass, circuit_id, problems, *, entry_id: set(),
     )
     monkeypatch.setattr(
         repairs,
