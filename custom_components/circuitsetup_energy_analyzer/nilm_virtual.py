@@ -1034,6 +1034,7 @@ def _nilm_alert_features(
     )
     routing = build_nilm_appliance_alert_payload(
         identity,
+        entry_id=entry_id,
         session_id=session_id or None,
         signature_fingerprint=signature_fingerprint or None,
     )

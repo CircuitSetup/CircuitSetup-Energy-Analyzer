@@ -219,7 +219,6 @@ def initialize_runtime(
         retention_days_for_circuit=lambda circuit_id: (
             RETENTION_WINDOWS[self._retention_mode_for_circuit(circuit_id)].days
         ),
-        source_states_for=self._source_states_for,
     )
     self._leg_imbalance_processor = LegImbalanceProcessor(
         alert_policy_for_circuit=(

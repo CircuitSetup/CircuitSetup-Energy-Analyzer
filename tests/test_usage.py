@@ -1,11 +1,37 @@
 from datetime import UTC, date, datetime, timedelta
 
+import pytest
+
 from custom_components.circuitsetup_energy_analyzer.usage import (
     DEFAULT_DAILY_USAGE_SPIKE_RATIO,
     DEFAULT_USAGE_WINDOW_DAYS,
     EnergyUsageSettings,
+    derive_cumulative_energy_from_power,
     record_energy_usage,
 )
+
+
+def test_derived_counter_preserves_low_power_between_reports() -> None:
+    history = {}
+    start = datetime(2026, 6, 3, tzinfo=UTC)
+    for second in range(61):
+        energy = derive_cumulative_energy_from_power(
+            history, timestamp=start + timedelta(seconds=second), power_w=1.0
+        )
+    assert energy == pytest.approx(1 / 60_000)
+
+
+def test_daily_usage_retains_sub_wh_updates() -> None:
+    history = {}
+    for index in range(11):
+        result = record_energy_usage(
+            history,
+            circuit_id="fridge",
+            timestamp=datetime(2026, 6, 3, 12, index, tzinfo=UTC),
+            energy_kwh=100 + index * 0.0004,
+            settings=EnergyUsageSettings(),
+        )
+    assert result.daily_usage_kwh == 0.004
 
 
 def test_record_energy_usage_flags_day_above_window_share() -> None:
@@ -163,7 +189,7 @@ def test_record_energy_usage_excludes_prior_maintenance_date_before_baseline() -
 
     assert history["days"][0] == {
         "date": "2026-07-27",
-        "usage_kwh": 8.667,
+        "usage_kwh": pytest.approx(8 + 2 / 3),
         "complete": True,
         "baseline_eligible": False,
     }
@@ -397,7 +423,7 @@ def test_bracketed_midnight_includes_split_delta_in_completed_baseline() -> None
     assert result.baseline_total_kwh == 24.0
     assert history["days"][0] == {
         "date": "2026-07-07",
-        "usage_kwh": 24.0,
+        "usage_kwh": pytest.approx(24.0000005, abs=1e-10),
         "complete": True,
     }
 

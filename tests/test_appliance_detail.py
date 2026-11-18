@@ -390,7 +390,7 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
     assert detail["next_step"] == "Review alert evidence"
     assert detail["what_to_check_first"] == ["No electrical check is needed right now."]
     assert detail["evidence_path"] == (
-        "/circuitsetup-energy-analyzer-evidence?circuit_id=fridge"
+        "/circuitsetup-energy-analyzer-evidence?circuit_id=fridge&entry_id=entry-1"
     )
     assert detail["appliance_health"] == {
         "status": "watch",
@@ -402,7 +402,9 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
     assert "water_flow_context" not in detail
     assert detail["active_alerts"][0]["feature"] == "daily_energy"
     assert payload["actions"]["open_evidence"]["path"] == detail["evidence_path"]
-    assert payload["actions"]["relearn_baseline"]["data"] == {"circuit_id": "fridge"}
+    assert payload["actions"]["relearn_baseline"]["data"] == {
+        "circuit_id": "fridge", "entry_id": "entry-1"
+    }
 
 
 def test_sump_pump_detail_exposes_history_driver_entities() -> None:
@@ -1334,6 +1336,7 @@ def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
     ]
     evidence_query = parse_qs(urlparse(detail["evidence_path"]).query)
     assert evidence_query == {
+        "entry_id": ["entry-1"],
         "circuit_id": ["mains"],
         "assignment_id": ["assignment-dishwasher"],
         "nilm_workspace": ["1"],
@@ -1341,6 +1344,7 @@ def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
     }
     review_path = payload["actions"]["review_nilm_assignment"]["path"]
     review_query = parse_qs(urlparse(review_path).query)
+    assert review_query["entry_id"] == ["entry-1"]
     assert review_query["circuit_id"] == ["mains"]
     assert review_query["assignment_id"] == ["assignment-dishwasher"]
     assert review_query["nilm_workspace"] == ["1"]
@@ -1352,6 +1356,7 @@ def test_nilm_appliance_detail_payload_marks_estimated_source() -> None:
             "circuit_id": "mains",
             "assignment_id": "assignment-dishwasher",
             "session_id": review_query["session_id"][0],
+            "entry_id": "entry-1",
         },
     }
     assert "open_evidence" not in payload["actions"]
@@ -1589,7 +1594,7 @@ def test_nilm_appliance_alert_actions_use_alert_feedback_contract() -> None:
         ("mark_unhelpful", "mark_alert_unhelpful"),
     ):
         assert actions[key]["service"] == service
-        assert actions[key]["data"] == {"alert_id": alert_id}
+        assert actions[key]["data"] == {"alert_id": alert_id, "entry_id": "entry-1"}
 
 
 def test_nilm_appliance_detail_derives_only_assignment_session_history() -> None:

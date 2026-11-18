@@ -147,10 +147,10 @@ async def test_config_entry_controller_reload_failure_cleans_preserved_panel(
         cleaned.append(("services", hass))
 
     coordinator.hass.config_entries.async_reload = _reload
-    from custom_components.circuitsetup_energy_analyzer import panel, services
+    import custom_components.circuitsetup_energy_analyzer as integration
 
-    monkeypatch.setattr(panel, "async_unload_panel", _cleanup_panel)
-    monkeypatch.setattr(services, "async_unload_services", _cleanup_services)
+    monkeypatch.setattr(integration, "async_unload_panel", _cleanup_panel)
+    monkeypatch.setattr(integration, "async_unload_services", _cleanup_services)
     controller = config_entry_controller.ConfigEntryController(coordinator)
 
     if failure is not False:

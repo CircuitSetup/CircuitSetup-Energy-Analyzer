@@ -67,6 +67,10 @@
       "name": "Relearn baseline",
       "description": "Advanced/script action: relearn the baseline for a configured circuit. The normal user path is the circuit Relearn Baseline button entity.",
       "fields": {
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional analyzer config entry to target. Panel actions include this automatically."
+        },
         "circuit_id": {
           "name": "Circuit ID",
           "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
@@ -81,6 +85,10 @@
       "name": "Pause alerts",
       "description": "Advanced/script action: pause alert notifications for a configured circuit. The normal user path is the circuit Pause alerts switch entity.",
       "fields": {
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional analyzer config entry to target. Panel actions include this automatically."
+        },
         "circuit_id": {
           "name": "Circuit ID",
           "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
@@ -99,6 +107,10 @@
       "name": "Acknowledge alert",
       "description": "Advanced/script action: acknowledge an alert evidence notification. The normal user path is the Acknowledge button in the evidence panel.",
       "fields": {
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional analyzer config entry to target. Panel actions include this automatically."
+        },
         "alert_id": {
           "name": "Alert ID",
           "description": "Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert."
@@ -1144,6 +1156,10 @@
       "name": "Pause alerts",
       "description": "Advanced/script action: pause appliance alert notifications while a circuit is being serviced. The normal user path is the circuit Pause alerts switch entity.",
       "fields": {
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional analyzer config entry to target. Panel actions include this automatically."
+        },
         "circuit_id": {
           "name": "Circuit ID",
           "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
@@ -1170,6 +1186,10 @@
       "name": "Resume alerts",
       "description": "Advanced/script action: resume appliance alert notifications for a serviced circuit. The normal user path is the circuit Pause alerts switch entity.",
       "fields": {
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional analyzer config entry to target. Panel actions include this automatically."
+        },
         "circuit_id": {
           "name": "Circuit ID",
           "description": "Optional configured circuit identifier, such as fridge or mains. You can choose an analyzer entity instead."
@@ -1188,6 +1208,10 @@
       "name": "Mark alert expected",
       "description": "Advanced/script action: mark an alert pattern as expected so repeated notifications are suppressed. The normal user path is the evidence panel button.",
       "fields": {
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional analyzer config entry to target. Panel actions include this automatically."
+        },
         "alert_id": {
           "name": "Alert ID",
           "description": "Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert."
@@ -1202,6 +1226,10 @@
       "name": "Confirm alert issue",
       "description": "Advanced/script action: confirm an alert as a real issue. For HVAC efficiency alerts, the affected abnormal episodes are excluded from future baselines. The normal user path is the evidence panel button.",
       "fields": {
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional analyzer config entry to target. Panel actions include this automatically."
+        },
         "alert_id": {
           "name": "Alert ID",
           "description": "Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert."
@@ -1216,6 +1244,10 @@
       "name": "Mark alert unhelpful",
       "description": "Advanced/script action: mark an alert pattern as unhelpful so repeated notifications are suppressed. The normal user path is the evidence panel button.",
       "fields": {
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional analyzer config entry to target. Panel actions include this automatically."
+        },
         "alert_id": {
           "name": "Alert ID",
           "description": "Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert."
@@ -1230,6 +1262,10 @@
       "name": "Mark NILM appliance correct",
       "description": "Advanced/script action: mark an estimated NILM appliance notification as correct. The normal user path is the evidence panel button.",
       "fields": {
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional analyzer config entry to target. Panel actions include this automatically."
+        },
         "alert_id": {
           "name": "Alert ID",
           "description": "Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert."
@@ -1244,6 +1280,10 @@
       "name": "Mark NILM appliance wrong",
       "description": "Advanced/script action: mark an estimated NILM appliance notification as the wrong appliance. The normal user path is the evidence panel button.",
       "fields": {
+        "entry_id": {
+          "name": "Entry ID",
+          "description": "Optional analyzer config entry to target. Panel actions include this automatically."
+        },
         "alert_id": {
           "name": "Alert ID",
           "description": "Optional alert identifier from the alert evidence notification. If omitted, choose an analyzer entity for a circuit with exactly one active alert."

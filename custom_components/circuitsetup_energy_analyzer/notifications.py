@@ -89,7 +89,7 @@ ALERT_VALUE_METADATA = {
 
 
 def notification_id_for_alert(alert: AlertEvidence) -> str:
-    """Return a stable persistent-notification id for alert evidence."""
+    """Return the stable alert ID used in evidence links, feedback, and storage."""
     feature = alert.feature or (
         alert.event_type.value if alert.event_type is not None else "alert"
     )
@@ -104,6 +104,11 @@ def notification_id_for_alert(alert: AlertEvidence) -> str:
     return _tuple_id(f"{DOMAIN}_alert", alert.circuit_id, feature)
 
 
+def alert_persistent_notification_id(alert_id: str, entry_id: str | None) -> str:
+    """Return the HA notification ID for this entry's copy of an alert."""
+    return _tuple_id(alert_id, entry_id) if entry_id else alert_id
+
+
 def settings_recommendation_notification_id(entry_id: str) -> str:
     """Return the persistent-notification id for suggested settings."""
     return f"{DOMAIN}_settings_recommendations_{_readable_component(entry_id)}"
@@ -114,10 +119,14 @@ def alert_notification_message(
     *,
     config: CircuitConfig | None = None,
     dashboard_path: str = DEFAULT_ALERT_EVIDENCE_PATH,
+    entry_id: str | None = None,
 ) -> str:
     """Return Markdown body text for an alert persistent notification."""
     from .alert_links import alert_evidence_path
 
+    evidence_path = alert_evidence_path(
+        alert, dashboard_path=dashboard_path, entry_id=entry_id
+    )
     nilm_display_name = str(alert.features.get("display_name") or "").strip()
     display_name = nilm_display_name or (
         config.name if config is not None and config.name else alert.circuit_id
@@ -130,7 +139,7 @@ def alert_notification_message(
                 alert.message,
                 "",
                 f"[{_notification_text('alert', 'open_appliance_evidence')}]"
-                f"({alert_evidence_path(alert, dashboard_path=dashboard_path)})",
+                f"({evidence_path})",
             )
         )
     lines = [f"**{display_name}**", "", alert.message]
@@ -168,7 +177,7 @@ def alert_notification_message(
         [
             "",
             f"[{_notification_text('alert', 'open_evidence')}]"
-            f"({alert_evidence_path(alert, dashboard_path=dashboard_path)})",
+            f"({evidence_path})",
         ]
     )
     return "\n".join(lines)
@@ -303,6 +312,7 @@ async def async_create_alert_notification(
     *,
     config: CircuitConfig | None = None,
     dashboard_path: str = DEFAULT_ALERT_EVIDENCE_PATH,
+    entry_id: str | None = None,
 ) -> None:
     """Create a persistent notification for important alert evidence if HA exists."""
     from homeassistant.components import persistent_notification
@@ -318,9 +328,12 @@ async def async_create_alert_notification(
                 alert,
                 config=config,
                 dashboard_path=dashboard_path,
+                entry_id=entry_id,
             ),
             title=_notification_text("alert", "title"),
-            notification_id=notification_id_for_alert(alert),
+            notification_id=alert_persistent_notification_id(
+                notification_id_for_alert(alert), entry_id
+            ),
         )
     except (AttributeError, TypeError):
         return

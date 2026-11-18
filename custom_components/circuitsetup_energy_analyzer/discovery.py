@@ -150,6 +150,7 @@ def sensor_role_from_metadata(
     *,
     device_class: str | None = None,
     unit: str | None = None,
+    configured_role: SensorRole | str | None = None,
 ) -> SensorRole | None:
     """Resolve a role from unambiguous device-class and unit metadata."""
     device_role = _DEVICE_CLASS_ROLES.get(str(device_class or "").strip().lower())
@@ -161,7 +162,11 @@ def sensor_role_from_metadata(
         return device_role
     if unit_role in non_real_roles:
         return unit_role
-    return device_role or unit_role
+    role = device_role or unit_role
+    # HA uses the same device class and units for peak and RMS current.
+    if role is SensorRole.CURRENT and configured_role == SensorRole.PEAK_CURRENT:
+        return SensorRole.PEAK_CURRENT
+    return role
 
 
 def infer_sensor_role(

@@ -53,6 +53,10 @@ mark_circuit_mixed:
 
 relearn_baseline:
   fields:
+    entry_id:
+      required: false
+      selector:
+        text:
     circuit_id:
       required: false
       example: fridge
@@ -71,6 +75,10 @@ relearn_baseline:
             - switch
 pause_alerts:
   fields:
+    entry_id:
+      required: false
+      selector:
+        text:
     circuit_id:
       required: false
       example: fridge
@@ -94,6 +102,10 @@ pause_alerts:
         text:
 acknowledge_alert:
   fields:
+    entry_id:
+      required: false
+      selector:
+        text:
     alert_id:
       required: false
       example: circuitsetup_energy_analyzer_alert_fridge_cycle_duration_s
@@ -1499,6 +1511,10 @@ set_utility_comparison_settings:
           mode: box
 start_maintenance:
   fields:
+    entry_id:
+      required: false
+      selector:
+        text:
     circuit_id:
       required: false
       example: fridge
@@ -1532,6 +1548,10 @@ start_maintenance:
         boolean:
 end_maintenance:
   fields:
+    entry_id:
+      required: false
+      selector:
+        text:
     circuit_id:
       required: false
       example: fridge
@@ -1555,6 +1575,10 @@ end_maintenance:
         boolean:
 mark_alert_expected:
   fields:
+    entry_id:
+      required: false
+      selector:
+        text:
     alert_id:
       required: false
       example: circuitsetup_energy_analyzer_alert_fridge_reactive_power
@@ -1572,6 +1596,10 @@ mark_alert_expected:
             - number
 mark_alert_confirmed:
   fields:
+    entry_id:
+      required: false
+      selector:
+        text:
     alert_id:
       required: false
       example: circuitsetup_energy_analyzer_alert_hvac_hvac_response_slower
@@ -1589,6 +1617,10 @@ mark_alert_confirmed:
             - number
 mark_alert_unhelpful:
   fields:
+    entry_id:
+      required: false
+      selector:
+        text:
     alert_id:
       required: false
       example: circuitsetup_energy_analyzer_alert_fridge_reactive_power
@@ -1606,6 +1638,10 @@ mark_alert_unhelpful:
             - number
 mark_nilm_appliance_correct:
   fields:
+    entry_id:
+      required: false
+      selector:
+        text:
     alert_id:
       required: false
       example: circuitsetup_energy_analyzer_alert_mains_nilm_appliance_finished
@@ -1623,6 +1659,10 @@ mark_nilm_appliance_correct:
             - number
 mark_nilm_appliance_wrong:
   fields:
+    entry_id:
+      required: false
+      selector:
+        text:
     alert_id:
       required: false
       example: circuitsetup_energy_analyzer_alert_mains_nilm_appliance_finished

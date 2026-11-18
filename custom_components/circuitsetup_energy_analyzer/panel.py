@@ -202,7 +202,12 @@ def alert_evidence_payload(
     requested_feature = str(feature or "").strip() or None
     requested_recommendation_id = str(recommendation_id or "").strip() or None
     requested_entry_id = str(entry_id or "").strip() or None
-    coordinators = tuple(coordinators)
+    coordinators = tuple(
+        coordinator
+        for coordinator in coordinators
+        if not requested_entry_id
+        or _coordinator_entry_id(coordinator) == requested_entry_id
+    )
     text = alert_evidence_panel_text()
 
     if review_suggested_settings:
@@ -976,6 +981,8 @@ def _appliance_detail_actions(
     detail: ApplianceDetail,
 ) -> dict[str, dict[str, Any]]:
     actions: dict[str, dict[str, Any]] = {}
+    entry_id = _coordinator_entry_id(coordinator)
+    entry_data = {ATTR_ENTRY_ID: entry_id} if entry_id else {}
     if detail.source_type == "nilm_estimate" and detail.assignment_id:
         active_alert = detail.active_alerts[0] if detail.active_alerts else None
         alert_id = active_alert.alert_id if active_alert else None
@@ -993,6 +1000,7 @@ def _appliance_detail_actions(
             else ""
         )
         action_data = {
+            **entry_data,
             ATTR_CIRCUIT_ID: detail.circuit_id,
             ATTR_ASSIGNMENT_ID: detail.assignment_id,
         }
@@ -1011,6 +1019,7 @@ def _appliance_detail_actions(
         if adjustable_session_id:
             adjust_query = urlencode(
                 {
+                    **entry_data,
                     ATTR_CIRCUIT_ID: detail.circuit_id,
                     ATTR_ASSIGNMENT_ID: detail.assignment_id,
                     ATTR_SESSION_ID: adjustable_session_id,
@@ -1026,12 +1035,12 @@ def _appliance_detail_actions(
             actions["mark_correct"] = {
                 "domain": DOMAIN,
                 "service": SERVICE_MARK_NILM_APPLIANCE_CORRECT,
-                "data": {ATTR_ALERT_ID: alert_id},
+                "data": {**entry_data, ATTR_ALERT_ID: alert_id},
             }
             actions["mark_wrong"] = {
                 "domain": DOMAIN,
                 "service": SERVICE_MARK_NILM_APPLIANCE_WRONG,
-                "data": {ATTR_ALERT_ID: alert_id},
+                "data": {**entry_data, ATTR_ALERT_ID: alert_id},
             }
             for key, service in (
                 ("mark_expected", SERVICE_MARK_ALERT_EXPECTED),
@@ -1040,7 +1049,7 @@ def _appliance_detail_actions(
                 actions[key] = {
                     "domain": DOMAIN,
                     "service": service,
-                    "data": {ATTR_ALERT_ID: alert_id},
+                    "data": {**entry_data, ATTR_ALERT_ID: alert_id},
                 }
         review_query = urlencode(
             {
@@ -1274,7 +1283,9 @@ def _payload_for_alert(
     include_all_nilm: bool,
 ) -> dict[str, Any]:
     config = _config_for_circuit(coordinator, alert.circuit_id)
-    detail = alert_evidence_detail(alert, config=config)
+    detail = alert_evidence_detail(
+        alert, config=config, entry_id=_coordinator_entry_id(coordinator)
+    )
     return _with_requested_feature(
         {
             "status": status,
@@ -1345,8 +1356,10 @@ def _actions_for_context(
     alert: AlertEvidence | None = None,
 ) -> dict[str, dict[str, Any]]:
     actions: dict[str, dict[str, Any]] = {}
+    entry_id = _coordinator_entry_id(coordinator)
+    entry_data = {ATTR_ENTRY_ID: entry_id} if entry_id else {}
     if isinstance(alert_id, str) and alert_id:
-        alert_data = {ATTR_ALERT_ID: alert_id}
+        alert_data = {**entry_data, ATTR_ALERT_ID: alert_id}
         actions["acknowledge"] = {
             "domain": DOMAIN,
             "service": SERVICE_ACKNOWLEDGE_ALERT,
@@ -1392,7 +1405,7 @@ def _actions_for_context(
             )
 
     if circuit_id:
-        circuit_data = {ATTR_CIRCUIT_ID: circuit_id}
+        circuit_data = {**entry_data, ATTR_CIRCUIT_ID: circuit_id}
         actions.update(
             {
                 "pause_alerts": _pause_alerts_action(
@@ -1408,7 +1421,9 @@ def _actions_for_context(
                 "open_appliance_detail": {
                     "type": "navigate",
                     "label": _panel_text("actions", "labels", "open_appliance_detail"),
-                    "path": _circuit_appliance_detail_panel_path(circuit_id),
+                    "path": _circuit_appliance_detail_panel_path(
+                        circuit_id, entry_id=entry_id
+                    ),
                 },
                 "open_advanced_circuit_settings": (
                     _advanced_circuit_settings_action(coordinator, config)
@@ -1416,8 +1431,7 @@ def _actions_for_context(
             }
         )
         if config is not None and nilm_detection_enabled(config):
-            entry_id = str(getattr(coordinator, "entry_id", "") or "")
-            query = urlencode({"entry_id": entry_id, ATTR_CIRCUIT_ID: circuit_id})
+            query = urlencode(circuit_data)
             actions["open_load_separation"] = {
                 "type": "navigate",
                 "label": _panel_text("actions", "labels", "open_load_separation"),
@@ -1775,7 +1789,9 @@ def _recommendation_payload(item: Any, *, coordinator: Any) -> dict[str, Any]:
             recommendation_id,
             status=str(payload.get("status") or "pending"),
         )
-        evidence_path = _recommendation_evidence_path(payload, recommendation_id)
+        evidence_path = _recommendation_evidence_path(
+            payload, recommendation_id, _coordinator_entry_id(coordinator)
+        )
         if evidence_path:
             payload["evidence_path"] = evidence_path
             payload["actions"]["preview"] = {"path": evidence_path}
@@ -1921,6 +1937,7 @@ def _recommendation_evidence_metadata(
 def _recommendation_evidence_path(
     payload: Mapping[str, Any],
     recommendation_id: str,
+    entry_id: str | None,
 ) -> str:
     circuit_id = str(payload.get("circuit_id") or "").strip()
     if not circuit_id:
@@ -1929,6 +1946,7 @@ def _recommendation_evidence_path(
         {
             "circuit_id": circuit_id,
             ATTR_RECOMMENDATION_ID: recommendation_id,
+            **({ATTR_ENTRY_ID: entry_id} if entry_id else {}),
         }
     )
     return f"/{PANEL_URL_PATH}?{query}"

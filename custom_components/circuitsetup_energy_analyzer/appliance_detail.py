@@ -150,6 +150,8 @@ def appliance_detail_for_circuit(
         return None
 
     state = _coordinator_state(coordinator)
+    entry_id = getattr(coordinator, "entry_id", None)
+    evidence_path = _evidence_path(circuit_id=config.circuit_id, entry_id=entry_id)
     source_type = _source_type_for_config(config)
     health_attrs = health_summary_attributes(state, config.circuit_id)
     electrical_attrs = electrical_health_attributes(state, config.circuit_id)
@@ -157,6 +159,7 @@ def appliance_detail_for_circuit(
         state,
         config.circuit_id,
         config=config,
+        entry_id=entry_id,
     )
     first_checks = _first_checks(electrical_attrs.get("what_to_check_first"))
     quality = _mapping_for_circuit(
@@ -175,7 +178,7 @@ def appliance_detail_for_circuit(
         state,
         comparisons=comparisons,
         source_type=source_type,
-        evidence_path=_evidence_path(circuit_id=config.circuit_id),
+        evidence_path=evidence_path,
     )
     converted_assignment = _converted_nilm_assignment(coordinator, circuit_id)
     return ApplianceDetail(
@@ -228,7 +231,7 @@ def appliance_detail_for_circuit(
         active_alerts=active_alerts,
         next_step=str(health_attrs.get("next_step") or "") or None,
         what_to_check_first=first_checks,
-        evidence_path=_evidence_path(circuit_id=config.circuit_id),
+        evidence_path=evidence_path,
         appliance_health=health_attrs["appliance_health_evidence"] or None,
         hvac_efficiency=_hvac_efficiency_detail(state, config),
         water_flow_context=_water_flow_context_detail(state, config),
@@ -321,7 +324,8 @@ def _nilm_detail(
     state: NilmVirtualApplianceState,
 ) -> ApplianceDetail:
     analyzer_state = _coordinator_state(coordinator)
-    evidence_path = _nilm_evidence_path(state)
+    entry_id = getattr(coordinator, "entry_id", None)
+    evidence_path = _nilm_evidence_path(state, entry_id=entry_id)
     validation_ready = bool(
         state.validation_readiness and state.validation_readiness.get("ready")
     )
@@ -368,6 +372,7 @@ def _nilm_detail(
             state.mains_circuit_id,
             config=None,
             assignment_id=state.assignment_id,
+            entry_id=entry_id,
         ),
         next_step=(
             "Confirm more NILM sessions"
@@ -1179,6 +1184,7 @@ def _primary_appliance_expectations_for_circuit(
                     state,
                     circuit_id,
                     config=config,
+                    entry_id=getattr(coordinator, "entry_id", None),
                 )
                 if alert.feature == COLD_STORAGE_SIGNATURE_FEATURE
             ),
@@ -1466,6 +1472,7 @@ def _active_alert_summaries(
     *,
     config: CircuitConfig | None,
     assignment_id: str | None = None,
+    entry_id: str | None = None,
 ) -> tuple[ApplianceAlertSummary, ...]:
     alerts_by_circuit = getattr(state, "active_alerts_by_circuit", {})
     alerts = (
@@ -1494,10 +1501,11 @@ def _active_alert_summaries(
                 first_seen=_iso(alert.first_seen),
                 last_seen=_iso(alert.last_seen),
                 evidence_path=(
-                    alert_evidence_path(alert)
+                    alert_evidence_path(alert, entry_id=entry_id)
                     if assignment_id is not None
                     else _evidence_path(
                         circuit_id=circuit_id,
+                        entry_id=entry_id,
                         alert_id=notification_id_for_alert(alert),
                         feature=alert.feature,
                     )
@@ -2091,8 +2099,11 @@ def _evidence_path(
     circuit_id: str,
     alert_id: str | None = None,
     feature: str | None = None,
+    entry_id: str | None = None,
 ) -> str:
     params = {"circuit_id": circuit_id}
+    if entry_id:
+        params["entry_id"] = entry_id
     if alert_id:
         params["alert_id"] = alert_id
     if feature:
@@ -2100,11 +2111,14 @@ def _evidence_path(
     return f"{DEFAULT_ALERT_EVIDENCE_PATH}?{urlencode(params)}"
 
 
-def _nilm_evidence_path(state: NilmVirtualApplianceState) -> str:
+def _nilm_evidence_path(
+    state: NilmVirtualApplianceState, *, entry_id: str | None
+) -> str:
     query = urlencode(
         {
             "circuit_id": state.mains_circuit_id,
             "assignment_id": state.assignment_id,
+            **({"entry_id": entry_id} if entry_id else {}),
             "nilm_workspace": "1",
             "appliance_detail": "1",
         }

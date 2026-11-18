@@ -10641,6 +10641,7 @@ test("NILM permanent deletion requires confirmation before removing an assignmen
     }
     if (!url.pathname.endsWith("/nilm_workspace")) return false;
     const payload = structuredClone(apiPayload(url.pathname));
+    const entryId = url.searchParams.get("entry_id");
     payload.assignments.push({
       assignment_id: "retired-dishwasher",
       appliance_id: "dishwasher",
@@ -10652,7 +10653,7 @@ test("NILM permanent deletion requires confirmation before removing an assignmen
         delete_permanently: {
           domain: "circuitsetup_energy_analyzer",
           service: "delete_nilm_appliance_assignment",
-          data: { circuit_id: "mains", assignment_id: "retired-dishwasher" },
+          data: { entry_id: entryId, circuit_id: "mains", assignment_id: "retired-dishwasher" },
         },
       },
     });
@@ -10661,10 +10662,21 @@ test("NILM permanent deletion requires confirmation before removing an assignmen
     await route.fulfill({ json: payload });
     return true;
   });
-  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains");
-
-  await panel.locator('[data-nilm-lane="hidden"]').click();
+  const panel = await openPanel(page, "?nilm_workspace=1&circuit_id=mains&entry_id=entry-1");
+  const hidden = panel.locator('[data-nilm-lane="hidden"]');
+  await hidden.waitFor();
+  await page.evaluate(() => {
+    history.pushState({}, "", `${location.pathname}?nilm_workspace=1&circuit_id=mains&entry_id=entry-2`);
+  });
+  await hidden.click();
   const remove = panel.locator('[data-nilm-assignment-action="delete_permanently"]');
+  await remove.click();
+  await expect(panel.locator("#action_confirmation_dialog")).toBeVisible();
+  await page.goBack();
+  await expect(panel.locator("#action_confirmation_dialog")).toHaveCount(0);
+  await hidden.click();
+  await expect(remove).toBeVisible();
+  expect(await page.evaluate(() => window.__serviceCalls)).toHaveLength(0);
   await remove.click();
   const dialog = panel.locator("#action_confirmation_dialog");
   await expect(dialog).toBeVisible();
@@ -10686,7 +10698,7 @@ test("NILM permanent deletion requires confirmation before removing an assignmen
   await panel.locator("#confirm_action").click();
   await expect.poll(() => page.evaluate(() => window.__serviceCalls.at(-1))).toMatchObject({
     service: "delete_nilm_appliance_assignment",
-    data: { circuit_id: "mains", assignment_id: "retired-dishwasher" },
+    data: { entry_id: "entry-1", circuit_id: "mains", assignment_id: "retired-dishwasher" },
   });
 });
 

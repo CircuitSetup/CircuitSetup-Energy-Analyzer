@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from time import monotonic
 from typing import Any, Self
 
+from homeassistant.const import EVENT_HOMEASSISTANT_STOP
 from homeassistant.helpers.event import (
     async_track_point_in_time,
     async_track_state_change_event,
@@ -177,6 +178,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         self.options = canonicalize_sensitivity_config(options or {})
         self._config_entry = config_entry
         self._store = store
+        self._unsub_shutdown = None
         self.store_data = store_data or FeatureStoreData()
         # ponytail: one lock serializes resets with ordinary processing;
         # use per-circuit locks only if update throughput needs it.
@@ -325,9 +327,23 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 entities.append(entity_id)
         await self.source_updates.async_start(tuple(dict.fromkeys(entities)))
         self._refresh_expected_schedule_interval_listener()
+        self.refresh_source_values()
+        listen = getattr(getattr(self.hass, "bus", None), "async_listen_once", None)
+        if listen is not None and self._unsub_shutdown is None:
+            self._unsub_shutdown = listen(
+                EVENT_HOMEASSISTANT_STOP, self._async_shutdown
+            )
+
+    async def _async_shutdown(self: Self, _event: Any) -> None:
+        # Home Assistant already removed the one-time listener.
+        self._unsub_shutdown = None
+        await self.async_stop()
 
     async def async_stop(self: Self) -> None:
         """Stop listening to source entity state changes."""
+        if self._unsub_shutdown is not None:
+            self._unsub_shutdown()
+            self._unsub_shutdown = None
         if self._unsub_maintenance_expiry is not None:
             self._unsub_maintenance_expiry()
             self._unsub_maintenance_expiry = None
@@ -335,7 +351,10 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
             self._unsub_expected_schedule_interval()
             self._unsub_expected_schedule_interval = None
         await self.source_updates.async_stop()
-        await self._async_save_store(self.current_time())
+        try:
+            await self._async_save_store(self.current_time())
+        finally:
+            self.store_persistence.cancel_delayed_save()
 
     def refresh_maintenance_expiry_listener(self: Self) -> None:
         """Schedule the next timed maintenance expiry."""
@@ -672,6 +691,13 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         changed_entities: Iterable[str] | None = None,
     ) -> AnalyzerState:
         """Publish current source values without running derived analytics."""
+        self.refresh_source_values(changed_entities)
+        return self.state
+
+    def refresh_source_values(
+        self: Self, changed_entities: Iterable[str] | None = None
+    ) -> None:
+        """Publish the latest available watts and schedule their next expiry."""
         now = self._now_fn()
         mains_context_sample = self._mains_context_sample(now)
         for config in self._processing_configs_for_changed_entities(changed_entities):
@@ -686,8 +712,8 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
                 config,
                 sample,
             )
+        self.source_updates.schedule_power_expiry()
         self.async_set_updated_data(self.state)
-        return self.state
 
     async def async_process_update(
         self: Self,
@@ -908,6 +934,7 @@ class EnergyAnalyzerCoordinator(DataUpdateCoordinator):
         )
         await self.notification_controller.async_dispatch_due(now)
         await self.notification_controller.async_refresh_weekly_digest(now)
+        self.source_updates.schedule_power_expiry()
         self.async_set_updated_data(self.state)
         await self._async_save_store(now, force=False)
         if recommendation_refresh_due:

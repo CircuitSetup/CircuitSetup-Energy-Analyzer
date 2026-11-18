@@ -428,7 +428,7 @@ def test_service_copy_is_owned_by_the_translation_catalog() -> None:
             sort_keys=True,
             separators=(",", ":"),
         ).encode()
-    ).hexdigest() == "c10c676b2fae6a9e4d08be17a06a12b6e234e266c7839fa60b321a1b14e2c763"
+    ).hexdigest() == "873f9ef8b50b1dfc843fbfa3155f43fcd4d69b40d88d3c399c6e94c4d8888965"
     for service_id, service in services.items():
         assert "name" not in service
         assert "description" not in service
@@ -6600,6 +6600,70 @@ def test_panel_options_actions_use_supported_integration_page() -> None:
   assert.equal(JSON.stringify(calls), "[]");
   assert.equal(destination, "/config/integrations/integration/circuitsetup_energy_analyzer");
 })().catch((error) => { console.error(error); process.exitCode = 1; });
+"""
+    )
+
+
+def test_delete_confirmation_tracks_assignment_and_entry_across_refresh() -> None:
+    _run_panel_node_script(
+        r"""
+const panel = new context.Panel();
+panel._render = () => {};
+const route = "/panel?nilm_workspace=1&entry_id=B&circuit_id=mains";
+panel._routeKey = () => route;
+panel._loadedRouteKey = route;
+const assignment = (entry_id, assignment_id) => ({
+  assignment_id,
+  actions: { delete_permanently: { data: { entry_id, circuit_id: "mains", assignment_id } } },
+});
+const retired = assignment("B", "dryer");
+panel._nilmWorkspace = { assignments: [retired] };
+const open = () => panel._requestNilmWorkspaceActionConfirmation("assignments", 0, "delete_permanently");
+const confirmed = [];
+panel._callNilmWorkspaceItemAction = (key, index) => confirmed.push(panel._nilmWorkspace[key][index]);
+open();
+panel._nilmWorkspace.assignments.unshift(assignment("B", "fridge"));
+panel._confirmPendingAction();
+assert.deepEqual(confirmed, [retired]);
+open();
+panel._nilmWorkspace.assignments = [assignment("A", "fridge")];
+panel._confirmPendingAction();
+assert.deepEqual(confirmed, [retired]);
+open();
+panel._requestJson = () => new Promise(() => {});
+panel._loadEvidence({ routeKey: "/panel?nilm_workspace=1&entry_id=A&circuit_id=mains" });
+assert.equal(panel._pendingConfirmationAction, "");
+"""
+    )
+
+
+def test_refresh_of_unscoped_alert_link_keeps_the_matched_entry() -> None:
+    _run_panel_node_script(
+        r"""
+const panel = new context.Panel();
+panel._routeKey = () => "/panel?alert_id=legacy";
+panel._payload = { alert: { circuit_id: "mains", feature: "peak" },
+  actions: { acknowledge: { data: { entry_id: "matched" } } } };
+const refresh = new URL(panel._actionRefreshRouteKey("acknowledge"), "http://example.local");
+assert.equal(refresh.searchParams.get("entry_id"), "matched");
+assert.equal(refresh.searchParams.get("circuit_id"), "mains");
+"""
+    )
+
+
+def test_workspace_explicit_route_owns_request_target() -> None:
+    _run_panel_node_script(
+        r"""
+const panel = new context.Panel();
+panel._payload = { circuit: { circuit_id: "other" }, nilm: {
+  workspace_call_api_path: "circuitsetup_energy_analyzer/nilm_workspace?entry_id=A&circuit_id=other",
+} };
+const paths = panel._nilmWorkspaceRequestPaths("/panel?nilm_workspace=1&entry_id=B&circuit_id=mains");
+for (const path of [paths.apiPath, paths.fetchPath]) {
+  const query = new URL(path, "http://example.local").searchParams;
+  assert.equal(query.get("entry_id"), "B");
+  assert.equal(query.get("circuit_id"), "mains");
+}
 """
     )
 

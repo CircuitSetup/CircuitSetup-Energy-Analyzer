@@ -206,7 +206,7 @@ def _schema(required: tuple[str, ...] = (), optional: tuple[str, ...] = ()) -> C
 
 
 def _circuit_schema(*optional: str) -> Callable:
-    return _schema(optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID, *optional))
+    return _schema(optional=(ATTR_CIRCUIT_ID, ATTR_ENTRY_ID, ATTR_ENTITY_ID, *optional))
 
 
 def _boolean_value(value: Any, field: str = "value") -> bool:
@@ -351,15 +351,18 @@ MAINTENANCE_START_SERVICE_SCHEMA = _schema(
     optional=(
         ATTR_CIRCUIT_ID,
         ATTR_ENTITY_ID,
+        ATTR_ENTRY_ID,
         ATTR_NOTE,
         ATTR_DURATION,
         ATTR_RELEARN_ON_END,
     ),
 )
 MAINTENANCE_END_SERVICE_SCHEMA = _schema(
-    optional=(ATTR_CIRCUIT_ID, ATTR_ENTITY_ID, ATTR_RELEARN),
+    optional=(ATTR_CIRCUIT_ID, ATTR_ENTRY_ID, ATTR_ENTITY_ID, ATTR_RELEARN),
 )
-ALERT_FEEDBACK_SERVICE_SCHEMA = _schema(optional=(ATTR_ALERT_ID, ATTR_ENTITY_ID))
+ALERT_FEEDBACK_SERVICE_SCHEMA = _schema(
+    optional=(ATTR_ALERT_ID, ATTR_ENTRY_ID, ATTR_ENTITY_ID)
+)
 NILM_LABEL_SERVICE_SCHEMA = _schema(
     required=(ATTR_SIGNATURE_ID, ATTR_LABEL),
     optional=(ATTR_CIRCUIT_ID, ATTR_ENTRY_ID, ATTR_ENTITY_ID),
@@ -1605,7 +1608,7 @@ async def _dispatch_service(hass: Any, service: str, data: dict[str, Any]) -> No
     circuit_id = _service_circuit_id(hass, data)
     coordinators = (
         _target_entry_circuit_coordinator(hass, data.get(ATTR_ENTRY_ID), circuit_id)
-        if service == SERVICE_MARK_CIRCUIT_MIXED and data.get(ATTR_ENTRY_ID)
+        if data.get(ATTR_ENTRY_ID)
         else _target_coordinators(hass, circuit_id)
     )
     for coordinator in coordinators:
@@ -1992,17 +1995,26 @@ def _target_nilm_coordinators(
     return _target_coordinators(hass, circuit_id)
 
 
-def _target_entry_circuit_coordinator(
-    hass: Any, entry_id: str, circuit_id: str
-) -> list[Any]:
+def _entry_coordinator(hass: Any, entry_id: str) -> Any:
     domain_data = getattr(hass, "data", {}).get(DOMAIN, {})
-    coordinator = domain_data.get(entry_id) if isinstance(domain_data, dict) else None
+    coordinator = (
+        domain_data.get(entry_id)
+        if isinstance(domain_data, dict) and isinstance(entry_id, str)
+        else None
+    )
     if coordinator is None or not hasattr(coordinator, "async_set_updated_data"):
         raise ServiceValidationError(
             translation_domain=DOMAIN,
             translation_key="entry_not_found",
             translation_placeholders={"entry_id": str(entry_id)},
         )
+    return coordinator
+
+
+def _target_entry_circuit_coordinator(
+    hass: Any, entry_id: str, circuit_id: str
+) -> list[Any]:
+    coordinator = _entry_coordinator(hass, entry_id)
     known_circuit_ids = _known_circuit_ids(coordinator)
     has_circuit = getattr(coordinator, "has_circuit", None)
     if not (
@@ -2156,12 +2168,21 @@ async def _dispatch_alert_id_action(
     method_name: str,
 ) -> None:
     alert_id = data.get(ATTR_ALERT_ID)
-    target_coordinators = _loaded_coordinators(hass)
-    if isinstance(alert_id, str):
+    entry_id = data.get(ATTR_ENTRY_ID)
+    if isinstance(alert_id, str) and alert_id.strip():
         alert_id = alert_id.strip()
-    if not isinstance(alert_id, str) or not alert_id:
+        target_coordinators = (
+            [_entry_coordinator(hass, entry_id)]
+            if entry_id
+            else _loaded_coordinators(hass)
+        )
+    else:
         circuit_id = _service_circuit_id(hass, data)
-        target_coordinators = _target_coordinators(hass, circuit_id)
+        target_coordinators = (
+            _target_entry_circuit_coordinator(hass, entry_id, circuit_id)
+            if entry_id
+            else _target_coordinators(hass, circuit_id)
+        )
         alert_id = _single_active_alert_id_for_circuit(
             circuit_id,
             target_coordinators,

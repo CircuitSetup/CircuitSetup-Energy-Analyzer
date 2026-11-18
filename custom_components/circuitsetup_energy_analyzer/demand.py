@@ -7,6 +7,7 @@ from typing import Any
 
 from .alert_feedback import mapping_datetime
 from .local_time import TimeZone, local_date, local_month_key
+from .normalize import STALE_AFTER
 
 DEFAULT_DEMAND_WINDOW_MINUTES = 15
 MAX_DEMAND_WINDOW_MINUTES = 240
@@ -404,12 +405,17 @@ def _prune_samples(
     window: timedelta,
 ) -> list[dict[str, float | str | bool]]:
     cutoff = timestamp - window
-    return [
-        sample
-        for sample in samples
-        if (sample_time := _datetime_or_none(sample["timestamp"])) is not None
-        and sample_time >= cutoff
-    ]
+    for index, sample in enumerate(samples):
+        sample_time = _datetime_or_none(sample["timestamp"])
+        if sample_time is None or sample_time < cutoff:
+            continue
+        if index and sample_time > cutoff:
+            previous = _datetime_or_none(samples[index - 1]["timestamp"])
+            if previous is not None and cutoff - previous < STALE_AFTER:
+                # Its held value covers the start of the rolling window.
+                index -= 1
+        return samples[index:]
+    return []
 
 
 def _time_weighted_average(
@@ -429,11 +435,11 @@ def _time_weighted_average(
         sample_time = _datetime_or_none(sample["timestamp"])
         if sample_time is None:
             continue
-        next_time = timestamp
+        next_time = min(timestamp, sample_time + STALE_AFTER)
         if index + 1 < len(samples):
             next_sample_time = _datetime_or_none(samples[index + 1]["timestamp"])
             if next_sample_time is not None:
-                next_time = min(next_sample_time, timestamp)
+                next_time = min(next_sample_time, next_time)
         interval_start = max(sample_time, cutoff)
         interval_seconds = max((next_time - interval_start).total_seconds(), 0.0)
         if interval_seconds <= 0.0:

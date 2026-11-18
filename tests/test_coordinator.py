@@ -7,6 +7,7 @@ from itertools import pairwise
 from types import MappingProxyType, ModuleType, SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -389,7 +390,11 @@ async def test_start_reconciles_saved_mixed_notifications_before_saving(
     assert store_data.baselines == {}
     assert store_data.standby_by_circuit == {}
     assert "fridge" in store_data.energy_usage_by_circuit
-    assert dismissed == [direct_id]
+    assert dismissed == [
+        notifications_module.alert_persistent_notification_id(
+            direct_id, coordinator.entry_id
+        )
+    ]
     assert [alert.feature for alert in store_data.alerts] == [
         "circuit_capacity",
         "always_on_power",
@@ -406,7 +411,11 @@ async def test_start_reconciles_saved_mixed_notifications_before_saving(
     store.async_save.assert_awaited_once()
 
     await coordinator.async_start(())
-    assert dismissed == [direct_id]
+    assert dismissed == [
+        notifications_module.alert_persistent_notification_id(
+            direct_id, coordinator.entry_id
+        )
+    ]
     store.async_save.assert_awaited_once()
 
 
@@ -487,7 +496,9 @@ async def test_start_dismissal_failure_keeps_alert_retriable(
 
     await retry.async_start(())
 
-    assert dismissed == [direct_id]
+    assert dismissed == [
+        notifications_module.alert_persistent_notification_id(direct_id, retry.entry_id)
+    ]
     retry_store.async_save.assert_awaited_once()
 
 
@@ -561,7 +572,9 @@ async def test_mark_mixed_dismissal_failure_retries_after_reconstruction(
 
     await retry.async_start(())
 
-    assert dismissed == [direct_id]
+    assert dismissed == [
+        notifications_module.alert_persistent_notification_id(direct_id, retry.entry_id)
+    ]
     store.async_save.assert_awaited_once()
 
 
@@ -3837,7 +3850,11 @@ async def test_start_dismisses_notifications_for_purged_nilm_alerts(
 
     await coordinator.async_start(())
 
-    assert dismissed == [alert_id]
+    assert dismissed == [
+        notifications_module.alert_persistent_notification_id(
+            alert_id, coordinator.entry_id
+        )
+    ]
     assert store_data.notification_delivery_state == {
         "deferred": [],
         "daily": [],
@@ -5580,6 +5597,44 @@ async def test_source_dirty_store_save_is_throttled(
     assert saved == 2
     assert retention_calls == [now, now + timedelta(seconds=120)]
     assert coordinator.store_persistence.dirty is False
+
+
+@pytest.mark.asyncio
+async def test_quiet_source_flushes_throttled_data_and_retries(monkeypatch) -> None:
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.managers import (
+        store_persistence,
+    )
+
+    monkeypatch.setattr(
+        store_persistence, "STORE_DIRTY_SAVE_INTERVAL", timedelta(milliseconds=20)
+    )
+    flushed = asyncio.Event()
+    snapshots = []
+
+    class Store:
+        async def async_save(self):
+            snapshots.append(dict(self.data.learning_started_at_by_circuit))
+            if len(snapshots) == 2:
+                raise OSError("transient failure")
+            if len(snapshots) == 3:
+                flushed.set()
+
+    coordinator = EnergyAnalyzerCoordinator(SimpleNamespace(data={}), store=Store())
+    manager = coordinator.store_persistence
+    now = coordinator.current_time()
+    manager.mark_dirty()
+    await manager.async_save_if_dirty(now)
+    coordinator.store_data.learning_started_at_by_circuit["fridge"] = now.isoformat()
+    for _ in range(2):
+        manager.mark_dirty()
+        await manager.async_save_if_dirty(now, force=False)
+    assert snapshots == [{}]
+    await asyncio.wait_for(flushed.wait(), 1)
+    assert snapshots[1:] == [{"fridge": now.isoformat()}] * 2
+    assert not manager.dirty
 
 
 @pytest.mark.asyncio
@@ -7691,6 +7746,8 @@ async def test_runtime_persists_standby_history_once_per_save_interval() -> None
             }
         ],
     }
+    await coordinator.async_stop()
+    assert fake_store.save_count == 2
 
 
 @pytest.mark.asyncio
@@ -10242,7 +10299,11 @@ async def test_nilm_session_validation_retires_matching_finished_alert(
 
     assert coordinator.store_data.alerts == []
     assert coordinator.state.active_alerts_by_circuit == {}
-    assert dismissed == [alert_id]
+    assert dismissed == [
+        notifications_module.alert_persistent_notification_id(
+            alert_id, coordinator.entry_id
+        )
+    ]
     assert coordinator.notification_controller.notified_alert_ids == set()
     feedback = tuple(coordinator.store_data.alert_feedback.values())
     assert len(feedback) == 1
@@ -12752,7 +12813,7 @@ async def test_runtime_data_quality_repair_clears_after_reload(monkeypatch) -> N
 
     deleted: list[tuple[str, str]] = []
 
-    async def fake_delete(hass, circuit_id, problem) -> None:
+    async def fake_delete(hass, circuit_id, problem, *, entry_id) -> None:
         del hass
         deleted.append((circuit_id, problem))
 
@@ -12764,7 +12825,9 @@ async def test_runtime_data_quality_repair_clears_after_reload(monkeypatch) -> N
     monkeypatch.setattr(
         repairs,
         "existing_circuit_problem_issues",
-        lambda hass, circuit_id, problems: {("fridge", "missing_required_sensor")},
+        lambda hass, circuit_id, problems, *, entry_id: {
+            ("fridge", "missing_required_sensor")
+        },
     )
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
         SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None), data={}),
@@ -16747,7 +16810,10 @@ async def test_export_diagnostics_includes_appliance_detail_story() -> None:
     assert detail["daily_energy_kwh"] == 2.4
     assert detail["runtime_today_seconds"] == 7200.0
     assert detail["run_count_today"] == 14
-    assert detail["evidence_path"].endswith("circuit_id=fridge")
+    assert parse_qs(urlsplit(detail["evidence_path"]).query) == {
+        "circuit_id": ["fridge"],
+        "entry_id": [coordinator.entry_id],
+    }
     comparisons = {item["metric_id"]: item for item in detail["today_vs_normal"]}
     assert comparisons["daily_energy_kwh"]["status"] == "learning"
     assert comparisons["daily_energy_kwh"]["normal_low"] is None
@@ -17139,7 +17205,7 @@ async def test_runtime_notifies_daily_energy_usage_spike(monkeypatch) -> None:
     )
 
     now = datetime(2026, 6, 3, 12, 0, tzinfo=UTC)
-    holder = {"time": now, "energy": 112.6}
+    holder = {"time": now, "energy_time": now, "energy": 112.6}
     notifications: list[AlertEvidence] = []
 
     async def fake_notification(hass, alert, **kwargs) -> None:
@@ -17161,7 +17227,7 @@ async def test_runtime_notifies_daily_energy_usage_spike(monkeypatch) -> None:
             return SimpleNamespace(
                 state=str(holder["energy"]),
                 attributes={"unit_of_measurement": "kWh"},
-                last_updated=holder["time"],
+                last_updated=holder["energy_time"],
             )
 
     coordinator = coordinator_module.EnergyAnalyzerCoordinator(
@@ -17205,19 +17271,26 @@ async def test_runtime_notifies_daily_energy_usage_spike(monkeypatch) -> None:
     coordinator.state.learning_by_circuit["mains"] = False
     for offset in range(3):
         holder["time"] = now + timedelta(minutes=offset)
-        holder["energy"] += 0.1
+        holder["energy_time"] = holder["time"]
+        if offset != 1:
+            holder["energy"] += 0.1
         await coordinator.async_process_update()
+        if offset == 0:
+            for _ in range(2):
+                holder["time"] += timedelta(seconds=8)
+                await coordinator.async_process_update()
+            assert notifications == []
 
     assert notifications
     alert = notifications[0]
     assert alert.feature == "daily_energy_usage_spike"
-    assert "used 12.9 kWh today" in alert.message
+    assert "used 12.8 kWh today" in alert.message
     assert "25%" in alert.message
-    assert alert.observed_value == 12.9
+    assert alert.observed_value == 12.8
     assert alert.baseline_value == 12.5
     assert alert.features["baseline_total_kwh"] == 50.0
-    assert coordinator.state.daily_energy_usage_by_circuit["fridge"] == 12.9
-    assert coordinator.state.energy_usage_share_by_circuit["fridge"] == 25.8
+    assert coordinator.state.daily_energy_usage_by_circuit["fridge"] == 12.8
+    assert coordinator.state.energy_usage_share_by_circuit["fridge"] == 25.6
 
 
 @pytest.mark.asyncio
@@ -19188,16 +19261,17 @@ async def test_runtime_tracks_peak_demand_and_notifies_limit(monkeypatch) -> Non
         holder["time"] = now + timedelta(minutes=offset)
         await coordinator.async_process_update()
 
+    # At 12:17 the window includes 3 min at 2200 W, 5 at 2400 W and 7 at 2600 W.
     assert notifications
     alert = notifications[0]
     assert alert.feature == "demand_limit"
-    assert "EV Charger demand averaged 2516.7 W" in alert.message
+    assert "EV Charger demand averaged 2453.3 W" in alert.message
     assert "configured 2000 W limit" in alert.message
-    assert alert.observed_value == 2516.7
+    assert alert.observed_value == 2453.3
     assert alert.baseline_value == 2000.0
-    assert coordinator.state.current_demand_w_by_circuit["ev"] == 2516.7
-    assert coordinator.state.peak_demand_w_by_circuit["ev"] == 2516.7
-    assert coordinator.state.demand_limit_usage_by_circuit["ev"] == 125.8
+    assert coordinator.state.current_demand_w_by_circuit["ev"] == 2453.3
+    assert coordinator.state.peak_demand_w_by_circuit["ev"] == 2453.3
+    assert coordinator.state.demand_limit_usage_by_circuit["ev"] == 122.7
 
 
 @pytest.mark.asyncio
@@ -20803,7 +20877,7 @@ async def test_runtime_utility_comparison_setup_repair_clears_when_tracking(
 
     deleted: list[tuple[str, str]] = []
 
-    async def fake_delete(hass, circuit_id, problem) -> None:
+    async def fake_delete(hass, circuit_id, problem, *, entry_id) -> None:
         deleted.append((circuit_id, problem))
 
     monkeypatch.setattr(
@@ -20857,7 +20931,7 @@ async def test_runtime_setup_health_repair_clears_after_reload(
 
     deleted: list[tuple[str, str]] = []
 
-    async def fake_delete(hass, circuit_id, problem) -> None:
+    async def fake_delete(hass, circuit_id, problem, *, entry_id) -> None:
         del hass
         deleted.append((circuit_id, problem))
 
@@ -20869,7 +20943,7 @@ async def test_runtime_setup_health_repair_clears_after_reload(
     monkeypatch.setattr(
         repairs,
         "existing_circuit_problem_issues",
-        lambda hass, circuit_id, problems: {
+        lambda hass, circuit_id, problems, *, entry_id: {
             ("fridge", "missing_electrical_metrics"),
             ("fridge", "missing_energy_source"),
         },

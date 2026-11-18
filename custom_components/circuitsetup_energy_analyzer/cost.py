@@ -221,33 +221,32 @@ def _interval_rate_is_ambiguous(
     time_zone: TimeZone,
 ) -> bool:
     last_calendar = _calendar_datetime(last_sample_at, time_zone)
-    if last_calendar.date() != timestamp.date():
-        return _positive_float_or_none(settings.tou_rate_per_kwh) is not None
+    if _positive_float_or_none(settings.tou_rate_per_kwh) is None:
+        return False
     last_rate, _last_name, _last_tou = _active_rate(last_calendar, settings)
     current_rate, _current_name, _current_tou = _active_rate(timestamp, settings)
     if last_rate != current_rate:
         return True
     boundary_times = (
+        time.min,
         _time_or_none(settings.tou_start),
         _time_or_none(settings.tou_end),
     )
-    for boundary_time in boundary_times:
-        if boundary_time is None:
-            continue
-        boundary = datetime.combine(
-            timestamp.date(),
-            boundary_time,
-            tzinfo=timestamp.tzinfo,
-        )
-        if not last_calendar < boundary < timestamp:
-            continue
-        before_rate, _before_name, _before_tou = _active_rate(
-            boundary - timedelta(microseconds=1),
-            settings,
-        )
-        after_rate, _after_name, _after_tou = _active_rate(boundary, settings)
-        if before_rate != after_rate:
-            return True
+    day = last_calendar.date()
+    while day <= timestamp.date():
+        for boundary_time in boundary_times:
+            if boundary_time is None:
+                continue
+            boundary = datetime.combine(day, boundary_time, tzinfo=timestamp.tzinfo)
+            if not last_calendar < boundary < timestamp:
+                continue
+            before_rate, _, _ = _active_rate(
+                boundary - timedelta(microseconds=1), settings
+            )
+            after_rate, _, _ = _active_rate(boundary, settings)
+            if before_rate != after_rate:
+                return True
+        day += timedelta(days=1)
     return False
 
 

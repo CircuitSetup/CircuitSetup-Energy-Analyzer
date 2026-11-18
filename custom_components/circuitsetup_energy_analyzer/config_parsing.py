@@ -832,7 +832,9 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
     if isinstance(raw_sensor, SensorRef):
         if sensor_metadata_is_unsupported(unit=raw_sensor.unit):
             return None
-        metadata_role = sensor_role_from_metadata(unit=raw_sensor.unit)
+        metadata_role = sensor_role_from_metadata(
+            unit=raw_sensor.unit, configured_role=raw_sensor.role
+        )
         return (
             replace(raw_sensor, role=metadata_role)
             if metadata_role is not None
@@ -863,6 +865,7 @@ def _sensor_ref_from_raw(raw_sensor: Any) -> SensorRef | None:
     metadata_role = sensor_role_from_metadata(
         device_class=device_class,
         unit=unit,
+        configured_role=raw_sensor.get("role"),
     )
     raw_role = raw_sensor.get("role")
     if metadata_role is not None:

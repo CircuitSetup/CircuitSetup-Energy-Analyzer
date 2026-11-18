@@ -69,14 +69,10 @@ class ConfigEntryController:
                 domain_data[DATA_RELOAD_COUNT] = remaining
             else:
                 domain_data.pop(DATA_RELOAD_COUNT, None)
-                if not any(
-                    not str(key).startswith("_") for key in domain_data
-                ):
-                    from ..panel import async_unload_panel
-                    from ..services import async_unload_services
+                from .. import _async_unload_unused_surfaces, _lifecycle_lock
 
-                    await async_unload_panel(hass)
-                    await async_unload_services(hass)
+                async with _lifecycle_lock(hass):
+                    await _async_unload_unused_surfaces(hass)
 
     def _config_entry_method(self, method_name: str) -> Any | None:
         config_entries = getattr(self._coordinator.hass, "config_entries", None)

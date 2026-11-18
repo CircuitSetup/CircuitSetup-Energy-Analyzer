@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass, replace
+from functools import partial
 from typing import Any
 from urllib.parse import urlencode
 
@@ -120,11 +121,13 @@ def health_summary_value(state: Any, circuit_id: str) -> str:
     }.get(status, str(status).replace("_", " ").title())
 
 
-def health_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
+def health_summary_attributes(
+    state: Any, circuit_id: str, *, entry_id: str | None = None
+) -> dict[str, Any]:
     """Return health detail that would otherwise require noisy status entities."""
     summary = health_summary_value(state, circuit_id)
     readiness = readiness_value(state, circuit_id)
-    electrical = electrical_health_attributes(state, circuit_id)
+    electrical = electrical_health_attributes(state, circuit_id, entry_id=entry_id)
     data_quality_problem = data_quality_checklist_value(state, circuit_id) == "problem"
     maintenance_active = _maintenance_active(state, circuit_id)
     active_alert_count = _active_alert_count(state, circuit_id)
@@ -159,7 +162,7 @@ def health_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         "data_quality_problem": data_quality_problem,
         "maintenance_active": maintenance_active,
         "active_alert_count": active_alert_count,
-        "evidence_path": _circuit_evidence_path(circuit_id),
+        "evidence_path": electrical["evidence_path"],
         "appliance_health_status": str(
             getattr(state, "appliance_health_status_by_circuit", {}).get(
                 circuit_id,
@@ -781,7 +784,9 @@ def _operating_state_snapshot(state: Any, circuit_id: str) -> dict[str, Any] | N
     return snapshot if isinstance(snapshot, dict) else None
 
 
-def electrical_health_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
+def electrical_health_attributes(
+    state: Any, circuit_id: str, *, entry_id: str | None = None
+) -> dict[str, Any]:
     """Return electrical-health detail from metric, phase, and PQ checks."""
     summary, explanation = _electrical_health_summary(state, circuit_id)
     metric_status = metric_consistency_status_value(state, circuit_id)
@@ -801,7 +806,7 @@ def electrical_health_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         "alert_confirmed": _alert_confirmed(state, circuit_id),
         "learning": circuit_is_learning(state, circuit_id),
         "maintenance_active": _maintenance_active(state, circuit_id),
-        "evidence_path": _circuit_evidence_path(circuit_id),
+        "evidence_path": _circuit_evidence_path(circuit_id, entry_id),
         "status_explanation": explanation,
         "metric_status_explanation": _status_explanation(metric_status),
         "leg_status_explanation": _status_explanation(leg_status),
@@ -819,7 +824,9 @@ def energy_summary_value(state: Any, circuit_id: str) -> str:
     return _energy_summary(state, circuit_id)[0]
 
 
-def energy_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
+def energy_summary_attributes(
+    state: Any, circuit_id: str, *, entry_id: str | None = None
+) -> dict[str, Any]:
     """Return energy, billing, goal, and cost detail in one place."""
     summary, explanation = _energy_summary(state, circuit_id)
     has_energy_evidence = _has_energy_usage_evidence(state, circuit_id)
@@ -847,7 +854,7 @@ def energy_summary_attributes(state: Any, circuit_id: str) -> dict[str, Any]:
         "alert_confirmed": _alert_confirmed(state, circuit_id),
         "learning": circuit_is_learning(state, circuit_id),
         "maintenance_active": _maintenance_active(state, circuit_id),
-        "evidence_path": _circuit_evidence_path(circuit_id),
+        "evidence_path": _circuit_evidence_path(circuit_id, entry_id),
         "summary_explanation": explanation,
         "energy_usage_explanation": _status_explanation(energy_usage_status),
         "billing_cycle_explanation": _status_explanation(billing_status),
@@ -866,8 +873,11 @@ def _health_summary_raw_status(summary: str, readiness: str) -> str:
     return normalized or "ready"
 
 
-def _circuit_evidence_path(circuit_id: str) -> str:
-    return f"{DEFAULT_ALERT_EVIDENCE_PATH}?{urlencode({'circuit_id': circuit_id})}"
+def _circuit_evidence_path(circuit_id: str, entry_id: str | None = None) -> str:
+    params = {"circuit_id": circuit_id}
+    if entry_id:
+        params["entry_id"] = entry_id
+    return f"{DEFAULT_ALERT_EVIDENCE_PATH}?{urlencode(params)}"
 
 
 def _health_summary_explanation(summary: str, readiness: str) -> str:
@@ -2586,6 +2596,11 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
             key=description.key,
         )
         self.entity_description = description
+        self._attributes_fn = description.attributes_fn
+        if self._attributes_fn in (
+            health_summary_attributes, energy_summary_attributes
+        ):
+            self._attributes_fn = partial(self._attributes_fn, entry_id=entry_id)
         self._attr_suggested_object_id = _LEGACY_SENSOR_OBJECT_ID_SUFFIXES.get(
             description.key,
             description.key,
@@ -2635,7 +2650,7 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
                 self.circuit_id,
             )
         if _is_status_sensor_key(self.entity_description.key):
-            attributes_fn = self.entity_description.attributes_fn
+            attributes_fn = self._attributes_fn
             attributes = (
                 attributes_fn(self.coordinator_state, self.circuit_id)
                 if attributes_fn is not None
@@ -2653,7 +2668,7 @@ class CircuitAnalyzerSensor(CircuitAnalyzerEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return additional diagnostics for sensors that expose detail."""
-        attributes_fn = self.entity_description.attributes_fn
+        attributes_fn = self._attributes_fn
         attributes = (
             attributes_fn(self.coordinator_state, self.circuit_id)
             if attributes_fn is not None

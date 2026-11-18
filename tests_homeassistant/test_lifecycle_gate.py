@@ -8,6 +8,7 @@ from inspect import unwrap
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from homeassistant.helpers import entity_registry as er
@@ -113,6 +114,34 @@ async def test_feature_store_migrates_previous_major_version(
     assert loaded.hvac_response_history_by_stream == {}
     assert loaded.hvac_baseline_era_by_stream == {}
     assert await Store(hass, STORAGE_VERSION, key).async_load() == previous_data
+
+
+@pytest.mark.asyncio
+async def test_shutdown_flushes_throttled_feature_store(hass, hass_storage) -> None:
+    from custom_components.circuitsetup_energy_analyzer.const import STORAGE_KEY
+    from custom_components.circuitsetup_energy_analyzer.coordinator import (
+        EnergyAnalyzerCoordinator,
+    )
+    from custom_components.circuitsetup_energy_analyzer.storage import FeatureStore
+
+    entry = MockConfigEntry(domain=DOMAIN)
+    coordinator = EnergyAnalyzerCoordinator(
+        hass, config_entry=entry, entry_id=entry.entry_id,
+        store=FeatureStore(hass, entry.entry_id),
+    )
+    await coordinator.async_start(())
+    manager = coordinator.store_persistence
+    now = coordinator.current_time()
+    manager.mark_dirty()
+    await manager.async_save_if_dirty(now)
+    coordinator.store_data.sensitivity_by_circuit["fridge"] = "quiet"
+    manager.mark_dirty()
+    await manager.async_save_if_dirty(now, force=False)
+    key = f"{STORAGE_KEY}.{entry.entry_id}"
+    assert hass_storage[key]["data"]["sensitivity_by_circuit"] == {}
+    await hass.async_stop(force=True)
+    assert hass_storage[key]["data"]["sensitivity_by_circuit"] == {"fridge": "quiet"}
+    assert not coordinator.started
 
 
 @pytest.mark.parametrize("version_offset", [0, -1])
@@ -449,10 +478,14 @@ def _assert_appliance_workflow_payloads(
     appliance = appliance_detail_payload([coordinator], circuit_id="fridge")
     assert appliance["status"] == "ok"
     assert appliance["detail"]["source_type"] == "direct_meter"
-    assert appliance["detail"]["evidence_path"].endswith("circuit_id=fridge")
+    assert parse_qs(urlsplit(appliance["detail"]["evidence_path"]).query) == {
+        "circuit_id": ["fridge"],
+        "entry_id": [entry_id],
+    }
     assert "open_evidence" not in appliance["actions"]
     assert appliance["actions"]["relearn_baseline"]["data"] == {
-        "circuit_id": "fridge"
+        "circuit_id": "fridge",
+        "entry_id": entry_id,
     }
 
     setup_health = setup_health_payload([coordinator], entry_id=entry_id)
@@ -523,7 +556,8 @@ async def _assert_appliance_workflow_panel_views(
     assert appliance["detail"]["source_type"] == "direct_meter"
     assert "open_evidence" not in appliance["actions"]
     assert appliance["actions"]["relearn_baseline"]["data"] == {
-        "circuit_id": "fridge"
+        "circuit_id": "fridge",
+        "entry_id": entry_id,
     }
 
     stale_assignment = await panel.ApplianceDetailView().get(

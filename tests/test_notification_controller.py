@@ -112,8 +112,9 @@ async def test_learning_completion_lifecycle_is_opt_in_and_once_per_epoch(
     clock = {"now": now}
     created: list[AlertEvidence] = []
 
-    async def create_notification(hass, alert, *, config=None) -> None:
+    async def create_notification(hass, alert, *, config=None, entry_id=None) -> None:
         del hass, config
+        assert entry_id == "second"
         created.append(alert)
 
     monkeypatch.setattr(
@@ -122,6 +123,7 @@ async def test_learning_completion_lifecycle_is_opt_in_and_once_per_epoch(
         create_notification,
     )
     coordinator = SimpleNamespace(
+        entry_id="second",
         hass=SimpleNamespace(config=SimpleNamespace(time_zone="UTC")),
         current_time=lambda: clock["now"],
         state=SimpleNamespace(
@@ -238,7 +240,7 @@ async def test_natural_alert_resolution_emits_one_lifecycle_recovery(
     dismissed: list[str] = []
     paused: set[str] = set()
 
-    async def create_notification(hass, alert, *, config=None) -> None:
+    async def create_notification(hass, alert, *, config=None, entry_id=None) -> None:
         del hass, config
         created.append(alert)
 
@@ -444,7 +446,9 @@ async def test_nilm_recovery_uses_assignment_identity_and_preferences(
     ]
     created: list[AlertEvidence] = []
 
-    async def create_notification(hass, created_alert, *, config=None) -> None:
+    async def create_notification(
+        hass, created_alert, *, config=None, entry_id=None
+    ) -> None:
         del hass, config
         created.append(created_alert)
 
@@ -800,7 +804,9 @@ async def test_notification_controller_uses_pause_controller_before_suppressing(
     )
     created: list[AlertEvidence] = []
 
-    async def create_notification(hass, alert_to_create, *, config=None) -> None:
+    async def create_notification(
+        hass, alert_to_create, *, config=None, entry_id=None
+    ) -> None:
         del hass, config
         created.append(alert_to_create)
 
@@ -842,7 +848,7 @@ async def test_alert_notifications_wait_for_live_learning_state(
 ) -> None:
     created: list[AlertEvidence] = []
 
-    async def create_notification(hass, alert, *, config=None) -> None:
+    async def create_notification(hass, alert, *, config=None, entry_id=None) -> None:
         del hass, config
         created.append(alert)
 
@@ -971,7 +977,9 @@ async def test_self_mature_cold_storage_alert_recovers_during_shared_learning(
     )
     created: list[AlertEvidence] = []
 
-    async def create_notification(hass, created_alert, *, config=None) -> None:
+    async def create_notification(
+        hass, created_alert, *, config=None, entry_id=None
+    ) -> None:
         del hass, config
         created.append(created_alert)
 
@@ -1032,7 +1040,7 @@ async def test_hvac_response_notification_obeys_shared_suppression(
     paused = {"value": False}
     suppressed = {"value": False}
 
-    async def create_notification(hass, alert, *, config=None) -> None:
+    async def create_notification(hass, alert, *, config=None, entry_id=None) -> None:
         del hass, config
         created.append(alert)
 
@@ -1089,7 +1097,7 @@ async def test_alert_notifications_wait_for_energy_learning(
 ) -> None:
     created: list[AlertEvidence] = []
 
-    async def create_notification(hass, alert, *, config=None) -> None:
+    async def create_notification(hass, alert, *, config=None, entry_id=None) -> None:
         del hass, config
         created.append(alert)
 
@@ -1142,7 +1150,9 @@ async def test_alert_notifications_wait_for_energy_learning(
 async def test_notification_preferences_gate_and_defer_alerts(monkeypatch) -> None:
     sent: list[AlertEvidence] = []
 
-    async def create_notification(hass, alert_to_create, *, config=None) -> None:
+    async def create_notification(
+        hass, alert_to_create, *, config=None, entry_id=None
+    ) -> None:
         del hass, config
         sent.append(alert_to_create)
 
@@ -1217,7 +1227,7 @@ async def test_deferred_alert_is_dropped_after_its_evidence_clears(
 ) -> None:
     sent: list[AlertEvidence] = []
 
-    async def create_notification(hass, alert, *, config=None) -> None:
+    async def create_notification(hass, alert, *, config=None, entry_id=None) -> None:
         del hass, config
         sent.append(alert)
 
@@ -1268,7 +1278,7 @@ async def test_deferred_alert_is_dropped_after_its_evidence_clears(
 async def test_finished_run_notifications_use_distinct_ids(monkeypatch) -> None:
     notification_ids: list[str] = []
 
-    async def create_notification(hass, alert, *, config=None) -> None:
+    async def create_notification(hass, alert, *, config=None, entry_id=None) -> None:
         del hass, config
         notification_ids.append(notification_id_for_alert(alert))
 

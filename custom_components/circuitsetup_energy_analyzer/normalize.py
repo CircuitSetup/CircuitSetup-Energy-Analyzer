@@ -30,6 +30,7 @@ _UNIT_SCALE_BY_ROLE = {
     },
     SensorRole.CURRENT: {"ka": 1_000.0, "ma": 0.001, "Ma": 1_000_000.0},
     SensorRole.PEAK_CURRENT: {"ka": 1_000.0, "ma": 0.001, "Ma": 1_000_000.0},
+    SensorRole.POWER_FACTOR: {"%": 0.01},
     SensorRole.VOLTAGE: {"kv": 1_000.0, "mv": 0.001, "Mv": 1_000_000.0},
 }
 
@@ -70,6 +71,8 @@ class NormalizedCircuitSample(CircuitSample):
     power_flow_direction: str | None = None
     leg_a_real_power: float | None = None
     leg_b_real_power: float | None = None
+    peak_current: float | None = None
+    max_leg_current: float | None = None
     leg_a_current: float | None = None
     leg_b_current: float | None = None
     leg_a_voltage: float | None = None
@@ -99,6 +102,7 @@ def build_circuit_sample(
     inactive_power_threshold_w: float | None = None,
 ) -> NormalizedCircuitSample:
     values: dict[SensorRole, float | None] = {}
+    max_leg_current = None
     source_by_role: dict[SensorRole, str] = {}
     source_updated_at_by_role: dict[SensorRole, datetime] = {}
     quality_issues: list[str] = []
@@ -123,6 +127,7 @@ def build_circuit_sample(
         metadata_role = sensor_role_from_metadata(
             device_class=source.device_class if source is not None else None,
             unit=source_unit,
+            configured_role=sensor.role,
         )
         effective_role = metadata_role or sensor.role
         if source is None:
@@ -179,6 +184,13 @@ def build_circuit_sample(
             quality_issues.append(f"{sensor.entity_id} non_finite")
             continue
 
+        if (
+            effective_role is SensorRole.CURRENT
+            and normalized_leg(sensor.leg) is not None
+        ):
+            max_leg_current = max(abs(value), max_leg_current or 0.0)
+        if effective_role is SensorRole.PEAK_CURRENT:
+            value = max(abs(value), values.get(effective_role) or 0.0)
         values[effective_role] = value
         source_by_role[effective_role] = sensor.entity_id
         source_updated_at_by_role[effective_role] = source_last_updated
@@ -197,6 +209,8 @@ def build_circuit_sample(
         circuit_id=config.circuit_id,
         real_power=real_power,
         current=values.get(SensorRole.CURRENT),
+        peak_current=values.get(SensorRole.PEAK_CURRENT),
+        max_leg_current=max_leg_current,
         voltage=values.get(SensorRole.VOLTAGE),
         reactive_power=values.get(SensorRole.REACTIVE_POWER),
         apparent_power=values.get(SensorRole.APPARENT_POWER),
@@ -300,3 +314,12 @@ def _normalize_real_power(
     if real_power < 0:
         return real_power, "export"
     return 0.0, "balanced"
+
+
+def normalized_leg(leg: str | None) -> str | None:
+    value = str(leg or "").strip().lower()
+    if value in {"a", "left", "l1", "leg1", "line1", "phase1", "1"}:
+        return "a"
+    if value in {"b", "right", "l2", "leg2", "line2", "phase2", "2"}:
+        return "b"
+    return None

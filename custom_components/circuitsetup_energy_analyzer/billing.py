@@ -93,7 +93,6 @@ def record_billing_cycle_usage(
     ):
         cycle_usage += max(float(energy_kwh) - last_energy, 0.0)
 
-    cycle_usage = _round_kwh(cycle_usage)
     history["cycle_start"] = cycle_start.isoformat()
     history["cycle_end"] = cycle_end.isoformat()
     history["cycle_usage_kwh"] = cycle_usage
@@ -110,7 +109,7 @@ def record_billing_cycle_usage(
         circuit_id=circuit_id,
         cycle_start=cycle_start.isoformat(),
         cycle_end=cycle_end.isoformat(),
-        cycle_usage_kwh=cycle_usage,
+        cycle_usage_kwh=_round_kwh(cycle_usage),
         projected_cycle_kwh=projected_cycle,
         elapsed_days=elapsed_days,
         cycle_days=cycle_days,
@@ -145,7 +144,7 @@ def record_billing_cycle_usage(
         circuit_id=circuit_id,
         cycle_start=cycle_start.isoformat(),
         cycle_end=cycle_end.isoformat(),
-        cycle_usage_kwh=cycle_usage,
+        cycle_usage_kwh=result.cycle_usage_kwh,
         projected_cycle_kwh=projected_cycle,
         budget_kwh=budget_kwh,
         budget_usage_percent=budget_usage,
@@ -154,7 +153,7 @@ def record_billing_cycle_usage(
         elapsed_days=elapsed_days,
         cycle_days=cycle_days,
         features={
-            "cycle_usage_kwh": cycle_usage,
+            "cycle_usage_kwh": result.cycle_usage_kwh,
             "projected_cycle_kwh": projected_cycle,
             "budget_kwh": budget_kwh,
             "budget_usage_percent": budget_usage,

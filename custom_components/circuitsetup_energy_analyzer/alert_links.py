@@ -8,9 +8,7 @@ from .demand import MAX_DEMAND_WINDOW_MINUTES
 from .models import AlertEvidence, CircuitConfig, SensorRole
 
 DEFAULT_ALERT_EVIDENCE_PATH = "/circuitsetup-energy-analyzer-evidence"
-DEFAULT_ALERT_EVIDENCE_DASHBOARD_PATH = (
-    "/circuitsetup-energy-analyzer/alert-evidence"
-)
+DEFAULT_ALERT_EVIDENCE_DASHBOARD_PATH = "/circuitsetup-energy-analyzer/alert-evidence"
 MAX_GRAPH_ENTITIES = 8
 _NILM_WORKSPACE_FEATURES = frozenset(
     {
@@ -91,14 +89,17 @@ _FEATURE_ROLE_HINTS: tuple[tuple[tuple[str, ...], tuple[SensorRole, ...]], ...] 
 
 
 def alert_evidence_path(
-    alert: AlertEvidence, *, dashboard_path: str = DEFAULT_ALERT_EVIDENCE_PATH
+    alert: AlertEvidence,
+    *,
+    dashboard_path: str = DEFAULT_ALERT_EVIDENCE_PATH,
+    entry_id: str | None = None,
 ) -> str:
     """Return a relative Home Assistant path for an alert evidence view."""
     from .notifications import notification_id_for_alert
 
     feature = _feature_for_alert(alert)
     assignment_id = str(alert.features.get("assignment_id") or "").strip()
-    entry_id = str(alert.features.get("entry_id") or "").strip()
+    entry_id = entry_id or str(alert.features.get("entry_id") or "").strip()
     mains_circuit_id = str(
         alert.features.get("mains_circuit_id") or alert.circuit_id
     ).strip()

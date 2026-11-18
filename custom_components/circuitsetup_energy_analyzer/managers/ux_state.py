@@ -220,6 +220,7 @@ class UxStateManager:
             coordinator.state,
             circuit_id,
             self.latest_alert_for_circuit(circuit_id, stored_alerts=alerts),
+            entry_id=getattr(coordinator, "entry_id", None),
             config=coordinator.circuit_registry.config_for_circuit(circuit_id),
         )
         coordinator.state_reducer.refresh_recent_activity_state(

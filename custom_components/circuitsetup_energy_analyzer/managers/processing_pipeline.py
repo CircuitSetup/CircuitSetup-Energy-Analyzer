@@ -6,8 +6,16 @@ from dataclasses import replace
 from time import monotonic
 from typing import Any
 
-from ..models import ApplianceProfile, PowerFlowMode, SensorRole
+from ..models import (
+    ApplianceProfile,
+    CircuitConfig,
+    CircuitMode,
+    PowerFlowMode,
+    SensorRole,
+)
+from ..normalize import NormalizedCircuitSample
 from ..usage import derive_cumulative_energy_from_power
+from .source_samples import normalized_leg
 
 
 class ProcessingPipeline:
@@ -135,16 +143,7 @@ class ProcessingPipeline:
             config.circuit_id,
             {},
         )
-        if not _has_usable_energy_sensor(config):
-            sample = replace(
-                sample,
-                energy=derive_cumulative_energy_from_power(
-                    energy_history,
-                    timestamp=sample.timestamp,
-                    power_w=sample.real_power,
-                ),
-            )
-            energy_history["energy_source"] = "derived_from_power"
+        sample = _energy_sample(config, sample, energy_history)
 
         event_result = await self._async_process(
             "events", self._event_processor, sample, config, context
@@ -327,11 +326,61 @@ class ProcessingPipeline:
         return alerts
 
 
-def _has_usable_energy_sensor(config: Any) -> bool:
-    for sensor in config.sensors:
-        if sensor.role is not SensorRole.ENERGY:
-            continue
-        unit = str(sensor.unit or "").strip().lower()
-        if not unit or unit in {"kwh", "wh", "mwh"}:
-            return True
-    return False
+def _has_usable_energy_sensor(config: CircuitConfig) -> bool:
+    energy_legs = {
+        normalized_leg(sensor.leg)
+        for sensor in config.sensors
+        if sensor.role is SensorRole.ENERGY
+        and str(sensor.unit or "").strip().lower() in {"", "kwh", "wh", "mwh"}
+    }
+    if config.mode is CircuitMode.DUAL_PHASE:
+        split_legs = {normalized_leg(sensor.leg) for sensor in config.sensors}
+        if {"a", "b"} <= split_legs:
+            return {"a", "b"} <= energy_legs
+    return bool(energy_legs)
+
+
+def _energy_sample(
+    config: CircuitConfig,
+    sample: NormalizedCircuitSample,
+    history: dict[str, Any],
+) -> NormalizedCircuitSample:
+    """Keep a single cumulative series when the configured meter coverage changes."""
+    if _has_usable_energy_sensor(config):
+        if sample.energy is None:
+            return sample
+        if history.get("energy_source") == "derived_from_power":
+            # Anchor the first measured value to the previously published counter.
+            del history["energy_source"]
+            if history.get("derived_energy_kwh") is not None:
+                history["previous_meter_kwh"] = sample.energy
+        if (previous_meter := history.get("previous_meter_kwh")) is None:
+            return sample
+        measured_delta = max(0.0, sample.energy - previous_meter)
+        energy = history["derived_energy_kwh"] + measured_delta
+        history["previous_meter_kwh"] = sample.energy
+        history["derived_energy_kwh"] = energy
+        return replace(sample, energy=energy)
+
+    if history.get("energy_source") != "derived_from_power":
+        if "last_energy_kwh" in history:
+            history["derived_energy_kwh"] = history["last_energy_kwh"]
+        history.pop("derived_energy_last_power_w", None)
+        history.pop("previous_meter_kwh", None)
+    history["energy_source"] = "derived_from_power"
+    energy = derive_cumulative_energy_from_power(
+        history,
+        timestamp=sample.timestamp,
+        power_w=sample.real_power,
+    )
+    source_times = dict(sample.source_updated_at_by_role)
+    source_times.pop(SensorRole.ENERGY, None)
+    if (
+        energy is not None
+        and sample.real_power is not None
+        and SensorRole.REAL_POWER in source_times
+    ):
+        source_times[SensorRole.ENERGY] = source_times[SensorRole.REAL_POWER]
+    return replace(
+        sample, energy=energy, source_updated_at_by_role=tuple(source_times.items())
+    )
