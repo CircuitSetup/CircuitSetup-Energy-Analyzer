@@ -249,7 +249,9 @@ def _index_details(coordinator: Any, *, compact: bool) -> Iterator[ApplianceDeta
         }:
             continue
         detail = (
-            appliance_detail_for_virtual_state(coordinator, state)
+            appliance_detail_for_virtual_state(
+                coordinator, state, include_timeline=False
+            )
             if compact
             else appliance_detail_for_assignment(coordinator, state.assignment_id)
         )
@@ -309,7 +311,7 @@ def attention_projection(
                 is_nilm and readiness.get("status") == "needs_validation"
             )
             coverage["unavailable"] += int(
-                has_problem or (not is_nilm and detail.current_power_w is None)
+                not is_nilm and detail.current_power_w is None
             )
             finding = attention_item_for_detail(coordinator, detail)
             if finding is None:

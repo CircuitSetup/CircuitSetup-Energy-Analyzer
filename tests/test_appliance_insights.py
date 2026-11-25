@@ -666,6 +666,8 @@ def test_attention_projection_pages_after_scope_filter_and_sort():
         "source_data_fresh"
     ] = False
 
+    meters[-1].state.latest_real_power_w_by_circuit.pop("fridge")
+
     def read(**kwargs):
         return appliance_insights_payload(meters, view="attention", **kwargs)
 
@@ -726,3 +728,67 @@ def test_compact_projection_does_not_rebuild_converted_alias_or_scan_history(
     coverage = panel.appliance_insights_payload([meter], view="attention")["coverage"]
     assert coverage["direct_monitored"] == 1
     assert coverage["identified_estimates"] == 0
+
+
+@pytest.mark.parametrize(
+    ("stale_sensor", "unavailable"), [("voltage", 0), ("power", 1)]
+)
+def test_attention_coverage_tracks_normalized_power_independently(
+    stale_sensor, unavailable
+):
+    from dataclasses import replace
+    from datetime import UTC, datetime, timedelta
+
+    from custom_components.circuitsetup_energy_analyzer.models import (
+        SensorRef,
+        SensorRole,
+    )
+    from custom_components.circuitsetup_energy_analyzer.normalize import (
+        SourceState,
+        build_circuit_sample,
+    )
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_insights_payload,
+    )
+    from custom_components.circuitsetup_energy_analyzer.ux import data_quality_checklist
+    from tests.test_appliance_detail import _direct_coordinator
+
+    meter = _direct_coordinator()
+    original = meter.circuit_configs[0]
+    voltage = SensorRef("sensor.fridge_voltage", SensorRole.VOLTAGE)
+    config = replace(original, sensors=(*original.sensors, voltage))
+    meter.circuit_configs = (config,)
+    now = datetime.now(UTC)
+    states = {
+        ref.entity_id: SourceState(
+            ref.entity_id,
+            "0",
+            None,
+            now - timedelta(hours=1)
+            if ref.entity_id == f"sensor.fridge_{stale_sensor}"
+            else now,
+        )
+        for ref in config.sensors
+    }
+    sample = build_circuit_sample(config, states, now)
+    meter.state.latest_real_power_w_by_circuit["fridge"] = sample.real_power
+    meter.state.data_quality_checklist_by_circuit["fridge"] = data_quality_checklist(
+        config, sample
+    )
+    result = appliance_insights_payload([meter], view="attention", data_problem=True)
+    assert result["matching_count"] == 1
+    assert result["coverage"]["unavailable"] == unavailable
+
+
+def test_attention_projection_omits_virtual_session_timelines(monkeypatch):
+    from custom_components.circuitsetup_energy_analyzer import appliance_detail, panel
+    from tests.test_appliance_detail import _nilm_coordinator
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("attention projection built a virtual appliance timeline")
+
+    monkeypatch.setattr(appliance_detail, "nilm_appliance_timeline", unexpected)
+    monkeypatch.setattr(appliance_detail, "_nilm_session_timeline", unexpected)
+    result = panel.appliance_insights_payload([_nilm_coordinator()], view="attention")
+    assert result["coverage"]["identified_estimates"] == 1
+    assert result["items"][0]["source_type"] == "nilm_estimate"

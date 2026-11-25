@@ -336,6 +336,8 @@ def appliance_detail_for_assignment(
 def appliance_detail_for_virtual_state(
     coordinator: Any,
     state: NilmVirtualApplianceState,
+    *,
+    include_timeline: bool = True,
 ) -> ApplianceDetail:
     analyzer_state = _coordinator_state(coordinator)
     entry_id = getattr(coordinator, "entry_id", None)
@@ -380,7 +382,7 @@ def appliance_detail_for_virtual_state(
             evidence_path=evidence_path,
             comparisons=comparisons,
         ),
-        recent_timeline=_nilm_session_timeline(state),
+        recent_timeline=_nilm_session_timeline(state) if include_timeline else None,
         active_alerts=_active_alert_summaries(
             analyzer_state,
             state.mains_circuit_id,
@@ -428,11 +430,15 @@ def appliance_detail_for_virtual_state(
         appliance_id=state.appliance_id,
         mains_circuit_id=state.mains_circuit_id,
         current_session_duration_seconds=state.current_session_duration_seconds,
-        current_session=_nilm_session_detail(state, state.current_session_id),
+        current_session=_nilm_session_detail(state, state.current_session_id)
+        if include_timeline
+        else None,
         last_matched_session=_nilm_session_detail(
             state,
             state.last_matched_session_id,
-        ),
+        )
+        if include_timeline
+        else None,
         session_timeline=nilm_appliance_timeline(
             state,
             (
@@ -448,7 +454,9 @@ def appliance_detail_for_virtual_state(
                     {},
                 ).get(state.mains_circuit_id, {})
             ),
-        ),
+        )
+        if include_timeline
+        else (),
         confidence_kind=state.confidence_kind,
     )
 
