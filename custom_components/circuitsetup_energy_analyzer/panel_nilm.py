@@ -19,6 +19,7 @@ from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote, urlencode
 
+from .alert_links import appliance_detail_path
 from .const import DOMAIN
 from .discovery import sensor_metadata_role_conflict, sensor_role_from_metadata
 from .entity import _entity_registry_for_hass
@@ -3235,8 +3236,8 @@ def _nilm_assignment_payload(
         payload["typical_power_w"] = round(fmean(recorded_interval_watts), 3)
         payload["typical_power_source"] = "interval_average"
 
-    payload["appliance_detail_path"] = _nilm_appliance_detail_panel_path(
-        assignment_id, entry_id=entry_id
+    payload["appliance_detail_path"] = appliance_detail_path(
+        entry_id, assignment_id=assignment_id
     )
     state = str(payload.get("lifecycle_state") or "").strip().lower()
     action_data = {ATTR_CIRCUIT_ID: circuit_id, ATTR_ASSIGNMENT_ID: assignment_id}
@@ -3522,8 +3523,8 @@ def _nilm_virtual_appliances_for_assignments(
                 "appliance_detail_api_path": (
                     f"{APPLIANCE_DETAIL_API_PATH}?{urlencode(detail_query)}"
                 ),
-                "appliance_detail_path": _nilm_appliance_detail_panel_path(
-                    assignment_id, entry_id=entry_id
+                "appliance_detail_path": appliance_detail_path(
+                    entry_id, assignment_id=assignment_id
                 ),
             }
         )
@@ -3550,13 +3551,6 @@ def _nilm_reconciliation_payload(
         ),
         "review_action": reconciliation.get("review_item"),
     }
-
-
-def _nilm_appliance_detail_panel_path(assignment_id: str, *, entry_id: str = "") -> str:
-    query = {ATTR_ASSIGNMENT_ID: assignment_id, "appliance_detail": "1"}
-    if entry_id:
-        query[ATTR_ENTRY_ID] = entry_id
-    return f"/{PANEL_URL_PATH}?{urlencode(query)}"
 
 
 def _nilm_appliance_profile_options(

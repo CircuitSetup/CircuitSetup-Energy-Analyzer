@@ -4,8 +4,8 @@ from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import urlencode
 
+from .alert_links import appliance_detail_path
 from .appliance_detail import (
     ApplianceDetail,
     ApplianceExpectation,
@@ -14,8 +14,6 @@ from .appliance_detail import (
 )
 from .models import CircuitMode
 from .nilm_virtual import nilm_virtual_appliance_states
-
-PANEL_PATH = "/circuitsetup-energy-analyzer-evidence"
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,8 +46,9 @@ def attention_items_for_coordinators(
 ) -> tuple[AttentionItem, ...]:
     """Build a bounded, deduplicated Needs Attention list."""
     items: list[AttentionItem] = []
-    seen: set[str] = set()
     for coordinator in coordinators:
+        seen: set[str] = set()
+        entry_id = getattr(coordinator, "entry_id", None)
         now = _coordinator_now(coordinator)
         for config in getattr(coordinator, "circuit_configs", ()) or ():
             if getattr(config, "mode", None) == CircuitMode.MAINS_NILM:
@@ -57,7 +56,7 @@ def attention_items_for_coordinators(
             detail = appliance_detail_for_circuit(coordinator, config.circuit_id)
             if detail is None or not detail.appliance_key:
                 continue
-            item = _attention_item(detail, now=now)
+            item = _attention_item(detail, now=now, entry_id=entry_id)
             if item is not None and item.appliance_key not in seen:
                 seen.add(item.appliance_key)
                 items.append(item)
@@ -74,7 +73,7 @@ def attention_items_for_coordinators(
             detail = appliance_detail_for_assignment(coordinator, state.assignment_id)
             if detail is None or not detail.appliance_key:
                 continue
-            item = _attention_item(detail, now=now)
+            item = _attention_item(detail, now=now, entry_id=entry_id)
             if item is not None and item.appliance_key not in seen:
                 seen.add(item.appliance_key)
                 items.append(item)
@@ -86,6 +85,7 @@ def _attention_item(
     detail: ApplianceDetail,
     *,
     now: datetime,
+    entry_id: str | None,
 ) -> AttentionItem | None:
     expectation = next(
         (item for item in detail.expectations if _expectation_is_actionable(item)),
@@ -111,7 +111,9 @@ def _attention_item(
             if expectation.what_to_check_first
             else detail.next_step or "Open appliance detail."
         ),
-        action_path=_detail_path(detail),
+        action_path=appliance_detail_path(
+            entry_id, circuit_id=detail.circuit_id, assignment_id=detail.assignment_id
+        ),
         updated_at=now,
     )
 
@@ -146,15 +148,6 @@ def _attention_severity(
     if category == "validate_nilm" or expectation.status == "watch":
         return "medium"
     return "low"
-
-
-def _detail_path(detail: ApplianceDetail) -> str:
-    query: dict[str, str] = {"appliance_detail": "1"}
-    if detail.assignment_id:
-        query["assignment_id"] = detail.assignment_id
-    else:
-        query["circuit_id"] = detail.circuit_id
-    return f"{PANEL_PATH}?{urlencode(query)}"
 
 
 def _attention_sort_key(item: AttentionItem) -> tuple[int, int, str]:

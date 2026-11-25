@@ -252,7 +252,7 @@ def test_attention_action_paths_select_one_appliance_detail(monkeypatch) -> None
     for item in items:
         parsed = urlparse(item.action_path or "")
         params = parse_qs(parsed.query)
-        assert parsed.path == attention.PANEL_PATH
+        assert parsed.path == "/circuitsetup-energy-analyzer-evidence"
         assert params["appliance_detail"] == ["1"]
         assert bool(params.get("circuit_id")) != bool(params.get("assignment_id"))
 

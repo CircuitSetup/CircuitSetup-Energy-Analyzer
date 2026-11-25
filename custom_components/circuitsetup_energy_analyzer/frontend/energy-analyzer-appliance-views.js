@@ -46,6 +46,7 @@ export function createApplianceViewMethods({
         return;
       }
       this._applianceDetail = detail;
+      if (detail.status === "choose_meter") return;
       await this._loadApplianceDetailHistories(undefined, requestId, routeKey);
     } catch (error) {
       if (!this._isCurrentRequest(requestId, routeKey)) {

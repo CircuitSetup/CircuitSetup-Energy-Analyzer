@@ -486,7 +486,7 @@ def test_panel_module_version_advances_combined_frontend() -> None:
         PANEL_MODULE_VERSION,
     )
 
-    assert PANEL_MODULE_VERSION == "20261117-1"
+    assert PANEL_MODULE_VERSION == "20261125-1"
 
 
 def test_nilm_finished_alert_exposes_completion_decisions() -> None:
@@ -8163,7 +8163,7 @@ def test_alert_evidence_payload_keeps_requested_circuit_after_stale_alert_id() -
     assert "end_maintenance" not in payload["actions"]
 
 
-def test_alert_evidence_payload_checks_later_coordinators_before_stale_fallback() -> (
+def test_alert_evidence_payload_scopes_stale_fallback_to_selected_meter() -> (
     None
 ):
     from custom_components.circuitsetup_energy_analyzer.panel import (
@@ -8172,13 +8172,14 @@ def test_alert_evidence_payload_checks_later_coordinators_before_stale_fallback(
 
     alert = _alert(circuit_id="hvac", feature="demand_monthly_peak")
 
-    payload = alert_evidence_payload(
-        [
-            _coordinator(config=_config("hvac")),
-            _coordinator(alert, config=_config("hvac")),
-        ],
-        circuit_id="hvac",
-    )
+    first = _coordinator(config=_config("hvac"))
+    second = _coordinator(alert, config=_config("hvac"))
+    first.entry_id, second.entry_id = "first", "second"
+    meters = [first, second]
+    assert alert_evidence_payload(meters, circuit_id="hvac")["status"] == "choose_meter"
+    stale = alert_evidence_payload(meters, circuit_id="hvac", entry_id="first")
+    assert stale["status"] == "circuit_found_no_evidence"
+    payload = alert_evidence_payload(meters, circuit_id="hvac", entry_id="second")
 
     assert payload["status"] == "latest_for_circuit"
     assert payload["alert"]["alert_id"] == notification_id_for_alert(alert)
@@ -8482,7 +8483,9 @@ def test_appliance_insights_payload_exposes_status_and_items() -> None:
     assert item["appliance_key"] == "circuit:hvac"
     assert item["display_name"] == "HVAC"
     assert item["source_type"] == "direct_meter"
-    assert item["detail_path"].endswith("appliance_detail=1&circuit_id=hvac")
+    assert parse_qs(urlparse(item["detail_path"]).query) == {
+        "entry_id": ["entry-hvac"], "appliance_detail": ["1"], "circuit_id": ["hvac"]
+    }
     assert item["is_nilm"] is False
     assert item["cost_today"] == 1.2
     assert item["cost_today_status"] == "recorded"
@@ -9739,3 +9742,30 @@ async def test_nilm_interval_evidence_preview_returns_shared_manual_evidence(
     )
 
     assert payload["interval_evidence"] == shared_evidence
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_shared_alert_asks_for_meter_before_feedback(reverse):
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        alert_evidence_payload,
+    )
+
+    alert = _alert()
+    meters = [_coordinator(alert), _coordinator(alert)]
+    meters[0].entry_id, meters[1].entry_id = "kitchen", "garage"
+    if reverse:
+        meters.reverse()
+    alert_id = notification_id_for_alert(alert)
+    result = alert_evidence_payload(meters, alert_id=alert_id)
+    assert result["status"] == "choose_meter"
+    assert result["actions"] == {}
+    assert {choice["entry_id"] for choice in result["meter_choices"]} == {
+        "kitchen",
+        "garage",
+    }
+    choice = next(c for c in result["meter_choices"] if c["entry_id"] == "garage")
+    query = parse_qs(urlparse(choice["url"]).query)
+    selected = alert_evidence_payload(
+        meters, alert_id=query["alert_id"][0], entry_id=query["entry_id"][0]
+    )
+    assert selected["actions"]["mark_expected"]["data"]["entry_id"] == "garage"

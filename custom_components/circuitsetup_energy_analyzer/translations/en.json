@@ -3258,6 +3258,7 @@
         "loading": "Loading Appliance Detail...",
         "fallback_message": "No appliance detail is available for the requested appliance.",
         "fallback_next_step": "Open the generated dashboard or review the appliance summary sensors.",
+        "choose_meter": "Choose a meter",
         "assignment_not_found_message": "The requested NILM appliance assignment is no longer available.",
         "assignment_not_found_next_step": "Open the NILM workspace to review current appliance assignments.",
         "no_immediate_check": "No immediate check is needed.",

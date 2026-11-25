@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from .alert_links import _feature_for_alert as _canonical_feature_for_alert
+from .alert_links import alert_evidence_path, appliance_detail_path
 from .appliance_detail import (
     ApplianceDetail,
     appliance_detail_for_assignment,
@@ -185,6 +186,33 @@ async def async_unload_panel(hass: Any) -> None:
         )
 
 
+def _meter_choice(
+    coordinators: Iterable[Any], path_for: Callable[[str | None], str]
+) -> dict[str, Any]:
+    choices = []
+    for coordinator in coordinators:
+        entry_id = _coordinator_entry_id(coordinator)
+        registry = getattr(getattr(coordinator, "hass", None), "config_entries", None)
+        entry = registry.async_get_entry(entry_id) if registry and entry_id else None
+        choices.append(
+            {
+                "entry_id": entry_id,
+                "label": getattr(entry, "title", None) or entry_id,
+                "url": path_for(entry_id),
+            }
+        )
+    labels = [choice["label"] for choice in choices]
+    for choice in choices:
+        if labels.count(choice["label"]) > 1:
+            choice["label"] = f"{choice['label']} ({choice['entry_id']})"
+    return {
+        "status": "choose_meter",
+        "meter_choices": choices,
+        "actions": {},
+        "message": _panel_text("appliance_detail", "choose_meter"),
+    }
+
+
 def alert_evidence_payload(
     coordinators: Iterable[Any],
     *,
@@ -226,6 +254,50 @@ def alert_evidence_payload(
             "setting_recommendations": recommendations,
             "text": text,
         }
+
+    if not requested_entry_id and len(coordinators) > 1:
+        exact = [
+            coordinator
+            for coordinator in coordinators
+            if requested_alert_id
+            and any(
+                notification_id_for_alert(alert) == requested_alert_id
+                for alert in _coordinator_alerts(coordinator)
+            )
+        ]
+        matches = exact or [
+            coordinator
+            for coordinator in coordinators
+            if requested_circuit_id
+            and (
+                _config_for_circuit(coordinator, requested_circuit_id)
+                or _latest_alert_for_circuit(
+                    coordinator, requested_circuit_id, feature=requested_feature
+                )
+                or _state_alert_detail(
+                    coordinator, requested_circuit_id, feature=requested_feature
+                )
+            )
+        ]
+        if len(matches) > 1:
+            query = {
+                key: value
+                for key, value in {
+                    "alert_id": requested_alert_id,
+                    "circuit_id": requested_circuit_id,
+                    "feature": requested_feature,
+                    "recommendation_id": requested_recommendation_id,
+                }.items()
+                if value
+            }
+            return _meter_choice(
+                matches,
+                lambda entry: (
+                    f"/{PANEL_URL_PATH}?{urlencode(dict(query, entry_id=entry))}"
+                ),
+            )
+        if matches:
+            coordinators = tuple(matches)
 
     if requested_alert_id:
         for coordinator in coordinators:
@@ -382,20 +454,37 @@ def appliance_detail_payload(
             if str(getattr(coordinator, "entry_id", "")) == requested_entry_id
         )
 
-    if requested_assignment_id:
-        for coordinator in coordinators:
+    matches = []
+    for coordinator in coordinators:
+        if requested_assignment_id:
             detail = appliance_detail_for_assignment(
-                coordinator,
-                requested_assignment_id,
+                coordinator, requested_assignment_id
             )
-            if detail is not None:
-                return _appliance_detail_payload(
-                    coordinator,
-                    detail,
-                    requested_circuit_id=requested_circuit_id,
-                    requested_assignment_id=requested_assignment_id,
-                    requested_entry_id=requested_entry_id,
-                )
+        elif requested_circuit_id:
+            detail = appliance_detail_for_circuit(coordinator, requested_circuit_id)
+        else:
+            continue
+        if detail is not None:
+            matches.append((coordinator, detail))
+    if len(matches) > 1:
+        return _meter_choice(
+            [coordinator for coordinator, _ in matches],
+            lambda entry: appliance_detail_path(
+                entry,
+                circuit_id=requested_circuit_id,
+                assignment_id=requested_assignment_id,
+            ),
+        )
+    if matches:
+        coordinator, detail = matches[0]
+        return _appliance_detail_payload(
+            coordinator,
+            detail,
+            requested_circuit_id=requested_circuit_id,
+            requested_assignment_id=requested_assignment_id,
+            requested_entry_id=requested_entry_id,
+        )
+    if requested_assignment_id:
         return {
             "status": "not_found",
             "requested_circuit_id": requested_circuit_id,
@@ -414,18 +503,6 @@ def appliance_detail_payload(
                 "assignment_not_found_next_step",
             ),
         }
-
-    if requested_circuit_id:
-        for coordinator in coordinators:
-            detail = appliance_detail_for_circuit(coordinator, requested_circuit_id)
-            if detail is not None:
-                return _appliance_detail_payload(
-                    coordinator,
-                    detail,
-                    requested_circuit_id=requested_circuit_id,
-                    requested_assignment_id=requested_assignment_id,
-                    requested_entry_id=requested_entry_id,
-                )
 
     return {
         "status": "not_found",
@@ -1066,15 +1143,16 @@ def _appliance_detail_actions(
 
     config = _config_for_circuit(coordinator, detail.circuit_id)
     latest_alert = _latest_alert_for_circuit(coordinator, detail.circuit_id)
-    alert_id = (
-        notification_id_for_alert(latest_alert)
-        if latest_alert
-        else (detail.active_alerts[0].alert_id if detail.active_alerts else None)
-    )
-    if alert_id and detail.evidence_path:
+    active_alert = detail.active_alerts[0] if detail.active_alerts else None
+    alert_id = active_alert.alert_id if active_alert else None
+    evidence_path = active_alert.evidence_path if active_alert else None
+    if latest_alert and notification_id_for_alert(latest_alert) != alert_id:
+        alert_id = notification_id_for_alert(latest_alert)
+        evidence_path = alert_evidence_path(latest_alert, entry_id=entry_id)
+    if evidence_path:
         actions["open_evidence"] = {
             "type": "navigate",
-            "path": detail.evidence_path,
+            "path": evidence_path,
         }
     actions.update(
         _actions_for_context(
@@ -1421,9 +1499,7 @@ def _actions_for_context(
                 "open_appliance_detail": {
                     "type": "navigate",
                     "label": _panel_text("actions", "labels", "open_appliance_detail"),
-                    "path": _circuit_appliance_detail_panel_path(
-                        circuit_id, entry_id=entry_id
-                    ),
+                    "path": appliance_detail_path(entry_id, circuit_id=circuit_id),
                 },
                 "open_advanced_circuit_settings": (
                     _advanced_circuit_settings_action(coordinator, config)
@@ -1494,15 +1570,6 @@ def _advanced_circuit_settings_action(
     return action
 
 
-def _circuit_appliance_detail_panel_path(
-    circuit_id: str, *, entry_id: str | None = None
-) -> str:
-    query = {ATTR_CIRCUIT_ID: circuit_id, "appliance_detail": "1"}
-    if entry_id:
-        query["entry_id"] = entry_id
-    return f"/{PANEL_URL_PATH}?{urlencode(query)}"
-
-
 def hvac_associations_payload(
     coordinators: Iterable[Any], *, entry_id: str | None = None
 ) -> dict[str, Any]:
@@ -1571,8 +1638,8 @@ def hvac_associations_payload(
                         "circuit_id": config.circuit_id,
                         "appliance_name": config.name,
                         "appliance_profile": config.appliance_profile.value,
-                        "detail_path": _circuit_appliance_detail_panel_path(
-                            config.circuit_id, entry_id=coordinator_entry_id
+                        "detail_path": appliance_detail_path(
+                            coordinator_entry_id, circuit_id=config.circuit_id
                         ),
                         "thermostat_entity_id": thermostat_entity_id,
                         "thermostat_name": _entity_id_name(thermostat_entity_id),

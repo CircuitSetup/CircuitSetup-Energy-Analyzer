@@ -88,6 +88,24 @@ _FEATURE_ROLE_HINTS: tuple[tuple[tuple[str, ...], tuple[SensorRole, ...]], ...] 
 )
 
 
+def appliance_detail_path(
+    entry_id: str | None,
+    *,
+    circuit_id: str | None = None,
+    assignment_id: str | None = None,
+) -> str:
+    """Open a circuit or estimated appliance on its owning meter."""
+    query = (
+        {"assignment_id": assignment_id}
+        if assignment_id
+        else {"circuit_id": circuit_id}
+    )
+    query["appliance_detail"] = "1"
+    if entry_id:
+        query["entry_id"] = entry_id
+    return f"{DEFAULT_ALERT_EVIDENCE_PATH}?{urlencode(query)}"
+
+
 def alert_evidence_path(
     alert: AlertEvidence,
     *,

@@ -2,6 +2,20 @@ export class PanelShellMethods {
   _render() {
     const nilmFocus = this._nilmFocusState();
     const payload = this._payload;
+    const routeDetail = this._routeRequestsApplianceDetail();
+    const result = routeDetail ? this._applianceDetail : payload;
+    if (result?.status === "choose_meter") {
+      const links = result.meter_choices.map(choice => {
+        const url = new URL(choice.url, window.location.origin);
+        const current = new URL(this._routeKey(), window.location.origin);
+        for (const [key, value] of current.searchParams) {
+          if (!url.searchParams.has(key)) url.searchParams.set(key, value);
+        }
+        return `<li><a href="${this._escape(url.pathname + url.search)}">${this._escape(choice.label)}</a></li>`;
+      }).join("");
+      this.shadowRoot.innerHTML = `<main style="padding:24px"><h1>${this._escape(result.message)}</h1><ul>${links}</ul></main>`;
+      return;
+    }
     const alert = payload && payload.alert;
     const circuit = payload && payload.circuit;
     const nilmWorkspaceRoute = this._routeRequestsNilmWorkspace();

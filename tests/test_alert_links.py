@@ -498,3 +498,17 @@ def test_alert_graph_window_orders_reversed_evidence_timestamps() -> None:
         datetime(2026, 6, 5, 9, 50, tzinfo=UTC),
         datetime(2026, 6, 5, 12, 40, tzinfo=UTC),
     )
+
+
+def test_detail_link_round_trips_meter_and_appliance_identifiers() -> None:
+    from custom_components.circuitsetup_energy_analyzer.alert_links import (
+        appliance_detail_path,
+    )
+
+    for field in ("circuit_id", "assignment_id"):
+        path = appliance_detail_path("Garage & shop", **{field: "fridge/1 + 2"})
+        assert parse_qs(urlparse(path).query) == {
+            "entry_id": ["Garage & shop"],
+            "appliance_detail": ["1"],
+            field: ["fridge/1 + 2"],
+        }

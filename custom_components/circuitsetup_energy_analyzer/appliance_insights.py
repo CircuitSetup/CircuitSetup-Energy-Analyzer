@@ -8,6 +8,7 @@ from math import isfinite
 from typing import Any
 from urllib.parse import urlencode
 
+from .alert_links import appliance_detail_path
 from .appliance_detail import (
     ApplianceDetail,
     MetricComparison,
@@ -312,7 +313,11 @@ def _append_insight(
             is_learning=_is_learning(readiness, detail),
             has_data_problem=_has_data_problem(source_quality),
             is_nilm=source_type == "nilm_estimate",
-            detail_path=_detail_path(coordinator, detail),
+            detail_path=appliance_detail_path(
+                getattr(coordinator, "entry_id", None),
+                circuit_id=detail.circuit_id,
+                assignment_id=detail.assignment_id,
+            ),
             source_path=_source_path(coordinator, detail),
             energy_change_explanation=explanation,
         )
@@ -421,19 +426,6 @@ def _is_learning(readiness: Mapping[str, Any], detail: Any) -> bool:
 def _has_data_problem(source_quality: Mapping[str, Any]) -> bool:
     status = str(source_quality.get("status") or "unknown").casefold()
     return status not in {"fresh", "ready", "ok", "estimated"}
-
-
-def _detail_path(coordinator: Any, detail: Any) -> str:
-    query = {
-        "entry_id": str(getattr(coordinator, "entry_id", "") or ""),
-        "appliance_detail": "1",
-    }
-    assignment_id = str(getattr(detail, "assignment_id", "") or "")
-    if assignment_id:
-        query["assignment_id"] = assignment_id
-    else:
-        query["circuit_id"] = str(getattr(detail, "circuit_id", ""))
-    return f"{PANEL_PATH}?{urlencode(query)}"
 
 
 def _source_path(coordinator: Any, detail: Any) -> str:
