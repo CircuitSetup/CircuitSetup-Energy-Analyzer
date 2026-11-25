@@ -708,8 +708,8 @@ export function createApplianceViewMethods({
       const sources = appliances + coverage.whole_home_feeds;
       let key = "no_coverage";
       if (payload.total_affected) key = "empty";
-      else if (!appliances && coverage.whole_home_feeds) key = "mains_only";
       else if (coverage.unavailable) key = "offline";
+      else if (!appliances && coverage.whole_home_feeds) key = "mains_only";
       else if (sources && coverage.learning === sources) key = "learning_only";
       else if (appliances) key = "healthy";
       return `${summary}<p>${text(key)}</p>`;

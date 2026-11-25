@@ -11514,11 +11514,11 @@ test("household issues distinguishes whole-home-only coverage from an empty filt
     if (url.searchParams.get("view") !== "attention") return false;
     const reply = householdIssues(url.searchParams);
     const entry = url.searchParams.get("entry_id");
-    if (entry === "mains-only" || entry === "offline") {
+    if (["mains-only", "offline", "offline-mains"].includes(entry)) {
       await route.fulfill({ json: {
         ...reply, status: "ok", meters: [{ entry_id: entry, label: "Main panel" }],
         coverage: { ...reply.coverage, direct_monitored: entry === "offline" ? 1 : 0,
-          whole_home_feeds: entry === "mains-only" ? 1 : 0, unavailable: entry === "offline" ? 1 : 0 },
+          whole_home_feeds: entry === "offline" ? 0 : 1, unavailable: entry === "mains-only" ? 0 : 1 },
       } });
     } else {
       await route.fulfill({ json: reply });
@@ -11531,6 +11531,11 @@ test("household issues distinguishes whole-home-only coverage from an empty filt
   panel = await openPanel(page, "?appliance_insights=1&needs_attention=1&entry_id=offline");
   await expect(panel).toContainText("Unavailable: 1");
   await expect(panel).toContainText(/monitoring data is unavailable|readings.*unavailable|sensors.*unavailable/i);
+  panel = await openPanel(page, "?appliance_insights=1&needs_attention=1&entry_id=offline-mains");
+  await expect(panel).toContainText("Whole-home feeds: 1");
+  await expect(panel).toContainText("Unavailable: 1");
+  await expect(panel).toContainText("Monitoring data is unavailable");
+  await expect(panel).not.toContainText("Whole-home monitoring is active");
   panel = await openPanel(page, "?appliance_insights=1&needs_attention=1&entry_id=garage-meter");
   await panel.locator('[data-appliance-insights-filter="nilm_estimated"]').check();
   await expect(panel).toContainText(/match.*filter|filter.*match/i);
