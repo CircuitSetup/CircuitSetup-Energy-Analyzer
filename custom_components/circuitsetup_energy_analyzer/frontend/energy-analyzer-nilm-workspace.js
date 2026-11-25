@@ -564,6 +564,7 @@ export function createNilmWorkspaceMethods({
     if (!this._routeRequestsNilmWorkspace(routeKey)) {
       return false;
     }
+    this._notifyAttentionChanged();
     let cycle = this._nilmWorkspaceRefreshCycle;
     if (!cycle || cycle.requestId !== requestId || cycle.routeKey !== routeKey) {
       cycle = { requestId, routeKey, requested: 0, running: false, task: null };

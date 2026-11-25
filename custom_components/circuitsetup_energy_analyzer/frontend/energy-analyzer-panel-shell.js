@@ -2167,17 +2167,25 @@ export class PanelShellMethods {
         this._navigate(button.dataset.nilmApplianceDetailPath);
       });
     }
+    const meter = this.shadowRoot.querySelector("[data-issues-meter]");
+    meter?.addEventListener("change", () => this._changeInsightsQuery("entry_id", meter.value));
+    this.shadowRoot.querySelector("[data-issues-more]")?.addEventListener("click", () =>
+      this._loadApplianceInsights(this._evidenceRequestId, this._loadedRouteKey, this._applianceInsights.next_offset));
+    this.shadowRoot.querySelector("[data-retry-issues]")?.addEventListener("click", () => this._loadApplianceInsights());
+    for (const button of this.shadowRoot.querySelectorAll("[data-issues-sensor]")) {
+      button.addEventListener("click", () => this.dispatchEvent(new CustomEvent("hass-more-info", {
+        bubbles: true, composed: true, detail: { entityId: button.dataset.issuesSensor },
+      })));
+    }
     for (const input of this.shadowRoot.querySelectorAll("[data-appliance-insights-filter]")) {
       input.addEventListener("change", () => {
-        this._applianceInsightsFilters[input.dataset.applianceInsightsFilter] = input.checked;
-        this._render();
+        this._changeInsightsQuery(input.dataset.applianceInsightsFilter, input.checked ? "1" : "");
       });
     }
     const applianceInsightsSort = this.shadowRoot.querySelector("[data-appliance-insights-sort]");
     if (applianceInsightsSort) {
       applianceInsightsSort.addEventListener("change", () => {
-        this._applianceInsightsSort = applianceInsightsSort.value;
-        this._render();
+        this._changeInsightsQuery("sort", applianceInsightsSort.value);
       });
     }
     for (const link of this.shadowRoot.querySelectorAll("[data-appliance-insights-detail-path]")) {

@@ -374,6 +374,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._nilmIntervalFailedAction = "";
     this._nilmIntervalFailedIndex = -1;
     this._nilmIntervalRefreshSuccessMessage = "";
+    this._refreshVisibleInsights = () => {
+      if (!document.hidden && new URL(this._routeKey(), window.location.origin).searchParams.get("needs_attention") === "1") {
+        this._loadEvidenceIfRouteChanged({ force: true });
+      }
+    };
     this._handleRouteChange = () => this._loadEvidenceIfRouteChanged();
   }
 
@@ -382,6 +387,8 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     this._requestPanelTranslations(hass);
     if (this.isConnected) {
       this._loadEvidenceIfRouteChanged();
+      if (this._findingSensorAvailability !== undefined
+          && this._findingSensorAvailability !== this._findingSensorsKey()) this._render();
     }
   }
 
@@ -423,6 +430,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
   }
 
   disconnectedCallback() {
+    this._evidenceRequestId++;
     this._panelTranslationGeneration += 1;
     this._panelTranslationLanguage = null;
     this._panelTranslationLocalize = null;
@@ -499,6 +507,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     window.addEventListener(ROUTE_CHANGE_EVENT, this._handleRouteChange);
     window.addEventListener("location-changed", this._handleRouteChange);
+    document.addEventListener("visibilitychange", this._refreshVisibleInsights);
     this._listeningForRouteChanges = true;
   }
 
@@ -506,6 +515,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     if (!this._listeningForRouteChanges) {
       return;
     }
+    document.removeEventListener("visibilitychange", this._refreshVisibleInsights);
     window.removeEventListener(ROUTE_CHANGE_EVENT, this._handleRouteChange);
     window.removeEventListener("location-changed", this._handleRouteChange);
     this._listeningForRouteChanges = false;
@@ -543,6 +553,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._nilmFocusedAmbiguitySession = null;
       this._nilmIntervalGraphSnapshot = null;
     }
+    this._findingSensorAvailability = undefined;
     this._loadedRouteKey = routeKey;
     this._loading = true;
     this._payload = null;
@@ -595,6 +606,11 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
 
     const routeUrl = new URL(routeKey, window.location.origin);
     const params = routeUrl.searchParams;
+    if (params.get("appliance_insights") === "1" && params.get("needs_attention") === "1") {
+      this._loading = false;
+      await this._loadApplianceInsights(requestId, routeKey);
+      return;
+    }
     const query = params.toString();
     const apiPath = `${EVIDENCE_CALL_API_PATH}${query ? `?${query}` : ""}`;
     const fetchPath = `${EVIDENCE_API_PATH}${query ? `?${query}` : ""}`;
@@ -777,6 +793,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       } else {
         await this._hass.callService("circuitsetup_energy_analyzer", action.service, action.data || {});
       }
+      this._notifyAttentionChanged();
       if (!actionContext.isCurrent()) {
         return;
       }
@@ -816,6 +833,12 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
         this._renderAndScrollToTop();
       }
     }
+  }
+
+  _notifyAttentionChanged() {
+    window.dispatchEvent(new CustomEvent("circuitsetup-attention-changed", {
+      detail: { connection: this._hass?.connection || this._hass?.callApi },
+    }));
   }
 
   _setInlineFeedback(scope, kind, message) {
