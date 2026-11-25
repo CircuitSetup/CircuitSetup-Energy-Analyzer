@@ -100,7 +100,7 @@ def attention_items_for_coordinators(
             if item is not None and item.appliance_key not in seen:
                 seen.add(item.appliance_key)
                 items.append(item)
-    items.sort(key=_attention_sort_key)
+    items.sort(key=attention_sort_key)
     return tuple(items[: max(0, min(int(limit), 100))])
 
 
@@ -189,7 +189,7 @@ def attention_item_for_detail(
             )
     if not candidates:
         return None
-    candidates.sort(key=_attention_sort_key)
+    candidates.sort(key=attention_sort_key)
     primary = candidates[0]
     actions = []
     for item in candidates:
@@ -323,7 +323,7 @@ def _attention_severity(
     return "low"
 
 
-def _attention_sort_key(item: AttentionItem) -> tuple:
+def attention_sort_key(item: AttentionItem) -> tuple:
     if item.category == "fix_setup_or_data":
         finding_rank = 0
     elif item.category == "review_appliance_behavior" and item.severity == "high":

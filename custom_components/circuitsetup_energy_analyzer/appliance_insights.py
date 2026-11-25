@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import asdict, dataclass
 from math import isfinite
 from typing import Any
@@ -14,9 +14,15 @@ from .appliance_detail import (
     MetricComparison,
     appliance_detail_for_assignment,
     appliance_detail_for_circuit,
+    appliance_detail_for_virtual_state,
 )
-from .attention import attention_item_for_detail, circuit_can_have_finding
+from .attention import (
+    attention_item_for_detail,
+    attention_sort_key,
+    circuit_can_have_finding,
+)
 from .const import DOMAIN
+from .entity import registry_device_for_identifier
 from .nilm_virtual import nilm_virtual_appliance_states
 
 NILM_EXPLANATION_CONFIDENCE_THRESHOLD = 0.8
@@ -208,38 +214,177 @@ def appliance_insights_for_coordinators(
     insights: list[ApplianceInsight] = []
     seen: set[tuple[str, str]] = set()
     for coordinator in coordinators:
-        for config in getattr(coordinator, "circuit_configs", ()) or ():
-            if not circuit_can_have_finding(coordinator, config):
-                continue
-            detail = appliance_detail_for_circuit(coordinator, config.circuit_id)
-            _append_insight(
-                insights,
-                seen,
-                coordinator,
-                detail,
-            )
-        for state in nilm_virtual_appliance_states(
-            coordinator,
-            published_only=False,
-        ):
-            if getattr(state, "model_status", None) in {
-                "ignored",
-                "expected",
-                "retired",
-            }:
-                continue
-            detail = appliance_detail_for_assignment(
-                coordinator,
-                state.assignment_id,
-            )
-            _append_insight(
-                insights,
-                seen,
-                coordinator,
-                detail,
-            )
+        for detail in _index_details(coordinator, compact=False):
+            _append_insight(insights, seen, coordinator, detail)
     insights.sort(key=_insight_sort_key)
     return tuple(insights[:MAX_APPLIANCE_INSIGHTS])
+
+
+def _index_details(coordinator: Any, *, compact: bool) -> Iterator[ApplianceDetail]:
+    converted = set()
+    for config in getattr(coordinator, "circuit_configs", ()) or ():
+        if not compact and not circuit_can_have_finding(coordinator, config):
+            continue
+        detail = (
+            appliance_detail_for_circuit(
+                coordinator, config.circuit_id, include_timeline=False
+            )
+            if compact
+            else appliance_detail_for_circuit(coordinator, config.circuit_id)
+        )
+        if detail is not None:
+            if detail.assignment_id:
+                converted.add(detail.assignment_id)
+            yield detail
+    states = (
+        nilm_virtual_appliance_states(coordinator, exclude_converted=True)
+        if compact
+        else nilm_virtual_appliance_states(coordinator, published_only=False)
+    )
+    for state in states:
+        if state.assignment_id in converted or getattr(state, "model_status", None) in {
+            "ignored",
+            "expected",
+            "retired",
+        }:
+            continue
+        detail = (
+            appliance_detail_for_virtual_state(
+                coordinator, state, include_timeline=False
+            )
+            if compact
+            else appliance_detail_for_assignment(coordinator, state.assignment_id)
+        )
+        if detail is not None:
+            yield detail
+
+
+def attention_projection(
+    coordinators: Mapping[str, Any],
+    labels: Mapping[str, str],
+    *,
+    entry_id: str | None,
+    offset: int,
+    sort: str,
+    running: bool,
+    nilm_estimated: bool,
+    learning: bool,
+    data_problem: bool,
+) -> dict[str, Any]:
+    """Count all scoped sources before filtering and paging current findings."""
+    coverage = dict.fromkeys(
+        (
+            "direct_monitored",
+            "shared_circuits",
+            "whole_home_feeds",
+            "identified_estimates",
+            "estimates_awaiting_verification",
+            "learning",
+            "unavailable",
+        ),
+        0,
+    )
+    coverage_key = {
+        "direct_meter": "direct_monitored",
+        "mixed": "shared_circuits",
+        "mains": "whole_home_feeds",
+        "nilm_estimate": "identified_estimates",
+    }
+    total = 0
+    matches = []
+    for owner, coordinator in coordinators.items():
+        if entry_id is not None and entry_id != owner:
+            continue
+        seen = set()
+        for detail in _index_details(coordinator, compact=True):
+            if detail.appliance_key in seen:
+                continue
+            seen.add(detail.appliance_key)
+            readiness = detail.learning_readiness or {}
+            quality = detail.source_quality or {}
+            is_learning = _is_learning(readiness, detail)
+            is_nilm = detail.source_type == "nilm_estimate"
+            has_problem = _has_data_problem(quality)
+            coverage[coverage_key[detail.source_type]] += 1
+            coverage["learning"] += int(is_learning)
+            coverage["estimates_awaiting_verification"] += int(
+                is_nilm and readiness.get("status") == "needs_validation"
+            )
+            coverage["unavailable"] += int(
+                not is_nilm and detail.current_power_w is None
+            )
+            finding = attention_item_for_detail(coordinator, detail)
+            if finding is None:
+                continue
+            total += 1
+            if (
+                (running and "running" not in detail.activity_state.casefold())
+                or (nilm_estimated and not is_nilm)
+                or (learning and not is_learning)
+                or (data_problem and not has_problem)
+            ):
+                continue
+            order = attention_sort_key(finding)
+            if sort == "name":
+                order = (finding.display_name.casefold(), *order)
+            elif sort in {"highest_energy", "largest_change"}:
+                value = detail.daily_energy_kwh
+                if sort == "largest_change":
+                    explanation = energy_change_explanation(detail)
+                    value = (
+                        abs(explanation.total_change_percent) if explanation else None
+                    )
+                order = (value is None, -(value or 0), *order)
+            matches.append((order, finding, detail.circuit_id, detail.assignment_id))
+    matches.sort(key=lambda match: match[0])
+    end = offset + MAX_APPLIANCE_INSIGHTS
+    rows = []
+    for _, finding, circuit, assignment in matches[offset:end]:
+        owner = finding.entry_id
+        row = {
+            **finding.as_dict(),
+            "meter_label": labels[owner],
+            "circuit_id": circuit,
+            "assignment_id": assignment,
+        }
+        if finding.source_type == "mains":
+            row["display_name"] = labels[owner]
+        device_key = (
+            f"nilm_{assignment}" if finding.source_type == "nilm_estimate" else circuit
+        )
+        area = _device_area(coordinators[owner], owner, device_key)
+        if area:
+            row["area"] = area
+        rows.append(row)
+    return {
+        "status": "not_found"
+        if entry_id is not None and entry_id not in coordinators
+        else "ok",
+        "meters": [
+            {"entry_id": owner, "label": label} for owner, label in labels.items()
+        ],
+        "coverage": coverage,
+        "total_affected": total,
+        "matching_count": len(matches),
+        "next_offset": end if end < len(matches) else None,
+        "items": rows,
+    }
+
+
+def _device_area(coordinator: Any, entry_id: str, device_key: str) -> str | None:
+    hass = getattr(coordinator, "hass", None)
+    if not hasattr(hass, "data"):
+        return None
+    from homeassistant.helpers import area_registry as ar
+    from homeassistant.helpers import device_registry as dr
+
+    device = registry_device_for_identifier(
+        dr.async_get(hass), (DOMAIN, f"{entry_id}_{device_key}"), entry_id
+    )
+    if device and device.area_id:
+        area = ar.async_get(hass).async_get_area(device.area_id)
+        return area.name if area else None
+    return None
 
 
 def _append_insight(

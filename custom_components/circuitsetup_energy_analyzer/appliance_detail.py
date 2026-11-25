@@ -143,6 +143,8 @@ _PROFILE_EXPECTATION_RECIPES: dict[ApplianceProfile, ProfileExpectationRecipe] =
 def appliance_detail_for_circuit(
     coordinator: Any,
     circuit_id: str,
+    *,
+    include_timeline: bool = True,
 ) -> ApplianceDetail | None:
     """Build Appliance Detail for a configured direct/mixed/mains circuit."""
     config = _config_for_circuit(coordinator, circuit_id)
@@ -272,7 +274,9 @@ def appliance_detail_for_circuit(
         session_timeline=direct_appliance_timeline(
             coordinator,
             config.circuit_id,
-        ),
+        )
+        if include_timeline
+        else (),
     )
 
 
@@ -325,13 +329,15 @@ def appliance_detail_for_assignment(
     for state in nilm_virtual_appliance_states(coordinator, published_only=False):
         if state.assignment_id != requested_id:
             continue
-        return _nilm_detail(coordinator, state)
+        return appliance_detail_for_virtual_state(coordinator, state)
     return None
 
 
-def _nilm_detail(
+def appliance_detail_for_virtual_state(
     coordinator: Any,
     state: NilmVirtualApplianceState,
+    *,
+    include_timeline: bool = True,
 ) -> ApplianceDetail:
     analyzer_state = _coordinator_state(coordinator)
     entry_id = getattr(coordinator, "entry_id", None)
@@ -376,7 +382,7 @@ def _nilm_detail(
             evidence_path=evidence_path,
             comparisons=comparisons,
         ),
-        recent_timeline=_nilm_session_timeline(state),
+        recent_timeline=_nilm_session_timeline(state) if include_timeline else None,
         active_alerts=_active_alert_summaries(
             analyzer_state,
             state.mains_circuit_id,
@@ -424,11 +430,15 @@ def _nilm_detail(
         appliance_id=state.appliance_id,
         mains_circuit_id=state.mains_circuit_id,
         current_session_duration_seconds=state.current_session_duration_seconds,
-        current_session=_nilm_session_detail(state, state.current_session_id),
+        current_session=_nilm_session_detail(state, state.current_session_id)
+        if include_timeline
+        else None,
         last_matched_session=_nilm_session_detail(
             state,
             state.last_matched_session_id,
-        ),
+        )
+        if include_timeline
+        else None,
         session_timeline=nilm_appliance_timeline(
             state,
             (
@@ -444,7 +454,9 @@ def _nilm_detail(
                     {},
                 ).get(state.mains_circuit_id, {})
             ),
-        ),
+        )
+        if include_timeline
+        else (),
         confidence_kind=state.confidence_kind,
     )
 

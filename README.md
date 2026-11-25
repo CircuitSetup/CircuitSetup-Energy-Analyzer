@@ -149,6 +149,8 @@ Start with these entities; `<circuit>` is your configured circuit ID. Availabili
 
 ## Appliance detail
 
+On the Home dashboard, **Issues** shows how many appliances need attention on the selected meter and names up to three. Earlier energy periods label this count **Current issues**. Open the count to see each appliance's reason and next action. Choose **All meters** to review the household together.
+
 Open an appliance tile or **Appliance Insights** to inspect a circuit. Investigation links keep the meter selected when you share or reopen them. If an older link matches several meters, choose the meter to see its evidence and feedback controls. Insights lists direct-meter and NILM appliances together, with running, attention, learning, NILM, and data-problem filters. Setup Health and the Needs Attention filter show each affected appliance once per meter, combining current warnings with actionable appliance checks. Warnings remain visible when notifications are off.
 
 ![Appliance Insights with activity, energy comparisons, source quality, and readiness](docs/images/readme/appliance-insights.png)
@@ -250,6 +252,8 @@ A linked `switch`, `binary_sensor`, or `input_boolean` can provide authoritative
 Interval edits remain unsaved until **Save** or **Save Changes**; **Cancel** discards the draft. **Expected** keeps a reviewed load in the model without publishing it. After restart, component state waits for fresh source evidence. NILM estimates are not safety or control evidence.
 
 ## Alerts and feedback
+
+**Review evidence** opens the warning for that appliance. **Open sensor** opens the affected entity in Home Assistant, and **Open Setup Health** helps investigate missing or multiple inputs. **Verify appliance match** opens the estimated appliance assignment. A meter that is only learning normal use shows its learning status without asking for a setup change.
 
 **Activity Summary** describes current operation. An observation records unusual evidence; **Possible issue** means repeated evidence crossed an alert threshold. Learning, source quality, and NILM confidence remain separate.
 

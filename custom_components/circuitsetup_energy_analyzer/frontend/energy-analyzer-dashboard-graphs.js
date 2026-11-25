@@ -16,6 +16,81 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     "now-365d",
     "now-12m",
   ];
+  const attentionConnections = new WeakMap();
+
+  // A visible scope owns one refresh timer, including when several cards use it.
+  function attentionScope(connection, path) {
+    let scopes = attentionConnections.get(connection);
+    if (!scopes) {
+      scopes = new Map();
+      attentionConnections.set(connection, scopes);
+    }
+    if (scopes.has(path)) return scopes.get(path);
+    const cards = new Set();
+    let timer;
+    let active = false;
+    let invalidated = false;
+    const publish = () => cards.forEach(card => card._renderAfterUpdate());
+    const scope = { cards, path, connection, payload: null, failed: false, refresh, remove };
+    scopes.set(path, scope);
+    async function refresh() {
+      if (document.hidden || active || !cards.size) return;
+      active = true;
+      if (scope.failed) {
+        scope.failed = false;
+        publish();
+      }
+      try {
+        let offset = 0;
+        do {
+          const card = cards.values().next().value;
+          const page = await card._requestJson(offset ? path + "&offset=" + offset : path, path);
+          if (!cards.size) break;
+          if (page.status !== "ok" || !Array.isArray(page.items)) throw new Error("Invalid attention page");
+          scope.payload = offset ? { ...page, items: [...scope.payload.items, ...page.items] } : page;
+          publish();
+          if (page.next_offset == null || !Number.isInteger(page.next_offset) || page.next_offset <= offset) break;
+          offset = page.next_offset;
+        } while (!document.hidden && [...cards].some(card => card instanceof CircuitSetupEnergyAnalyzerApplianceGrid));
+      } catch {
+        scope.failed = true;
+        scope.payload = null;
+        publish();
+      } finally {
+        active = false;
+        if (invalidated) {
+          invalidated = false;
+          refresh();
+        }
+      }
+    }
+    function invalidate(event) {
+      const owner = event.detail?.connection;
+      if (owner && owner !== connection) return;
+      if (active) invalidated = true;
+      else refresh();
+    }
+    function visibility() {
+      clearInterval(timer);
+      if (!document.hidden) {
+        refresh();
+        timer = setInterval(refresh, 30000);
+      }
+    }
+    function remove(card) {
+      cards.delete(card);
+      if (cards.size) return;
+      clearInterval(timer);
+      scopes.delete(path);
+      document.removeEventListener("visibilitychange", visibility);
+      window.removeEventListener("circuitsetup-attention-changed", invalidate);
+    }
+    document.addEventListener("visibilitychange", visibility);
+    window.addEventListener("circuitsetup-attention-changed", invalidate);
+    visibility();
+    return scope;
+  }
+
   const dashboardSeries = new Map();
 
   const defaultRange = () => {
@@ -90,6 +165,8 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     }
 
     disconnectedCallback() {
+      this._attention?.remove(this);
+      this._attention = null;
       super.disconnectedCallback();
       window.removeEventListener(RANGE_EVENT, this._handleDashboardRange);
       localStorage.removeItem(RANGE_KEY);
@@ -101,6 +178,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
 
     setConfig(config) {
       this._dashboardConfig = config || {};
+      if (this._dashboardConfig.mode === "mains") {
+        this._attention?.remove(this);
+        this._attention = null;
+      }
       if (config && config.text) {
         this.panel = { config: { text: config.text } };
       }
@@ -110,6 +191,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     set hass(value) {
       const initial = !this._hass;
       this._hass = value;
+      if (!value?.callApi) {
+        this._attention?.remove(this);
+        this._attention = null;
+      }
       this._requestPanelTranslations(value);
       if (!localStorage.getItem(RANGE_KEY)) {
         const todayKey = this._chartDateKey(Date.now());
@@ -125,6 +210,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           : liveRange || liveDataChanged;
         if (!shouldRender) return;
       }
+      this._renderAfterUpdate();
+    }
+
+    _renderAfterUpdate() {
       const active = this.shadowRoot && this.shadowRoot.activeElement;
       if (active && active.matches("input, select, textarea")) {
         this._deferredHassRender = true;
@@ -132,7 +221,9 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         return;
       }
       this._deferredHassRender = false;
+      const focusedIssue = active?.matches("[data-issues-link], [data-retry-issues]");
       this._render();
+      if (focusedIssue) this.shadowRoot.querySelector("[data-issues-link], [data-retry-issues]")?.focus({ preventScroll: true });
     }
 
     get hass() {
@@ -367,8 +458,45 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         learningDaysComplete: Number.isFinite(learningDaysComplete) ? learningDaysComplete : null,
         learningDaysRequired: Number.isFinite(learningDaysRequired) ? learningDaysRequired : null,
         running,
-        issue: electricalIssue || /(attention|issue|warning|problem|alert|abnormal|high|low)/i.test(health),
       };
+    }
+
+    _observeAttention() {
+      if (!this.isConnected || !this._hass?.callApi) return;
+      const config = this._dashboardConfig;
+      const params = new URLSearchParams({ view: "attention" });
+      if (config.entry_id) params.set("entry_id", config.entry_id);
+      const path = (config.api_path || "circuitsetup_energy_analyzer/appliance_insights") + "?" + params;
+      const connection = this._hass.connection || this._hass.callApi;
+      if (this._attention?.path === path && this._attention.connection === connection) return;
+      this._attention?.remove(this);
+      const scope = attentionScope(connection, path);
+      this._attention = scope;
+      scope.cards.add(this);
+      scope.refresh();
+    }
+
+    _issuesFailureHtml() {
+      return `<span role="status">${this._escape(this._label("issues_unavailable", "Issues unavailable"))}</span>
+        <button type="button" data-retry-issues>${this._escape(this._label("retry", this._panelText("common.retry")))}</button>`;
+    }
+
+    _issuesMetric(current) {
+      const scope = this._attention;
+      const payload = scope?.payload;
+      if (scope?.failed) return `<div class="metric">${this._issuesFailureHtml()}</div>`;
+      const params = new URLSearchParams({ appliance_insights: "1", needs_attention: "1" });
+      if (this._dashboardConfig.entry_id) params.set("entry_id", this._dashboardConfig.entry_id);
+      const label = current ? this._label("issues", "Issues") : this._label("current_issues", "Current issues");
+      const entry = this._dashboardConfig.entry_id;
+      const meter = entry ? payload?.meters?.find(item => item.entry_id === entry)?.label || entry
+        : this._label("all_meters", "All meters");
+      const preview = (payload?.items || []).slice(0, 3).map(item => {
+        const identity = [item.display_name, item.area, entry ? "" : item.meter_label].filter(Boolean);
+        return `<span>${this._escape(identity.join(" · "))}</span>`;
+      }).join("");
+      return `<div class="metric"><a data-issues-link href="/circuitsetup-energy-analyzer-evidence?${this._escape(String(params))}">${this._escape(label)} <strong>${payload ? this._escape(payload.total_affected) : "..."}</strong></a>
+        <span>${this._escape(meter)}</span>${preview}</div>`;
     }
 
     _navigate(path) {
@@ -824,6 +952,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     connectedCallback() {
       super.connectedCallback();
       window.addEventListener(DATA_EVENT, this._handleDashboardData);
+      if (this._hass) this._render();
       this._attachResizeObserver();
     }
 
@@ -1935,6 +2064,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const config = this._dashboardConfig;
       if (
         config.mode !== "mains"
+        && config.api_path
         && !this._contributionLoadKey
       ) {
         this._loadRangeTotals();
@@ -1949,7 +2079,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const unassignedPower = this._number(mains.balance_power_entity);
       const coverage = this._number(mains.monitored_coverage_entity);
       const runningCount = appliances.filter((item) => item.running).length;
-      const issueCount = appliances.filter((item) => item.issue).length;
+      if (config.mode !== "mains") this._observeAttention();
       const applianceLiveTotals = this._applianceLiveTotals(config.appliances);
       const mainsLiveTotals = this._liveRangeTotals(
         mains.daily_energy_usage_entity,
@@ -2004,12 +2134,17 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         )),
       );
       const healthState = this._state(config.setup_health_entity);
-      const setupReady = healthState && String(healthState.state).toLowerCase() === "ready";
+      const attrs = healthState?.attributes || {};
+      const codes = [attrs.primary_issue, ...(attrs.issues || []).map(issue => issue.issue)].filter(Boolean);
+      const learning = codes.includes("learning") && codes.every(code => code === "learning");
+      const setupReady = attrs.ready ?? (String(healthState?.state).toLowerCase() === "ready");
+      const title = learning ? this._label("learning_normal_use", "Learning normal use")
+        : this._label(setupReady ? "setup_ready" : "setup_attention", setupReady ? "Setup ready" : "Setup needs attention");
       const setup = healthState ? `
-        <button type="button" class="banner ${setupReady ? "ready" : ""}" data-setup-health>
-          <strong>${this._escape(this._label(setupReady ? "setup_ready" : "setup_attention", setupReady ? "Setup ready" : "Setup needs attention"))}</strong>
-          <span>${this._escape(String(healthState.state))}</span>
-        </button>
+        <${learning ? "div" : 'button type="button" data-setup-health'} class="banner ${setupReady || learning ? "ready" : ""}">
+          <strong>${this._escape(title)}</strong>
+          <span>${this._escape(String(learning ? attrs.reason || healthState.state : healthState.state))}</span>
+        </${learning ? "div" : "button"}>
       ` : "";
       const rangeLabel = this._rangeLabel();
       const homeContent = config.mode === "mains" ? "" : `
@@ -2019,7 +2154,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           ${this._metricHtml(`${this._label("energy", "Energy")} (${rangeLabel})`, energyToday, "kWh", Number.isFinite(averageEnergy) ? averageEnergy * averageScale : null, days)}
           ${this._metricHtml(`${this._label("cost", "Cost")} (${rangeLabel})`, costToday, "currency", Number.isFinite(averageCost) ? averageCost * averageScale : null, days)}
           ${this._metricHtml(this._label("running", "Running"), runningCount, "")}
-          ${this._metricHtml(this._label("issues", "Issues"), issueCount, "")}
+          ${this._issuesMetric(this._isTodayRange())}
         </div>
         ${this._contributionHtml(contributionAppliances)}
       `;
@@ -2043,6 +2178,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           <style>${this._styles()}
             .home-summary .kpis { border: 1px solid var(--divider-color, #d8dee6); border-radius: 8px; gap: 0; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); overflow: hidden; }
             .home-summary .metric { background: transparent; border: 0; border-left: 1px solid var(--divider-color, #d8dee6); border-radius: 0; padding: 14px; }
+            .home-summary [data-issues-link] { color: inherit; text-decoration: underline; }
             .home-summary .metric:first-child { border-left: 0; }
             @media (max-width: 700px) { .home-summary .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .home-summary .metric { border-bottom: 1px solid var(--divider-color, #d8dee6); } }
           </style>
@@ -2054,6 +2190,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           </div>
         </ha-card>
       `;
+      this.shadowRoot.querySelector("[data-retry-issues]")?.addEventListener("click", () => this._attention?.refresh());
       const setupButton = this.shadowRoot.querySelector("[data-setup-health]");
       if (setupButton) setupButton.addEventListener("click", () => this._navigate(config.setup_health_path));
       for (const tile of this.shadowRoot.querySelectorAll("[data-appliance-id]")) {
@@ -2712,6 +2849,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       this._applianceDateRolledOver = false;
     }
 
+    connectedCallback() {
+      super.connectedCallback();
+      if (this._hass) this._render();
+    }
+
     disconnectedCallback() {
       clearTimeout(this._applianceRangeReloadTimer);
       super.disconnectedCallback();
@@ -2744,6 +2886,21 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         || this._rangeIncludesToday() && liveDataChanged;
     }
 
+    _filteredGridStatus(appliances, visible) {
+      if (this._filter !== "attention") return "";
+      if (this._attention?.failed) return this._issuesFailureHtml();
+      const payload = this._attention?.payload;
+      let message;
+      if (!payload || payload.next_offset != null) {
+        message = this._label("checking_issues", "Checking issues");
+      } else if (appliances.some(item => item.unknown)) {
+        message = this._label("unclassified_issues", "Some appliances could not be matched to a meter.");
+      } else if (!visible.length) {
+        message = this._label("no_grid_issues", "No current issues on these appliances.");
+      }
+      return message ? `<span role="status">${this._escape(message)}</span>` : "";
+    }
+
     _render() {
       if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
       const historical = !this._isTodayRange();
@@ -2768,6 +2925,17 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
             : null,
         )
       ));
+      this._observeAttention();
+      const payload = this._attention?.payload;
+      for (const appliance of appliances) {
+        const entry = appliance.entry_id
+          || (appliance.detail_path && new URL(appliance.detail_path, window.location.origin).searchParams.get("entry_id"))
+          || this._dashboardConfig.entry_id
+          || (payload?.meters?.length === 1 && payload.meters[0].entry_id);
+        appliance.issue = payload?.items.some(row => row.entry_id === entry
+          && row.circuit_id === appliance.circuit_id && ["direct_meter", "mixed"].includes(row.source_type)) || false;
+        appliance.unknown = !appliance.issue && (!entry || !payload || payload.next_offset != null);
+      }
       const visible = appliances.filter((item) => (
         this._filter === "all"
           || this._filter === "running" && item.running
@@ -2778,6 +2946,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           || (right.power || 0) - (left.power || 0)
           || String(left.name).localeCompare(String(right.name))
       ));
+      const gridStatus = this._filteredGridStatus(appliances, visible);
       const filters = historical ? [] : [
         ["all", this._label("all", "All")],
         ["running", this._label("running", "Running")],
@@ -2790,7 +2959,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .map((item) => item.activity_entity);
       this.shadowRoot.innerHTML = `
         <ha-card>
-          <style>${this._styles()}</style>
+          <style>${this._styles()} .grid-status { grid-column: 1 / -1; }</style>
           <div class="dashboard-card">
             <h2>${this._escape(this._dashboardConfig.title || "Appliances")}</h2>
             <div class="controls"${historical ? "" : ` role="tablist" aria-label="${this._escape(this._dashboardConfig.title || "Appliances")}"`}>
@@ -2798,6 +2967,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
               <input type="search" data-appliance-search value="${this._escape(this._search)}" aria-label="${this._escape(this._label("search", "Search appliances"))}" placeholder="${this._escape(this._label("search", "Search appliances"))}">
             </div>
             <div class="appliance-grid" data-columns="${Number(this._dashboardConfig.columns) === 2 ? 2 : 1}">
+              ${gridStatus ? `<div class="grid-status">${gridStatus}</div>` : ""}
               ${visible.map((item) => this._tile(item, !this._matchesSearch(item), historical, singleDay)).join("")}
             </div>
             <section class="timeline">
@@ -2819,6 +2989,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           </div>
         </ha-card>
       `;
+      this.shadowRoot.querySelector("[data-retry-issues]")?.addEventListener("click", () => this._attention.refresh());
       const select = this.shadowRoot.querySelector("[data-timeline-selection]");
       select.value = this._timelineSelection;
       select.addEventListener("change", () => {
@@ -2859,6 +3030,11 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       const energyLabel = historical
         ? `${this._label("energy", "Energy")} ${this._rangeLabel()}`
         : this._label("energy_today", "Energy today");
+      let status = item.running ? this._label("running", "Running") : this._label("idle", "Idle");
+      if (item.issue) status = this._label("needs_attention", "Needs attention");
+      if (item.unknown) status = this._attention?.failed
+        ? this._label("issues_unavailable", "Issues unavailable")
+        : this._label("checking_issues", "Checking issues");
       const learning = singleDay
         && String(item.health).toLowerCase() === "learning"
         && Number.isFinite(item.learningDaysComplete)
@@ -2874,7 +3050,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         <span class="appliance-heading"><ha-icon icon="${this._escape(item.icon || "mdi:power-plug-outline")}"></ha-icon><strong>${this._escape(item.name)}</strong></span>
         <div class="appliance-meta">
           ${item.area ? `<span>${this._escape(item.area)}</span>` : ""}
-          ${historical ? "" : `<span class="${item.issue ? "issue" : ""}">${this._escape(item.issue ? this._label("needs_attention", "Needs attention") : item.running ? this._label("running", "Running") : this._label("idle", "Idle"))} · ${this._escape(this._formatValue(item.power, powerUnit))}</span>`}
+          ${historical ? "" : `<span class="${item.issue ? "issue" : ""}">${this._escape(status)} · ${this._escape(this._formatValue(item.power, powerUnit))}</span>`}
           <span>${this._escape(energyLabel)}: ${this._escape(this._formatValue(item.energy, "kWh"))} · ${this._escape(this._formatValue(item.cost, "currency"))}</span>
           ${singleDay ? `<span>${this._escape(this._label("health", "Health"))}: ${this._escape(item.health || this._label("unavailable", "Unavailable"))}${this._escape(learning)}</span>` : ""}
         </div>

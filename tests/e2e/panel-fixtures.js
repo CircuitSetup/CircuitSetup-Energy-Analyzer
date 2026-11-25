@@ -627,8 +627,21 @@ export const hvacAssociations = {
   ],
 };
 
-export function apiPayload(pathname) {
+export function apiPayload(pathname, params = new URLSearchParams()) {
   if (pathname.endsWith("/alert_evidence")) return evidence;
+  if (pathname.endsWith("/appliance_insights") && params.get("view") === "attention") {
+    const findings = applianceInsights.items.filter(item => item.needs_attention).map(item => ({
+      ...item,
+      entry_id: "entry-1",
+      meter_label: "Home meter",
+      reason: item.attention_reason,
+      actions: [{
+        kind: item.is_nilm ? "verify_appliance_match" : "review_evidence",
+        path: item.source_path + "&entry_id=entry-1",
+      }],
+    }));
+    return householdIssues(params, findings);
+  }
   if (pathname.endsWith("/appliance_insights")) return applianceInsights;
   if (pathname.endsWith("/appliance_detail")) return applianceDetail;
   if (pathname.endsWith("/setup_health")) return setupHealth;
@@ -636,4 +649,54 @@ export function apiPayload(pathname) {
   if (pathname.endsWith("/nilm_workspace")) return nilmWorkspace;
   if (pathname.includes("/history/period")) return chartHistory;
   throw new Error(`Unmocked browser API request: ${pathname}`);
+}
+const issuesPanel = "/circuitsetup-energy-analyzer-evidence";
+const garageMeter = { entry_id: "garage-meter", label: "Garage meter" };
+const kitchenMeter = { entry_id: "kitchen-meter", label: "Kitchen meter" };
+const householdFindings = [
+  {
+    entry_id: garageMeter.entry_id, meter_label: garageMeter.label, appliance_key: "circuit:fridge",
+    circuit_id: "fridge", display_name: "Garage fridge", source_type: "direct_meter",
+    reason: "Garage fridge used more energy than usual.",
+    actions: [{ kind: "review_evidence", path: issuesPanel + "?alert_id=garage-energy&circuit_id=fridge&entry_id=garage-meter" }],
+  },
+  {
+    entry_id: kitchenMeter.entry_id, meter_label: kitchenMeter.label, appliance_key: "circuit:washer",
+    circuit_id: "washer", display_name: "Washer", source_type: "direct_meter",
+    reason: "The washer power sensor stopped updating.",
+    actions: [{ kind: "open_sensor", entity_id: "sensor.washer_power" }],
+  },
+  {
+    entry_id: kitchenMeter.entry_id, meter_label: kitchenMeter.label, appliance_key: "nilm:dishwasher",
+    circuit_id: "mains", assignment_id: "dishwasher", display_name: "Dishwasher", source_type: "nilm_estimate",
+    reason: "The dishwasher match needs verification.",
+    actions: [{ kind: "verify_appliance_match", path: issuesPanel + "?nilm_workspace=1&assignment_id=dishwasher&entry_id=kitchen-meter" }],
+  },
+];
+
+export function householdIssues(params, findings = householdFindings) {
+  const entry = params.get("entry_id");
+  const meters = [...new Map(findings.map(row => [row.entry_id, { entry_id: row.entry_id, label: row.meter_label }])).values()];
+  const scoped = findings.filter(item => !entry || item.entry_id === entry);
+  const rows = scoped.filter(item => (
+    (params.get("nilm_estimated") !== "1" || item.source_type === "nilm_estimate")
+    && (params.get("running") !== "1" || item.is_running)
+    && (params.get("learning") !== "1" || item.is_learning)
+    && (params.get("data_problem") !== "1" || item.has_data_problem)
+  ));
+  const offset = Number(params.get("offset")) || 0;
+  const limit = Math.min(100, Number(params.get("limit")) || 100);
+  return {
+    status: entry && !meters.some(meter => meter.entry_id === entry) ? "not_found" : "ok",
+    meters,
+    coverage: {
+      direct_monitored: scoped.filter(row => row.source_type === "direct_meter").length,
+      shared_circuits: 0, whole_home_feeds: 0, identified_estimates: 0,
+      estimates_awaiting_verification: scoped.filter(row => row.source_type === "nilm_estimate").length,
+      learning: 0, unavailable: 0,
+    },
+    total_affected: scoped.length, matching_count: rows.length,
+    next_offset: offset + limit < rows.length ? offset + limit : null,
+    items: rows.slice(offset, offset + limit),
+  };
 }

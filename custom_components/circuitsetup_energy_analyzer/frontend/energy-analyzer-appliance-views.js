@@ -518,22 +518,35 @@ export function createApplianceViewMethods({
     };
   }
 
-  async _loadApplianceInsights(requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey) {
+  async _loadApplianceInsights(requestId = this._evidenceRequestId, routeKey = this._loadedRouteKey, offset = 0) {
     if (!this._routeRequestsApplianceInsights(routeKey)) {
       return;
     }
+    const params = new URL(routeKey, window.location.origin).searchParams;
+    const attention = params.get("needs_attention") === "1";
+    const query = new URLSearchParams();
+    if (attention) query.set("view", "attention");
+    if (params.has("entry_id")) query.set("entry_id", params.get("entry_id"));
+    for (const key of Object.keys(this._applianceInsightsFilters)) {
+      this._applianceInsightsFilters[key] = params.get(key) === "1";
+      if (attention && key !== "needs_attention" && params.get(key) === "1") query.set(key, "1");
+    }
+    this._applianceInsightsSort = params.get("sort") || "default";
+    if (attention && params.has("sort")) query.set("sort", this._applianceInsightsSort);
+    if (offset) query.set("offset", offset);
+    const suffix = query.size ? "?" + query : "";
     this._applianceInsightsLoading = true;
     this._applianceInsightsError = "";
     this._render();
     try {
       const payload = await this._requestJson(
-        APPLIANCE_INSIGHTS_CALL_API_PATH,
-        APPLIANCE_INSIGHTS_API_PATH,
+        APPLIANCE_INSIGHTS_CALL_API_PATH + suffix,
+        APPLIANCE_INSIGHTS_API_PATH + suffix,
       );
       if (!this._isCurrentRequest(requestId, routeKey)) {
         return;
       }
-      this._applianceInsights = payload;
+      this._applianceInsights = offset ? { ...payload, items: [...this._applianceInsights.items, ...payload.items] } : payload;
     } catch (error) {
       if (!this._isCurrentRequest(requestId, routeKey)) {
         return;
@@ -619,15 +632,24 @@ export function createApplianceViewMethods({
   }
 
   _renderApplianceInsightsContent() {
+    const params = new URL(this._routeKey(), window.location.origin).searchParams;
+    const attention = params.get("needs_attention") === "1";
     if (this._applianceInsightsLoading) {
       return `<section class="panel"><p>${this._escape(this._panelText("appliance_insights.loading"))}</p></section>`;
     }
     if (this._applianceInsightsError) {
+      if (attention) return `<section class="panel error">${this._escape(this._panelText("appliance_insights.issues_unavailable"))} <button data-retry-issues>${this._escape(this._panelText("appliance_insights.retry"))}</button></section>`;
       return `<section class="panel error"><p>${this._escape(this._applianceInsightsError)}</p></section>`;
     }
-    const items = this._visibleApplianceInsights();
+    const payload = this._applianceInsights || {};
+    const items = attention ? payload.items || [] : this._visibleApplianceInsights();
     return `
       <section class="panel appliance-insights-controls">
+        ${attention ? `<label>${this._escape(this._panelText("appliance_insights.meter"))} <select data-issues-meter>
+          <option value="">${this._escape(this._panelText("appliance_insights.all_meters"))}</option>
+          ${payload.status === "not_found" ? `<option selected value="${this._escape(params.get("entry_id"))}">${this._escape(params.get("entry_id"))}</option>` : ""}
+          ${(payload.meters || []).map(meter => `<option value="${this._escape(meter.entry_id)}" ${meter.entry_id === params.get("entry_id") ? "selected" : ""}>${this._escape(meter.label)}</option>`).join("")}
+        </select></label>` : ""}
         <fieldset class="appliance-insights-filters">
           <legend>${this._escape(this._panelText("appliance_insights.filters.heading"))}</legend>
           ${[
@@ -651,16 +673,77 @@ export function createApplianceViewMethods({
         </label>
       </section>
       <section class="panel">
-        ${items.length ? this._renderApplianceInsightsTable(items) : `<p class="muted">${this._escape(this._panelText("appliance_insights.empty"))}</p>`}
+        ${attention ? this._renderAttentionFindings(payload) : items.length ? this._renderApplianceInsightsTable(items) : `<p class="muted">${this._escape(this._panelText("appliance_insights.empty"))}</p>`}
       </section>
     `;
+  }
+
+  _changeInsightsQuery(key, value) {
+    const url = new URL(this._routeKey(), window.location.origin);
+    url.searchParams.set("appliance_insights", "1");
+    if (value) url.searchParams.set(key, value);
+    else url.searchParams.delete(key);
+    this._navigate(url.pathname + url.search);
+  }
+
+  _findingSensorsKey() {
+    return (this._applianceInsights?.items || []).flatMap(item => (item.actions || [])
+      .filter(action => action.kind === "open_sensor")
+      .map(action => Boolean(this._hass?.states?.[action.entity_id]))).join(",");
+  }
+
+  _renderAttentionFindings(payload) {
+    this._findingSensorAvailability = this._findingSensorsKey();
+    const text = key => this._escape(this._panelText("appliance_insights." + key));
+    if (payload.status === "not_found") return `<p>${text("unknown_meter")}</p>`;
+    if (!payload.items) return "";
+    const coverage = payload.coverage || {};
+    const counts = ["direct_monitored", "shared_circuits", "whole_home_feeds", "identified_estimates",
+      "estimates_awaiting_verification", "learning", "unavailable"];
+    const summary = `<section aria-label="${text("coverage")}">
+      <h2>${text("coverage")}</h2><p>${counts.map(key =>
+        `${text("coverage_" + key)}: ${this._escape(coverage[key] ?? 0)}`).join(" · ")}</p></section>`;
+    if (!payload.items.length) {
+      const appliances = coverage.direct_monitored + coverage.shared_circuits + coverage.identified_estimates;
+      const sources = appliances + coverage.whole_home_feeds;
+      let key = "no_coverage";
+      if (payload.total_affected) key = "empty";
+      else if (coverage.unavailable) key = "offline";
+      else if (!appliances && coverage.whole_home_feeds) key = "mains_only";
+      else if (sources && coverage.learning === sources) key = "learning_only";
+      else if (appliances) key = "healthy";
+      return `${summary}<p>${text(key)}</p>`;
+    }
+    return `${summary}<h2>${text("current_issues")} (${this._escape(payload.matching_count)})</h2>
+      ${payload.items.map(item => `<article class="metric">
+        <strong>${this._escape(item.display_name)}</strong><span>${this._escape([item.meter_label, item.area].filter(Boolean).join(" · "))}</span>
+        <p>${this._escape(item.reason)}</p>
+        ${(item.actions || []).map(action => this._renderFindingAction(item, action)).join(" ")}
+      </article>`).join("")}
+      ${payload.next_offset != null ? `<button data-issues-more>${text("load_more")}</button>` : ""}`;
+  }
+
+  _renderFindingAction(item, action) {
+    let kind = action.kind;
+    let path = action.path;
+    if (kind === "open_sensor") {
+      if (this._hass?.states?.[action.entity_id]) {
+        return `<button type="button" data-issues-sensor="${this._escape(action.entity_id)}">${this._escape(this._panelText("appliance_insights.open_sensor"))}</button>`;
+      }
+      kind = "open_setup_health";
+      path = "/" + PANEL_URL_PATH + "?" + new URLSearchParams({ setup_health: "1", entry_id: item.entry_id, circuit_id: item.circuit_id });
+    }
+    if (!path) return "";
+    return `<a class="button secondary" href="${this._escape(path)}" data-appliance-insights-detail-path="${this._escape(path)}">${this._escape(this._panelText("appliance_insights." + kind) || action.label)}</a>`;
   }
 
   _visibleApplianceInsights() {
     const payloadItems = this._applianceInsights && this._applianceInsights.items;
     const filters = this._applianceInsightsFilters;
+    const entry = new URL(this._routeKey(), window.location.origin).searchParams.get("entry_id");
     const items = (Array.isArray(payloadItems) ? payloadItems : []).filter((item) => (
-      (!filters.running || item.is_running)
+      (!entry || item.entry_id === entry)
+      && (!filters.running || item.is_running)
       && (!filters.needs_attention || item.needs_attention)
       && (!filters.nilm_estimated || item.is_nilm)
       && (!filters.learning || item.is_learning)

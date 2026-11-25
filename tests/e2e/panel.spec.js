@@ -1,6 +1,8 @@
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
-import { apiPayload, chartHistory, evidence, hvacAssociations } from "./panel-fixtures.js";
+import { apiPayload, chartHistory, evidence, householdIssues, hvacAssociations } from "./panel-fixtures.js";
 
 const HARNESS = "/tests/e2e/panel.html";
 const browserLogs = new WeakMap();
@@ -44,13 +46,17 @@ test.afterEach(async ({ page }, testInfo) => {
   expect(unexpected).toEqual([]);
 });
 
+function isEnergyInsightsRequest(url) {
+  return url.pathname.endsWith("/appliance_insights") && !url.searchParams.has("view");
+}
+
 async function mockPanelApi(page, override) {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const overridden = override ? await override({ request, route, url }) : false;
     if (overridden) return;
-    await route.fulfill({ json: apiPayload(url.pathname) });
+    await route.fulfill({ json: apiPayload(url.pathname, url.searchParams) });
   });
 }
 
@@ -760,7 +766,7 @@ test("Home summary omits power flow and separates contribution", async ({ page, 
       });
       return true;
     }
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({
       json: {
         status: "ok",
@@ -983,7 +989,7 @@ test("home summary uses the mains graph history for the amps average", async ({ 
       });
       return true;
     }
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
     return true;
   });
@@ -1044,7 +1050,7 @@ test("mains graph calculates power across the selected range from amps, volts, a
       });
       return true;
     }
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
     return true;
   });
@@ -1106,7 +1112,7 @@ test("mains graph keeps a gap when calculated power inputs are unavailable", asy
       });
       return true;
     }
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
     return true;
   });
@@ -1151,7 +1157,7 @@ test("mains graph does not calculate power from incomplete configured histories"
       });
       return true;
     }
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
     return true;
   });
@@ -1447,7 +1453,7 @@ test("mains graph pairs calculated history by leg", async ({ page }) => {
       });
       return true;
     }
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
     return true;
   });
@@ -1513,7 +1519,7 @@ test("completed day labels amps as the time-weighted average", async ({ page }) 
       });
       return true;
     }
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
     return true;
   });
@@ -1571,7 +1577,7 @@ test("completed day derives average amps from appliance current history", async 
       });
       return true;
     }
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
     return true;
   });
@@ -1612,7 +1618,7 @@ test("completed day falls back to appliance current history when mains history i
       });
       return true;
     }
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
     return true;
   });
@@ -1659,7 +1665,7 @@ test("completed day reloads fallback amps when the range changes", async ({ page
       });
       return true;
     }
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
     return true;
   });
@@ -1700,7 +1706,7 @@ test("multi-day fallback amps use Recorder statistics instead of raw history", a
       await route.fulfill({ json: [] });
       return true;
     }
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
     return true;
   });
@@ -1787,7 +1793,7 @@ test("completed day retries fallback amps after a Recorder failure", async ({ pa
       });
       return true;
     }
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
     return true;
   });
@@ -1829,7 +1835,7 @@ test("completed day does not carry amps through unavailable history", async ({ p
       });
       return true;
     }
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
     return true;
   });
@@ -1869,7 +1875,7 @@ test("completed day does not sum partial appliance amp history", async ({ page }
       });
       return true;
     }
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
     return true;
   });
@@ -1915,7 +1921,7 @@ test("completed day derives average amps from signed power and PF history", asyn
       });
       return true;
     }
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
     return true;
   });
@@ -1964,7 +1970,7 @@ test("completed day derives amps when direct current history has no usable value
       });
       return true;
     }
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
     return true;
   });
@@ -2102,7 +2108,7 @@ test("home summary rejects incomplete mains current history", async ({ page }) =
       });
       return true;
     }
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({ json: { status: "ok", items: [], whole_house: [] } });
     return true;
   });
@@ -2211,7 +2217,7 @@ test("home totals use retained completed days without Recorder history", async (
   );
   let insightCalls = 0;
   await mockPanelApi(page, async ({ route, url }) => {
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     insightCalls += 1;
     if (insightCalls === 1) {
       await route.fulfill({ status: 503, body: "" });
@@ -2272,7 +2278,7 @@ test("home totals use retained completed days without Recorder history", async (
 test("completed home totals fall back to complete retained appliance totals", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-08-01T12:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({
       json: {
         status: "ok",
@@ -2330,7 +2336,7 @@ test("historical home totals retry after an API failure", async ({ page }) => {
   await page.clock.install({ time: new Date("2026-07-12T22:00:00.000Z") });
   let insightCalls = 0;
   await mockPanelApi(page, async ({ route, url }) => {
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     insightCalls += 1;
     await route.fulfill({ status: 503, body: "" });
     return true;
@@ -2365,7 +2371,7 @@ test("home totals retry when the first midnight payload is stale", async ({ page
   let afterMidnight = false;
   let rolloverCalls = 0;
   await mockPanelApi(page, async ({ route, url }) => {
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     const completedDayReady = afterMidnight && rolloverCalls++ > 0;
     await route.fulfill({
       json: {
@@ -2467,7 +2473,7 @@ test("newly mounted home totals retry stale rollover data", async ({ page }) => 
   await page.clock.install({ time: new Date("2026-07-13T00:01:00.000Z") });
   let insightCalls = 0;
   await mockPanelApi(page, async ({ route, url }) => {
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     insightCalls += 1;
     await route.fulfill({
       json: {
@@ -2531,7 +2537,7 @@ test("home totals retry when a configured appliance is missing after rollover", 
   await page.clock.install({ time: new Date("2026-07-13T00:01:00.000Z") });
   let insightCalls = 0;
   await mockPanelApi(page, async ({ route, url }) => {
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     insightCalls += 1;
     await route.fulfill({
       json: {
@@ -2589,6 +2595,14 @@ test("home totals retry when a configured appliance is missing after rollover", 
 test("appliance grid filters live state and loads Activity Summary history", async ({ page, isMobile }) => {
   await page.clock.install({ time: new Date("2026-07-12T22:00:00.000Z") });
   await mockPanelApi(page, async ({ route, url }) => {
+    if (url.searchParams.get("view") === "attention") {
+      await route.fulfill({ json: householdIssues(url.searchParams, [{
+        entry_id: "entry-1", meter_label: "Home meter", appliance_key: "circuit:oven",
+        circuit_id: "oven", display_name: "Oven", source_type: "direct_meter",
+        reason: "Possible Imbalance", actions: [],
+      }]) });
+      return true;
+    }
     if (!url.pathname.includes("/history/period")) return false;
     await route.fulfill({
       json: [[
@@ -2768,7 +2782,7 @@ test("historical appliance grid uses selected-date totals without live status", 
       });
       return true;
     }
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({
       json: {
         status: "ok",
@@ -2900,7 +2914,7 @@ test("historical appliance totals retry after a transient API failure", async ({
   let insightCalls = 0;
   let allowSuccess = false;
   await mockPanelApi(page, async ({ route, url }) => {
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     insightCalls += 1;
     if (!allowSuccess) {
       await route.fulfill({ status: 503, body: "" });
@@ -2953,7 +2967,7 @@ test("current-inclusive appliance totals update without reloading retained histo
   await page.clock.install({ time: new Date("2026-07-12T22:00:00.000Z") });
   let insightCalls = 0;
   await mockPanelApi(page, async ({ route, url }) => {
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     insightCalls += 1;
     await route.fulfill({
       json: {
@@ -3058,7 +3072,7 @@ test("appliance totals retry when the first post-midnight payload is stale", asy
   await page.clock.install({ time: new Date("2026-07-12T23:59:00.000Z") });
   let insightCalls = 0;
   await mockPanelApi(page, async ({ route, url }) => {
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     insightCalls += 1;
     await route.fulfill({
       json: {
@@ -3164,7 +3178,7 @@ test("energy and cost card follows the dashboard range and preserves cost source
     cost_source: index < 5 ? "recorded" : index === 9 ? "unavailable" : "estimated",
   }));
   await mockPanelApi(page, async ({ route, url }) => {
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({
       json: {
         status: "ok",
@@ -3359,7 +3373,7 @@ test("energy and cost history includes live monitored totals for today", async (
   await page.clock.install({ time: new Date("2026-07-26T18:00:00.000Z") });
   let insightCalls = 0;
   await mockPanelApi(page, async ({ route, url }) => {
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     insightCalls += 1;
     const completed = {
       date: "2026-07-26",
@@ -3475,7 +3489,7 @@ test("no-mains energy history retries the selected appliance after midnight", as
   await page.clock.install({ time: new Date("2026-07-27T00:01:00.000Z") });
   let insightCalls = 0;
   await mockPanelApi(page, async ({ route, url }) => {
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     insightCalls += 1;
     const completed = {
       date: "2026-07-26",
@@ -3540,7 +3554,7 @@ test("no-mains energy history retries the selected appliance after midnight", as
 
 test("no-mains energy history waits for an appliance selection", async ({ page }) => {
   await mockPanelApi(page, async ({ route, url }) => {
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     await route.fulfill({
       json: { status: "ok", items: [], whole_house: [] },
     });
@@ -4869,7 +4883,7 @@ test("dashboard date range is bounded by retained history and today", async ({ p
   let insightCalls = 0;
   let failNext = false;
   await mockPanelApi(page, async ({ route, url }) => {
-    if (!url.pathname.endsWith("/appliance_insights")) return false;
+    if (!isEnergyInsightsRequest(url)) return false;
     insightCalls += 1;
     if (failNext) {
       failNext = false;
@@ -8896,15 +8910,17 @@ test("Appliance Insights filters attention and NILM appliances", async ({ page, 
   await mockPanelApi(page);
   const panel = await openPanel(page, "?appliance_insights=1");
   await expect(panel.locator("tbody tr")).toHaveCount(3);
+  await expect(panel.locator("tbody")).toContainText("Feedback evidence score: 81%");
 
   await panel.locator('[data-appliance-insights-filter="needs_attention"]').check();
-  await expect(panel.locator("tbody tr")).toHaveCount(2);
-  await expect(panel.locator("tbody")).not.toContainText("Bedroom Fan");
+  await expect(panel).toContainText("Kitchen Appliances");
+  await expect(panel).toContainText("Dishwasher Estimate");
+  await expect(panel).not.toContainText("Bedroom Fan");
 
   await panel.locator('[data-appliance-insights-filter="nilm_estimated"]').check();
-  await expect(panel.locator("tbody tr")).toHaveCount(1);
-  await expect(panel.locator("tbody")).toContainText("Dishwasher Estimate");
-  await expect(panel.locator("tbody")).toContainText("Feedback evidence score: 81%");
+  await expect(panel).not.toContainText("Kitchen Appliances");
+  await expect(panel).toContainText("Dishwasher Estimate");
+  await expect(panel.getByRole("link", { name: "Verify appliance match" })).toBeVisible();
 });
 
 test("Appliance Detail exposes ranges and comparisons", async ({ page, isMobile }) => {
@@ -11226,4 +11242,363 @@ test("integration surfaces inherit the Home Assistant font", async ({ page }) =>
   await expect.poll(() => panel.locator("h1").evaluate(
     (heading) => getComputedStyle(heading).fontFamily,
   )).toContain("Courier New");
+});
+
+// Exercise production navigation URLs on the static test server.
+async function serveHouseholdPanel(page) {
+  await page.route("**/circuitsetup-energy-analyzer-evidence?*", (route) => (
+    route.fulfill({ path: "tests/e2e/panel.html", contentType: "text/html" })
+  ));
+}
+
+test("household issues opens the scoped list by keyboard and keeps the meter on reload and Back", async ({ page }) => {
+  const python = process.env.PYTHON || (existsSync(".venv/Scripts/python.exe") ? ".venv/Scripts/python.exe" : "python");
+  const cases = JSON.parse(execFileSync(python, ["-m", "tests.e2e.household_issues_fixture"], { encoding: "utf8" }));
+  await serveHouseholdPanel(page);
+  await mockPanelApi(page, async ({ route, url }) => {
+    const meter = cases[url.searchParams.get("entry_id")];
+    if (url.searchParams.get("view") === "attention" && meter) {
+      await route.fulfill({ json: meter.issues });
+    } else if (url.pathname.endsWith("/alert_evidence") && meter) {
+      await route.fulfill({ json: meter.evidence });
+    } else {
+      return false;
+    }
+    return true;
+  });
+  const card = await openDashboardCard(page, "circuitsetup-energy-analyzer-house-flow", {
+    entry_id: "garage-meter",
+    api_path: "circuitsetup_energy_analyzer/appliance_insights",
+  });
+  const issuesLink = card.getByRole("link", { name: /issues/i }).first();
+  await expect(issuesLink).toContainText("1");
+  await expect(card).toContainText("Garage fridge");
+  await issuesLink.focus();
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/needs_attention=1/);
+  expect(new URL(page.url()).searchParams.get("entry_id")).toBe("garage-meter");
+  const panel = page.locator("circuitsetup-energy-analyzer-panel");
+  await expect(panel).toContainText("Garage fridge used more energy than usual.");
+  await page.reload();
+  await expect(panel).toContainText("Garage fridge used more energy than usual.");
+  await expect(panel).toContainText("Directly monitored appliances: 1");
+  const action = panel.getByRole("link", { name: "Review evidence" });
+  await expect(action).toHaveAttribute("href", /entry_id=garage-meter/);
+  await action.click();
+  await expect(panel.getByRole("heading", { name: "Garage fridge", exact: true })).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("alert_id")).toBe(cases["garage-meter"].evidence.alert.alert_id);
+  await page.goBack();
+  await expect(panel).toContainText("Garage fridge used more energy than usual.");
+  expect(new URL(page.url()).searchParams.get("entry_id")).toBe("garage-meter");
+});
+
+test("household issues sends the washer sensor to Home Assistant and the uncertain match to its assignment", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.searchParams.get("view") !== "attention") return false;
+    await route.fulfill({ json: householdIssues(url.searchParams) });
+    return true;
+  });
+  const panel = await openPanel(page, "?appliance_insights=1&needs_attention=1");
+  await page.evaluate(() => {
+    const element = window.__panel;
+    element._hass.states["sensor.washer_power"] = { state: "unavailable", attributes: {} };
+    element.hass = element._hass;
+    document.addEventListener("hass-more-info", event => { window.__openSensor = event.detail.entityId; });
+  });
+  await panel.getByRole("button", { name: "Open sensor" }).click();
+  await expect.poll(() => page.evaluate(() => window.__openSensor)).toBe("sensor.washer_power");
+  const match = panel.getByRole("link", { name: "Verify appliance match" });
+  await expect(match).toHaveAttribute("href", /assignment_id=dishwasher/);
+  await expect(match).toHaveAttribute("href", /entry_id=kitchen-meter/);
+});
+
+test("household issues shares an in-flight request and ignores a reply from the previous meter", async ({ page }) => {
+  const requests = [];
+  let resolveGarage;
+  const garageGate = new Promise(resolve => { resolveGarage = resolve; });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.searchParams.get("view") !== "attention") return false;
+    const meter = url.searchParams.get("entry_id");
+    requests.push(meter);
+    if (meter === "garage-meter") await garageGate;
+    await route.fulfill({ json: householdIssues(url.searchParams) });
+    return true;
+  });
+  const initial = { entry_id: "garage-meter", api_path: "circuitsetup_energy_analyzer/appliance_insights" };
+  await openDashboardCards(page, [
+    { tagName: "circuitsetup-energy-analyzer-house-flow", config: initial },
+    { tagName: "circuitsetup-energy-analyzer-appliance-grid", config: initial },
+  ]);
+  try {
+    await expect.poll(() => requests).toEqual(["garage-meter"]);
+    await page.evaluate(config => {
+      for (const card of window.__dashboardCards) card.setConfig({ ...config, entry_id: "kitchen-meter" });
+    }, initial);
+    const home = page.locator("circuitsetup-energy-analyzer-house-flow");
+    await expect(home).toContainText("Washer");
+    const completed = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.searchParams.get("view") === "attention" && url.searchParams.get("entry_id") === "garage-meter";
+    });
+    resolveGarage();
+    await completed;
+    await expect(home).toContainText("Washer");
+    await expect(home).not.toContainText("Garage fridge");
+    expect(requests).toEqual(["garage-meter", "kitchen-meter"]);
+  } finally {
+    resolveGarage();
+  }
+});
+
+test("household issues reaches the last appliance when 101 need attention", async ({ page }) => {
+  const rows = Array.from({ length: 101 }, (_unused, index) => ({
+    ...householdIssues(new URLSearchParams("entry_id=garage-meter")).items[0],
+    appliance_key: `circuit:load-${index + 1}`, circuit_id: `load-${index + 1}`,
+    display_name: `Appliance ${String(index + 1).padStart(3, "0")}`,
+  }));
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.searchParams.get("view") !== "attention") return false;
+    await route.fulfill({ json: householdIssues(url.searchParams, rows) });
+    return true;
+  });
+  const panel = await openPanel(page, "?appliance_insights=1&needs_attention=1&entry_id=garage-meter");
+  await expect(panel).toContainText("101");
+  await expect(panel).toContainText("Appliance 001");
+  const more = panel.getByRole("button", { name: /load more|show more|next/i });
+  await more.click();
+  await expect(panel).toContainText("Appliance 101");
+});
+
+test("household issues shows a retry after a failure and the count when it recovers", async ({ page }, testInfo) => {
+  testInfo.annotations.push({ type: "allow-browser-error", description: "503" });
+  let failed = false;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.searchParams.get("view") !== "attention") return false;
+    if (!failed) {
+      failed = true;
+      await route.fulfill({ status: 503, json: {} });
+    } else {
+      await route.fulfill({ json: householdIssues(url.searchParams) });
+    }
+    return true;
+  });
+  const card = await openDashboardCard(page, "circuitsetup-energy-analyzer-house-flow", {
+    entry_id: "garage-meter", api_path: "circuitsetup_energy_analyzer/appliance_insights",
+  });
+  await expect(card).toContainText("Issues unavailable");
+  await card.getByRole("button", { name: /retry/i }).click();
+  await expect(card.getByRole("link", { name: /issues/i }).first()).toContainText("1");
+  await expect(card).toContainText("Garage fridge");
+});
+
+test("household issues keeps learning separate from a setup problem", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.searchParams.get("view") !== "attention") return false;
+    const reply = householdIssues(new URLSearchParams());
+    await route.fulfill({ json: {
+      ...reply, items: [], total_affected: 0, matching_count: 0,
+      coverage: { ...reply.coverage, direct_monitored: 1, learning: 1, estimates_awaiting_verification: 0 },
+    } });
+    return true;
+  });
+  const card = await openDashboardCard(page, "circuitsetup-energy-analyzer-house-flow", {
+    entry_id: "garage-meter", setup_health_entity: "sensor.garage_setup",
+    setup_health_path: "/circuitsetup-energy-analyzer-evidence?setup_health=1&entry_id=garage-meter",
+  }, {
+    "sensor.garage_setup": {
+      state: "Let analyzer learn",
+      attributes: { primary_issue: "learning", issue_count: 1, issues: [{ issue: "learning" }] },
+    },
+  });
+  await expect(card).toContainText("Learning normal use");
+  await expect(card).not.toContainText("Setup needs attention");
+  await page.evaluate(() => window.__setDashboardState("sensor.garage_setup", {
+    state: "Fix stale source sensor",
+    attributes: {
+      primary_issue: "stale_source_sensor", issue_count: 2,
+      issues: [{ issue: "stale_source_sensor" }, { issue: "learning" }],
+    },
+  }));
+  await expect(card).toContainText("Setup needs attention");
+});
+
+test("household issues refreshes both cards together and stops after they leave", async ({ page }) => {
+  await page.clock.install();
+  let requests = 0;
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.searchParams.get("view") !== "attention") return false;
+    requests++;
+    await route.fulfill({ json: householdIssues(url.searchParams) });
+    return true;
+  });
+  const config = { entry_id: "garage-meter", api_path: "circuitsetup_energy_analyzer/appliance_insights" };
+  await openDashboardCards(page, [
+    { tagName: "circuitsetup-energy-analyzer-house-flow", config },
+    { tagName: "circuitsetup-energy-analyzer-appliance-grid", config },
+  ]);
+  const home = page.locator("circuitsetup-energy-analyzer-house-flow");
+  await expect(home).toContainText("Garage fridge");
+  expect(requests).toBe(1);
+  await page.clock.fastForward(30_000);
+  await expect.poll(() => requests).toBe(2);
+  await page.evaluate(() => window.__dashboardCards.forEach(card => card.remove()));
+  await page.clock.fastForward(60_000);
+  expect(requests).toBe(2);
+});
+
+test("household issues retries a failed findings request from the filtered grid", async ({ page }, testInfo) => {
+  testInfo.annotations.push({ type: "allow-browser-error", description: "503" });
+  const meters = [];
+  let releaseFailure;
+  const pending = new Promise(resolve => { releaseFailure = resolve; });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.searchParams.get("view") !== "attention") return false;
+    meters.push(url.searchParams.get("entry_id"));
+    if (meters.length === 1) {
+      await pending;
+      await route.fulfill({ status: 503, json: {} });
+    } else {
+      const payload = householdIssues(url.searchParams);
+      await route.fulfill({ json: { ...payload, items: [], total_affected: 0, matching_count: 0 } });
+    }
+    return true;
+  });
+  try {
+    const grid = await openDashboardCard(page, "circuitsetup-energy-analyzer-appliance-grid", {
+      entry_id: "garage-meter", appliances: [{ name: "Garage fridge", circuit_id: "fridge" }],
+    });
+    const tab = grid.getByRole("tab", { name: "Needs attention" });
+    await tab.click();
+    await expect(grid.getByRole("status")).toContainText("Checking issues");
+    releaseFailure();
+    await expect(grid.getByRole("status")).toContainText("Issues unavailable");
+    await grid.getByRole("button", { name: "Retry" }).click();
+    await expect(grid.getByRole("status")).toContainText("No current issues");
+    await expect(tab).toHaveAttribute("aria-selected", "true");
+    expect(meters).toEqual(["garage-meter", "garage-meter"]);
+  } finally {
+    releaseFailure();
+  }
+});
+
+test("household issues keeps a clipped appliance tile unclassified until its finding arrives", async ({ page }) => {
+  let releaseLast;
+  const lastPage = new Promise(resolve => { releaseLast = resolve; });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.searchParams.get("view") !== "attention") return false;
+    const initial = householdIssues(new URLSearchParams("entry_id=garage-meter"));
+    if (Number(url.searchParams.get("offset")) > 0) {
+      await lastPage;
+      await route.fulfill({ json: { ...initial, total_affected: 101, matching_count: 101 } });
+    } else {
+      const item = initial.items[0];
+      const items = Array.from({ length: 100 }, (_, index) => ({
+        ...item, appliance_key: `circuit:load${index}`, circuit_id: `load${index}`,
+      }));
+      await route.fulfill({ json: { ...initial, items, total_affected: 101, matching_count: 101, next_offset: 100 } });
+    }
+    return true;
+  });
+  try {
+    const grid = await openDashboardCard(page, "circuitsetup-energy-analyzer-appliance-grid", {
+      entry_id: "garage-meter", appliances: [
+        { name: "Garage fridge", circuit_id: "fridge" },
+        { name: "Known load", circuit_id: "load0" },
+      ],
+    });
+    const tile = grid.locator('[data-appliance-id="fridge"]');
+    await expect(tile).toBeVisible();
+    await expect(tile).not.toContainText(/no current issues|no issues found/i);
+    await expect(tile).toContainText(/checking|unclassified|unknown|pending|unavailable/i);
+    await grid.getByRole("tab", { name: "Needs attention" }).click();
+    await expect(grid.locator('[data-appliance-id="load0"]')).toBeVisible();
+    await expect(tile).toHaveCount(0);
+    await expect(grid.getByRole("status")).toContainText("Checking issues");
+    releaseLast();
+    await expect(tile).toBeVisible();
+    await expect(grid.getByText("Checking issues", { exact: true })).toHaveCount(0);
+  } finally {
+    releaseLast();
+  }
+});
+
+test("household issues widens to All meters while every action keeps its owner", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.searchParams.get("view") !== "attention") return false;
+    await route.fulfill({ json: householdIssues(url.searchParams) });
+    return true;
+  });
+  const panel = await openPanel(page, "?appliance_insights=1&needs_attention=1&entry_id=garage-meter");
+  await expect(panel).toContainText("Garage fridge used more energy than usual.");
+  await expect(panel).not.toContainText("The dishwasher match needs verification.");
+  const meter = panel.getByRole("combobox", { name: /meter/i });
+  await meter.selectOption({ label: "All meters" });
+  await expect(panel).toContainText("The dishwasher match needs verification.");
+  expect(new URL(page.url()).searchParams.has("entry_id")).toBe(false);
+  await expect(panel.getByRole("link", { name: "Review evidence" })).toHaveAttribute("href", /entry_id=garage-meter/);
+  await expect(panel.getByRole("link", { name: "Verify appliance match" })).toHaveAttribute("href", /entry_id=kitchen-meter/);
+});
+
+test("household issues routes a removed sensor to the owning meter's Setup Health", async ({ page }) => {
+  await serveHouseholdPanel(page);
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.searchParams.get("view") !== "attention") return false;
+    await route.fulfill({ json: householdIssues(url.searchParams) });
+    return true;
+  });
+  const panel = await openPanel(page, "?appliance_insights=1&needs_attention=1&entry_id=kitchen-meter");
+  const action = panel.getByRole("link", { name: /open setup health/i });
+  await action.click();
+  const route = new URL(page.url()).searchParams;
+  expect(route.get("setup_health")).toBe("1");
+  expect(route.get("entry_id")).toBe("kitchen-meter");
+});
+
+test("household issues distinguishes whole-home-only coverage from an empty filtered list", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.searchParams.get("view") !== "attention") return false;
+    const reply = householdIssues(url.searchParams);
+    const entry = url.searchParams.get("entry_id");
+    if (["mains-only", "offline", "offline-mains"].includes(entry)) {
+      await route.fulfill({ json: {
+        ...reply, status: "ok", meters: [{ entry_id: entry, label: "Main panel" }],
+        coverage: { ...reply.coverage, direct_monitored: entry === "offline" ? 1 : 0,
+          whole_home_feeds: entry === "offline" ? 0 : 1, unavailable: entry === "mains-only" ? 0 : 1 },
+      } });
+    } else {
+      await route.fulfill({ json: reply });
+    }
+    return true;
+  });
+  let panel = await openPanel(page, "?appliance_insights=1&needs_attention=1&entry_id=mains-only");
+  await expect(panel).toContainText("Whole-home feeds: 1");
+  await expect(panel).toContainText(/no (individual |identified )?appliances|no .* appliances .*identified/i);
+  panel = await openPanel(page, "?appliance_insights=1&needs_attention=1&entry_id=offline");
+  await expect(panel).toContainText("Unavailable: 1");
+  await expect(panel).toContainText(/monitoring data is unavailable|readings.*unavailable|sensors.*unavailable/i);
+  panel = await openPanel(page, "?appliance_insights=1&needs_attention=1&entry_id=offline-mains");
+  await expect(panel).toContainText("Whole-home feeds: 1");
+  await expect(panel).toContainText("Unavailable: 1");
+  await expect(panel).toContainText("Monitoring data is unavailable");
+  await expect(panel).not.toContainText("Whole-home monitoring is active");
+  panel = await openPanel(page, "?appliance_insights=1&needs_attention=1&entry_id=garage-meter");
+  await panel.locator('[data-appliance-insights-filter="nilm_estimated"]').check();
+  await expect(panel).toContainText(/match.*filter|filter.*match/i);
+});
+
+test("household issues flags a converted estimate on its directly metered grid tile", async ({ page }) => {
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.searchParams.get("view") !== "attention") return false;
+    const reply = householdIssues(url.searchParams);
+    reply.items[0] = { ...reply.items[0], appliance_key: "nilm:converted", assignment_id: "converted" };
+    await route.fulfill({ json: reply });
+    return true;
+  });
+  const grid = await openDashboardCard(page, "circuitsetup-energy-analyzer-appliance-grid", {
+    entry_id: "garage-meter", appliances: [{ name: "Garage fridge", circuit_id: "fridge" }],
+  });
+  const tile = grid.locator('[data-appliance-id="fridge"]');
+  await expect(tile).toContainText("Needs attention");
+  await grid.getByRole("tab", { name: "Needs attention", exact: true }).click();
+  await expect(tile).toBeVisible();
 });

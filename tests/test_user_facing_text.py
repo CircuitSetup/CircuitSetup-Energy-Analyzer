@@ -285,6 +285,10 @@ const context = {{
     get() {{ return undefined; }},
     define() {{}},
   }},
+  document: {{
+    addEventListener() {{}},
+    removeEventListener() {{}},
+  }},
   history: {{
     pushState() {{}},
     replaceState() {{}},

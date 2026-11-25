@@ -93,6 +93,7 @@ def nilm_virtual_appliance_states(
     coordinator: Any,
     *,
     published_only: bool = False,
+    exclude_converted: bool = False,
 ) -> tuple[NilmVirtualApplianceState, ...]:
     """Return estimated NILM appliance states from persisted assignments."""
     store_data = getattr(coordinator, "store_data", None)
@@ -114,6 +115,11 @@ def nilm_virtual_appliance_states(
             if isinstance(assignment, Mapping)
         ]
         for assignment in assignment_list:
+            if (
+                exclude_converted
+                and assignment.get("conversion_state") == "direct_meter"
+            ):
+                continue
             if published_only and not _published_assignment(assignment):
                 continue
             state = _nilm_virtual_appliance_state(

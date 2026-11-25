@@ -37,7 +37,8 @@
           const request = { method, apiPath, data };
           apiCalls.push(request);
           if (useFixtureApi) {
-            return apiPayload(new URL(`/api/${apiPath}`, window.location.origin).pathname);
+            const url = new URL(`/api/${apiPath}`, window.location.origin);
+            return apiPayload(url.pathname, url.searchParams);
           }
           const response = await fetch(`/api/${apiPath}`, {
             method,
