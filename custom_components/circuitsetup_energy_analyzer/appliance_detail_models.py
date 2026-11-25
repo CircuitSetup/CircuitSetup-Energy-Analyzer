@@ -93,6 +93,8 @@ class ApplianceAlertSummary:
     first_seen: str | None
     last_seen: str | None
     evidence_path: str | None
+    assignment_id: str | None = None
+    circuit_id: str | None = None
 
 
 @dataclass(slots=True)

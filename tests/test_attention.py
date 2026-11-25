@@ -252,7 +252,7 @@ def test_attention_action_paths_select_one_appliance_detail(monkeypatch) -> None
     for item in items:
         parsed = urlparse(item.action_path or "")
         params = parse_qs(parsed.query)
-        assert parsed.path == attention.PANEL_PATH
+        assert parsed.path == "/circuitsetup-energy-analyzer-evidence"
         assert params["appliance_detail"] == ["1"]
         assert bool(params.get("circuit_id")) != bool(params.get("assignment_id"))
 
@@ -377,3 +377,208 @@ def test_real_learning_only_appliance_is_omitted() -> None:
     )
 
     assert attention.attention_items_for_coordinators((coordinator,)) == ()
+
+
+def test_two_meter_warning_only_agrees_with_insights_and_clears() -> None:
+    from custom_components.circuitsetup_energy_analyzer.appliance_insights import (
+        appliance_insights_for_coordinators,
+    )
+    from tests.test_appliance_detail import _direct_coordinator
+
+    meters = (_direct_coordinator(), _direct_coordinator())
+    meters[1].entry_id = "entry-2"
+    items = attention.attention_items_for_coordinators(meters)
+    rows = appliance_insights_for_coordinators(meters)
+    assert len(items) == 2
+    for row in rows:
+        assert row.needs_attention
+        finding = row.as_dict()["finding"]
+        item = next(i for i in items if i.entry_id == row.entry_id)
+        assert (
+            finding["reason"]
+            == item.reason
+            == "Kitchen Fridge is using more energy than usual."
+        )
+        assert row.entry_id in finding["action"]["path"]
+        assert finding["alert_ids"] == item.as_dict()["alert_ids"]
+    meters[0].state.active_alerts_by_circuit.clear()
+    assert [i.entry_id for i in attention.attention_items_for_coordinators(meters)] == [
+        "entry-2"
+    ]
+    assert [
+        r.entry_id
+        for r in appliance_insights_for_coordinators(meters)
+        if r.needs_attention
+    ] == ["entry-2"]
+
+
+def test_stale_source_keeps_evidence_then_survives_maintenance() -> None:
+    from tests.test_appliance_detail import _direct_coordinator
+
+    coord = _direct_coordinator()
+    checklist = coord.state.data_quality_checklist_by_circuit["fridge"]
+    checklist.update(
+        source_data_fresh=False, quality_issues=["sensor.fridge_power stale"]
+    )
+    (item,) = attention.attention_items_for_coordinators([coord])
+    assert item.action == {
+        "kind": "open_sensor",
+        "label": "Open sensor",
+        "entity_id": "sensor.fridge_power",
+    }
+    assert {action["kind"] for action in item.actions} == {
+        "open_sensor",
+        "review_evidence",
+    }
+    coord.hass = SimpleNamespace(states={})
+    (missing,) = attention.attention_items_for_coordinators([coord])
+    assert missing.action["kind"] == "open_setup_health"
+    coord.hass.states["sensor.fridge_power"] = object()
+    coord.state.maintenance_by_circuit["fridge"] = {"active": True}
+    (item,) = attention.attention_items_for_coordinators([coord])
+    assert not item.alert_ids
+    assert item.action["kind"] == "open_sensor"
+    for issues in (
+        ["sensor.fridge_power stale", "sensor.fridge_energy stale"],
+        ["stale"],
+        ["sensor.removed stale"],
+    ):
+        checklist["quality_issues"] = issues
+        (item,) = attention.attention_items_for_coordinators([coord])
+        assert item.action["kind"] == "open_setup_health"
+        assert parse_qs(urlparse(item.action["path"]).query)["entry_id"] == ["entry-1"]
+    checklist.update(source_data_fresh=True, quality_issues=[])
+    assert not attention.attention_items_for_coordinators([coord])
+
+
+def test_feed_and_assignment_warnings_have_distinct_owners_after_conversion() -> None:
+    from dataclasses import replace
+
+    from tests.test_appliance_detail import (
+        _config,
+        _direct_coordinator,
+        _nilm_coordinator,
+    )
+
+    coord = _nilm_coordinator()
+    template = _direct_coordinator().state.active_alerts_by_circuit["fridge"][0]
+    supply = replace(
+        template, circuit_id="mains", feature="voltage_sag", message="Low feed voltage"
+    )
+    assigned = replace(
+        template,
+        circuit_id="mains",
+        features={"assignment_id": "assignment-dishwasher"},
+    )
+    coord.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(
+            async_get_entry=lambda _: SimpleNamespace(title="Garage Meter")
+        )
+    )
+    coord.entry_id = "garage"
+    coord.state.active_alerts_by_circuit["mains"] = [supply, assigned]
+    for converted in (False, True):
+        if converted:
+            coord.circuit_configs += (_config("dishwasher_direct"),)
+            assignment = coord.store_data.nilm_appliance_assignments_by_circuit[
+                "mains"
+            ][0]
+            assignment.update(
+                conversion_state="direct_meter",
+                direct_circuit_id="dishwasher_direct",
+                publish_entities=False,
+            )
+        items = attention.attention_items_for_coordinators([coord])
+        assert len(items) == 2
+        feed = next(i for i in items if i.source_type == "mains")
+        appliance = next(i for i in items if i.source_type != "mains")
+        assert feed.display_name == "Garage Meter"
+        assert feed.reason == supply.message
+        assert appliance.source_type == (
+            "direct_meter" if converted else "nilm_estimate"
+        )
+        assert len(feed.alert_ids) == len(appliance.alert_ids) == 1
+        assert feed.alert_ids != appliance.alert_ids
+
+
+def test_matching_expectation_and_warning_keep_one_evidence_action() -> None:
+    from dataclasses import replace
+
+    from tests.test_appliance_detail import _direct_coordinator
+
+    coord = _direct_coordinator()
+    detail = attention.appliance_detail_for_circuit(coord, "fridge")
+    expected = _expectation(
+        "fridge:energy", title="Energy is above normal", status="watch"
+    )
+    detail = replace(detail, expectations=(expected,))
+    item = attention.attention_item_for_detail(coord, detail)
+    assert item.reason == detail.active_alerts[0].message
+    assert item.action["path"] == detail.active_alerts[0].evidence_path
+    assert item.alert_ids == (detail.active_alerts[0].alert_id,)
+    cleared = attention.attention_item_for_detail(
+        coord, replace(detail, active_alerts=())
+    )
+    assert cleared.reason == expected.title
+    assert cleared.alert_ids == ()
+
+
+def test_converted_alias_warning_reaches_both_views() -> None:
+    from dataclasses import replace
+
+    from custom_components.circuitsetup_energy_analyzer.appliance_insights import (
+        appliance_insights_for_coordinators,
+    )
+    from tests.test_appliance_detail import (
+        _config,
+        _direct_coordinator,
+        _nilm_coordinator,
+    )
+
+    coord = _nilm_coordinator()
+    coord.circuit_configs += (_config("direct"),)
+    aliases = coord.store_data.nilm_appliance_assignments_by_circuit["mains"]
+    aliases[0].update(conversion_state="direct_meter", direct_circuit_id="direct")
+    aliases.append(dict(aliases[0], assignment_id="second"))
+    warning = _direct_coordinator().state.active_alerts_by_circuit["fridge"][0]
+    coord.state.active_alerts_by_circuit["mains"] = [
+        replace(warning, circuit_id="mains", features={"assignment_id": "second"})
+    ]
+    (item,) = attention.attention_items_for_coordinators([coord])
+    (row,) = appliance_insights_for_coordinators([coord])
+    assert item.reason == row.finding["reason"] == warning.message
+    assert item.appliance_key == row.appliance_key
+    assert row.needs_attention and len(item.alert_ids) == 1
+
+
+def test_model_uncertainty_prompts_verification_with_supporting_evidence() -> None:
+    from dataclasses import replace
+
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        nilm_virtual_appliance_states,
+        nilm_virtual_low_confidence_alert,
+    )
+    from tests.test_appliance_detail import _nilm_coordinator
+
+    coord = _nilm_coordinator()
+    (state,) = nilm_virtual_appliance_states(coord, published_only=False)
+    for status, confidence, feature in (
+        ("conflict", 0.9, "nilm_model_drift"),
+        ("low_confidence", 0.2, "nilm_low_confidence_change"),
+        ("needs_validation", 0.95, "nilm_assignment_needs_validation"),
+    ):
+        uncertain = replace(
+            state, model_status=status, feedback_evidence_score=confidence
+        )
+        alert = nilm_virtual_low_confidence_alert(uncertain, now=NOW)
+        assert alert and alert.feature == feature
+        coord.state.active_alerts_by_circuit["mains"] = [alert]
+        (item,) = attention.attention_items_for_coordinators([coord])
+        assert item.category == "validate_nilm"
+        assert item.action["kind"] == "verify_appliance_match"
+        verify, evidence = item.actions
+        assert verify == item.action
+        assert evidence["kind"] == "review_evidence"
+        params = parse_qs(urlparse(evidence["path"]).query)
+        assert params["alert_id"] == list(item.alert_ids)
+        assert params["assignment_id"] == [state.assignment_id]

@@ -183,23 +183,18 @@ def test_energy_change_with_opposing_factors_is_fully_unexplained() -> None:
 
 def test_energy_change_requires_a_positive_normal_energy_baseline() -> None:
     assert (
-        appliance_insights.energy_change_explanation(
-            _detail(energy=(4.0, None))
-        )
+        appliance_insights.energy_change_explanation(_detail(energy=(4.0, None)))
         is None
     )
     assert (
-        appliance_insights.energy_change_explanation(_detail(energy=(4.0, 0.0)))
-        is None
+        appliance_insights.energy_change_explanation(_detail(energy=(4.0, 0.0))) is None
     )
 
 
 @pytest.mark.parametrize("invalid", (nan, inf, -inf))
 def test_energy_change_treats_non_finite_energy_as_missing(invalid: float) -> None:
     assert (
-        appliance_insights.energy_change_explanation(
-            _detail(energy=(invalid, 10.0))
-        )
+        appliance_insights.energy_change_explanation(_detail(energy=(invalid, 10.0)))
         is None
     )
 
@@ -268,8 +263,7 @@ def test_weather_context_is_presented_as_context_not_precise_causality(
 
     assert explanation is not None
     assert (
-        "outdoor-temperature context may explain"
-        in explanation.explanation.casefold()
+        "outdoor-temperature context may explain" in explanation.explanation.casefold()
     )
     assert explanation.usage_event_contribution_percent is None
 
@@ -324,8 +318,7 @@ def _install_index_sources(
         appliance_insights,
         "nilm_virtual_appliance_states",
         lambda _coordinator, published_only=False: tuple(
-            SimpleNamespace(assignment_id=assignment_id)
-            for assignment_id in nilm_by_id
+            SimpleNamespace(assignment_id=assignment_id) for assignment_id in nilm_by_id
         ),
     )
     monkeypatch.setattr(
@@ -335,8 +328,10 @@ def _install_index_sources(
     )
     monkeypatch.setattr(
         appliance_insights,
-        "attention_items_for_coordinators",
-        lambda _coordinators, **_kwargs: attention,
+        "attention_item_for_detail",
+        lambda _, detail: next(
+            (i for i in attention if i.appliance_key == detail.appliance_key), None
+        ),
     )
     return coordinator
 
@@ -589,8 +584,8 @@ def test_duplicate_circuit_ids_across_entries_have_distinct_detail_paths(
     )
     monkeypatch.setattr(
         appliance_insights,
-        "attention_items_for_coordinators",
-        lambda _coordinators, **_kwargs: (),
+        "attention_item_for_detail",
+        lambda _, detail: None,
     )
 
     items = appliance_insights.appliance_insights_for_coordinators(coordinators)
@@ -609,8 +604,7 @@ def test_index_requests_attention_for_every_bounded_row(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     details = tuple(
-        _detail(f"load-{index:02}", f"Load {index:02}")
-        for index in range(1, 52)
+        _detail(f"load-{index:02}", f"Load {index:02}") for index in range(1, 52)
     )
     attention = tuple(
         AttentionItem(
@@ -634,20 +628,16 @@ def test_index_requests_attention_for_every_bounded_row(
         direct=details,
         nilm=(),
     )
-    requested_limits = []
+    classified = []
 
-    def attention_items(_coordinators, *, limit: int = 50):
-        requested_limits.append(limit)
-        return attention[:limit]
+    def classify(_, detail):
+        classified.append(detail.appliance_key)
+        return next(i for i in attention if i.appliance_key == detail.appliance_key)
 
-    monkeypatch.setattr(
-        appliance_insights,
-        "attention_items_for_coordinators",
-        attention_items,
-    )
+    monkeypatch.setattr(appliance_insights, "attention_item_for_detail", classify)
 
     items = appliance_insights.appliance_insights_for_coordinators((coordinator,))
     last = next(item for item in items if item.appliance_key == "circuit:load-51")
 
-    assert requested_limits == [appliance_insights.MAX_APPLIANCE_INSIGHTS]
+    assert len(set(classified)) == len(classified) == 51
     assert last.needs_attention is True

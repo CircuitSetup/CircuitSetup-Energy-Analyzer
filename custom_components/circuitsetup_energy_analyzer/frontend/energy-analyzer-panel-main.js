@@ -545,6 +545,7 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
     }
     this._loadedRouteKey = routeKey;
     this._loading = true;
+    this._payload = null;
     this._error = "";
     this._historyError = "";
     this._historySeries = [];
@@ -608,7 +609,9 @@ class CircuitSetupEnergyAnalyzerPanel extends HTMLElement {
       this._render();
       if (this._routeRequestsApplianceDetail(routeKey)) {
         await this._loadApplianceDetail(requestId, routeKey);
+        if (this._applianceDetail?.status === "choose_meter") return;
       }
+      if (payload.status === "choose_meter") return;
       if (this._routeRequestsApplianceInsights(routeKey)) {
         await this._loadApplianceInsights(requestId, routeKey);
       }

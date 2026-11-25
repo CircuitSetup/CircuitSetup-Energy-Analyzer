@@ -401,7 +401,10 @@ def test_direct_appliance_detail_payload_uses_existing_summary_state() -> None:
     assert "hvac_efficiency" not in detail
     assert "water_flow_context" not in detail
     assert detail["active_alerts"][0]["feature"] == "daily_energy"
-    assert payload["actions"]["open_evidence"]["path"] == detail["evidence_path"]
+    assert (
+        payload["actions"]["open_evidence"]["path"]
+        == detail["active_alerts"][0]["evidence_path"]
+    )
     assert payload["actions"]["relearn_baseline"]["data"] == {
         "circuit_id": "fridge", "entry_id": "entry-1"
     }
@@ -2174,3 +2177,56 @@ def test_appliance_views_register_with_panel_views() -> None:
         f"api:{DOMAIN}:appliance_detail",
         f"api:{DOMAIN}:appliance_insights",
     }
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_setup_health_link_selects_owning_meter(reverse):
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+        setup_health_payload,
+    )
+
+    kitchen = _direct_coordinator()
+    garage = _direct_coordinator()
+    garage.state.data_quality_checklist_by_circuit["fridge"]["source_data_fresh"] = (
+        False
+    )
+    garage.entry_id = "garage"
+    garage.circuit_configs = (_config(name="Garage fridge"),)
+    meters = [garage, kitchen] if reverse else [kitchen, garage]
+    path = setup_health_payload(meters, entry_id="garage")["needs_attention"][0][
+        "action_path"
+    ]
+    query = parse_qs(urlparse(path).query)
+    assert query["entry_id"] == ["garage"]
+    detail = appliance_detail_payload(
+        meters, circuit_id=query["circuit_id"][0], entry_id=query["entry_id"][0]
+    )
+    assert detail["detail"]["display_name"] == "Garage fridge"
+    assert (
+        appliance_detail_payload(meters, circuit_id="fridge")["status"]
+        == "choose_meter"
+    )
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_duplicate_assignment_requires_meter(reverse):
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_detail_payload,
+    )
+
+    meters = [_nilm_coordinator(), _nilm_coordinator()]
+    meters[1].entry_id = "garage"
+    assignments = meters[1].store_data.nilm_appliance_assignments_by_circuit
+    garage_assignment = assignments["mains"][0]
+    garage_assignment["display_name"] = "Garage dishwasher"
+    if reverse:
+        meters.reverse()
+    choices = appliance_detail_payload(meters, assignment_id="assignment-dishwasher")
+    assert {c["entry_id"] for c in choices["meter_choices"]} == {"entry-1", "garage"}
+    choice = next(c for c in choices["meter_choices"] if c["entry_id"] == "garage")
+    query = parse_qs(urlparse(choice["url"]).query)
+    detail = appliance_detail_payload(
+        meters, assignment_id=query["assignment_id"][0], entry_id=query["entry_id"][0]
+    )
+    assert detail["detail"]["display_name"] == "Garage dishwasher"
