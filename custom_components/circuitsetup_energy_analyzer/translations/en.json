@@ -2806,6 +2806,8 @@
       "live_cards": {
         "all_meters": "All meters",
         "checking_issues": "Checking issues",
+        "unclassified_issues": "Some appliances could not be matched to a meter.",
+        "no_grid_issues": "No current issues on these appliances.",
         "current_issues": "Current issues",
         "issues_unavailable": "Issues unavailable",
         "learning_normal_use": "Learning normal use",

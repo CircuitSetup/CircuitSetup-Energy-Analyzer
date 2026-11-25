@@ -36,7 +36,10 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
     async function refresh() {
       if (document.hidden || active || !cards.size) return;
       active = true;
-      scope.failed = false;
+      if (scope.failed) {
+        scope.failed = false;
+        publish();
+      }
       try {
         let offset = 0;
         do {
@@ -473,10 +476,15 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
       scope.refresh();
     }
 
+    _issuesFailureHtml() {
+      return `<span role="status">${this._escape(this._label("issues_unavailable", "Issues unavailable"))}</span>
+        <button type="button" data-retry-issues>${this._escape(this._label("retry", this._panelText("common.retry")))}</button>`;
+    }
+
     _issuesMetric(current) {
       const scope = this._attention;
       const payload = scope?.payload;
-      if (scope?.failed) return `<div class="metric">${this._escape(this._label("issues_unavailable", "Issues unavailable"))} <button type="button" data-retry-issues>${this._escape(this._label("retry", this._panelText("common.retry")))}</button></div>`;
+      if (scope?.failed) return `<div class="metric">${this._issuesFailureHtml()}</div>`;
       const params = new URLSearchParams({ appliance_insights: "1", needs_attention: "1" });
       if (this._dashboardConfig.entry_id) params.set("entry_id", this._dashboardConfig.entry_id);
       const label = current ? this._label("issues", "Issues") : this._label("current_issues", "Current issues");
@@ -2878,6 +2886,21 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         || this._rangeIncludesToday() && liveDataChanged;
     }
 
+    _filteredGridStatus(appliances, visible) {
+      if (this._filter !== "attention") return "";
+      if (this._attention?.failed) return this._issuesFailureHtml();
+      const payload = this._attention?.payload;
+      let message;
+      if (!payload || payload.next_offset != null) {
+        message = this._label("checking_issues", "Checking issues");
+      } else if (appliances.some(item => item.unknown)) {
+        message = this._label("unclassified_issues", "Some appliances could not be matched to a meter.");
+      } else if (!visible.length) {
+        message = this._label("no_grid_issues", "No current issues on these appliances.");
+      }
+      return message ? `<span role="status">${this._escape(message)}</span>` : "";
+    }
+
     _render() {
       if (!this.shadowRoot || !this._dashboardConfig || !this._hass) return;
       const historical = !this._isTodayRange();
@@ -2923,6 +2946,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           || (right.power || 0) - (left.power || 0)
           || String(left.name).localeCompare(String(right.name))
       ));
+      const gridStatus = this._filteredGridStatus(appliances, visible);
       const filters = historical ? [] : [
         ["all", this._label("all", "All")],
         ["running", this._label("running", "Running")],
@@ -2935,7 +2959,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
         .map((item) => item.activity_entity);
       this.shadowRoot.innerHTML = `
         <ha-card>
-          <style>${this._styles()}</style>
+          <style>${this._styles()} .grid-status { grid-column: 1 / -1; }</style>
           <div class="dashboard-card">
             <h2>${this._escape(this._dashboardConfig.title || "Appliances")}</h2>
             <div class="controls"${historical ? "" : ` role="tablist" aria-label="${this._escape(this._dashboardConfig.title || "Appliances")}"`}>
@@ -2943,6 +2967,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
               <input type="search" data-appliance-search value="${this._escape(this._search)}" aria-label="${this._escape(this._label("search", "Search appliances"))}" placeholder="${this._escape(this._label("search", "Search appliances"))}">
             </div>
             <div class="appliance-grid" data-columns="${Number(this._dashboardConfig.columns) === 2 ? 2 : 1}">
+              ${gridStatus ? `<div class="grid-status">${gridStatus}</div>` : ""}
               ${visible.map((item) => this._tile(item, !this._matchesSearch(item), historical, singleDay)).join("")}
             </div>
             <section class="timeline">
@@ -2964,6 +2989,7 @@ export function registerDashboardGraphs(CircuitSetupEnergyAnalyzerPanel) {
           </div>
         </ha-card>
       `;
+      this.shadowRoot.querySelector("[data-retry-issues]")?.addEventListener("click", () => this._attention.refresh());
       const select = this.shadowRoot.querySelector("[data-timeline-selection]");
       select.value = this._timelineSelection;
       select.addEventListener("change", () => {

@@ -11446,6 +11446,41 @@ test("household issues refreshes both cards together and stops after they leave"
   expect(requests).toBe(2);
 });
 
+test("household issues retries a failed findings request from the filtered grid", async ({ page }, testInfo) => {
+  testInfo.annotations.push({ type: "allow-browser-error", description: "503" });
+  const meters = [];
+  let releaseFailure;
+  const pending = new Promise(resolve => { releaseFailure = resolve; });
+  await mockPanelApi(page, async ({ route, url }) => {
+    if (url.searchParams.get("view") !== "attention") return false;
+    meters.push(url.searchParams.get("entry_id"));
+    if (meters.length === 1) {
+      await pending;
+      await route.fulfill({ status: 503, json: {} });
+    } else {
+      const payload = householdIssues(url.searchParams);
+      await route.fulfill({ json: { ...payload, items: [], total_affected: 0, matching_count: 0 } });
+    }
+    return true;
+  });
+  try {
+    const grid = await openDashboardCard(page, "circuitsetup-energy-analyzer-appliance-grid", {
+      entry_id: "garage-meter", appliances: [{ name: "Garage fridge", circuit_id: "fridge" }],
+    });
+    const tab = grid.getByRole("tab", { name: "Needs attention" });
+    await tab.click();
+    await expect(grid.getByRole("status")).toContainText("Checking issues");
+    releaseFailure();
+    await expect(grid.getByRole("status")).toContainText("Issues unavailable");
+    await grid.getByRole("button", { name: "Retry" }).click();
+    await expect(grid.getByRole("status")).toContainText("No current issues");
+    await expect(tab).toHaveAttribute("aria-selected", "true");
+    expect(meters).toEqual(["garage-meter", "garage-meter"]);
+  } finally {
+    releaseFailure();
+  }
+});
+
 test("household issues keeps a clipped appliance tile unclassified until its finding arrives", async ({ page }) => {
   let releaseLast;
   const lastPage = new Promise(resolve => { releaseLast = resolve; });
@@ -11466,12 +11501,22 @@ test("household issues keeps a clipped appliance tile unclassified until its fin
   });
   try {
     const grid = await openDashboardCard(page, "circuitsetup-energy-analyzer-appliance-grid", {
-      entry_id: "garage-meter", appliances: [{ name: "Garage fridge", circuit_id: "fridge" }],
+      entry_id: "garage-meter", appliances: [
+        { name: "Garage fridge", circuit_id: "fridge" },
+        { name: "Known load", circuit_id: "load0" },
+      ],
     });
     const tile = grid.locator('[data-appliance-id="fridge"]');
     await expect(tile).toBeVisible();
     await expect(tile).not.toContainText(/no current issues|no issues found/i);
     await expect(tile).toContainText(/checking|unclassified|unknown|pending|unavailable/i);
+    await grid.getByRole("tab", { name: "Needs attention" }).click();
+    await expect(grid.locator('[data-appliance-id="load0"]')).toBeVisible();
+    await expect(tile).toHaveCount(0);
+    await expect(grid.getByRole("status")).toContainText("Checking issues");
+    releaseLast();
+    await expect(tile).toBeVisible();
+    await expect(grid.getByText("Checking issues", { exact: true })).toHaveCount(0);
   } finally {
     releaseLast();
   }
