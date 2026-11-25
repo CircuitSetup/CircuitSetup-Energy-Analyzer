@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -12,6 +13,7 @@ from custom_components.circuitsetup_energy_analyzer.const import (
     DASHBOARD_LAYOUT_STANDARD,
 )
 from custom_components.circuitsetup_energy_analyzer.dashboard import (
+    APPLIANCE_GRID_CARD,
     CONTEXT_GRAPH_CARD,
     DASHBOARD_CUSTOM_CARD_TYPES,
     DASHBOARD_URL_PATH,
@@ -1366,6 +1368,21 @@ def test_dashboard_setup_health_tile_opens_guided_panel_view() -> None:
     assert home["setup_health_path"] == (
         "/circuitsetup-energy-analyzer-evidence?setup_health=1&entry_id=entry-1"
     )
+
+
+@pytest.mark.parametrize("entry_id", ["kitchen-meter", "garage-meter"])
+def test_home_and_appliance_grid_share_the_meter_for_findings(entry_id: str) -> None:
+    dashboard = build_recommended_dashboard(
+        _example_circuits(), DASHBOARD_LAYOUT_STANDARD, entry_id=entry_id
+    )
+    for card_type in (HOUSE_FLOW_CARD, APPLIANCE_GRID_CARD):
+        card = _card_of_type(dashboard, card_type)
+        assert card["entry_id"] == entry_id
+        assert card["api_path"] == "circuitsetup_energy_analyzer/appliance_insights"
+        fridge = next(
+            item for item in card["appliances"] if item["circuit_id"] == "fridge"
+        )
+        assert parse_qs(urlsplit(fridge["detail_path"]).query)["entry_id"] == [entry_id]
 
 
 def test_dashboard_long_form_cards_use_readable_section_widths() -> None:
