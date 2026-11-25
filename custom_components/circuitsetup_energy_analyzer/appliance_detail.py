@@ -143,6 +143,8 @@ _PROFILE_EXPECTATION_RECIPES: dict[ApplianceProfile, ProfileExpectationRecipe] =
 def appliance_detail_for_circuit(
     coordinator: Any,
     circuit_id: str,
+    *,
+    include_timeline: bool = True,
 ) -> ApplianceDetail | None:
     """Build Appliance Detail for a configured direct/mixed/mains circuit."""
     config = _config_for_circuit(coordinator, circuit_id)
@@ -272,7 +274,9 @@ def appliance_detail_for_circuit(
         session_timeline=direct_appliance_timeline(
             coordinator,
             config.circuit_id,
-        ),
+        )
+        if include_timeline
+        else (),
     )
 
 
@@ -325,11 +329,11 @@ def appliance_detail_for_assignment(
     for state in nilm_virtual_appliance_states(coordinator, published_only=False):
         if state.assignment_id != requested_id:
             continue
-        return _nilm_detail(coordinator, state)
+        return appliance_detail_for_virtual_state(coordinator, state)
     return None
 
 
-def _nilm_detail(
+def appliance_detail_for_virtual_state(
     coordinator: Any,
     state: NilmVirtualApplianceState,
 ) -> ApplianceDetail:

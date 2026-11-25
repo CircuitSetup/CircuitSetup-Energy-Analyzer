@@ -641,3 +641,88 @@ def test_index_requests_attention_for_every_bounded_row(
 
     assert len(set(classified)) == len(classified) == 51
     assert last.needs_attention is True
+
+def test_attention_projection_pages_after_scope_filter_and_sort():
+    from types import SimpleNamespace
+
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_insights_payload,
+    )
+    from tests.test_appliance_detail import _direct_coordinator
+
+    meters = []
+    for number in range(101):
+        meter = _direct_coordinator()
+        meter.entry_id = f"meter-{number:03d}"
+        meter.hass = SimpleNamespace(
+            config_entries=SimpleNamespace(
+                async_get_entry=lambda _: SimpleNamespace(title="Building")
+            )
+        )
+        meter.state.latest_real_power_w_by_circuit["fridge"] = 0
+        meter.state.daily_energy_usage_by_circuit["fridge"] = number
+        meters.append(meter)
+    meters[-1].state.data_quality_checklist_by_circuit["fridge"][
+        "source_data_fresh"
+    ] = False
+
+    def read(**kwargs):
+        return appliance_insights_payload(meters, view="attention", **kwargs)
+
+    first = read(sort="highest_energy")
+    assert first["total_affected"] == first["matching_count"] == 101
+    assert first["next_offset"] == 100 and len(first["items"]) == 100
+    assert first["items"][0]["entry_id"] == "meter-100"
+    assert len({item["label"] for item in first["meters"]}) == 101
+    assert first["coverage"]["unavailable"] == 1
+    last = read(sort="highest_energy", offset=100)
+    assert [item["entry_id"] for item in last["items"]] == ["meter-000"]
+    assert last["next_offset"] is None
+    selected = read(data_problem=True)
+    assert selected["matching_count"] == 1 and selected["total_affected"] == 101
+    scoped = read(entry_id="meter-100")
+    assert scoped["total_affected"] == scoped["coverage"]["direct_monitored"] == 1
+    assert read(entry_id="missing")["status"] == "not_found"
+
+
+def test_attention_coverage_includes_mains_without_findings():
+    from custom_components.circuitsetup_energy_analyzer.panel import (
+        appliance_insights_payload,
+    )
+    from tests.test_appliance_detail import _nilm_coordinator
+
+    meter = _nilm_coordinator()
+    result = appliance_insights_payload([meter], view="attention")
+    assert result["coverage"]["whole_home_feeds"] == 1
+    assert result["coverage"]["estimates_awaiting_verification"] == 1
+    meter.store_data.nilm_appliance_assignments_by_circuit.clear()
+    result = appliance_insights_payload([meter], view="attention")
+    assert result["coverage"]["whole_home_feeds"] == 1
+    assert result["coverage"]["identified_estimates"] == result["total_affected"] == 0
+
+
+def test_compact_projection_does_not_rebuild_converted_alias_or_scan_history(
+    monkeypatch,
+):
+    from custom_components.circuitsetup_energy_analyzer import appliance_detail, panel
+    from tests.test_appliance_detail import _config, _nilm_coordinator
+
+    meter = _nilm_coordinator()
+    meter.circuit_configs += (_config("fridge"),)
+    assignments = meter.store_data.nilm_appliance_assignments_by_circuit["mains"]
+    assignments[0].update(conversion_state="direct_meter", direct_circuit_id="fridge")
+    assignments.append(dict(assignments[0], assignment_id="second-alias"))
+
+    def unexpected(*args, **kwargs):
+        pytest.fail(
+            "compact projection traversed a retained timeline or a converted alias"
+        )
+
+    monkeypatch.setattr(appliance_detail, "direct_appliance_timeline", unexpected)
+    monkeypatch.setattr(
+        appliance_insights, "appliance_detail_for_assignment", unexpected
+    )
+    monkeypatch.setattr(panel, "_appliance_daily_totals", unexpected)
+    coverage = panel.appliance_insights_payload([meter], view="attention")["coverage"]
+    assert coverage["direct_monitored"] == 1
+    assert coverage["identified_estimates"] == 0

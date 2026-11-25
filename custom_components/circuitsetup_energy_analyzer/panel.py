@@ -18,6 +18,7 @@ from .appliance_detail import (
 )
 from .appliance_insights import (
     appliance_insights_for_coordinators,
+    attention_projection,
     energy_change_explanation,
 )
 from .appliance_notifications import preferences_from_dict
@@ -518,9 +519,56 @@ def appliance_detail_payload(
 
 def appliance_insights_payload(
     coordinators: Iterable[Any],
+    *,
+    view: str | None = None,
+    entry_id: str | None = None,
+    offset: int = 0,
+    sort: str = "default",
+    running: bool = False,
+    nilm_estimated: bool = False,
+    learning: bool = False,
+    data_problem: bool = False,
 ) -> dict[str, Any]:
     """Return the integration-level appliance index payload."""
     coordinator_list = tuple(coordinators)
+    if view == "attention":
+        owners = {
+            _coordinator_entry_id(c): c
+            for c in coordinator_list
+            if _coordinator_entry_id(c)
+        }
+        labels = {}
+        for owner, coordinator in owners.items():
+            registry = getattr(
+                getattr(coordinator, "hass", None), "config_entries", None
+            )
+            entry = registry.async_get_entry(owner) if registry else None
+            labels[owner] = getattr(entry, "title", None) or owner
+        raw_labels = labels.copy()
+        for owner, label in raw_labels.items():
+            peers = [
+                key
+                for key, other in raw_labels.items()
+                if key != owner and other == label
+            ]
+            if peers:
+                width = 4
+                while width < len(owner) and any(
+                    key[-width:] == owner[-width:] for key in peers
+                ):
+                    width += 1
+                labels[owner] = f"{label} ({owner[-width:]})"
+        return attention_projection(
+            owners,
+            labels,
+            entry_id=entry_id,
+            offset=max(0, offset),
+            sort=sort,
+            running=running,
+            nilm_estimated=nilm_estimated,
+            learning=learning,
+            data_problem=data_problem,
+        )
     items = appliance_insights_for_coordinators(coordinator_list)
     coordinators_by_entry = {
         str(getattr(coordinator, "entry_id", "") or ""): coordinator

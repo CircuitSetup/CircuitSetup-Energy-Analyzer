@@ -127,8 +127,32 @@ class ApplianceInsightsView(HomeAssistantView):
         from . import panel
 
         hass = request.app[KEY_HASS]
+        query = request.query
+        try:
+            offset = (
+                max(0, int(query.get("offset", 0)))
+                if query.get("view") == "attention"
+                else 0
+            )
+        except ValueError:
+            return web.json_response({"error": "Invalid offset"}, status=400)
         return web.json_response(
-            panel.appliance_insights_payload(panel._loaded_coordinators(hass))
+            panel.appliance_insights_payload(
+                panel._loaded_coordinators(hass),
+                view=query.get("view"),
+                entry_id=query.get("entry_id"),
+                offset=offset,
+                sort=query.get("sort", "default"),
+                **{
+                    flag: query.get(flag, "").lower() in {"1", "true"}
+                    for flag in (
+                        "running",
+                        "nilm_estimated",
+                        "learning",
+                        "data_problem",
+                    )
+                },
+            )
         )
 
 
