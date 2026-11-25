@@ -6,7 +6,11 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlencode
 
-from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH, appliance_detail_path
+from .alert_links import (
+    DEFAULT_ALERT_EVIDENCE_PATH,
+    NILM_MODEL_VALIDATION_FEATURES,
+    appliance_detail_path,
+)
 from .appliance_detail import (
     ApplianceDetail,
     ApplianceExpectation,
@@ -135,19 +139,9 @@ def attention_item_for_detail(
         elif paused:
             continue
         elif item.category == "validate_nilm":
-            query = urlencode(
-                {
-                    "entry_id": entry_id,
-                    "nilm_workspace": "1",
-                    "circuit_id": detail.circuit_id,
-                    "assignment_id": detail.assignment_id,
-                }
+            action = _verify_match_action(
+                entry_id, detail.circuit_id, detail.assignment_id
             )
-            action = {
-                "kind": "verify_appliance_match",
-                "label": "Verify appliance match",
-                "path": f"{DEFAULT_ALERT_EVIDENCE_PATH}?{query}",
-            }
         candidates.append(replace(item, entry_id=entry_id, action=action))
 
     if not paused:
@@ -164,6 +158,12 @@ def attention_item_for_detail(
                 "label": "Review evidence",
                 "path": alert.evidence_path or path,
             }
+            evidence = action
+            validation = alert.feature in NILM_MODEL_VALIDATION_FEATURES
+            if validation:
+                action = _verify_match_action(
+                    entry_id, alert.circuit_id, alert.assignment_id
+                )
             candidates.append(
                 AttentionItem(
                     item_id=f"{detail.appliance_key}:{alert.alert_id}",
@@ -171,7 +171,9 @@ def attention_item_for_detail(
                     entry_id=entry_id,
                     display_name=display_name,
                     source_type=detail.source_type,
-                    category="review_appliance_behavior",
+                    category="validate_nilm"
+                    if validation
+                    else "review_appliance_behavior",
                     status="possible_issue",
                     reason=alert.message,
                     confidence=None,
@@ -182,6 +184,7 @@ def attention_item_for_detail(
                     alert_ids=(alert.alert_id,),
                     evidence_at=alert.last_seen,
                     action=action,
+                    actions=(evidence,),
                 )
             )
     if not candidates:
@@ -190,13 +193,32 @@ def attention_item_for_detail(
     primary = candidates[0]
     actions = []
     for item in candidates:
-        if item.action and item.action not in actions:
-            actions.append(item.action)
+        for action in (item.action, *item.actions):
+            if action and action not in actions:
+                actions.append(action)
     return replace(
         primary,
         actions=tuple(actions),
         alert_ids=tuple(dict.fromkeys(a for i in candidates for a in i.alert_ids)),
     )
+
+
+def _verify_match_action(
+    entry_id: str, circuit_id: str | None, assignment_id: str | None
+) -> dict[str, str]:
+    query = urlencode(
+        {
+            "entry_id": entry_id,
+            "nilm_workspace": "1",
+            "circuit_id": circuit_id,
+            "assignment_id": assignment_id,
+        }
+    )
+    return {
+        "kind": "verify_appliance_match",
+        "label": "Verify appliance match",
+        "path": f"{DEFAULT_ALERT_EVIDENCE_PATH}?{query}",
+    }
 
 
 def _source_action(

@@ -155,19 +155,20 @@ def appliance_detail_for_circuit(
     source_type = _source_type_for_config(config)
     health_attrs = health_summary_attributes(state, config.circuit_id)
     electrical_attrs = electrical_health_attributes(state, config.circuit_id)
-    converted_assignment = _converted_nilm_assignment(coordinator, circuit_id)
+    converted_assignments = _converted_nilm_assignments(coordinator, circuit_id)
+    converted_assignment = next(iter(converted_assignments), None)
     active_alerts = _active_alert_summaries(
         state,
         config.circuit_id,
         config=config,
         entry_id=entry_id,
     )
-    if converted_assignment:
+    for assignment in converted_assignments:
         active_alerts += _active_alert_summaries(
             state,
-            str(converted_assignment.get("mains_circuit_id") or ""),
+            str(assignment.get("mains_circuit_id") or ""),
             config=None,
-            assignment_id=str(converted_assignment["assignment_id"]),
+            assignment_id=str(assignment["assignment_id"]),
             entry_id=entry_id,
         )
     first_checks = _first_checks(electrical_attrs.get("what_to_check_first"))
@@ -275,18 +276,19 @@ def appliance_detail_for_circuit(
     )
 
 
-def _converted_nilm_assignment(
+def _converted_nilm_assignments(
     coordinator: Any,
     circuit_id: str,
-) -> Mapping[str, Any] | None:
+) -> list[Mapping[str, Any]]:
     store_data = getattr(coordinator, "store_data", None)
     assignments_by_circuit = getattr(
         store_data,
         "nilm_appliance_assignments_by_circuit",
         {},
     )
+    matches = []
     if not isinstance(assignments_by_circuit, Mapping):
-        return None
+        return matches
     for assignments in assignments_by_circuit.values():
         for assignment in _iter_items(assignments):
             if (
@@ -296,8 +298,8 @@ def _converted_nilm_assignment(
                 not in {"ignored", "retired"}
                 and str(assignment.get("direct_circuit_id") or "") == circuit_id
             ):
-                return assignment
-    return None
+                matches.append(assignment)
+    return matches
 
 
 def appliance_detail_for_assignment(
@@ -1500,6 +1502,8 @@ def _active_alert_summaries(
             ApplianceAlertSummary(
                 alert_id=notification_id_for_alert(alert),
                 feature=alert.feature,
+                assignment_id=assignment_id,
+                circuit_id=circuit_id,
                 message=alert.message,
                 severity=str(alert.severity.value),
                 observed_value=_number_or_none(alert.observed_value),

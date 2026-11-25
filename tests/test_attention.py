@@ -521,3 +521,64 @@ def test_matching_expectation_and_warning_keep_one_evidence_action() -> None:
     )
     assert cleared.reason == expected.title
     assert cleared.alert_ids == ()
+
+
+def test_converted_alias_warning_reaches_both_views() -> None:
+    from dataclasses import replace
+
+    from custom_components.circuitsetup_energy_analyzer.appliance_insights import (
+        appliance_insights_for_coordinators,
+    )
+    from tests.test_appliance_detail import (
+        _config,
+        _direct_coordinator,
+        _nilm_coordinator,
+    )
+
+    coord = _nilm_coordinator()
+    coord.circuit_configs += (_config("direct"),)
+    aliases = coord.store_data.nilm_appliance_assignments_by_circuit["mains"]
+    aliases[0].update(conversion_state="direct_meter", direct_circuit_id="direct")
+    aliases.append(dict(aliases[0], assignment_id="second"))
+    warning = _direct_coordinator().state.active_alerts_by_circuit["fridge"][0]
+    coord.state.active_alerts_by_circuit["mains"] = [
+        replace(warning, circuit_id="mains", features={"assignment_id": "second"})
+    ]
+    (item,) = attention.attention_items_for_coordinators([coord])
+    (row,) = appliance_insights_for_coordinators([coord])
+    assert item.reason == row.finding["reason"] == warning.message
+    assert item.appliance_key == row.appliance_key
+    assert row.needs_attention and len(item.alert_ids) == 1
+
+
+def test_model_uncertainty_prompts_verification_with_supporting_evidence() -> None:
+    from dataclasses import replace
+
+    from custom_components.circuitsetup_energy_analyzer.nilm_virtual import (
+        nilm_virtual_appliance_states,
+        nilm_virtual_low_confidence_alert,
+    )
+    from tests.test_appliance_detail import _nilm_coordinator
+
+    coord = _nilm_coordinator()
+    (state,) = nilm_virtual_appliance_states(coord, published_only=False)
+    for status, confidence, feature in (
+        ("conflict", 0.9, "nilm_model_drift"),
+        ("low_confidence", 0.2, "nilm_low_confidence_change"),
+        ("needs_validation", 0.95, "nilm_assignment_needs_validation"),
+    ):
+        uncertain = replace(
+            state, model_status=status, feedback_evidence_score=confidence
+        )
+        alert = nilm_virtual_low_confidence_alert(uncertain, now=NOW)
+        assert alert and alert.feature == feature
+        coord.state.active_alerts_by_circuit["mains"] = [alert]
+        (item,) = attention.attention_items_for_coordinators([coord])
+        assert item.category == "validate_nilm"
+        assert item.action["kind"] == "verify_appliance_match"
+        verify, evidence = item.actions
+        assert verify == item.action
+        assert evidence["kind"] == "review_evidence"
+        params = parse_qs(urlparse(evidence["path"]).query)
+        assert params["alert_id"] == list(item.alert_ids)
+        assert params["assignment_id"] == [state.assignment_id]

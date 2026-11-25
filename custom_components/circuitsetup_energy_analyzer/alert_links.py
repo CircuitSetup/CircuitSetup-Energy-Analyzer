@@ -10,7 +10,7 @@ from .models import AlertEvidence, CircuitConfig, SensorRole
 DEFAULT_ALERT_EVIDENCE_PATH = "/circuitsetup-energy-analyzer-evidence"
 DEFAULT_ALERT_EVIDENCE_DASHBOARD_PATH = "/circuitsetup-energy-analyzer/alert-evidence"
 MAX_GRAPH_ENTITIES = 8
-_NILM_WORKSPACE_FEATURES = frozenset(
+NILM_MODEL_VALIDATION_FEATURES = frozenset(
     {
         "nilm_assignment_needs_validation",
         "nilm_low_confidence_change",
@@ -130,7 +130,7 @@ def alert_evidence_path(
         values["assignment_id"] = assignment_id
         if feature != "nilm_appliance_finished":
             values["nilm_workspace"] = "1"
-            if feature not in _NILM_WORKSPACE_FEATURES:
+            if feature not in NILM_MODEL_VALIDATION_FEATURES:
                 values["appliance_detail"] = "1"
     if entry_id:
         values["entry_id"] = entry_id
