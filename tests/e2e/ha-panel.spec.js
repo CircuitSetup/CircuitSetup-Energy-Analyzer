@@ -53,7 +53,7 @@ test("real Home Assistant loads panel routes and accepts a reversible mutation",
 
   const routes = [
     ["?appliance_insights=1", "Appliance Insights"],
-    ["?appliance_detail=1&circuit_id=fridge", "Kitchen Fridge"],
+    [`?appliance_detail=1&circuit_id=fridge&entry_id=${configEntryId}`, "Kitchen Fridge"],
     ["?setup_health=1", "Setup Health"],
     ["?nilm_workspace=1&circuit_id=mains", "Load Separation"],
   ];
@@ -66,16 +66,35 @@ test("real Home Assistant loads panel routes and accepts a reversible mutation",
     );
   }
 
-  await page.goto("/circuitsetup-energy-analyzer-evidence?circuit_id=fridge");
+  const evidenceRoute = "/circuitsetup-energy-analyzer-evidence";
+  await page.goto(evidenceRoute + "?appliance_detail=1&circuit_id=fridge");
   const panel = page.locator("circuitsetup-energy-analyzer-panel");
+  await expect(panel.getByRole("heading", { name: "Choose a meter" })).toBeVisible();
+  await expect(panel.locator("[data-alert-decision]")).toHaveCount(0);
+  await panel.getByRole("link", { name: /garage/i }).click();
+  await expect(panel.locator("h1")).toHaveText("Garage Fridge");
+  const evidence = panel.getByRole("link", { name: "Open Evidence", exact: true });
+  await expect(evidence).toHaveAttribute("href", /entry_id=browser-garage/);
+  await evidence.click();
+  await page.reload();
+  await expect(panel).toContainText("Garage Fridge used more energy than usual.");
+  expect(new URL(page.url()).searchParams.get("alert_id")).toBe(process.env.HA_SHARED_ALERT_ID);
+  await panel.locator('[data-alert-decision][value="mark_expected"]').check();
+  await panel.locator("#apply_alert_decision").click();
+  await expect(panel).toContainText("Marked as expected behavior.");
+
+  await page.goto(evidenceRoute + `?circuit_id=fridge&entry_id=${configEntryId}`);
   await expect(panel.locator("h1")).toHaveText("Kitchen Fridge", {
     timeout: 30_000,
   });
+  const tuning = panel.locator('details[data-alert-disclosure="tune"]:not([open]) > summary');
+  if (await tuning.count()) await tuning.click();
   await panel.locator("#relearn_baseline").click();
   await expect(panel.locator("#cancel_action_confirmation")).toBeVisible();
   await expect(panel.locator("#confirm_action")).toBeVisible();
   await panel.locator("#cancel_action_confirmation").click();
   await expect(panel.locator("ha-dialog")).toHaveCount(0);
+  if (await tuning.count()) await tuning.click();
   await panel.locator("#relearn_baseline").click();
   await panel.locator("#confirm_action").click();
   await expect(panel.locator("ha-dialog")).toHaveCount(0);

@@ -13,7 +13,14 @@ from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.circuitsetup_energy_analyzer.const import DOMAIN
-from custom_components.circuitsetup_energy_analyzer.models import BaselineStats
+from custom_components.circuitsetup_energy_analyzer.models import (
+    AlertEvidence,
+    BaselineStats,
+    Severity,
+)
+from custom_components.circuitsetup_energy_analyzer.notifications import (
+    notification_id_for_alert,
+)
 
 
 @pytest.mark.usefixtures("enable_custom_integrations", "socket_enabled")
@@ -29,35 +36,43 @@ async def test_disposable_home_assistant_panel(
     """Render the shipped panel against a real disposable HA HTTP server."""
     caplog.set_level(logging.INFO)
     _point_custom_components_at_worktree(monkeypatch)
-    hass.states.async_set(
-        "sensor.fridge_power",
-        "84",
-        {"unit_of_measurement": "W", "device_class": "power"},
-    )
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        entry_id="browser-entry",
-        title="Browser Gate",
-        data={
-            "source_entities": ["sensor.fridge_power"],
-            "circuits": [
-                {
-                    "circuit_id": "fridge",
-                    "name": "Kitchen Fridge",
-                    "mode": "single_phase",
-                    "appliance_profile": "refrigerator",
-                    "sensors": [
-                        {"entity_id": "sensor.fridge_power", "role": "real_power"}
-                    ],
-                }
-            ],
-        },
-    )
-    entry.add_to_hass(hass)
-
     assert await async_setup_component(hass, "frontend", {})
     hass.data["onboarding"].onboarded = True
-    assert await hass.config_entries.async_setup(entry.entry_id)
+    for location in ("Kitchen", "Garage"):
+        entity_id = f"sensor.{location.lower()}_fridge_power"
+        hass.states.async_set(
+            entity_id, "84", {"unit_of_measurement": "W", "device_class": "power"}
+        )
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            entry_id=f"browser-{location.lower()}",
+            title=f"{location} meter",
+            data={
+                "source_entities": [entity_id],
+                "circuits": [
+                    {
+                        "circuit_id": "fridge",
+                        "name": f"{location} Fridge",
+                        "mode": "single_phase",
+                        "appliance_profile": "refrigerator",
+                        "sensors": [{"entity_id": entity_id, "role": "real_power"}],
+                    }
+                ],
+            },
+        )
+        entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        meter = hass.data[DOMAIN][entry.entry_id]
+        alert = AlertEvidence(
+            timestamp=meter.current_time(),
+            circuit_id="fridge",
+            feature="daily_energy",
+            severity=Severity.WARNING,
+            message=f"{location} Fridge used more energy than usual.",
+        )
+        meter.store_data.alerts.append(alert)
+        meter.state.active_alerts_by_circuit["fridge"] = [alert]
+        meter.state.learning_by_circuit["fridge"] = False
     await hass.async_block_till_done()
     client = await aiohttp_client(
         hass.http.app,
@@ -65,7 +80,7 @@ async def test_disposable_home_assistant_panel(
     )
     base_url = str(client.make_url("/")).rstrip("/")
     refresh_token = next(iter(hass_admin_user.refresh_tokens.values()))
-    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = hass.data[DOMAIN]["browser-kitchen"]
     coordinator.store_data.baselines["fridge:real_power"] = BaselineStats(
         feature="real_power",
         sample_count=5,
@@ -83,7 +98,8 @@ async def test_disposable_home_assistant_panel(
         "HA_ACCESS_TOKEN": hass_access_token,
         "HA_REFRESH_TOKEN": refresh_token.token,
         "HA_CLIENT_ID": refresh_token.client_id or base_url,
-        "HA_CONFIG_ENTRY_ID": entry.entry_id,
+        "HA_CONFIG_ENTRY_ID": coordinator.entry_id,
+        "HA_SHARED_ALERT_ID": notification_id_for_alert(alert),
     }
     root = Path(__file__).parents[1]
     process = await asyncio.create_subprocess_exec(
@@ -104,7 +120,7 @@ async def test_disposable_home_assistant_panel(
         process.kill()
         stdout, _ = await process.communicate()
         timed_out = True
-    active_coordinator = hass.data[DOMAIN][entry.entry_id]
+    active_coordinator = hass.data[DOMAIN][coordinator.entry_id]
     mutated = active_coordinator.store_data.baselines == {}
     dashboard_action = active_coordinator.store_data.dashboard_status.get("action")
     if dashboard_action is not None:
@@ -125,6 +141,13 @@ async def test_disposable_home_assistant_panel(
     assert process.returncode == 0, stdout.decode(errors="replace")
     assert mutated
     assert dashboard_action == "updated"
+    assert not active_coordinator.store_data.alert_feedback
+    garage = hass.data[DOMAIN]["browser-garage"]
+    assert any(
+        record["action"] == "expected"
+        and record["source_alert_id"] == env["HA_SHARED_ALERT_ID"]
+        for record in garage.store_data.alert_feedback.values()
+    )
     assert not error_records
 
 
