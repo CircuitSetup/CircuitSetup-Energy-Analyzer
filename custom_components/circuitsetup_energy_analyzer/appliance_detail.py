@@ -155,12 +155,21 @@ def appliance_detail_for_circuit(
     source_type = _source_type_for_config(config)
     health_attrs = health_summary_attributes(state, config.circuit_id)
     electrical_attrs = electrical_health_attributes(state, config.circuit_id)
+    converted_assignment = _converted_nilm_assignment(coordinator, circuit_id)
     active_alerts = _active_alert_summaries(
         state,
         config.circuit_id,
         config=config,
         entry_id=entry_id,
     )
+    if converted_assignment:
+        active_alerts += _active_alert_summaries(
+            state,
+            str(converted_assignment.get("mains_circuit_id") or ""),
+            config=None,
+            assignment_id=str(converted_assignment["assignment_id"]),
+            entry_id=entry_id,
+        )
     first_checks = _first_checks(electrical_attrs.get("what_to_check_first"))
     quality = _mapping_for_circuit(
         state,
@@ -180,7 +189,6 @@ def appliance_detail_for_circuit(
         source_type=source_type,
         evidence_path=evidence_path,
     )
-    converted_assignment = _converted_nilm_assignment(coordinator, circuit_id)
     return ApplianceDetail(
         circuit_id=config.circuit_id,
         display_name=str(
@@ -1484,8 +1492,8 @@ def _active_alert_summaries(
     for alert in alerts:
         if not isinstance(alert, AlertEvidence):
             continue
-        if assignment_id is not None and (
-            str(alert.features.get("assignment_id") or "").strip() != assignment_id
+        if str(alert.features.get("assignment_id") or "").strip() != (
+            assignment_id or ""
         ):
             continue
         summaries.append(
@@ -1499,7 +1507,7 @@ def _active_alert_summaries(
                 change_ratio=_number_or_none(alert.change_ratio),
                 repeated_count=int(alert.repeated_count),
                 first_seen=_iso(alert.first_seen),
-                last_seen=_iso(alert.last_seen),
+                last_seen=_iso(alert.last_seen or alert.timestamp),
                 evidence_path=(
                     alert_evidence_path(alert, entry_id=entry_id)
                     if assignment_id is not None

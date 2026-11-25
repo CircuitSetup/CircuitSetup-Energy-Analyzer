@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlencode
 
-from .alert_links import appliance_detail_path
+from .alert_links import DEFAULT_ALERT_EVIDENCE_PATH, appliance_detail_path
 from .appliance_detail import (
     ApplianceDetail,
     ApplianceExpectation,
@@ -33,10 +34,30 @@ class AttentionItem:
     action_path: str | None
     updated_at: datetime
 
+    entry_id: str = ""
+    alert_ids: tuple[str, ...] = ()
+    action: dict[str, str] | None = None
+    actions: tuple[dict[str, str], ...] = ()
+    evidence_at: str | None = None
+
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["updated_at"] = self.updated_at.isoformat()
         return payload
+
+
+def circuit_can_have_finding(coordinator: Any, config: Any) -> bool:
+    """Skip building a whole-home detail unless the feed has a current warning."""
+    if getattr(config, "mode", None) != CircuitMode.MAINS_NILM:
+        return True
+    active = getattr(
+        getattr(coordinator, "state", None), "active_alerts_by_circuit", {}
+    )
+    return any(
+        alert.severity in {"warning", "error"}
+        and not alert.features.get("assignment_id")
+        for alert in active.get(config.circuit_id, ())
+    )
 
 
 def attention_items_for_coordinators(
@@ -48,15 +69,13 @@ def attention_items_for_coordinators(
     items: list[AttentionItem] = []
     for coordinator in coordinators:
         seen: set[str] = set()
-        entry_id = getattr(coordinator, "entry_id", None)
-        now = _coordinator_now(coordinator)
         for config in getattr(coordinator, "circuit_configs", ()) or ():
-            if getattr(config, "mode", None) == CircuitMode.MAINS_NILM:
+            if not circuit_can_have_finding(coordinator, config):
                 continue
             detail = appliance_detail_for_circuit(coordinator, config.circuit_id)
             if detail is None or not detail.appliance_key:
                 continue
-            item = _attention_item(detail, now=now, entry_id=entry_id)
+            item = attention_item_for_detail(coordinator, detail)
             if item is not None and item.appliance_key not in seen:
                 seen.add(item.appliance_key)
                 items.append(item)
@@ -73,7 +92,7 @@ def attention_items_for_coordinators(
             detail = appliance_detail_for_assignment(coordinator, state.assignment_id)
             if detail is None or not detail.appliance_key:
                 continue
-            item = _attention_item(detail, now=now, entry_id=entry_id)
+            item = attention_item_for_detail(coordinator, detail)
             if item is not None and item.appliance_key not in seen:
                 seen.add(item.appliance_key)
                 items.append(item)
@@ -81,18 +100,150 @@ def attention_items_for_coordinators(
     return tuple(items[: max(0, min(int(limit), 100))])
 
 
-def _attention_item(
-    detail: ApplianceDetail,
-    *,
-    now: datetime,
-    entry_id: str | None,
+def attention_item_for_detail(
+    coordinator: Any, detail: ApplianceDetail
 ) -> AttentionItem | None:
-    expectation = next(
-        (item for item in detail.expectations if _expectation_is_actionable(item)),
+    """Classify the current detail once, retaining each distinct follow-up action."""
+    entry_id = str(getattr(coordinator, "entry_id", "") or "")
+    state = getattr(coordinator, "state", None)
+    maintenance = getattr(state, "maintenance_by_circuit", {})
+    paused = maintenance.get(detail.circuit_id, {}).get("active") is True
+    now = _coordinator_now(coordinator)
+    path = appliance_detail_path(
+        entry_id, circuit_id=detail.circuit_id, assignment_id=detail.assignment_id
+    )
+    detail_action = {
+        "kind": "open_detail",
+        "label": "Open Appliance Detail",
+        "path": path,
+    }
+    display_name = detail.display_name
+    if detail.source_type == "mains":
+        registry = getattr(getattr(coordinator, "hass", None), "config_entries", None)
+        entry = registry.async_get_entry(entry_id) if registry and entry_id else None
+        display_name = getattr(entry, "title", None) or display_name
+    candidates = []
+    if getattr(detail, "model_status", None) in {"ignored", "expected", "retired"}:
+        return None
+    for expectation in getattr(detail, "expectations", ()):
+        if detail.source_type == "mains" or not _expectation_is_actionable(expectation):
+            continue
+        item = _expectation_item(detail, expectation, now=now, entry_id=entry_id)
+        action = detail_action
+        if item.category == "fix_setup_or_data":
+            action = _source_action(coordinator, detail, entry_id)
+        elif paused:
+            continue
+        elif item.category == "validate_nilm":
+            query = urlencode(
+                {
+                    "entry_id": entry_id,
+                    "nilm_workspace": "1",
+                    "circuit_id": detail.circuit_id,
+                    "assignment_id": detail.assignment_id,
+                }
+            )
+            action = {
+                "kind": "verify_appliance_match",
+                "label": "Verify appliance match",
+                "path": f"{DEFAULT_ALERT_EVIDENCE_PATH}?{query}",
+            }
+        candidates.append(replace(item, entry_id=entry_id, action=action))
+
+    if not paused:
+        for alert in getattr(detail, "active_alerts", ()):
+            if alert.severity not in {"warning", "error"} or alert.feature in {
+                "finished_running",
+                "nilm_appliance_finished",
+                "learning_completed",
+                "maintenance_completed",
+            }:
+                continue
+            action = {
+                "kind": "review_evidence",
+                "label": "Review evidence",
+                "path": alert.evidence_path or path,
+            }
+            candidates.append(
+                AttentionItem(
+                    item_id=f"{detail.appliance_key}:{alert.alert_id}",
+                    appliance_key=detail.appliance_key,
+                    entry_id=entry_id,
+                    display_name=display_name,
+                    source_type=detail.source_type,
+                    category="review_appliance_behavior",
+                    status="possible_issue",
+                    reason=alert.message,
+                    confidence=None,
+                    severity="high" if alert.severity == "error" else "medium",
+                    next_step=action["label"],
+                    action_path=path,
+                    updated_at=now,
+                    alert_ids=(alert.alert_id,),
+                    evidence_at=alert.last_seen,
+                    action=action,
+                )
+            )
+    if not candidates:
+        return None
+    candidates.sort(key=_attention_sort_key)
+    primary = candidates[0]
+    actions = []
+    for item in candidates:
+        if item.action and item.action not in actions:
+            actions.append(item.action)
+    return replace(
+        primary,
+        actions=tuple(actions),
+        alert_ids=tuple(dict.fromkeys(a for i in candidates for a in i.alert_ids)),
+    )
+
+
+def _source_action(
+    coordinator: Any, detail: ApplianceDetail, entry_id: str
+) -> dict[str, str]:
+    config = next(
+        (c for c in coordinator.circuit_configs if c.circuit_id == detail.circuit_id),
         None,
     )
-    if expectation is None:
-        return None
+    checklist = getattr(
+        getattr(coordinator, "state", None), "data_quality_checklist_by_circuit", {}
+    ).get(detail.circuit_id, {})
+    issues = (
+        checklist.get("quality_issues_full") or checklist.get("quality_issues") or ()
+    )
+    sensors = {s.entity_id for s in getattr(config, "sensors", ())}
+    affected = set()
+    for issue in issues:
+        words = str(issue).replace(":", " ").split()
+        if "stale" in words:
+            affected.update(word for word in words if word.startswith("sensor."))
+    if len(affected) == 1 and affected <= sensors:
+        entity_id = affected.pop()
+        states = getattr(getattr(coordinator, "hass", None), "states", None)
+        if states is None or states.get(entity_id) is not None:
+            return {
+                "kind": "open_sensor",
+                "label": "Open sensor",
+                "entity_id": entity_id,
+            }
+    query = urlencode(
+        {"setup_health": "1", "entry_id": entry_id, "circuit_id": detail.circuit_id}
+    )
+    return {
+        "kind": "open_setup_health",
+        "label": "Open Setup Health",
+        "path": f"{DEFAULT_ALERT_EVIDENCE_PATH}?{query}",
+    }
+
+
+def _expectation_item(
+    detail: ApplianceDetail,
+    expectation: ApplianceExpectation,
+    *,
+    now: datetime,
+    entry_id: str,
+) -> AttentionItem:
     category = _attention_category(detail, expectation)
     severity = _attention_severity(category, expectation)
     appliance_key = detail.appliance_key or f"circuit:{detail.circuit_id}"
@@ -150,15 +301,13 @@ def _attention_severity(
     return "low"
 
 
-def _attention_sort_key(item: AttentionItem) -> tuple[int, int, str]:
+def _attention_sort_key(item: AttentionItem) -> tuple:
     if item.category == "fix_setup_or_data":
         finding_rank = 0
     elif item.category == "review_appliance_behavior" and item.severity == "high":
         finding_rank = 1
-    elif (
-        item.category == "review_appliance_behavior"
-        and item.confidence is not None
-        and item.confidence >= 0.8
+    elif item.category == "review_appliance_behavior" and (
+        item.alert_ids or (item.confidence is not None and item.confidence >= 0.8)
     ):
         finding_rank = 2
     elif item.category == "validate_nilm":
@@ -166,7 +315,17 @@ def _attention_sort_key(item: AttentionItem) -> tuple[int, int, str]:
     else:
         finding_rank = 4
     severity_rank = {"high": 0, "medium": 1, "low": 2}.get(item.severity, 3)
-    return finding_rank, severity_rank, item.display_name.casefold()
+    timestamp = (
+        datetime.fromisoformat(item.evidence_at).timestamp() if item.evidence_at else 0
+    )
+    return (
+        finding_rank,
+        severity_rank,
+        -timestamp,
+        item.display_name.casefold(),
+        item.entry_id,
+        item.item_id,
+    )
 
 
 def _coordinator_now(coordinator: Any) -> datetime:

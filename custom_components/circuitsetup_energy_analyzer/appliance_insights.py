@@ -15,9 +15,8 @@ from .appliance_detail import (
     appliance_detail_for_assignment,
     appliance_detail_for_circuit,
 )
-from .attention import attention_items_for_coordinators
+from .attention import attention_item_for_detail, circuit_can_have_finding
 from .const import DOMAIN
-from .models import CircuitMode
 from .nilm_virtual import nilm_virtual_appliance_states
 
 NILM_EXPLANATION_CONFIDENCE_THRESHOLD = 0.8
@@ -68,6 +67,7 @@ class ApplianceInsight:
     confidence: float | None
     confidence_kind: str | None
     feedback_evidence_score: float | None
+    finding: dict[str, Any] | None
     needs_attention: bool
     is_running: bool
     is_learning: bool
@@ -205,22 +205,11 @@ def appliance_insights_for_coordinators(
     coordinators: Iterable[Any],
 ) -> tuple[ApplianceInsight, ...]:
     """Return a bounded, deduplicated appliance index in action-first order."""
-    coordinators = tuple(coordinators)
-    attention_keys: set[tuple[str, str]] = set()
-    for coordinator in coordinators:
-        entry_id = str(getattr(coordinator, "entry_id", "") or "")
-        attention_keys.update(
-            (entry_id, item.appliance_key)
-            for item in attention_items_for_coordinators(
-                (coordinator,),
-                limit=MAX_APPLIANCE_INSIGHTS,
-            )
-        )
     insights: list[ApplianceInsight] = []
     seen: set[tuple[str, str]] = set()
     for coordinator in coordinators:
         for config in getattr(coordinator, "circuit_configs", ()) or ():
-            if getattr(config, "mode", None) == CircuitMode.MAINS_NILM:
+            if not circuit_can_have_finding(coordinator, config):
                 continue
             detail = appliance_detail_for_circuit(coordinator, config.circuit_id)
             _append_insight(
@@ -228,12 +217,17 @@ def appliance_insights_for_coordinators(
                 seen,
                 coordinator,
                 detail,
-                attention_keys,
             )
         for state in nilm_virtual_appliance_states(
             coordinator,
             published_only=False,
         ):
+            if getattr(state, "model_status", None) in {
+                "ignored",
+                "expected",
+                "retired",
+            }:
+                continue
             detail = appliance_detail_for_assignment(
                 coordinator,
                 state.assignment_id,
@@ -243,7 +237,6 @@ def appliance_insights_for_coordinators(
                 seen,
                 coordinator,
                 detail,
-                attention_keys,
             )
     insights.sort(key=_insight_sort_key)
     return tuple(insights[:MAX_APPLIANCE_INSIGHTS])
@@ -254,7 +247,6 @@ def _append_insight(
     seen: set[tuple[str, str]],
     coordinator: Any,
     detail: ApplianceDetail | Any | None,
-    attention_keys: set[tuple[str, str]],
 ) -> None:
     if detail is None:
         return
@@ -265,6 +257,9 @@ def _append_insight(
     entry_id = str(getattr(coordinator, "entry_id", "") or "")
     identity = (entry_id, appliance_key)
     if not appliance_key or identity in seen:
+        return
+    finding = attention_item_for_detail(coordinator, detail)
+    if detail.source_type == "mains" and finding is None:
         return
     seen.add(identity)
     source_quality = _mapping_copy(getattr(detail, "source_quality", None))
@@ -277,19 +272,17 @@ def _append_insight(
         ApplianceInsight(
             appliance_key=appliance_key,
             entry_id=entry_id,
-            display_name=str(getattr(detail, "display_name", appliance_key)),
+            display_name=finding.display_name
+            if finding
+            else str(getattr(detail, "display_name", appliance_key)),
             circuit_id=str(getattr(detail, "circuit_id", "")),
             assignment_id=assignment_id,
             source_type=source_type,
             activity_state=activity_state,
             current_power_w=_number_or_none(getattr(detail, "current_power_w", None)),
-            daily_energy_kwh=_number_or_none(
-                getattr(detail, "daily_energy_kwh", None)
-            ),
+            daily_energy_kwh=_number_or_none(getattr(detail, "daily_energy_kwh", None)),
             cost_today=_number_or_none(getattr(detail, "cost_today", None)),
-            cost_today_status=str(
-                getattr(detail, "cost_today_status", "unavailable")
-            ),
+            cost_today_status=str(getattr(detail, "cost_today_status", "unavailable")),
             average_kwh_per_day=_number_or_none(
                 getattr(detail, "average_kwh_per_day", None)
             ),
@@ -302,13 +295,12 @@ def _append_insight(
             source_quality=source_quality,
             learning_readiness=readiness,
             confidence=_number_or_none(getattr(detail, "confidence", None)),
-            confidence_kind=(
-                str(getattr(detail, "confidence_kind", "") or "") or None
-            ),
+            confidence_kind=(str(getattr(detail, "confidence_kind", "") or "") or None),
             feedback_evidence_score=_number_or_none(
                 getattr(detail, "feedback_evidence_score", None)
             ),
-            needs_attention=identity in attention_keys,
+            needs_attention=finding is not None,
+            finding=finding.as_dict() if finding else None,
             is_running="running" in activity_state.casefold(),
             is_learning=_is_learning(readiness, detail),
             has_data_problem=_has_data_problem(source_quality),

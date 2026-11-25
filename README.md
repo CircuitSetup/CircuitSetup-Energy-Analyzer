@@ -149,7 +149,7 @@ Start with these entities; `<circuit>` is your configured circuit ID. Availabili
 
 ## Appliance detail
 
-Open an appliance tile or **Appliance Insights** to inspect a circuit. Investigation links keep the meter selected when you share or reopen them. If an older link matches several meters, choose the meter to see its evidence and feedback controls. Insights lists direct-meter and NILM appliances together, with running, attention, learning, NILM, and data-problem filters.
+Open an appliance tile or **Appliance Insights** to inspect a circuit. Investigation links keep the meter selected when you share or reopen them. If an older link matches several meters, choose the meter to see its evidence and feedback controls. Insights lists direct-meter and NILM appliances together, with running, attention, learning, NILM, and data-problem filters. Setup Health and the Needs Attention filter show each affected appliance once per meter, combining current warnings with actionable appliance checks. Warnings remain visible when notifications are off.
 
 ![Appliance Insights with activity, energy comparisons, source quality, and readiness](docs/images/readme/appliance-insights.png)
 
